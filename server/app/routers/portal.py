@@ -64,7 +64,18 @@ def _pin_hash(pin: str) -> str:
 
 
 class PinBody(BaseModel):
+    pin: str = Field(default="", pattern=r"^(\d{4})?$")
+
+
+class StrictPinBody(BaseModel):
     pin: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
+def _session_user(conn, request: Request):
+    """已登录的维护者免 PIN：尝试按会话识别，失败返回 None。"""
+    from ..deps import SESSION_COOKIE, _load_session
+    token = request.cookies.get(SESSION_COOKIE, "")
+    return _load_session(conn, token) if token else None
 
 
 def _check_pin(conn, request: Request, pin: str) -> None:
@@ -93,7 +104,7 @@ def portal_status():
 
 
 @router.post("/my-pin", status_code=201)
-def set_my_pin(body: PinBody, user=CurrentUser):
+def set_my_pin(body: StrictPinBody, user=CurrentUser):
     """设置当前账号的门户 PIN；其他维护者的 PIN 不受影响。"""
     with db.tx() as conn:
         conn.execute("UPDATE users SET portal_pin_hash=? WHERE id=?",
@@ -115,9 +126,16 @@ def clear_my_pin(user=CurrentUser):
 
 @router.post("/data")
 def portal_data(body: PinBody, request: Request):
-    """门户数据：设备订阅链接、客户端资源、导入指引与个人规则。"""
+    """门户数据：设备订阅链接、客户端资源、导入指引与个人规则。
+
+    已登录的维护者免 PIN；未登录访客按 PIN 校验。
+    """
     with db.connect() as conn:
-        _check_pin(conn, request, body.pin)
+        user = _session_user(conn, request)
+        if not user:
+            if not body.pin:
+                raise HTTPException(401, "请输入 PIN 或登录维护者账号")
+            _check_pin(conn, request, body.pin)
         base = db.get_setting(conn, "base_url", "").rstrip("/") \
             or str(request.base_url).rstrip("/")
         devices = []

@@ -4,7 +4,7 @@ import { store } from './store'
 
 // 「/」为门户展示页（PIN 门禁，无需登录）；管理端统一挂在 /admin 下。
 const routes = [
-  { path: '/', component: () => import('./views/Portal.vue'), meta: { title: '订阅中心', standalone: true } },
+  { path: '/', component: () => import('./views/Portal.vue'), meta: { title: 'MagicHub - 欢迎访问订阅配置服务中心', standalone: true } },
   { path: '/admin/setup', component: () => import('./views/Setup.vue'), meta: { title: '初始化' } },
   { path: '/admin/login', component: () => import('./views/Login.vue'), meta: { title: '登录' } },
   { path: '/admin', component: () => import('./views/Overview.vue'), meta: { title: '总览' } },
@@ -51,14 +51,22 @@ router.beforeEach(async (to) => {
     return to.path === '/admin/setup' ? true : '/admin/setup'
   }
   if (to.meta.standalone) {
-    document.title = `${to.meta.title} · MagicPanel`
+    // 独立页标题自带完整品牌，不拼后缀
+    document.title = to.meta.title
     return true
   }
-  if (to.path === '/admin/setup') return '/admin/login'
+  if (to.path === '/admin/setup') {
+    document.title = '初始化 · MagicPanel'
+    return '/admin/login'
+  }
   if (to.path === '/admin/login') {
+    document.title = '登录 · MagicPanel'
     return store.user ? '/admin' : true
   }
-  if (!store.user) return '/admin/login'
+  if (!store.user) {
+    document.title = '登录 · MagicPanel'
+    return '/admin/login'
+  }
   document.title = `${to.meta.title} · MagicPanel`
   return true
 })

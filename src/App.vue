@@ -3,8 +3,11 @@
   <div v-else class="mp-layout">
     <aside class="mp-aside">
       <div class="mp-brand">
-        MagicPanel
-        <small>代理订阅配置管理</small>
+        <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel" title="返回门户首页" @click="router.push('/')">
+        <span class="mp-brand-text" title="返回总览" @click="router.push('/admin')">
+          MagicPanel
+          <small>代理订阅配置管理</small>
+        </span>
       </div>
       <el-menu :default-active="route.path" router>
         <el-menu-item v-for="item in menu" :key="item.path" :index="item.path">
@@ -13,7 +16,10 @@
         </el-menu-item>
       </el-menu>
       <div class="mp-aside-footer">
-        <span>{{ store.user?.display_name || store.user?.username }}</span>
+        <span class="mp-aside-user">
+          <UserAvatar :user="store.user" :size="26" />
+          <span class="mp-aside-name">{{ store.user?.display_name || store.user?.username }}</span>
+        </span>
         <el-tooltip :content="theme === 'dark' ? '切换为亮色' : '切换为暗色'" placement="top">
           <el-button text @click="onToggleTheme" :aria-label="theme === 'dark' ? '切换为亮色' : '切换为暗色'">
             <el-icon :size="17"><Sunny v-if="theme === 'dark'" /><Moon v-else /></el-icon>
@@ -25,8 +31,11 @@
 
     <el-drawer v-model="drawer" direction="ltr" size="240px" :with-header="false">
       <div class="mp-brand">
-        MagicPanel
-        <small>代理订阅配置管理</small>
+        <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel" title="返回门户首页" @click="drawer = false; router.push('/')">
+        <span class="mp-brand-text" title="返回总览" @click="drawer = false; router.push('/admin')">
+          MagicPanel
+          <small>代理订阅配置管理</small>
+        </span>
       </div>
       <el-menu :default-active="route.path" @select="drawer = false" router>
         <el-menu-item v-for="item in menu" :key="item.path" :index="item.path">
@@ -46,6 +55,7 @@
         <el-button text @click="onToggleTheme" :aria-label="theme === 'dark' ? '切换为亮色' : '切换为暗色'">
           <el-icon :size="17"><Sunny v-if="theme === 'dark'" /><Moon v-else /></el-icon>
         </el-button>
+        <UserAvatar :user="store.user" :size="24" />
         <span style="font-size:13px;color:var(--mp-text-secondary)">{{ store.user?.display_name || store.user?.username }}</span>
         <el-button text size="small" @click="onLogout">退出</el-button>
       </div>
@@ -71,6 +81,7 @@ import { confirmBox } from './confirm'
 import { api } from './api'
 import { store } from './store'
 import { currentTheme, toggleTheme } from './theme'
+import UserAvatar from './components/UserAvatar.vue'
 
 const route = useRoute()
 const router = useRouter()

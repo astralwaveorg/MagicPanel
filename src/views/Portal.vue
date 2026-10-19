@@ -3,6 +3,7 @@
     <!-- PIN 门禁 -->
     <div v-if="!data" class="pt-gate">
       <div class="pt-gate-card" :class="{ shake: shaking }">
+        <img class="pt-gate-logo" src="/logo.svg" alt="MagicPanel">
         <div class="pt-logo">MagicPanel</div>
         <p class="pt-gate-desc">输入 4 位 PIN 查看订阅与资源</p>
         <input
@@ -20,6 +21,7 @@
         >
         <p v-if="gateError" class="pt-gate-error">{{ gateError }}</p>
         <p v-if="locked" class="pt-gate-error">已锁定，{{ lockRemain }} 秒后重试</p>
+        <button class="pt-gate-login" @click="goLogin">维护者登录</button>
       </div>
     </div>
 
@@ -28,8 +30,11 @@
       <header class="pt-hero">
         <div class="pt-hero-inner">
           <div class="pt-hero-top">
-            <span class="pt-hero-brand">MagicPanel</span>
-            <button class="pt-exit" @click="exitPortal">退出查看</button>
+            <span class="pt-hero-brand">
+              <img class="pt-hero-logo" src="/logo.svg" alt="">MagicPanel
+            </span>
+            <button v-if="isMaintainer" class="pt-exit" @click="goAdmin">管理后台</button>
+            <button v-else class="pt-exit" @click="exitPortal">退出查看</button>
           </div>
           <h1>订阅中心</h1>
           <p class="pt-hero-sub">
@@ -156,12 +161,19 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
+import { api } from '../api'
 
+const GATE_TITLE = 'MagicHub - 欢迎访问订阅配置服务中心'
+const CONTENT_TITLE = '订阅中心 · MagicPanel'
+
+const router = useRouter()
 const PIN_KEY = 'mp-portal-pin'
 
 const pin = ref('')
 const data = ref(null)
+const isMaintainer = ref(false)
 const gateError = ref('')
 const shaking = ref(false)
 const locked = ref(false)
@@ -292,6 +304,11 @@ async function fetchData() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: pin.value }),
     })
+    // 未登录且未提供 PIN：停留在门禁页，不提示错误
+    if (resp.status === 401) {
+      pin.value = ''
+      return
+    }
     if (resp.status === 404) {
       gateError.value = '门户页未启用，请联系维护者在后台设置 PIN'
       return
@@ -308,8 +325,9 @@ async function fetchData() {
       pin.value = ''
       return
     }
-    sessionStorage.setItem(PIN_KEY, pin.value)
+    if (pin.value) sessionStorage.setItem(PIN_KEY, pin.value)
     data.value = body
+    document.title = CONTENT_TITLE
   } catch {
     gateError.value = '网络异常，请稍后重试'
   }
@@ -324,17 +342,30 @@ function exitPortal() {
   sessionStorage.removeItem(PIN_KEY)
   data.value = null
   pin.value = ''
+  document.title = GATE_TITLE
   nextTick(() => pinInput.value?.focus())
 }
 
+function goLogin() { router.push('/admin/login') }
+function goAdmin() { router.push('/admin') }
+
 onMounted(async () => {
-  const saved = sessionStorage.getItem(PIN_KEY)
-  if (saved && /^\d{4}$/.test(saved)) {
-    pin.value = saved
+  // 已登录的维护者免 PIN 直接进入
+  try {
+    await api('/api/v1/auth/me')
+    isMaintainer.value = true
+  } catch { /* 未登录 */ }
+  if (isMaintainer.value) {
     await fetchData()
-    if (!data.value) pin.value = ''
+  } else {
+    const saved = sessionStorage.getItem(PIN_KEY)
+    if (saved && /^\d{4}$/.test(saved)) {
+      pin.value = saved
+      await fetchData()
+      if (!data.value) pin.value = ''
+    }
   }
-  nextTick(() => pinInput.value?.focus())
+  if (!data.value) nextTick(() => pinInput.value?.focus())
 })
 </script>
 
@@ -376,6 +407,19 @@ onMounted(async () => {
   40%, 80% { transform: translateX(8px); }
 }
 .pt-logo { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+.pt-gate-logo { width: 56px; height: 56px; margin-bottom: 12px; }
+.pt-gate-login {
+  margin-top: 18px;
+  padding: 8px 18px;
+  font-size: 12.5px;
+  color: #aab1c8;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.pt-gate-login:hover { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
 .pt-gate-desc { color: #9aa0b5; font-size: 13px; margin: 10px 0 22px; }
 .pt-pin {
   width: 180px;
@@ -403,7 +447,8 @@ onMounted(async () => {
 }
 .pt-hero-inner { max-width: 1080px; margin: 0 auto; }
 .pt-hero-top { display: flex; justify-content: space-between; align-items: center; }
-.pt-hero-brand { font-weight: 700; letter-spacing: 1px; opacity: 0.9; }
+.pt-hero-brand { font-weight: 700; letter-spacing: 1px; opacity: 0.9; display: inline-flex; align-items: center; gap: 8px; }
+.pt-hero-logo { width: 22px; height: 22px; }
 .pt-exit {
   background: none;
   border: 1px solid rgba(255, 255, 255, 0.25);

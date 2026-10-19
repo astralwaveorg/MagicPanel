@@ -1,8 +1,9 @@
 """认证与维护者账号。多维护者共享同一份数据，账号仅用于访问控制。"""
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import db, security
+from .. import config, db, security
 from ..deps import SESSION_COOKIE, CurrentUser, create_session, destroy_session
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
@@ -100,11 +101,13 @@ def logout(request: Request, response: Response, user=CurrentUser):
 @router.get("/auth/me")
 def me(user=CurrentUser):
     return {
+        "id": user["id"],
         "username": user["username"],
         "display_name": user["display_name"],
         "role": user["role"],
         "csrf_token": user["csrf_token"],
         "has_portal_pin": bool(user.get("portal_pin_hash")),
+        "has_avatar": bool(user.get("avatar_mime")),
     }
 
 
@@ -113,13 +116,14 @@ def list_users(user=CurrentUser):
     with db.connect() as conn:
         rows = db.all_(
             conn,
-            "SELECT id, username, display_name, role, portal_pin_hash, created_at, "
-            "last_login_at FROM users ORDER BY id",
+            "SELECT id, username, display_name, role, portal_pin_hash, avatar_mime, "
+            "created_at, last_login_at FROM users ORDER BY id",
         )
     result = []
     for r in rows:
         item = db.row_to_dict(r)
         item["has_portal_pin"] = bool(item.pop("portal_pin_hash"))
+        item["has_avatar"] = bool(item.pop("avatar_mime"))
         result.append(item)
     return result
 
@@ -182,4 +186,71 @@ def change_password(body: PasswordBody, user=CurrentUser):
             (user["id"], security.sha256_text(user["token"])),
         )
         security.audit(conn, user["username"], "修改密码", "user", user["id"])
+    return {"ok": True}
+
+
+# ---- 头像 ----
+# 二进制直传（Content-Type 为图片类型），不引入 multipart 依赖；
+# 文件存 data/avatars/{uid}{ext}，users.avatar_mime 记录类型。
+
+AVATAR_TYPES = {
+    "image/png": (".png", b"\x89PNG\r\n\x1a\n"),
+    "image/jpeg": (".jpg", b"\xff\xd8\xff"),
+    "image/webp": (".webp", b"RIFF"),
+}
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _avatar_dir():
+    path = config.DATA_DIR / "avatars"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+@router.get("/users/{user_id}/avatar")
+def get_avatar(user_id: int, user=CurrentUser):
+    with db.connect() as conn:
+        row = db.one(conn, "SELECT avatar_mime FROM users WHERE id=?", (user_id,))
+    if not row or not row["avatar_mime"]:
+        raise HTTPException(404, "未设置头像")
+    ext = AVATAR_TYPES.get(row["avatar_mime"], (".png",))[0]
+    path = _avatar_dir() / f"{user_id}{ext}"
+    if not path.exists():
+        raise HTTPException(404, "未设置头像")
+    return FileResponse(path, media_type=row["avatar_mime"],
+                        headers={"Cache-Control": "private, no-cache"})
+
+
+@router.post("/auth/avatar")
+async def set_avatar(request: Request, user=CurrentUser):
+    ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if ctype not in AVATAR_TYPES:
+        raise HTTPException(400, "仅支持 PNG / JPEG / WebP 图片")
+    data = await request.body()
+    if not data or len(data) > AVATAR_MAX_BYTES:
+        raise HTTPException(400, "头像需为 2 MB 以内的图片")
+    ext, magic = AVATAR_TYPES[ctype]
+    if not data.startswith(magic):
+        raise HTTPException(400, "文件内容与声明的图片类型不符")
+    if ctype == "image/webp" and data[8:12] != b"WEBP":
+        raise HTTPException(400, "文件内容与声明的图片类型不符")
+    avdir = _avatar_dir()
+    for old in avdir.glob(f"{user['id']}.*"):
+        old.unlink()
+    (avdir / f"{user['id']}{ext}").write_bytes(data)
+    with db.tx() as conn:
+        conn.execute("UPDATE users SET avatar_mime=? WHERE id=?",
+                     (ctype, user["id"]))
+        security.audit(conn, user["username"], "更换头像", "user", user["id"])
+    return {"ok": True}
+
+
+@router.delete("/auth/avatar")
+def clear_avatar(user=CurrentUser):
+    avdir = _avatar_dir()
+    for old in avdir.glob(f"{user['id']}.*"):
+        old.unlink()
+    with db.tx() as conn:
+        conn.execute("UPDATE users SET avatar_mime='' WHERE id=?", (user["id"],))
+        security.audit(conn, user["username"], "移除头像", "user", user["id"])
     return {"ok": True}

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'admin',
   portal_pin_hash TEXT NOT NULL DEFAULT '',
+  avatar_mime TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   last_login_at TEXT
 );
@@ -212,6 +213,9 @@ def init_db() -> None:
         # 门户 PIN 与维护者账号绑定，可按人撤销
         _ensure_column(conn, "users", "portal_pin_hash",
                        "portal_pin_hash TEXT NOT NULL DEFAULT ''")
+        # 自定义头像的 MIME；文件在 data/avatars/
+        _ensure_column(conn, "users", "avatar_mime",
+                       "avatar_mime TEXT NOT NULL DEFAULT ''")
         for key, value in config.SETTINGS_DEFAULTS.items():
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value)

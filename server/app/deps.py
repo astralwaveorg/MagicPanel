@@ -40,7 +40,7 @@ def _load_session(conn, token: str):
     row = db.one(
         conn,
         "SELECT s.token_hash, s.csrf_token, s.expires_at, u.id AS uid, u.username, "
-        "u.display_name, u.role, u.portal_pin_hash FROM sessions s "
+        "u.display_name, u.role, u.portal_pin_hash, u.avatar_mime FROM sessions s "
         "JOIN users u ON u.id = s.user_id WHERE s.token_hash=?",
         (_hash(token),),
     )
@@ -79,6 +79,7 @@ def require_user(request: Request) -> dict:
             "role": row["role"],
             "csrf_token": row["csrf_token"],
             "portal_pin_hash": row["portal_pin_hash"],
+            "avatar_mime": row["avatar_mime"],
             "token": token,
         }
 

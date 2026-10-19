@@ -51,6 +51,25 @@
     </div>
 
     <div class="mp-card">
+      <h3>我的头像</h3>
+      <div style="display:flex;align-items:center;gap:16px">
+        <UserAvatar :user="store.user" :size="56" />
+        <div>
+          <el-upload
+            :auto-upload="false" :show-file-list="false"
+            accept="image/png,image/jpeg,image/webp" :on-change="uploadAvatar"
+          >
+            <el-button type="primary" plain>上传头像</el-button>
+          </el-upload>
+          <el-button v-if="store.user?.has_avatar" type="danger" plain @click="removeAvatar">移除</el-button>
+          <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:8px 0 0">
+            支持 PNG / JPEG / WebP，不超过 2 MB；未上传时按用户名生成默认头像。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mp-card">
       <div class="mp-toolbar">
         <h3 style="margin:0">维护者账号</h3>
         <el-button type="primary" plain @click="userDialog = true">添加维护者</el-button>
@@ -60,6 +79,9 @@
       </p>
       <div class="mp-table-wrap">
         <el-table :data="users" size="small">
+          <el-table-column label="头像" width="60" align="center">
+            <template #default="{ row }"><UserAvatar :user="row" :size="26" /></template>
+          </el-table-column>
           <el-table-column prop="username" label="用户名" min-width="120" />
           <el-table-column prop="display_name" label="显示名称" min-width="120">
             <template #default="{ row }">{{ row.display_name || '—' }}</template>
@@ -133,6 +155,7 @@ import { api } from '../api'
 import { confirmBox } from '../confirm'
 import { store } from '../store'
 import { fmtTime } from '../format'
+import UserAvatar from '../components/UserAvatar.vue'
 
 const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 12, core_proxy: '' })
 const savingSettings = ref(false)
@@ -264,6 +287,46 @@ async function changePwd() {
     ElMessage.error(e.message)
   } finally {
     changingPwd.value = false
+  }
+}
+
+// 头像为二进制直传，不走 api() 的 JSON 封装
+async function uploadAvatar(file) {
+  const raw = file.raw
+  if (!raw) return
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(raw.type)) {
+    return ElMessage.warning('仅支持 PNG / JPEG / WebP 图片')
+  }
+  if (raw.size > 2 * 1024 * 1024) return ElMessage.warning('头像不能超过 2 MB')
+  try {
+    const resp = await fetch('/api/v1/auth/avatar', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': raw.type, 'X-CSRF-Token': store.csrf },
+      body: raw,
+    })
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}))
+      throw new Error(d.detail || `上传失败（${resp.status}）`)
+    }
+    if (store.user) store.user.has_avatar = true
+    store.avatarVersion += 1
+    ElMessage.success('头像已更新')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function removeAvatar() {
+  try {
+    await api('/api/v1/auth/avatar', { method: 'DELETE' })
+    if (store.user) store.user.has_avatar = false
+    store.avatarVersion += 1
+    ElMessage.success('已移除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 
