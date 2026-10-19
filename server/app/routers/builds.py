@@ -36,7 +36,8 @@ def collect_snapshot(conn) -> dict:
          "filter": r["filter"], "use_sources": json.loads(r["use_sources"] or "[]"),
          "proxies": json.loads(r["proxies"] or "[]"), "url": r["url"],
          "interval": r["interval"], "timeout": r["timeout"],
-         "tolerance": r["tolerance"], "lazy": bool(r["lazy"])}
+         "tolerance": r["tolerance"], "lazy": bool(r["lazy"]),
+         "strategy": r["strategy"]}
         for r in db.all_(conn, "SELECT * FROM proxy_groups ORDER BY sort, id")
     ]
     rules = [

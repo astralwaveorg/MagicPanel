@@ -242,3 +242,55 @@ def test_overview(client):
         set(data["channels"]) == {"stable", "candidate"}
     assert len(data["sources"]) == 1 and len(data["devices"]) == 0
     assert "note" in data
+
+
+def test_group_load_balance_and_relay(client):
+    """load-balance / relay 类型的校验与双引擎渲染差异。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    client.post("/api/v1/sources", headers=h, json={
+        "name": "测试机场", "url": "https://airport.example.com/sub?token=abc123"})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "前置", "type": "select", "proxies": ["DIRECT"],
+        "use_sources": ["测试机场"]})
+
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "负载", "type": "load-balance",
+        "use_sources": ["测试机场"], "strategy": "sticky-sessions"})
+    assert r.status_code == 201, r.text
+    # 非法分配策略 / 非负载均衡类型带策略均被拒绝
+    assert client.post("/api/v1/groups", headers=h, json={
+        "name": "负载2", "type": "load-balance",
+        "use_sources": ["测试机场"], "strategy": "random"}).status_code == 400
+    assert client.post("/api/v1/groups", headers=h, json={
+        "name": "选择2", "type": "select", "proxies": ["DIRECT"],
+        "strategy": "round-robin"}).status_code == 400
+
+    # relay：固定链，禁止节点来源，至少两个成员
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "链路", "type": "relay", "proxies": ["前置", "负载"]})
+    assert r.status_code == 201, r.text
+    assert client.post("/api/v1/groups", headers=h, json={
+        "name": "链路2", "type": "relay", "proxies": ["前置", "负载"],
+        "use_sources": ["测试机场"]}).status_code == 400
+    assert client.post("/api/v1/groups", headers=h, json={
+        "name": "链路3", "type": "relay", "proxies": ["前置"]}).status_code == 400
+
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-ios", "engine": "stash", "platform": "ios"})
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "mihomo-android", "engine": "mihomo", "platform": "android"})
+    client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "前置"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+
+    bid = build["id"]
+    art_s = client.get(f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"]
+    art_m = client.get(f"/api/v1/builds/{bid}/artifact/mihomo-android").json()["content"]
+    # strategy 是 Mihomo 扩展字段，Stash 产物不输出
+    assert "strategy: sticky-sessions" in art_m and "strategy:" not in art_s
+    # Stash 的 relay 用 benchmark-* 测速字段
+    assert "type: relay" in art_s and "benchmark-url:" in art_s
+    assert "type: relay" in art_m
+    # load-balance 也插入空组保护
+    assert "load-balance" in art_m and "空组保护" in art_m

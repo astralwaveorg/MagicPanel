@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS proxy_groups (
   timeout INTEGER NOT NULL DEFAULT 8000,
   tolerance INTEGER NOT NULL DEFAULT 150,
   lazy INTEGER NOT NULL DEFAULT 1,
+  strategy TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -216,6 +217,9 @@ def init_db() -> None:
         # 自定义头像的 MIME；文件在 data/avatars/
         _ensure_column(conn, "users", "avatar_mime",
                        "avatar_mime TEXT NOT NULL DEFAULT ''")
+        # load-balance 的分配策略（consistent-hashing / round-robin / sticky-sessions）
+        _ensure_column(conn, "proxy_groups", "strategy",
+                       "strategy TEXT NOT NULL DEFAULT ''")
         for key, value in config.SETTINGS_DEFAULTS.items():
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value)

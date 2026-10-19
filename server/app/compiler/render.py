@@ -72,11 +72,12 @@ def _provider_entry(src: dict, engine: str) -> dict:
     return entry
 
 
-def _group_entry(group: dict) -> dict:
+def _group_entry(group: dict, engine: str) -> dict:
     entry = {"name": group["name"], "type": group["type"]}
     proxies = list(group.get("proxies") or [])
     use = list(group.get("use_sources") or [])
-    if group["type"] in ("url-test", "fallback") and config.GUARD_PROXY not in proxies:
+    if group["type"] in ("url-test", "fallback", "load-balance") \
+            and config.GUARD_PROXY not in proxies:
         proxies.insert(0, config.GUARD_PROXY)
     if proxies:
         entry["proxies"] = proxies
@@ -86,7 +87,7 @@ def _group_entry(group: dict) -> dict:
         entry["filter"] = group["filter"]
     if group.get("hidden"):
         entry["hidden"] = True
-    if group["type"] in ("url-test", "fallback"):
+    if group["type"] in ("url-test", "fallback", "load-balance"):
         entry["url"] = group.get("url") or HEALTH_CHECK["url"]
         entry["interval"] = group.get("interval", 600)
         entry["timeout"] = group.get("timeout", 8000)
@@ -94,6 +95,18 @@ def _group_entry(group: dict) -> dict:
             entry["lazy"] = True
         if group["type"] == "url-test" and group.get("tolerance"):
             entry["tolerance"] = group["tolerance"]
+        # strategy 为 Mihomo 扩展字段，Stash 不识别，仅 Mihomo 目标输出
+        if group["type"] == "load-balance" and group.get("strategy") \
+                and engine == "mihomo":
+            entry["strategy"] = group["strategy"]
+    if group["type"] == "relay":
+        # Stash 链式转发用 benchmark-* 字段测速；Mihomo 沿用 url/interval
+        if engine == "stash":
+            entry["benchmark-url"] = group.get("url") or HEALTH_CHECK["url"]
+            entry["benchmark-timeout"] = max(1, group.get("timeout", 8000) // 1000)
+        else:
+            entry["url"] = group.get("url") or HEALTH_CHECK["url"]
+            entry["interval"] = group.get("interval", 600)
     return entry
 
 
@@ -148,7 +161,7 @@ def render_target(snapshot: dict, target: dict) -> str:
 
     groups = snapshot["groups"]
     if groups:
-        cfg["proxy-groups"] = [_group_entry(g) for g in groups]
+        cfg["proxy-groups"] = [_group_entry(g, engine) for g in groups]
 
     rps = [r for r in snapshot["rule_providers"] if r.get("enabled")]
     if rps:

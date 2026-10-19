@@ -13,7 +13,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 GUARD_PROXY = "空组保护"           # 永远无法出站的占位节点，防止空策略组被客户端隐式改写
 BUILTIN_TARGETS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL"}
-GROUP_TYPES = {"select", "url-test", "fallback"}
+GROUP_TYPES = {"select", "url-test", "fallback", "load-balance", "relay"}
+LB_STRATEGIES = {"consistent-hashing", "round-robin", "sticky-sessions"}
 RULE_TYPES = {
     "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-REGEX",
     "IP-CIDR", "IP-CIDR6", "GEOIP", "GEOSITE", "RULE-SET",

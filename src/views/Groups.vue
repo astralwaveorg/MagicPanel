@@ -40,14 +40,20 @@
           </el-table-column>
           <el-table-column label="测速地址" min-width="180">
             <template #default="{ row }">
-              <span class="mono">{{ ['url-test','fallback'].includes(row.type) ? row.url : '—' }}</span>
+              <span class="mono">{{ row.type !== 'select' ? row.url : '—' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="间隔/超时/容差" width="150" align="center">
             <template #default="{ row }">
-              <span v-if="['url-test','fallback'].includes(row.type)" class="mono">
-                {{ row.interval }}/{{ row.timeout }}/{{ row.tolerance }}
+              <span v-if="['url-test','fallback','load-balance','relay'].includes(row.type)" class="mono">
+                {{ row.interval }}/{{ row.timeout }}/{{ row.type === 'url-test' ? row.tolerance : '—' }}
               </span>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="分配策略" width="140">
+            <template #default="{ row }">
+              <span v-if="row.type === 'load-balance'" class="mono">{{ row.strategy || 'consistent-hashing' }}</span>
               <span v-else>—</span>
             </template>
           </el-table-column>
@@ -76,11 +82,15 @@
                 <el-option value="select" label="select（手动选择）" />
                 <el-option value="url-test" label="url-test（延迟测速）" />
                 <el-option value="fallback" label="fallback（故障切换）" />
+                <el-option value="load-balance" label="load-balance（负载均衡）" />
+                <el-option value="relay" label="relay（链式转发）" />
               </el-select>
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="成员（其他策略组或 DIRECT / REJECT，按顺序）">
+        <el-form-item :label="form.type === 'relay'
+          ? '成员（按顺序组成转发链，至少两个，仅限策略组或 DIRECT / REJECT）'
+          : '成员（其他策略组或 DIRECT / REJECT，按顺序）'">
           <el-select v-model="form.proxies" multiple filterable allow-create default-first-option
                      style="width:100%" placeholder="选择或输入">
             <el-option v-for="g in otherGroups" :key="g" :label="g" :value="g" />
@@ -88,16 +98,25 @@
             <el-option value="REJECT" label="REJECT（拒绝）" />
           </el-select>
         </el-form-item>
-        <el-form-item label="节点来源（从来源中取节点，可多选）">
-          <el-select v-model="form.use_sources" multiple style="width:100%">
-            <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
+        <template v-if="form.type !== 'relay'">
+          <el-form-item label="节点来源（从来源中取节点，可多选）">
+            <el-select v-model="form.use_sources" multiple style="width:100%">
+              <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="过滤正则（仅保留匹配的节点，可选）">
+            <el-input v-model="form.filter" class="mono" />
+          </el-form-item>
+        </template>
+        <el-form-item v-if="form.type === 'load-balance'" label="分配策略（仅 Mihomo 目标生效）">
+          <el-select v-model="form.strategy" style="width:100%">
+            <el-option value="consistent-hashing" label="consistent-hashing（同目标固定节点）" />
+            <el-option value="round-robin" label="round-robin（轮询）" />
+            <el-option value="sticky-sessions" label="sticky-sessions（会话保持）" />
           </el-select>
         </el-form-item>
-        <el-form-item label="过滤正则（仅保留匹配的节点，可选）">
-          <el-input v-model="form.filter" class="mono" />
-        </el-form-item>
-        <template v-if="['url-test','fallback'].includes(form.type)">
-          <el-form-item label="测速地址">
+        <template v-if="hasHealthCheck">
+          <el-form-item :label="form.type === 'relay' ? '测速地址（Stash 目标渲染为 benchmark-url）' : '测速地址'">
             <el-input v-model="form.url" class="mono" />
           </el-form-item>
           <el-row :gutter="12">
@@ -112,7 +131,7 @@
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="容差（毫秒）">
+              <el-form-item v-if="form.type === 'url-test'" label="容差（毫秒）">
                 <el-input-number v-model="form.tolerance" :min="0" :max="5000" style="width:100%" />
               </el-form-item>
             </el-col>
@@ -120,7 +139,7 @@
         </template>
         <el-form-item>
           <el-checkbox v-model="form.hidden">在客户端中隐藏该组</el-checkbox>
-          <el-checkbox v-if="['url-test','fallback'].includes(form.type)" v-model="form.lazy">
+          <el-checkbox v-if="['url-test','fallback','load-balance'].includes(form.type)" v-model="form.lazy">
             惰性测速（无流量时不测）
           </el-checkbox>
         </el-form-item>
@@ -150,9 +169,13 @@ const editing = ref(null)
 const emptyForm = () => ({
   name: '', type: 'select', hidden: false, filter: '', use_sources: [], proxies: [],
   url: 'https://www.gstatic.com/generate_204', interval: 600, timeout: 8000,
-  tolerance: 150, lazy: true,
+  tolerance: 150, lazy: true, strategy: 'consistent-hashing',
 })
 const form = reactive(emptyForm())
+
+const hasHealthCheck = computed(() =>
+  ['url-test', 'fallback', 'load-balance', 'relay'].includes(form.type),
+)
 
 const otherGroups = computed(() =>
   rows.value.map((g) => g.name).filter((n) => n !== editing.value?.name),
@@ -180,7 +203,7 @@ function openEdit(row) {
     name: row.name, type: row.type, hidden: row.hidden, filter: row.filter,
     use_sources: [...row.use_sources], proxies: [...row.proxies],
     url: row.url, interval: row.interval, timeout: row.timeout,
-    tolerance: row.tolerance, lazy: row.lazy,
+    tolerance: row.tolerance, lazy: row.lazy, strategy: row.strategy || 'consistent-hashing',
   } : {})
   dialog.value = true
 }

@@ -23,6 +23,7 @@ class GroupBody(BaseModel):
     timeout: int = Field(default=8000, ge=100, le=60000)
     tolerance: int = Field(default=150, ge=0, le=5000)
     lazy: bool = True
+    strategy: str = Field(default="", max_length=32)
 
 
 class RuleBody(BaseModel):
@@ -51,6 +52,17 @@ def _rule_public(row) -> dict:
 def _check_group(body: GroupBody) -> None:
     if body.type not in config.GROUP_TYPES:
         raise HTTPException(400, f"策略组类型仅支持：{'、'.join(sorted(config.GROUP_TYPES))}")
+    if body.strategy:
+        if body.type != "load-balance":
+            raise HTTPException(400, "分配策略仅用于 load-balance 类型")
+        if body.strategy not in config.LB_STRATEGIES:
+            raise HTTPException(400, f"分配策略仅支持：{'、'.join(sorted(config.LB_STRATEGIES))}")
+    if body.type == "relay":
+        # 链式转发顺序必须固定，不能用节点来源或过滤动态生成
+        if body.use_sources or body.filter:
+            raise HTTPException(400, "relay 为链式转发，仅支持固定成员，不能用节点来源或过滤")
+        if len(body.proxies) < 2:
+            raise HTTPException(400, "relay 至少需要两个成员组成转发链")
     if body.filter:
         try:
             re.compile(body.filter)
@@ -82,13 +94,13 @@ def create_group(body: GroupBody, user=CurrentUser):
         now = db.now()
         cur = conn.execute(
             "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
-            "proxies, url, interval, timeout, tolerance, lazy, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "proxies, url, interval, timeout, tolerance, lazy, strategy, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.type, sort, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance,
-             int(body.lazy), now, now),
+             int(body.lazy), body.strategy, now, now),
         )
         security.audit(conn, user["username"], "新增策略组", "group", cur.lastrowid,
                        {"name": body.name})
@@ -108,13 +120,13 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
             raise HTTPException(409, "同名策略组已存在")
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
-            "proxies=?, url=?, interval=?, timeout=?, tolerance=?, lazy=?, updated_at=? "
-            "WHERE id=?",
+            "proxies=?, url=?, interval=?, timeout=?, tolerance=?, lazy=?, strategy=?, "
+            "updated_at=? WHERE id=?",
             (body.name, body.type, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance, int(body.lazy),
-             db.now(), gid),
+             body.strategy, db.now(), gid),
         )
         security.audit(conn, user["username"], "更新策略组", "group", gid,
                        {"name": body.name})
