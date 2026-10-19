@@ -54,10 +54,12 @@
           </el-table-column>
           <el-table-column label="操作" width="290" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" @click="reveal(row)">复制地址</el-button>
-              <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="warning" plain @click="rotate(row)">轮换令牌</el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+              <div class="op-grid">
+                <el-button size="small" @click="reveal(row)">复制地址</el-button>
+                <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" type="warning" plain @click="rotate(row)">轮换令牌</el-button>
+                <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -217,3 +219,9 @@ async function remove(row) {
   }
 }
 </script>
+
+<style scoped>
+/* 操作列 2×2 排列，覆盖 Element Plus 相邻按钮默认间距 */
+.op-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.op-grid .el-button { margin: 0; }
+</style>
