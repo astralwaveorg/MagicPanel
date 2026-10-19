@@ -9,7 +9,7 @@
 
 - 镜像由根目录 `Dockerfile` 多阶段构建（Node 编译前端 → Python 3.12 运行时，非 root 运行）。
 - 数据目录 `./data` 挂载到容器 `/app/data`，内含数据库、`secret.key` 主密钥、构建产物与测速核心，**请纳入 1Panel 备份计划**。
-- 容器只监听 `127.0.0.1:8100`，不直接对外；对外由 1Panel 的 OpenResty 反向代理承担 TLS。
+- 容器只监听 `127.0.0.1:47100`，不直接对外；对外由 1Panel 的 OpenResty 反向代理承担 TLS。
 
 ## 步骤
 
@@ -37,7 +37,7 @@ NAS 网络访问 GitHub 不通时，在管理端「设置 → 核心下载代理
 「网站 → 创建网站 → 反向代理」：
 
 - 主域名：`magichub.top`，端口：`8443`，勾选 HTTPS，证书选择已签发的 `magichub.top` / `*.magichub.top` 证书；
-- 代理地址：`http://127.0.0.1:8100`。
+- 代理地址：`http://127.0.0.1:47100`。
 
 1Panel 默认反代模板已带 `X-Forwarded-Proto / X-Forwarded-Host`；MagicPanel 以 `--proxy-headers` 启动，
 会按这些头生成订阅地址。保险起见，在管理端「设置 → 对外基础地址」填入 `https://magichub.top:8443`，

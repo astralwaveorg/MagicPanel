@@ -30,7 +30,7 @@ cd server && ../.venv/bin/python -m pytest tests -q
 Docker（推荐，含 1Panel 反向代理步骤）：
 
 ```sh
-docker compose up -d --build   # 数据持久化在 ./data，监听 127.0.0.1:8100
+docker compose up -d --build   # 数据持久化在 ./data，监听 127.0.0.1:47100
 ```
 
 完整步骤见 [docs/deployment/1Panel-Docker-部署.md](docs/deployment/1Panel-Docker-部署.md)。
