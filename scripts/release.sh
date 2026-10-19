@@ -28,7 +28,7 @@ if git rev-parse "$VERSION" >/dev/null 2>&1; then
   echo "标签 $VERSION 已存在，请显式指定版本号。" >&2
   exit 1
 fi
-echo "发布版本：$VERSION（上一个标签：${LAST:-无}）"
+echo "发布版本：${VERSION}（上一个标签：${LAST:-无}）"
 
 echo "== 后端测试 =="
 (cd server && ../.venv/bin/python -m pytest tests -q)
