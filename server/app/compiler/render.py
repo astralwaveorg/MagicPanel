@@ -1,8 +1,11 @@
 """按目标渲染完整配置。
 
 产物中的 `{FEED}` 占位符由分发层在响应时替换为设备专属地址，
+`{FEED_HOST}` 替换为面板域名（用于置顶 DIRECT 规则），
 构建产物本身不含任何令牌或节点凭据。
 """
+import urllib.parse
+
 import yaml
 
 from .. import config
@@ -171,7 +174,9 @@ def render_target(snapshot: dict, target: dict) -> str:
         cfg["rule-providers"] = {r["name"]: _rule_provider_entry(r) for r in rps}
 
     rules = [r for r in snapshot["rules"] if r.get("enabled", True)]
-    cfg["rules"] = [_rule_line(r) for r in rules]
+    # 面板自身域名强制直连且置顶：VPN 运行中客户端更新配置不经过代理，
+    # 避免节点失效导致配置无法更新（TLS 握手失败）。{FEED_HOST} 分发时替换。
+    cfg["rules"] = ["DOMAIN-SUFFIX,{FEED_HOST},DIRECT"] + [_rule_line(r) for r in rules]
 
     # Stash 由客户端接管 DNS；Mihomo 需要显式 dns 段。
     if engine == "mihomo":
@@ -192,4 +197,5 @@ def render_target(snapshot: dict, target: dict) -> str:
 
 
 def substitute_feed(text: str, feed_base: str) -> str:
-    return text.replace("{FEED}", feed_base)
+    host = urllib.parse.urlsplit(feed_base).hostname or ""
+    return text.replace("{FEED}", feed_base).replace("{FEED_HOST}", host)
