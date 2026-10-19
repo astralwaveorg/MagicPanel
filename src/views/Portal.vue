@@ -39,10 +39,11 @@
           <h1>订阅中心</h1>
           <p class="pt-hero-sub">
             {{ devices.length }} 台设备 · {{ data.rules.length }} 条个人规则 ·
+            {{ data.rule_providers.length }} 个规则来源 ·
             稳定通道 {{ channelText('stable') }} · 候选通道 {{ channelText('candidate') }}
           </p>
           <div class="pt-search">
-            <input v-model="query" placeholder="搜索设备、客户端或规则…" aria-label="搜索">
+            <input v-model="query" placeholder="搜索订阅、规则、客户端…" aria-label="搜索">
           </div>
         </div>
       </header>
@@ -80,6 +81,9 @@
             </div>
           </div>
         </section>
+        <p v-else-if="!query" class="pt-empty">
+          暂无订阅地址：设备尚未创建或通道未发布，请联系维护者在管理后台完成配置与发布。
+        </p>
 
         <!-- 客户端资源 -->
         <section v-if="clients.length">
@@ -107,6 +111,17 @@
               <span class="pt-rule-note">{{ copied === 'rule-' + i ? '已复制' : (r.note || '') }}</span>
             </li>
           </ul>
+        </section>
+
+        <!-- 规则来源 -->
+        <section v-if="ruleProviders.length">
+          <h2 class="pt-sec-title">规则来源<small>已随配置下发</small></h2>
+          <div class="pt-providers">
+            <span v-for="p in ruleProviders" :key="p.name" class="pt-chip"
+                  :title="`${p.behavior} · ${p.kind === 'inline' ? '内联' : '远程'}`">
+              {{ p.name }}<i>{{ p.rule_count ?? 0 }} 条</i>
+            </span>
+          </div>
         </section>
 
         <!-- 功能模块 -->
@@ -222,9 +237,13 @@ const clients = computed(() =>
 const rules = computed(() =>
   (data.value?.rules || []).filter((r) => hit(r.type, r.value, r.target, r.note)))
 
+const ruleProviders = computed(() =>
+  (data.value?.rule_providers || []).filter((p) => hit(p.name, p.behavior, p.kind)))
+
 const snippetGroups = computed(() => {
   const groups = {}
   for (const s of data.value?.snippets || []) {
+    if (!hit(s.name, s.note, s.category)) continue
     ;(groups[s.category] ||= []).push(s)
   }
   return Object.entries(groups).map(([category, items]) => ({
@@ -235,7 +254,8 @@ const snippetGroups = computed(() => {
 const guides = computed(() => data.value?.guides || [])
 
 const hasAnyResult = computed(() =>
-  devices.value.length || clients.value.length || rules.value.length)
+  devices.value.length || clients.value.length || rules.value.length
+  || ruleProviders.value.length || snippetGroups.value.length)
 
 function platformLabel(p) { return PLATFORM_LABELS[p] || p }
 function engineLabel(e) { return e === 'stash' ? 'Stash' : 'Mihomo' }
@@ -575,6 +595,13 @@ onMounted(async () => {
 .pt-snippets { display: flex; flex-direction: column; gap: 12px; }
 .pt-snippet-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pt-snippet-cat { font-size: 13px; color: #8f96b0; width: 44px; flex-shrink: 0; }
+.pt-providers { display: flex; gap: 10px; flex-wrap: wrap; }
+.pt-empty {
+  color: #79809a; font-size: 13px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 10px; padding: 14px 16px;
+}
 .pt-chip {
   font-size: 12.5px;
   padding: 5px 12px;

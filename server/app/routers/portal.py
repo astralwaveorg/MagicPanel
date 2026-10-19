@@ -167,6 +167,15 @@ def portal_data(body: PinBody, request: Request):
                 "ORDER BY sort, id",
             )
         ]
+        # 规则来源仅展示元信息，随配置下发，不展示原始内容
+        rule_providers = [
+            {"name": r["name"], "behavior": r["behavior"], "kind": r["kind"],
+             "rule_count": r["rule_count"]}
+            for r in db.all_(
+                conn,
+                "SELECT * FROM rule_providers WHERE enabled=1 ORDER BY id",
+            )
+        ]
         channels = {}
         for p in db.all_(conn, "SELECT * FROM pointers"):
             build = db.one(conn, "SELECT * FROM builds WHERE id=?", (p["build_id"],))
@@ -186,6 +195,7 @@ def portal_data(body: PinBody, request: Request):
         "clients": CLIENT_RESOURCES,
         "guides": IMPORT_GUIDES,
         "rules": rules,
+        "rule_providers": rule_providers,
         "snippets": snippets,
         "channels": channels,
     }

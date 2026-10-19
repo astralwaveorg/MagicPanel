@@ -70,9 +70,19 @@
         <el-form-item label="说明">
           <el-input v-model="form.description" placeholder="例如：iPhone 主力配置" />
         </el-form-item>
-        <el-form-item label="目标扩展（YAML 映射，顶层键整键覆盖生成结果；Stash 的 mitm/rewrite 等平台差异在此维护）">
+        <el-form-item>
+          <template #label>
+            <span>目标扩展（YAML 映射，顶层键整键覆盖生成结果）</span>
+            <span class="mp-field-hint">{{ engineHint }}</span>
+          </template>
+          <div class="mp-template-bar">
+            <el-button
+              v-for="t in templates" :key="t.label" size="small" text type="primary"
+              @click="insertTemplate(t.content)"
+            >插入{{ t.label }}</el-button>
+          </div>
           <el-input v-model="form.extra_yaml" type="textarea" :rows="8" class="mono"
-                    placeholder="# 示例（Stash）：&#10;# mitm:&#10;#   hostnames:&#10;#     - www.google.cn" />
+                    :placeholder="enginePlaceholder" />
         </el-form-item>
         <el-form-item label="更新提示（小时，写入 profile-update-interval 响应头）">
           <el-input-number v-model="form.update_interval" :min="1" :max="168" />
@@ -87,12 +97,46 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
 import { PLATFORM_LABELS } from '../format'
+
+// 引擎差异以官方文档为准：
+// Stash 特有顶层键 http / cron / script-providers（stash.wiki/configuration/example-config）
+// Mihomo 特有顶层键 tun / sniffer / listeners（wiki.metacubex.one）
+const ENGINE_HINTS = {
+  stash: 'Stash 特有：http（mitm、url-rewrite）、cron、script-providers',
+  mihomo: 'Mihomo 特有：tun、sniffer、listeners',
+}
+const ENGINE_PLACEHOLDERS = {
+  stash: '# Stash 示例：\n# http:\n#   mitm:\n#     - "*.google.cn"',
+  mihomo: '# Mihomo 示例：\n# tun:\n#   enable: true\n#   stack: gvisor',
+}
+const TEMPLATES = {
+  stash: [
+    {
+      label: 'MitM 模板',
+      content: 'http:\n  # CA 证书需在设备上信任后再启用\n  mitm:\n    - "*.example.com"\n',
+    },
+    {
+      label: '定时脚本模板',
+      content: 'cron:\n  script:\n    - name: my-script\n      cron: "0 * * * *"\n      timeout: 10\n',
+    },
+  ],
+  mihomo: [
+    {
+      label: 'TUN 模板',
+      content: 'tun:\n  enable: true\n  stack: gvisor\n  dns-hijack:\n    - any:53\n  auto-route: true\n  auto-detect-interface: true\n',
+    },
+    {
+      label: '嗅探模板',
+      content: 'sniffer:\n  enable: true\n  sniff:\n    TLS:\n      ports: [443]\n    HTTP:\n      ports: [80]\n',
+    },
+  ],
+}
 
 const rows = ref([])
 const loading = ref(false)
@@ -104,6 +148,16 @@ const emptyForm = () => ({
   name: '', engine: 'stash', platform: 'ios', description: '', extra_yaml: '', update_interval: 12,
 })
 const form = reactive(emptyForm())
+
+const engineHint = computed(() => ENGINE_HINTS[form.engine] || '')
+const enginePlaceholder = computed(() => ENGINE_PLACEHOLDERS[form.engine] || '')
+const templates = computed(() => TEMPLATES[form.engine] || [])
+
+function insertTemplate(content) {
+  form.extra_yaml = form.extra_yaml
+    ? `${form.extra_yaml.replace(/\s+$/, '')}\n\n${content}`
+    : content
+}
 
 async function load() {
   loading.value = true

@@ -110,8 +110,9 @@ def test_portal_data_content(client):
     assert data["devices"][0]["subscription_url"] == dev["subscription_url"]
     assert data["devices"][0]["engine"] == "stash"
     assert len(data["clients"]) >= 5 and data["guides"]
-    # 个人规则不含 RULE-SET（公共规则来源不在门户展示）
+    # 个人规则不含 RULE-SET；规则来源只展示元信息
     assert [x["type"] for x in data["rules"]] == ["DOMAIN-SUFFIX"]
+    assert "rule_providers" in data
 
     # 轮换令牌后 reveal 返回新地址，门户同步更新
     r = client.post("/api/v1/auth/login",
