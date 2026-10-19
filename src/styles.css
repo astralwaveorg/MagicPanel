@@ -1,0 +1,188 @@
+/* 设计基线：克制配色，强调色仅用于主操作与选中态；状态用文字+色点双编码。
+   默认暗色，可手动切换亮色（html.dark 由 theme.js 控制）。 */
+:root {
+  --el-color-primary: #2f54eb;
+  --mp-bg: #f5f6f8;
+  --mp-surface: #ffffff;
+  --mp-surface-2: #fbfbfc;
+  --mp-border: #e4e7ed;
+  --mp-text: #1f2329;
+  --mp-text-secondary: #646a73;
+  --mp-ok: #2f9e44;
+  --mp-warn: #d48806;
+  --mp-danger: #d4380d;
+  --mp-muted: #8f959e;
+  --mp-secret-bg: #fffbe6;
+  --mp-secret-border: #d48806;
+}
+
+html.dark {
+  --mp-bg: #141414;
+  --mp-surface: #1d1e1f;
+  --mp-surface-2: #1a1b1c;
+  --mp-border: #333637;
+  --mp-text: #e5e6eb;
+  --mp-text-secondary: #a6a9ad;
+  --mp-ok: #4cc26b;
+  --mp-warn: #e2a63d;
+  --mp-danger: #e86a4d;
+  --mp-muted: #6b7078;
+  --mp-secret-bg: #2b2614;
+  --mp-secret-border: #a97e1f;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  background: var(--mp-bg);
+  color: var(--mp-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue',
+    'Microsoft YaHei', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+/* 布局 */
+.mp-layout { display: flex; min-height: 100%; }
+.mp-aside {
+  width: 216px;
+  flex-shrink: 0;
+  background: var(--mp-surface);
+  border-right: 1px solid var(--mp-border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.mp-brand {
+  padding: 18px 20px 14px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.mp-brand small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mp-text-secondary);
+  margin-top: 2px;
+}
+.mp-aside-footer {
+  margin-top: auto;
+  padding: 12px 20px;
+  border-top: 1px solid var(--mp-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--mp-text-secondary);
+}
+.mp-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mp-topbar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--mp-surface);
+  border-bottom: 1px solid var(--mp-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.mp-content { padding: 20px 24px 48px; max-width: 1280px; width: 100%; margin: 0 auto; }
+
+.mp-page-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+.mp-page-desc { color: var(--mp-text-secondary); font-size: 13px; margin: 0 0 16px; }
+
+.mp-card {
+  background: var(--mp-surface);
+  border: 1px solid var(--mp-border);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.mp-card h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+
+.mp-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.mp-toolbar .left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.mp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* 状态点：与文字共同编码状态 */
+.mp-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mp-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.mp-dot.ok { background: var(--mp-ok); }
+.mp-dot.warn { background: var(--mp-warn); }
+.mp-dot.danger { background: var(--mp-danger); }
+.mp-dot.muted { background: var(--mp-muted); }
+
+.mp-empty {
+  border: 1px dashed var(--mp-border);
+  border-radius: 8px;
+  padding: 28px 20px;
+  color: var(--mp-text-secondary);
+  font-size: 13px;
+  line-height: 1.8;
+  background: var(--mp-surface-2);
+}
+.mp-empty strong { color: var(--mp-text); }
+
+.mp-secret-box {
+  border: 1px solid var(--mp-secret-border);
+  background: var(--mp-secret-bg);
+  border-radius: 8px;
+  padding: 14px 16px;
+  line-height: 1.9;
+}
+
+/* 页面进入过渡 */
+.fade-enter-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.fade-enter-from { opacity: 0; transform: translateY(4px); }
+.fade-leave-active { transition: opacity 0.12s ease; }
+.fade-leave-to { opacity: 0; }
+
+/* 登录 / 初始化 */
+.mp-auth-page {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.mp-auth-card {
+  width: 380px;
+  max-width: 100%;
+  background: var(--mp-surface);
+  border: 1px solid var(--mp-border);
+  border-radius: 10px;
+  padding: 32px 30px;
+}
+
+/* 菜单选中态：仅强调色 */
+.el-menu { border-right: none; }
+.mp-aside .el-menu, .el-drawer .el-menu { background: transparent; }
+
+/* 移动端 */
+@media (max-width: 768px) {
+  .mp-aside { display: none; }
+  .mp-topbar { display: flex; }
+  .mp-content { padding: 14px 12px 40px; }
+  .mp-auth-card { padding: 24px 20px; }
+}

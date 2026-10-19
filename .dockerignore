@@ -1,0 +1,16 @@
+.git
+.ref
+node_modules
+dist
+data
+.venv
+.cache
+docs
+scripts
+server/tests
+server/app/static
+Stash 真实配置文件示例
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+*.log

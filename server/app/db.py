@@ -1,0 +1,257 @@
+"""SQLite 数据层：连接、事务与建表。单实例单写入，WAL 模式。"""
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
+
+from . import config
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  salt TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'admin',
+  portal_pin_hash TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  last_login_at TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  csrf_token TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  ip TEXT, ua TEXT
+);
+CREATE TABLE IF NOT EXISTS sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  url_enc TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  filter TEXT NOT NULL DEFAULT '',
+  ua TEXT NOT NULL DEFAULT 'Stash',
+  interval INTEGER NOT NULL DEFAULT 21600,
+  allow_private INTEGER NOT NULL DEFAULT 0,
+  last_status TEXT NOT NULL DEFAULT 'never',
+  last_error TEXT NOT NULL DEFAULT '',
+  last_fetched_at TEXT,
+  node_count INTEGER,
+  sha256 TEXT,
+  fail_count INTEGER NOT NULL DEFAULT 0,
+  snapshot_enc TEXT,
+  nodes_meta TEXT NOT NULL DEFAULT '[]',
+  filter_unavailable INTEGER NOT NULL DEFAULT 0,
+  tested_at TEXT,
+  test_results TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rule_providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  behavior TEXT NOT NULL DEFAULT 'domain',
+  format TEXT NOT NULL DEFAULT 'yaml',
+  kind TEXT NOT NULL DEFAULT 'remote',
+  url TEXT NOT NULL DEFAULT '',
+  inline_content TEXT NOT NULL DEFAULT '',
+  interval INTEGER NOT NULL DEFAULT 86400,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_status TEXT NOT NULL DEFAULT 'never',
+  last_error TEXT NOT NULL DEFAULT '',
+  last_fetched_at TEXT,
+  rule_count INTEGER,
+  sha256 TEXT,
+  content TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proxy_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  type TEXT NOT NULL DEFAULT 'select',
+  sort INTEGER NOT NULL DEFAULT 0,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  filter TEXT NOT NULL DEFAULT '',
+  use_sources TEXT NOT NULL DEFAULT '[]',
+  proxies TEXT NOT NULL DEFAULT '[]',
+  url TEXT NOT NULL DEFAULT 'https://www.gstatic.com/generate_204',
+  interval INTEGER NOT NULL DEFAULT 600,
+  timeout INTEGER NOT NULL DEFAULT 8000,
+  tolerance INTEGER NOT NULL DEFAULT 150,
+  lazy INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sort INTEGER NOT NULL DEFAULT 0,
+  type TEXT NOT NULL,
+  value TEXT NOT NULL DEFAULT '',
+  target TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS targets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  engine TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  extra_yaml TEXT NOT NULL DEFAULT '',
+  update_interval INTEGER NOT NULL DEFAULT 12,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  platform TEXT NOT NULL,
+  target_id INTEGER NOT NULL REFERENCES targets(id),
+  channel TEXT NOT NULL DEFAULT 'stable',
+  token_hash TEXT UNIQUE NOT NULL,
+  token_hint TEXT NOT NULL,
+  token_enc TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  last_pull_at TEXT,
+  last_pull_ip TEXT,
+  pull_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS builds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  policy_sha TEXT NOT NULL,
+  snapshot TEXT NOT NULL,
+  results TEXT NOT NULL DEFAULT '{}',
+  note TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS releases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  build_id INTEGER NOT NULL REFERENCES builds(id),
+  channel TEXT NOT NULL,
+  action TEXT NOT NULL,
+  operator TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pointers (
+  channel TEXT PRIMARY KEY,
+  build_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL,
+  object_type TEXT NOT NULL DEFAULT '',
+  object_id TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS snippets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  engine TEXT NOT NULL DEFAULT 'all',
+  content TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+"""
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+class _Conn(sqlite3.Connection):
+    """上下文退出时提交/回滚并关闭连接。"""
+
+    def __exit__(self, exc_type, exc, tb):
+        super().__exit__(exc_type, exc, tb)
+        self.close()
+
+
+def connect() -> sqlite3.Connection:
+    config.ensure_dirs()
+    conn = sqlite3.connect(config.DB_PATH, timeout=15, factory=_Conn)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+def init_db() -> None:
+    with connect() as conn:
+        conn.executescript(SCHEMA)
+        _ensure_column(conn, "sources", "filter_unavailable",
+                       "filter_unavailable INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "sources", "tested_at", "tested_at TEXT")
+        _ensure_column(conn, "sources", "test_results",
+                       "test_results TEXT NOT NULL DEFAULT '{}'")
+        # 令牌同时保存 Fernet 加密副本：哈希用于校验，密文用于门户与后台重新展示地址
+        _ensure_column(conn, "devices", "token_enc", "token_enc TEXT")
+        # 门户 PIN 与维护者账号绑定，可按人撤销
+        _ensure_column(conn, "users", "portal_pin_hash",
+                       "portal_pin_hash TEXT NOT NULL DEFAULT ''")
+        for key, value in config.SETTINGS_DEFAULTS.items():
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value)
+            )
+
+
+@contextmanager
+def tx():
+    """写事务：提交或回滚，连接随上下文关闭。"""
+    conn = connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def one(conn: sqlite3.Connection, sql: str, args=()):
+    return conn.execute(sql, args).fetchone()
+
+
+def all_(conn: sqlite3.Connection, sql: str, args=()):
+    return conn.execute(sql, args).fetchall()
+
+
+def row_to_dict(row) -> dict:
+    return {k: row[k] for k in row.keys()}
+
+
+def get_setting(conn, key: str, default: str = "") -> str:
+    row = one(conn, "SELECT value FROM settings WHERE key=?", (key,))
+    return row["value"] if row else default
+
+
+def set_setting(conn, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES(?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )

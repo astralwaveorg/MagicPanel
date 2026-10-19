@@ -1,0 +1,200 @@
+"""规则来源：远程规则集与内联规则集，统一由服务端快照向设备分发。"""
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from .. import db, security
+from ..deps import CurrentUser
+from ..services import fetcher
+
+router = APIRouter(prefix="/api/v1/rule-providers", tags=["rule-providers"])
+
+BEHAVIORS = {"domain", "ipcidr", "classical"}
+FORMATS = {"yaml", "text", "mrs"}
+
+
+class RuleProviderBody(BaseModel):
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    behavior: str = "domain"
+    format: str = "yaml"
+    kind: str = "remote"  # remote / inline
+    url: str = Field(default="", max_length=1024)
+    inline_content: str = Field(default="", max_length=2_000_000)
+    interval: int = Field(default=86400, ge=600, le=604800)
+    enabled: bool = True
+
+
+def _public(row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "behavior": row["behavior"],
+        "format": row["format"],
+        "kind": row["kind"],
+        "url": row["url"],
+        "interval": row["interval"],
+        "enabled": bool(row["enabled"]),
+        "last_status": row["last_status"],
+        "last_error": row["last_error"],
+        "last_fetched_at": row["last_fetched_at"],
+        "rule_count": row["rule_count"],
+        "sha256": row["sha256"],
+        "has_content": bool(row["content"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _validate_body(body: RuleProviderBody) -> None:
+    if body.behavior not in BEHAVIORS:
+        raise HTTPException(400, f"behavior 仅支持：{'、'.join(sorted(BEHAVIORS))}")
+    if body.format not in FORMATS:
+        raise HTTPException(400, f"format 仅支持：{'、'.join(sorted(FORMATS))}")
+    if body.kind == "remote" and not body.url:
+        raise HTTPException(400, "远程规则来源必须填写 URL")
+    if body.kind == "inline" and not body.inline_content.strip():
+        raise HTTPException(400, "内联规则来源必须填写内容")
+
+
+def _get_or_404(conn, rp_id: int):
+    row = db.one(conn, "SELECT * FROM rule_providers WHERE id=?", (rp_id,))
+    if not row:
+        raise HTTPException(404, "规则来源不存在")
+    return row
+
+
+@router.get("")
+def list_providers(user=CurrentUser):
+    with db.connect() as conn:
+        rows = db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
+    return [_public(r) for r in rows]
+
+
+@router.get("/{rp_id}/content")
+def get_content(rp_id: int, user=CurrentUser):
+    """规则内容不涉凭据，允许维护者查看最近快照原文。"""
+    with db.connect() as conn:
+        row = _get_or_404(conn, rp_id)
+    return {"name": row["name"], "content": row["content"]}
+
+
+@router.post("", status_code=201)
+def create_provider(body: RuleProviderBody, user=CurrentUser):
+    _validate_body(body)
+    with db.tx() as conn:
+        if db.one(conn, "SELECT id FROM rule_providers WHERE name=?", (body.name,)):
+            raise HTTPException(409, "同名规则来源已存在")
+        content = body.inline_content if body.kind == "inline" else ""
+        count = None
+        sha = None
+        status = "never"
+        fetched = None
+        if body.kind == "inline":
+            count = fetcher.count_rules(content.encode(), body.behavior)
+            sha = security.sha256_text(content)
+            status = "ok"
+            fetched = db.now()
+        now = db.now()
+        cur = conn.execute(
+            "INSERT INTO rule_providers(name, behavior, format, kind, url, "
+            "inline_content, interval, enabled, content, rule_count, sha256, "
+            "last_status, last_fetched_at, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (body.name, body.behavior, body.format, body.kind, body.url,
+             body.inline_content, body.interval, int(body.enabled), content,
+             count, sha, status, fetched, now, now),
+        )
+        security.audit(conn, user["username"], "新增规则来源", "rule_provider",
+                       cur.lastrowid, {"name": body.name})
+        row = _get_or_404(conn, cur.lastrowid)
+    return _public(row)
+
+
+@router.put("/{rp_id}")
+def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
+    _validate_body(body)
+    with db.tx() as conn:
+        _get_or_404(conn, rp_id)
+        clash = db.one(
+            conn, "SELECT id FROM rule_providers WHERE name=? AND id!=?",
+            (body.name, rp_id),
+        )
+        if clash:
+            raise HTTPException(409, "同名规则来源已存在")
+        old = _get_or_404(conn, rp_id)
+        content = old["content"]
+        count = old["rule_count"]
+        sha = old["sha256"]
+        status = old["last_status"]
+        fetched = old["last_fetched_at"]
+        if body.kind == "inline":
+            content = body.inline_content
+            count = fetcher.count_rules(content.encode(), body.behavior)
+            sha = security.sha256_text(content)
+            status = "ok"
+            fetched = db.now()
+        elif old["kind"] == "inline":
+            # 从 inline 切到 remote：清空旧快照，等待首次抓取
+            content, count, sha, status, fetched = "", None, None, "never", None
+        conn.execute(
+            "UPDATE rule_providers SET name=?, behavior=?, format=?, kind=?, url=?, "
+            "inline_content=?, interval=?, enabled=?, content=?, rule_count=?, "
+            "sha256=?, last_status=?, last_fetched_at=?, updated_at=? WHERE id=?",
+            (body.name, body.behavior, body.format, body.kind, body.url,
+             body.inline_content, body.interval, int(body.enabled), content, count,
+             sha, status, fetched, db.now(), rp_id),
+        )
+        security.audit(conn, user["username"], "更新规则来源", "rule_provider", rp_id,
+                       {"name": body.name})
+        row = _get_or_404(conn, rp_id)
+    return _public(row)
+
+
+@router.delete("/{rp_id}")
+def delete_provider(rp_id: int, user=CurrentUser):
+    with db.tx() as conn:
+        row = _get_or_404(conn, rp_id)
+        used = [
+            r["id"] for r in db.all_(
+                conn,
+                "SELECT id FROM rules WHERE type='RULE-SET' AND value=? AND enabled=1",
+                (row["name"],),
+            )
+        ]
+        if used:
+            raise HTTPException(400, "规则来源仍被分流规则引用，请先删除对应规则")
+        conn.execute("DELETE FROM rule_providers WHERE id=?", (rp_id,))
+        security.audit(conn, user["username"], "删除规则来源", "rule_provider", rp_id,
+                       {"name": row["name"]})
+    return {"ok": True}
+
+
+@router.post("/{rp_id}/refresh")
+def refresh_provider(rp_id: int, user=CurrentUser):
+    with db.tx() as conn:
+        row = _get_or_404(conn, rp_id)
+        if row["kind"] != "remote":
+            raise HTTPException(400, "内联规则来源无需抓取")
+        now = db.now()
+        try:
+            body = fetcher.fetch(row["url"])
+            count = fetcher.count_rules(body, row["behavior"])
+        except fetcher.FetchError as exc:
+            conn.execute(
+                "UPDATE rule_providers SET last_status='failed', last_error=?, "
+                "updated_at=? WHERE id=?",
+                (str(exc), now, rp_id),
+            )
+            security.audit(conn, user["username"], "刷新规则来源失败",
+                           "rule_provider", rp_id, {"error": str(exc)})
+            raise HTTPException(502, f"抓取失败：{exc}（已保留最近一次成功快照）")
+        text = body.decode("utf-8", "replace")
+        conn.execute(
+            "UPDATE rule_providers SET last_status='ok', last_error='', "
+            "last_fetched_at=?, rule_count=?, sha256=?, content=?, updated_at=? "
+            "WHERE id=?",
+            (now, count, security.sha256_text(text), text, now, rp_id),
+        )
+        security.audit(conn, user["username"], "刷新规则来源", "rule_provider", rp_id,
+                       {"name": row["name"], "rule_count": count})
+        row = _get_or_404(conn, rp_id)
+    return _public(row)
