@@ -8,15 +8,41 @@
 
     <div class="mp-card">
       <div class="mp-toolbar" style="margin-bottom:0">
-        <div class="left">
-          <span v-for="ch in ['stable', 'candidate']" :key="ch" style="margin-right:18px;font-size:13.5px">
-            {{ CHANNEL_LABELS[ch] }}通道：
-            <template v-if="channels[ch]">
-              <span class="mono">构建 #{{ channels[ch].id }}</span>
-              （{{ fmtTime(channels[ch].created_at) }}）
-            </template>
-            <span v-else style="color:var(--mp-text-secondary)">未发布</span>
-          </span>
+        <div class="left" style="flex-direction:column;align-items:flex-start;gap:8px">
+          <div class="channel-list">
+            <div v-for="ch in ['stable', 'candidate']" :key="ch" class="channel-line">
+              <span class="channel-label">{{ CHANNEL_LABELS[ch] }}通道</span>
+              <template v-if="channels[ch]">
+                <span class="mono">构建 #{{ channels[ch].id }}</span>
+                <span class="mono" style="color:var(--mp-text-secondary)">
+                  策略 {{ shortSha(channels[ch].policy_sha) }}
+                </span>
+                <template v-if="channels[ch].publish?.at">
+                  <el-tag size="small" effect="plain"
+                          :type="channels[ch].publish.operator === '系统' ? 'success' : 'info'">
+                    {{ channels[ch].publish.operator === '系统' ? '自动' : '手动' }}
+                  </el-tag>
+                  <span>
+                    {{ channels[ch].publish.action === 'rollback' ? '回滚' : '发布' }}于
+                    {{ fmtTime(channels[ch].publish.at) }}
+                  </span>
+                  <span class="mono">{{ channels[ch].publish.operator || '—' }}</span>
+                  <span v-if="channels[ch].publish.reason" class="channel-reason">
+                    · {{ channels[ch].publish.reason }}
+                  </span>
+                </template>
+                <span v-else style="color:var(--mp-text-secondary)">
+                  构建于 {{ fmtTime(channels[ch].created_at) }}
+                </span>
+              </template>
+              <span v-else style="color:var(--mp-text-secondary)">未发布</span>
+            </div>
+          </div>
+          <div v-if="selected.length" class="selected-actions">
+            <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
+            <el-button type="danger" plain @click="removeSelected">批量删除</el-button>
+            <el-button link @click="clearSelection">取消选择</el-button>
+          </div>
         </div>
         <el-button type="primary" :loading="building" @click="createBuild">创建候选构建</el-button>
       </div>
@@ -29,7 +55,9 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table :data="rows" v-loading="loading">
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+                  @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="44" fixed />
           <el-table-column label="构建" width="90">
             <template #default="{ row }"><span class="mono">#{{ row.id }}</span></template>
           </el-table-column>
@@ -60,17 +88,21 @@
           <el-table-column prop="note" label="备注" min-width="120">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="330" fixed="right">
+          <el-table-column label="操作" width="360" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" @click="openDetail(row)">详情</el-button>
-              <el-button size="small" :disabled="channels.candidate?.id === row.id"
-                         @click="promote(row, 'candidate')">发到候选</el-button>
-              <el-button size="small" type="primary" plain
-                         :disabled="row.status !== 'success' || channels.stable?.id === row.id"
-                         @click="promote(row, 'stable')">发布稳定</el-button>
-              <el-button size="small" type="warning" plain
-                         :disabled="row.status !== 'success'"
-                         @click="rollback(row)">回滚至此</el-button>
+              <div class="op-grid">
+                <el-button size="small" @click="openDetail(row)">详情</el-button>
+                <el-button size="small" :disabled="channels.candidate?.id === row.id"
+                           @click="promote(row, 'candidate')">发到候选</el-button>
+                <el-button size="small" type="primary" plain
+                           :disabled="row.status !== 'success' || channels.stable?.id === row.id"
+                           @click="promote(row, 'stable')">发布稳定</el-button>
+                <el-button size="small" type="warning" plain
+                           :disabled="row.status !== 'success'"
+                           @click="rollback(row)">回滚至此</el-button>
+                <el-button size="small" type="danger" plain
+                           @click="remove(row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -78,7 +110,7 @@
     </div>
 
     <div class="mp-card">
-      <h3>发布历史</h3>
+      <h3>发布历史（最近 10 条）</h3>
       <EmptyState v-if="!releases.length" reason="还没有发布记录。" />
       <div v-else class="mp-table-wrap">
         <el-table :data="releases" size="small">
@@ -138,7 +170,8 @@
     <el-dialog v-model="artifactVisible" :title="`产物预览 · ${artifactTarget}`"
                width="min(760px, 94vw)">
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin-top:0">
-        产物中订阅地址以 <span class="mono">{FEED}</span> 占位，分发时才注入设备专属地址，不含节点凭据。
+        订阅来源以 <span class="mono">{FEED}</span> 占位，分发时才注入设备专属地址；
+        本地单节点的凭据会直接写入产物，请仅在管理端预览。
       </p>
       <el-input :model-value="artifactContent" type="textarea" :rows="20" readonly class="mono" />
     </el-dialog>
@@ -147,15 +180,24 @@
       <el-input :model-value="diffContent || '（无差异或上一构建不存在该目标）'"
                 type="textarea" :rows="20" readonly class="mono" />
     </el-dialog>
+
+    <BatchResultDialog
+      v-model:visible="blockedVisible"
+      title="部分构建未删除"
+      :summary="`已删除 ${deletedCount} 项；${blockedItems.length} 项因仍在通道中而保留`"
+      :items="blockedItems"
+    />
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { confirmBox } from '../confirm'
 import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
+import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
 
 const rows = ref([])
@@ -171,6 +213,11 @@ const artifactContent = ref('')
 const diffVisible = ref(false)
 const diffTarget = ref('')
 const diffContent = ref('')
+const tableRef = ref(null)
+const selected = ref([])
+const blockedVisible = ref(false)
+const blockedItems = ref([])
+const deletedCount = ref(0)
 
 async function load() {
   loading.value = true
@@ -188,6 +235,15 @@ async function load() {
   }
 }
 onMounted(load)
+
+function onSelectionChange(selection) {
+  selected.value = selection
+}
+
+function clearSelection() {
+  tableRef.value?.clearSelection()
+  selected.value = []
+}
 
 async function createBuild() {
   building.value = true
@@ -280,4 +336,92 @@ async function rollback(row) {
     ElMessage.error(e.message)
   }
 }
+
+async function remove(row) {
+  if (!await confirmBox(
+    `删除候选构建 #${row.id}？产物文件与相关发布历史会一并删除；`
+    + '仍在稳定或候选通道中的构建不能删除，需先把通道移到其他构建。',
+    `删除构建 #${row.id}`, { type: 'warning', confirmButtonText: '删除' },
+  )) return
+  try {
+    await api(`/api/v1/builds/${row.id}`, { method: 'DELETE' })
+    ElMessage.success(`构建 #${row.id} 已删除`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function removeSelected() {
+  if (!selected.value.length) return
+  if (!await confirmBox(
+    `删除选中的 ${selected.value.length} 个构建？产物文件与相关发布历史会一并删除；`
+    + '仍在稳定或候选通道中的构建会保留，并列出原因。',
+    '批量删除构建', { type: 'warning', confirmButtonText: '删除' },
+  )) return
+  try {
+    const ids = selected.value.map((r) => r.id)
+    const resp = await api('/api/v1/builds/batch/delete', {
+      method: 'POST', body: { ids },
+    })
+    deletedCount.value = resp.deleted.length
+    blockedItems.value = resp.blocked
+    if (resp.blocked.length) {
+      blockedVisible.value = true
+    } else {
+      ElMessage.success(`已删除 ${resp.deleted.length} 个构建`)
+    }
+    clearSelection()
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
 </script>
+
+<style scoped>
+.op-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.op-grid .el-button {
+  width: 100%;
+  margin: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+@media (max-width: 640px) {
+  .op-grid { gap: 4px; }
+  .op-grid .el-button { font-size: 12px; }
+}
+.channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.channel-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.channel-label { font-weight: 600; min-width: 64px; }
+.channel-reason {
+  color: var(--mp-text-secondary);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selected-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .channel-reason { max-width: 220px; }
+}
+</style>

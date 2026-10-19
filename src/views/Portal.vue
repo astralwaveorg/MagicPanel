@@ -57,13 +57,17 @@
             <div class="pt-grid">
               <article v-for="d in g.devices" :key="d.name" class="pt-card">
                 <div class="pt-card-head">
-                  <span class="pt-card-name">{{ d.name }}</span>
+                  <span class="pt-card-name">{{ d.display_name || d.name }}</span>
                   <span class="pt-tag" :data-channel="d.channel">
                     {{ d.channel === 'stable' ? '稳定' : '候选' }}
                   </span>
                 </div>
-                <p class="pt-card-meta">{{ platformLabel(d.platform) }} · {{ d.target_name }}</p>
-                <p v-if="d.note" class="pt-card-note">{{ d.note }}</p>
+                <p class="pt-card-meta">
+                  {{ platformLabel(d.platform) }} · {{ d.target_name }}
+                  <template v-if="d.display_name && d.display_name !== d.name">
+                    · 文件 {{ d.name }}.yaml
+                  </template>
+                </p>
                 <div class="pt-card-actions">
                   <button
                     class="pt-btn primary"
@@ -231,7 +235,7 @@ const hit = (...fields) => !query.value
 
 const devices = computed(() =>
   (data.value?.devices || []).filter((d) =>
-    hit(d.name, d.platform, d.target_name, d.note)))
+    hit(d.name, d.display_name, d.platform, d.target_name, d.note)))
 
 const engineGroups = computed(() => {
   const groups = {}
@@ -310,7 +314,7 @@ function installUrl(d) {
 }
 
 async function showQr(d) {
-  qrDevice.value = d.name
+  qrDevice.value = d.display_name || d.name
   qrText.value = d.subscription_url
   if (qrCache.has(d.subscription_url)) {
     qrUrl.value = qrCache.get(d.subscription_url)

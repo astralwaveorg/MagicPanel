@@ -96,7 +96,12 @@
       />
       <div v-else class="mp-table-wrap">
         <el-table :data="data.devices" size="small">
-          <el-table-column prop="name" label="设备" min-width="110" />
+          <el-table-column label="文件名" min-width="120">
+            <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
+          </el-table-column>
+          <el-table-column label="设备名" min-width="110">
+            <template #default="{ row }">{{ row.display_name || row.name }}</template>
+          </el-table-column>
           <el-table-column label="平台" width="90">
             <template #default="{ row }">{{ PLATFORM_LABELS[row.platform] || row.platform }}</template>
           </el-table-column>

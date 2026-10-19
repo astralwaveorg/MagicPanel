@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      顺序即声明顺序；地区筛选为空的组保留 <strong>空组保护</strong> 占位，避免被客户端隐式改写为直连。
+      顺序即声明顺序；按住左侧手柄可拖动排序。地区筛选为空的组保留 <strong>空组保护</strong> 占位，避免被客户端隐式改写为直连。
     </p>
 
     <div class="mp-toolbar">
@@ -17,11 +17,14 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table :data="rows" v-loading="loading">
-          <el-table-column label="顺序" width="90" align="center">
-            <template #default="{ $index }">
-              <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
-              <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id">
+          <el-table-column label="顺序" width="104" align="center">
+            <template #default="{ row, $index }">
+              <div class="order-cell">
+                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
+                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
+              </div>
             </template>
           </el-table-column>
           <el-table-column prop="name" label="名称" min-width="110" />
@@ -29,35 +32,18 @@
           <el-table-column label="隐藏" width="70">
             <template #default="{ row }">{{ row.hidden ? '隐藏' : '显示' }}</template>
           </el-table-column>
-          <el-table-column label="成员（引用）" min-width="180">
+          <el-table-column label="包含策略组" min-width="380">
             <template #default="{ row }">{{ row.proxies.join('、') || '—' }}</template>
           </el-table-column>
           <el-table-column label="节点来源" min-width="140">
             <template #default="{ row }">{{ row.use_sources.join('、') || '—' }}</template>
           </el-table-column>
-          <el-table-column label="过滤正则" min-width="180">
-            <template #default="{ row }"><span class="mono">{{ row.filter || '—' }}</span></template>
-          </el-table-column>
-          <el-table-column label="测速地址" min-width="180">
+          <el-table-column label="本地节点" min-width="160">
             <template #default="{ row }">
-              <span class="mono">{{ row.type !== 'select' ? row.url : '—' }}</span>
+              {{ localNodeNames(row.local_nodes) || '—' }}
             </template>
           </el-table-column>
-          <el-table-column label="间隔/超时/容差" width="150" align="center">
-            <template #default="{ row }">
-              <span v-if="['url-test','fallback','load-balance','relay'].includes(row.type)" class="mono">
-                {{ row.interval }}/{{ row.timeout }}/{{ row.type === 'url-test' ? row.tolerance : '—' }}
-              </span>
-              <span v-else>—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="分配策略" width="140">
-            <template #default="{ row }">
-              <span v-if="row.type === 'load-balance'" class="mono">{{ row.strategy || 'consistent-hashing' }}</span>
-              <span v-else>—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column label="操作" width="150">
             <template #default="{ row }">
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
@@ -89,13 +75,20 @@
           </el-col>
         </el-row>
         <el-form-item :label="form.type === 'relay'
-          ? '成员（按顺序组成转发链，至少两个，仅限策略组或 DIRECT / REJECT）'
+          ? '成员（按顺序组成转发链，至少两个，仅限策略组、本地节点或 DIRECT / REJECT）'
           : '成员（其他策略组或 DIRECT / REJECT，按顺序）'">
           <el-select v-model="form.proxies" multiple filterable allow-create default-first-option
                      style="width:100%" placeholder="选择或输入">
             <el-option v-for="g in otherGroups" :key="g" :label="g" :value="g" />
             <el-option value="DIRECT" label="DIRECT（直连）" />
             <el-option value="REJECT" label="REJECT（拒绝）" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="本地节点（单节点，可多选）">
+          <el-select v-model="form.local_nodes" multiple filterable style="width:100%">
+            <el-option v-for="n in localNodes" :key="n.id" :value="n.id"
+                       :disabled="!n.enabled"
+                       :label="`${n.marked_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
           </el-select>
         </el-form-item>
         <template v-if="form.type !== 'relay'">
@@ -153,21 +146,34 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 
 const rows = ref([])
 const sources = ref([])
+const localNodes = ref([])
 const loading = ref(false)
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
+const tableRef = ref(null)
+const sorter = useRowSortable(tableRef, rows, async (ids) => {
+  try {
+    await api('/api/v1/groups/reorder', { method: 'POST', body: ids })
+    ElMessage.success('顺序已更新')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+  await load()
+})
 
 const emptyForm = () => ({
-  name: '', type: 'select', hidden: false, filter: '', use_sources: [], proxies: [],
+  name: '', type: 'select', hidden: false, filter: '', use_sources: [],
+  local_nodes: [], proxies: [],
   url: 'https://www.gstatic.com/generate_204', interval: 600, timeout: 8000,
   tolerance: 150, lazy: true, strategy: 'consistent-hashing',
 })
@@ -181,27 +187,39 @@ const otherGroups = computed(() =>
   rows.value.map((g) => g.name).filter((n) => n !== editing.value?.name),
 )
 
+function localNodeNames(ids) {
+  return (ids || [])
+    .map((id) => localNodes.value.find((node) => node.id === id)?.marked_name)
+    .filter(Boolean)
+    .join('、')
+}
+
 async function load() {
   loading.value = true
   try {
-    const [groups, srcs] = await Promise.all([
-      api('/api/v1/groups'), api('/api/v1/sources'),
+    const [groups, srcs, nodes] = await Promise.all([
+      api('/api/v1/groups'), api('/api/v1/sources'), api('/api/v1/local-nodes'),
     ])
     rows.value = groups
     sources.value = srcs.filter((s) => s.enabled)
+    localNodes.value = nodes
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
     loading.value = false
   }
+  await sorter.init()
 }
 onMounted(load)
+
+onBeforeUnmount(sorter.destroy)
 
 function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     name: row.name, type: row.type, hidden: row.hidden, filter: row.filter,
-    use_sources: [...row.use_sources], proxies: [...row.proxies],
+    use_sources: [...row.use_sources], local_nodes: [...(row.local_nodes || [])],
+    proxies: [...row.proxies],
     url: row.url, interval: row.interval, timeout: row.timeout,
     tolerance: row.tolerance, lazy: row.lazy, strategy: row.strategy || 'consistent-hashing',
   } : {})
@@ -250,3 +268,24 @@ async function remove(row) {
   }
 }
 </script>
+
+<style scoped>
+.order-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+.drag-handle {
+  cursor: grab;
+  color: var(--mp-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 3px;
+  margin-right: 2px;
+  user-select: none;
+  touch-action: none;
+}
+.drag-handle:active { cursor: grabbing; }
+.order-cell .el-button { margin: 0; padding: 4px 2px; }
+</style>

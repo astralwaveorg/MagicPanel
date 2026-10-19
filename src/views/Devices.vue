@@ -23,7 +23,12 @@
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
         <el-table :data="rows" v-loading="loading">
-          <el-table-column prop="name" label="设备" min-width="110" fixed />
+          <el-table-column label="文件名" min-width="130" fixed>
+            <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
+          </el-table-column>
+          <el-table-column label="设备名" min-width="130">
+            <template #default="{ row }">{{ row.display_name }}</template>
+          </el-table-column>
           <el-table-column label="平台" width="90">
             <template #default="{ row }">{{ PLATFORM_LABELS[row.platform] || row.platform }}</template>
           </el-table-column>
@@ -49,9 +54,6 @@
           <el-table-column label="最近来源 IP" min-width="120">
             <template #default="{ row }"><span class="mono">{{ row.last_pull_ip || '—' }}</span></template>
           </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="120">
-            <template #default="{ row }">{{ row.note || '—' }}</template>
-          </el-table-column>
           <el-table-column label="操作" width="290" fixed="right">
             <template #default="{ row }">
               <div class="op-grid">
@@ -68,8 +70,9 @@
 
     <el-dialog v-model="dialog" :title="editing ? '编辑设备' : '添加设备'" width="min(560px, 94vw)">
       <el-form :model="form" label-position="top">
-        <el-form-item label="设备名称">
-          <el-input v-model="form.name" placeholder="例如：iPhone 17 Pro Max" />
+        <el-form-item label="文件名">
+          <el-input v-model="form.name" placeholder="例如：Stash-Macmini" />
+          <div class="mp-form-hint">下载得到的文件名为“输入值.yaml”，同时用于区分设备，需唯一。</div>
         </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
@@ -94,8 +97,9 @@
             <el-radio value="candidate">候选（提前试用新构建）</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="备注（可选）">
-          <el-input v-model="form.note" />
+        <el-form-item label="设备名">
+          <el-input v-model="form.note" placeholder="例如：客厅 Mac mini" />
+          <div class="mp-form-hint">用于后台与门户展示；留空时显示文件名。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -158,7 +162,7 @@ function openEdit(row) {
 }
 
 async function save() {
-  if (!form.name) return ElMessage.warning('请填写设备名称')
+  if (!form.name) return ElMessage.warning('请填写文件名')
   if (!form.target_id) return ElMessage.warning('请选择发布目标')
   saving.value = true
   try {
@@ -193,7 +197,7 @@ async function reveal(row) {
 
 async function rotate(row) {
   if (!await confirmBox(
-    `轮换 “${row.name}” 的令牌？旧订阅地址立即失效，设备需改用新地址。`,
+    `轮换 “${row.display_name || row.name}” 的令牌？旧订阅地址立即失效，设备需改用新地址。`,
     '轮换令牌', { type: 'warning', confirmButtonText: '轮换' },
   )) return
   try {
@@ -207,7 +211,7 @@ async function rotate(row) {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除设备 “${row.name}”？其订阅地址同时失效。`,
+    `删除设备 “${row.display_name || row.name}”？其订阅地址同时失效，下载文件名 “${row.name}” 也不再可用。`,
     '删除设备', { type: 'warning' },
   )) return
   try {

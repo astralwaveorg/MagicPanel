@@ -27,11 +27,25 @@ DEFAULT_UA = "Stash"
 FETCH_MAX_BYTES = 10 * 1024 * 1024
 FETCH_TIMEOUT = 20.0
 SESSION_TTL_HOURS = 168
+# 内置调度器：单进程后台任务，随应用启动；测试环境用 MAGICPANEL_SCHEDULER=0 关闭
+SCHEDULER_AUTOSTART = os.environ.get("MAGICPANEL_SCHEDULER", "1") != "0"
+SCHEDULER_TICK_SECONDS = max(10, int(os.environ.get("MAGICPANEL_SCHEDULER_TICK", "30")))
+RELEASE_HISTORY_LIMIT = 10       # 发布历史只保留最近 10 条（每日两次约 5 天）
 
 SETTINGS_DEFAULTS = {
     "base_url": "",                 # 对外基础地址，如 https://panel.example.com
     "session_ttl_hours": str(SESSION_TTL_HOURS),
     "profile_update_interval": "12",  # 小时，写入响应头 profile-update-interval
+    # 内置定时任务
+    "scheduler_enabled": "1",
+    "auto_fetch_sources": "1",
+    "auto_fetch_rules": "1",
+    "auto_test_sources": "1",
+    "auto_build_enabled": "1",
+    "auto_build_interval_hours": "12",
+    "auto_publish_enabled": "1",
+    "auto_publish_channel": "stable",   # stable / candidate
+    "auto_build_last_attempt": "",      # 内部：上次自动构建检查时间
 }
 
 

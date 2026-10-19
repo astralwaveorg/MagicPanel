@@ -143,6 +143,7 @@ def portal_data(body: PinBody, request: Request):
             target = db.one(conn, "SELECT * FROM targets WHERE id=?", (r["target_id"],))
             item = {
                 "name": r["name"],
+                "display_name": r["note"] or r["name"],
                 "platform": r["platform"],
                 "channel": r["channel"],
                 "engine": target["engine"] if target else "",

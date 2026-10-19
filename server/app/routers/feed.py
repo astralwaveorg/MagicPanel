@@ -101,8 +101,9 @@ def device_config(token: str, request: Request):
                 "pull_count=pull_count+1 WHERE id=?",
                 (db.now(), request.client.host if request.client else "", device["id"]),
             )
-            security.audit(conn, device["name"], "设备下载完整配置", "device",
-                           device["id"], {"build_id": build["id"]})
+            security.audit(conn, device["note"] or device["name"],
+                           "设备下载完整配置", "device", device["id"],
+                           {"build_id": build["id"], "filename": device["name"]})
 
         return _respond(request, text, etag, extra, record=record)
 

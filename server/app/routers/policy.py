@@ -17,6 +17,7 @@ class GroupBody(BaseModel):
     hidden: bool = False
     filter: str = Field(default="", max_length=512)
     use_sources: list[str] = Field(default_factory=list)
+    local_nodes: list[int] = Field(default_factory=list)
     proxies: list[str] = Field(default_factory=list)
     url: str = Field(default="https://www.gstatic.com/generate_204", max_length=256)
     interval: int = Field(default=600, ge=30, le=86400)
@@ -40,6 +41,7 @@ def _group_public(row) -> dict:
     data["hidden"] = bool(row["hidden"])
     data["lazy"] = bool(row["lazy"])
     data["use_sources"] = json.loads(row["use_sources"] or "[]")
+    data["local_nodes"] = json.loads(row["local_nodes"] or "[]")
     data["proxies"] = json.loads(row["proxies"] or "[]")
     return data
 
@@ -63,13 +65,22 @@ def _check_group(body: GroupBody) -> None:
         # 链式转发顺序必须固定，不能用节点来源或过滤动态生成
         if body.use_sources or body.filter:
             raise HTTPException(400, "relay 为链式转发，仅支持固定成员，不能用节点来源或过滤")
-        if len(body.proxies) < 2:
+        if len(body.proxies) + len(body.local_nodes) < 2:
             raise HTTPException(400, "relay 至少需要两个成员组成转发链")
     if body.filter:
         try:
             re.compile(body.filter)
         except re.error as exc:
             raise HTTPException(400, f"过滤正则无效：{exc}")
+
+
+def _check_local_ids(conn, ids: list[int]) -> list[int]:
+    unique = list(dict.fromkeys(ids))
+    existing = {r["id"] for r in db.all_(conn, "SELECT id FROM local_nodes")}
+    missing = [i for i in unique if i not in existing]
+    if missing:
+        raise HTTPException(400, f"本地节点不存在：{'、'.join(f'#{i}' for i in missing)}")
+    return unique
 
 
 def _get_group(conn, gid: int):
@@ -92,14 +103,16 @@ def create_group(body: GroupBody, user=CurrentUser):
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (body.name,)):
             raise HTTPException(409, "同名策略组已存在")
+        local_ids = _check_local_ids(conn, body.local_nodes)
         sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups"))["s"]
         now = db.now()
         cur = conn.execute(
             "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
-            "proxies, url, interval, timeout, tolerance, lazy, strategy, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "local_nodes, proxies, url, interval, timeout, tolerance, lazy, strategy, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.type, sort, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
+             json.dumps(local_ids, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance,
              int(body.lazy), body.strategy, now, now),
@@ -120,12 +133,14 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         )
         if clash:
             raise HTTPException(409, "同名策略组已存在")
+        local_ids = _check_local_ids(conn, body.local_nodes)
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
-            "proxies=?, url=?, interval=?, timeout=?, tolerance=?, lazy=?, strategy=?, "
-            "updated_at=? WHERE id=?",
+            "local_nodes=?, proxies=?, url=?, interval=?, timeout=?, tolerance=?, "
+            "lazy=?, strategy=?, updated_at=? WHERE id=?",
             (body.name, body.type, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
+             json.dumps(local_ids, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance, int(body.lazy),
              body.strategy, db.now(), gid),

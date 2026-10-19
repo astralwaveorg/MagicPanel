@@ -16,6 +16,7 @@ const routes = [
   { path: '/admin/targets', component: () => import('./views/Targets.vue'), meta: { title: '发布目标' } },
   { path: '/admin/devices', component: () => import('./views/Devices.vue'), meta: { title: '设备' } },
   { path: '/admin/builds', component: () => import('./views/Builds.vue'), meta: { title: '构建与发布' } },
+  { path: '/admin/automation', component: () => import('./views/Automation.vue'), meta: { title: '自动发布' } },
   { path: '/admin/audit', component: () => import('./views/Audit.vue'), meta: { title: '审计日志' } },
   { path: '/admin/settings', component: () => import('./views/Settings.vue'), meta: { title: '设置' } },
   // 旧路径兼容

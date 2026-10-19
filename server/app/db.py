@@ -34,10 +34,12 @@ CREATE TABLE IF NOT EXISTS sources (
   filter TEXT NOT NULL DEFAULT '',
   ua TEXT NOT NULL DEFAULT 'Stash',
   interval INTEGER NOT NULL DEFAULT 21600,
+  auto_fetch INTEGER NOT NULL DEFAULT 1,
   allow_private INTEGER NOT NULL DEFAULT 0,
   last_status TEXT NOT NULL DEFAULT 'never',
   last_error TEXT NOT NULL DEFAULT '',
   last_fetched_at TEXT,
+  last_attempt_at TEXT,
   node_count INTEGER,
   sha256 TEXT,
   fail_count INTEGER NOT NULL DEFAULT 0,
@@ -45,6 +47,9 @@ CREATE TABLE IF NOT EXISTS sources (
   nodes_meta TEXT NOT NULL DEFAULT '[]',
   filter_unavailable INTEGER NOT NULL DEFAULT 0,
   tested_at TEXT,
+  test_attempt_at TEXT,
+  test_interval INTEGER NOT NULL DEFAULT 21600,
+  auto_test INTEGER NOT NULL DEFAULT 1,
   test_results TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -62,9 +67,23 @@ CREATE TABLE IF NOT EXISTS rule_providers (
   last_status TEXT NOT NULL DEFAULT 'never',
   last_error TEXT NOT NULL DEFAULT '',
   last_fetched_at TEXT,
+  last_attempt_at TEXT,
   rule_count INTEGER,
   sha256 TEXT,
   content TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS local_nodes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  protocol TEXT NOT NULL,
+  server TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  params_enc TEXT NOT NULL DEFAULT '',
+  extra_yaml_enc TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -76,6 +95,7 @@ CREATE TABLE IF NOT EXISTS proxy_groups (
   hidden INTEGER NOT NULL DEFAULT 0,
   filter TEXT NOT NULL DEFAULT '',
   use_sources TEXT NOT NULL DEFAULT '[]',
+  local_nodes TEXT NOT NULL DEFAULT '[]',
   proxies TEXT NOT NULL DEFAULT '[]',
   url TEXT NOT NULL DEFAULT 'https://www.gstatic.com/generate_204',
   interval INTEGER NOT NULL DEFAULT 600,
@@ -106,6 +126,7 @@ CREATE TABLE IF NOT EXISTS targets (
   description TEXT NOT NULL DEFAULT '',
   extra_yaml TEXT NOT NULL DEFAULT '',
   update_interval INTEGER NOT NULL DEFAULT 12,
+  sort INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -145,7 +166,11 @@ CREATE TABLE IF NOT EXISTS releases (
 );
 CREATE TABLE IF NOT EXISTS pointers (
   channel TEXT PRIMARY KEY,
-  build_id INTEGER
+  build_id INTEGER,
+  released_at TEXT,
+  operator TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,6 +180,12 @@ CREATE TABLE IF NOT EXISTS audit (
   object_type TEXT NOT NULL DEFAULT '',
   object_id TEXT NOT NULL DEFAULT '',
   detail TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  trigger TEXT NOT NULL DEFAULT 'scheduled',
+  summary TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS snippets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -210,6 +241,28 @@ def init_db() -> None:
         _ensure_column(conn, "sources", "tested_at", "tested_at TEXT")
         _ensure_column(conn, "sources", "test_results",
                        "test_results TEXT NOT NULL DEFAULT '{}'")
+        # 定时抓取/测速：记录最近一次尝试（含失败），避免失败后每个 tick 重试
+        _ensure_column(conn, "sources", "last_attempt_at", "last_attempt_at TEXT")
+        _ensure_column(conn, "sources", "test_attempt_at", "test_attempt_at TEXT")
+        _ensure_column(conn, "sources", "test_interval",
+                       "test_interval INTEGER NOT NULL DEFAULT 21600")
+        # 本地快照来源：关闭自动抓取，只使用已保存快照
+        _ensure_column(conn, "sources", "auto_fetch",
+                       "auto_fetch INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(conn, "sources", "auto_test",
+                       "auto_test INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(conn, "rule_providers", "last_attempt_at",
+                       "last_attempt_at TEXT")
+        # 发布目标支持拖动排序
+        _ensure_column(conn, "targets", "sort", "sort INTEGER NOT NULL DEFAULT 0")
+        # 通道指针记录最近一次发布/回滚的来源，供界面展示“当前版本由谁、何时发布”
+        _ensure_column(conn, "pointers", "released_at", "released_at TEXT")
+        _ensure_column(conn, "pointers", "operator",
+                       "operator TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "pointers", "action",
+                       "action TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "pointers", "reason",
+                       "reason TEXT NOT NULL DEFAULT ''")
         # 令牌同时保存 Fernet 加密副本：哈希用于校验，密文用于门户与后台重新展示地址
         _ensure_column(conn, "devices", "token_enc", "token_enc TEXT")
         # 门户 PIN 与维护者账号绑定，可按人撤销
@@ -221,6 +274,9 @@ def init_db() -> None:
         # load-balance 的分配策略（consistent-hashing / round-robin / sticky-sessions）
         _ensure_column(conn, "proxy_groups", "strategy",
                        "strategy TEXT NOT NULL DEFAULT ''")
+        # 策略组引用的本地单节点 ID 列表
+        _ensure_column(conn, "proxy_groups", "local_nodes",
+                       "local_nodes TEXT NOT NULL DEFAULT '[]'")
         # 分流规则的 no-resolve 修饰符（仅 IP 类规则有效）
         _ensure_column(conn, "rules", "no_resolve",
                        "no_resolve INTEGER NOT NULL DEFAULT 0")

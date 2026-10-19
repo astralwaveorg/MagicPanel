@@ -1,4 +1,5 @@
 """应用入口：路由、静态托管与安全响应头。"""
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -6,17 +7,31 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import HTTPException as StarletteHTTPException
 
 from . import config, db
-from .routers import (auth, builds, feed, misc, policy, portal, rule_providers,
-                      snippets, sources, targets_devices)
+from .routers import (auth, automation, builds, feed, local_nodes, misc, policy,
+                      portal, rule_providers, snippets, sources, targets_devices)
+from .services import scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = scheduler.start_loop() if config.SCHEDULER_AUTOSTART else None
+    try:
+        yield
+    finally:
+        if task:
+            await scheduler.stop_loop(task)
 
 
 def create_app() -> FastAPI:
     db.init_db()
-    app = FastAPI(title="MagicPanel", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        title="MagicPanel", docs_url=None, redoc_url=None, openapi_url=None,
+        lifespan=lifespan,
+    )
 
     for r in (auth.router, sources.router, rule_providers.router, policy.router,
-              targets_devices.router, builds.router, misc.router, feed.router,
-              portal.router, snippets.router):
+              targets_devices.router, builds.router, misc.router, automation.router,
+              local_nodes.router, feed.router, portal.router, snippets.router):
         app.include_router(r)
 
     @app.middleware("http")

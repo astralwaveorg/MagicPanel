@@ -16,6 +16,9 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
 
     sources = {s["name"] for s in snapshot["sources"] if s.get("enabled")}
     providers = {r["name"] for r in snapshot["rule_providers"] if r.get("enabled")}
+    local_nodes = {
+        node["id"]: node for node in snapshot.get("local_nodes", [])
+    }
     groups = snapshot["groups"]
     group_names = [g["name"] for g in groups]
     group_set = set(group_names)
@@ -44,8 +47,20 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         for u in g.get("use_sources") or []:
             if u not in sources:
                 errors.append(f"策略组“{g['name']}”引用了不可用节点来源“{u}”")
-        if not (g.get("proxies") or g.get("use_sources")):
+        enabled_local: list[int] = []
+        for node_id in dict.fromkeys(g.get("local_nodes") or []):
+            node = local_nodes.get(node_id)
+            if not node:
+                errors.append(f"策略组“{g['name']}”引用了不存在的本地节点 #{node_id}")
+            elif not node.get("enabled"):
+                warnings.append(
+                    f"策略组“{g['name']}”引用了已停用的本地节点“{node['name']}”")
+            else:
+                enabled_local.append(node_id)
+        if not (g.get("proxies") or g.get("use_sources") or enabled_local):
             errors.append(f"策略组“{g['name']}”为空：既无成员也无节点来源")
+        if g["type"] == "relay" and len(g.get("proxies") or []) + len(enabled_local) < 2:
+            errors.append(f"relay 策略组“{g['name']}”至少需要两个可用成员")
         edges[g["name"]] = refs
 
     visiting: set[str] = set()

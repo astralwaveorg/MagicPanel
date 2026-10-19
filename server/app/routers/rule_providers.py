@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from .. import db, security
 from ..deps import CurrentUser
-from ..services import fetcher
+from ..services import fetcher, updater
 
 router = APIRouter(prefix="/api/v1/rule-providers", tags=["rule-providers"])
 
@@ -23,6 +23,15 @@ class RuleProviderBody(BaseModel):
     enabled: bool = True
 
 
+class BatchIds(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class BatchInterval(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=200)
+    interval: int = Field(ge=600, le=604800)
+
+
 def _public(row) -> dict:
     return {
         "id": row["id"],
@@ -36,6 +45,7 @@ def _public(row) -> dict:
         "last_status": row["last_status"],
         "last_error": row["last_error"],
         "last_fetched_at": row["last_fetched_at"],
+        "last_attempt_at": row["last_attempt_at"],
         "rule_count": row["rule_count"],
         "sha256": row["sha256"],
         "has_content": bool(row["content"]),
@@ -60,6 +70,28 @@ def _get_or_404(conn, rp_id: int):
     if not row:
         raise HTTPException(404, "规则来源不存在")
     return row
+
+
+def _rule_refs(conn, name: str) -> list:
+    """所有引用该规则来源的分流规则，含已停用规则（重新启用后会再次生效）。"""
+    return db.all_(
+        conn,
+        "SELECT id, enabled, target FROM rules WHERE type='RULE-SET' AND value=? "
+        "ORDER BY sort, id",
+        (name,),
+    )
+
+
+def _reference_reason(refs: list) -> str:
+    ids = "、".join(f"#{r['id']}" for r in refs[:5])
+    more = f" 等 {len(refs)} 条" if len(refs) > 5 else ""
+    return f"仍被 {len(refs)} 条分流规则引用（{ids}{more}），请先删除或调整对应规则"
+
+
+def _delete_one(conn, row, operator: str) -> None:
+    conn.execute("DELETE FROM rule_providers WHERE id=?", (row["id"],))
+    security.audit(conn, operator, "删除规则来源", "rule_provider", row["id"],
+                   {"name": row["name"]})
 
 
 @router.get("")
@@ -121,6 +153,14 @@ def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名规则来源已存在")
         old = _get_or_404(conn, rp_id)
+        if body.name != old["name"]:
+            refs = _rule_refs(conn, old["name"])
+            if refs:
+                raise HTTPException(
+                    400,
+                    f"规则来源“{old['name']}”{_reference_reason(refs)}；"
+                    "重命名会使这些引用失效，请先调整分流规则或保持名称不变",
+                )
         content = old["content"]
         count = old["rule_count"]
         sha = old["sha256"]
@@ -153,48 +193,67 @@ def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
 def delete_provider(rp_id: int, user=CurrentUser):
     with db.tx() as conn:
         row = _get_or_404(conn, rp_id)
-        used = [
-            r["id"] for r in db.all_(
-                conn,
-                "SELECT id FROM rules WHERE type='RULE-SET' AND value=? AND enabled=1",
-                (row["name"],),
-            )
-        ]
-        if used:
-            raise HTTPException(400, "规则来源仍被分流规则引用，请先删除对应规则")
-        conn.execute("DELETE FROM rule_providers WHERE id=?", (rp_id,))
-        security.audit(conn, user["username"], "删除规则来源", "rule_provider", rp_id,
-                       {"name": row["name"]})
+        refs = _rule_refs(conn, row["name"])
+        if refs:
+            raise HTTPException(
+                400, f"规则来源“{row['name']}”{_reference_reason(refs)}")
+        _delete_one(conn, row, user["username"])
     return {"ok": True}
+
+
+@router.patch("/batch")
+def batch_update_providers(body: BatchInterval, user=CurrentUser):
+    """批量修改刷新间隔；内联来源的间隔同样会写入后续构建产物。"""
+    ids = list(dict.fromkeys(body.ids))
+    with db.tx() as conn:
+        rows = [r for r in (
+            db.one(conn, "SELECT id, name FROM rule_providers WHERE id=?", (i,))
+            for i in ids
+        ) if r]
+        conn.executemany(
+            "UPDATE rule_providers SET interval=?, updated_at=? WHERE id=?",
+            [(body.interval, db.now(), r["id"]) for r in rows],
+        )
+        if rows:
+            security.audit(conn, user["username"], "批量修改规则来源刷新间隔",
+                           "rule_provider", ",".join(str(r["id"]) for r in rows),
+                           {"interval": body.interval,
+                            "names": [r["name"] for r in rows]})
+        missing = [i for i in ids if i not in {r["id"] for r in rows}]
+    return {"ok": True, "updated": len(rows), "missing": missing,
+            "interval": body.interval}
+
+
+@router.post("/batch/delete")
+def batch_delete_providers(body: BatchIds, user=CurrentUser):
+    """批量删除：逐个校验分流规则引用，被引用的保留并返回原因。"""
+    deleted: list[int] = []
+    blocked: list[dict] = []
+    with db.tx() as conn:
+        for rp_id in dict.fromkeys(body.ids):
+            row = db.one(conn, "SELECT * FROM rule_providers WHERE id=?", (rp_id,))
+            if not row:
+                blocked.append({"id": rp_id, "name": f"#{rp_id}",
+                                "reason": "规则来源不存在（可能已被删除）"})
+                continue
+            refs = _rule_refs(conn, row["name"])
+            if refs:
+                blocked.append({"id": rp_id, "name": row["name"],
+                                "reason": _reference_reason(refs)})
+                continue
+            _delete_one(conn, row, user["username"])
+            deleted.append(rp_id)
+    return {"ok": True, "deleted": deleted, "blocked": blocked}
 
 
 @router.post("/{rp_id}/refresh")
 def refresh_provider(rp_id: int, user=CurrentUser):
-    with db.tx() as conn:
-        row = _get_or_404(conn, rp_id)
-        if row["kind"] != "remote":
-            raise HTTPException(400, "内联规则来源无需抓取")
-        now = db.now()
-        try:
-            body = fetcher.fetch(row["url"])
-            count = fetcher.count_rules(body, row["behavior"])
-        except fetcher.FetchError as exc:
-            conn.execute(
-                "UPDATE rule_providers SET last_status='failed', last_error=?, "
-                "updated_at=? WHERE id=?",
-                (str(exc), now, rp_id),
-            )
-            security.audit(conn, user["username"], "刷新规则来源失败",
-                           "rule_provider", rp_id, {"error": str(exc)})
-            raise HTTPException(502, f"抓取失败：{exc}（已保留最近一次成功快照）")
-        text = body.decode("utf-8", "replace")
-        conn.execute(
-            "UPDATE rule_providers SET last_status='ok', last_error='', "
-            "last_fetched_at=?, rule_count=?, sha256=?, content=?, updated_at=? "
-            "WHERE id=?",
-            (now, count, security.sha256_text(text), text, now, rp_id),
-        )
-        security.audit(conn, user["username"], "刷新规则来源", "rule_provider", rp_id,
-                       {"name": row["name"], "rule_count": count})
-        row = _get_or_404(conn, rp_id)
+    try:
+        row = updater.refresh_provider(rp_id, user["username"])
+    except updater.NotFound as exc:
+        raise HTTPException(404, str(exc))
+    except updater.InvalidOperation as exc:
+        raise HTTPException(400, str(exc))
+    except fetcher.FetchError as exc:
+        raise HTTPException(502, f"抓取失败：{exc}（已保留最近一次成功快照）")
     return _public(row)

@@ -130,6 +130,22 @@ html, body, #app {
   flex-wrap: wrap;
 }
 .mp-toolbar .left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mp-toolbar-hint { color: var(--mp-text-secondary); font-size: 12.5px; }
+.mp-selected-hint { font-size: 13px; font-weight: 600; }
+.mp-form-hint { color: var(--mp-text-secondary); font-size: 12px; line-height: 1.6; margin-top: 2px; }
+.mp-dialog-desc { color: var(--mp-text-secondary); font-size: 13px; line-height: 1.7; margin: 0 0 10px; }
+.mp-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.mp-drag-ghost { opacity: 0.35; }
+.mp-drag-chosen { background: var(--mp-surface-2); }
+.mp-nowrap { white-space: nowrap; }
+
+.mp-preset-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.mp-preset-row .el-button { margin: 0; }
 
 .mp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 

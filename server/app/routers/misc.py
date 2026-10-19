@@ -10,8 +10,16 @@ from ..services import tester
 
 router = APIRouter(prefix="/api/v1", tags=["misc"])
 
-EDITABLE_SETTINGS = {"base_url", "session_ttl_hours", "profile_update_interval",
-                     "core_proxy"}
+EDITABLE_SETTINGS = {
+    "base_url", "session_ttl_hours", "profile_update_interval", "core_proxy",
+    "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
+    "auto_test_sources", "auto_build_enabled", "auto_build_interval_hours",
+    "auto_publish_enabled", "auto_publish_channel",
+}
+BOOL_SETTINGS = {
+    "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
+    "auto_test_sources", "auto_build_enabled", "auto_publish_enabled",
+}
 
 
 @router.get("/overview")
@@ -50,7 +58,9 @@ def overview(user=CurrentUser):
             for r in db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
         ]
         devices = [
-            {"id": r["id"], "name": r["name"], "platform": r["platform"],
+            {"id": r["id"], "name": r["name"],
+             "display_name": r["note"] or r["name"],
+             "platform": r["platform"],
              "channel": r["channel"], "last_pull_at": r["last_pull_at"],
              "pull_count": r["pull_count"]}
             for r in db.all_(conn, "SELECT * FROM devices ORDER BY id")
@@ -99,6 +109,18 @@ def put_settings(body: SettingsBody, user=CurrentUser):
     base_url = body.values.get("base_url", "")
     if base_url and not base_url.startswith(("https://", "http://")):
         raise HTTPException(400, "对外基础地址必须以 http(s):// 开头")
+    for key, value in body.values.items():
+        if key in BOOL_SETTINGS and value not in ("0", "1"):
+            raise HTTPException(400, f"{key} 只能是 0 或 1")
+        if key == "auto_build_interval_hours":
+            try:
+                hours = int(value)
+            except ValueError:
+                raise HTTPException(400, "自动构建间隔必须是整数小时")
+            if not 1 <= hours <= 168:
+                raise HTTPException(400, "自动构建间隔需在 1–168 小时之间")
+        if key == "auto_publish_channel" and value not in ("stable", "candidate"):
+            raise HTTPException(400, "自动发布通道仅支持 stable / candidate")
     with db.tx() as conn:
         for key, value in body.values.items():
             db.set_setting(conn, key, value.strip())
@@ -109,7 +131,7 @@ def put_settings(body: SettingsBody, user=CurrentUser):
 
 
 BACKUP_TABLES = [
-    "users", "sources", "rule_providers", "proxy_groups", "rules",
+    "users", "sources", "rule_providers", "local_nodes", "proxy_groups", "rules",
     "targets", "devices", "builds", "releases", "pointers", "settings",
 ]
 

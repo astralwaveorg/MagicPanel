@@ -3,6 +3,7 @@
     <h2 class="mp-page-title">发布目标</h2>
     <p class="mp-page-desc">
       一个目标对应一类客户端（引擎 + 平台）。同一策略按目标编译为对应方言；目标扩展用于平台差异，整键覆盖。
+      按住左侧手柄可拖动排序。
     </p>
 
     <div class="mp-toolbar">
@@ -17,7 +18,16 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table :data="rows" v-loading="loading">
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id">
+          <el-table-column label="顺序" width="104" align="center">
+            <template #default="{ row, $index }">
+              <div class="order-cell">
+                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
+                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column prop="name" label="名称" min-width="130">
             <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
           </el-table-column>
@@ -32,7 +42,7 @@
             <template #default="{ row }">{{ row.extra_yaml ? '有（整键覆盖）' : '—' }}</template>
           </el-table-column>
           <el-table-column label="更新提示(小时)" width="120" align="right" prop="update_interval" />
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column label="操作" width="150">
             <template #default="{ row }">
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
@@ -97,10 +107,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import { PLATFORM_LABELS } from '../format'
 
@@ -143,6 +154,16 @@ const loading = ref(false)
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
+const tableRef = ref(null)
+const sorter = useRowSortable(tableRef, rows, async (ids) => {
+  try {
+    await api('/api/v1/targets/reorder', { method: 'POST', body: ids })
+    ElMessage.success('顺序已更新')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+  await load()
+})
 
 const emptyForm = () => ({
   name: '', engine: 'stash', platform: 'ios', description: '', extra_yaml: '', update_interval: 12,
@@ -168,8 +189,22 @@ async function load() {
   } finally {
     loading.value = false
   }
+  await sorter.init()
 }
 onMounted(load)
+onBeforeUnmount(sorter.destroy)
+
+async function move(index, delta) {
+  const ids = rows.value.map((r) => r.id)
+  const [id] = ids.splice(index, 1)
+  ids.splice(index + delta, 0, id)
+  try {
+    await api('/api/v1/targets/reorder', { method: 'POST', body: ids })
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
 
 function openEdit(row) {
   editing.value = row || null
@@ -211,3 +246,23 @@ async function remove(row) {
   }
 }
 </script>
+
+<style scoped>
+.order-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.drag-handle {
+  cursor: grab;
+  color: var(--mp-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 3px;
+  margin-right: 2px;
+  user-select: none;
+  touch-action: none;
+}
+.drag-handle:active { cursor: grabbing; }
+.order-cell .el-button { margin: 0; padding: 4px 2px; }
+</style>

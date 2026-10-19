@@ -75,7 +75,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Menu, Moon, Odometer, Connection, Collection, SetUp, Filter, Monitor,
-  Iphone, Promotion, Document, Sunny, Tools, MagicStick,
+  Iphone, Promotion, Document, Sunny, Tools, MagicStick, Timer,
 } from '@element-plus/icons-vue'
 import { confirmBox } from './confirm'
 import { api } from './api'
@@ -105,6 +105,7 @@ const menu = [
   { path: '/admin/targets', title: '发布目标', icon: Monitor },
   { path: '/admin/devices', title: '设备', icon: Iphone },
   { path: '/admin/builds', title: '构建与发布', icon: Promotion },
+  { path: '/admin/automation', title: '自动发布', icon: Timer },
   { path: '/admin/audit', title: '审计日志', icon: Document },
   { path: '/admin/settings', title: '设置', icon: Tools },
 ]

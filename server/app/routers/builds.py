@@ -5,6 +5,7 @@
 """
 import difflib
 import json
+import shutil
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -22,8 +23,7 @@ CHANNELS = {"stable", "candidate"}
 def collect_snapshot(conn) -> dict:
     sources = [
         {"name": r["name"], "enabled": bool(r["enabled"]), "filter": r["filter"],
-         "ua": r["ua"], "interval": r["interval"],
-         "last_status": r["last_status"], "node_count": r["node_count"]}
+         "ua": r["ua"], "interval": r["interval"]}
         for r in db.all_(conn, "SELECT * FROM sources ORDER BY id")
     ]
     rule_providers = [
@@ -31,9 +31,18 @@ def collect_snapshot(conn) -> dict:
          "kind": r["kind"], "interval": r["interval"], "enabled": bool(r["enabled"])}
         for r in db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
     ]
+    local_nodes = [
+        {"id": r["id"], "name": r["name"], "protocol": r["protocol"],
+         "server": r["server"], "port": r["port"],
+         "params": json.loads(security.decrypt_text(r["params_enc"]) if r["params_enc"] else "{}"),
+         "extra_yaml": security.decrypt_text(r["extra_yaml_enc"]) if r["extra_yaml_enc"] else "",
+         "enabled": bool(r["enabled"])}
+        for r in db.all_(conn, "SELECT * FROM local_nodes ORDER BY sort, id")
+    ]
     groups = [
         {"name": r["name"], "type": r["type"], "hidden": bool(r["hidden"]),
          "filter": r["filter"], "use_sources": json.loads(r["use_sources"] or "[]"),
+         "local_nodes": json.loads(r["local_nodes"] or "[]"),
          "proxies": json.loads(r["proxies"] or "[]"), "url": r["url"],
          "interval": r["interval"], "timeout": r["timeout"],
          "tolerance": r["tolerance"], "lazy": bool(r["lazy"]),
@@ -58,8 +67,8 @@ def collect_snapshot(conn) -> dict:
     ]
     return {
         "sources": sources, "rule_providers": rule_providers,
-        "groups": groups, "rules": rules, "targets": targets,
-        "snippets": snippets,
+        "local_nodes": local_nodes, "groups": groups, "rules": rules,
+        "targets": targets, "snippets": snippets,
     }
 
 
@@ -95,74 +104,138 @@ def _get_build(conn, bid: int):
     return row
 
 
+def _channel_refs(conn, bid: int) -> list[str]:
+    return [r["channel"] for r in db.all_(
+        conn, "SELECT channel FROM pointers WHERE build_id=? ORDER BY channel", (bid,))]
+
+
+def _channel_reason(channels: list[str]) -> str:
+    labels = {"stable": "稳定", "candidate": "候选"}
+    return (f"仍发布在{'、'.join(labels.get(c, c) for c in channels)}通道，"
+            "不能删除；请先把该通道发布或回滚到其他构建")
+
+
+def _purge_artifacts(build_id: int) -> None:
+    """删除产物目录；只接受数据库里的整数构建号，避免误删。"""
+    try:
+        folder = (config.BUILDS_DIR / str(int(build_id))).resolve()
+    except (TypeError, ValueError):
+        return
+    if folder.parent != config.BUILDS_DIR.resolve():
+        return
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+def _delete_build(conn, build, operator: str) -> int:
+    """删除构建并清理其发布历史；调用方需先校验通道指针。"""
+    removed = conn.execute(
+        "DELETE FROM releases WHERE build_id=?", (build["id"],)).rowcount
+    conn.execute("DELETE FROM builds WHERE id=?", (build["id"],))
+    security.audit(conn, operator, "删除候选构建", "build", build["id"],
+                   {"releases_removed": removed, "status": build["status"],
+                    "note": build["note"]})
+    return removed
+
+
 class BuildBody(BaseModel):
     note: str = Field(default="", max_length=256)
+
+
+class BatchIds(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class BuildError(Exception):
+    pass
+
+
+def current_policy(conn) -> tuple[dict, str]:
+    snapshot = collect_snapshot(conn)
+    policy_sha = security.sha256_text(
+        json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+    )
+    return snapshot, policy_sha
+
+
+def create_candidate(conn, operator: str, note: str = "",
+                     snapshot: dict | None = None,
+                     policy_sha: str | None = None) -> tuple[int, str]:
+    """在给定事务内创建候选构建，返回 (build_id, status)。
+
+    定时任务与手动创建共用；没有发布目标时抛 BuildError。
+    """
+    snapshot = collect_snapshot(conn) if snapshot is None else snapshot
+    if not snapshot["targets"]:
+        raise BuildError("尚未配置任何发布目标，请先在“发布目标”中添加")
+    if policy_sha is None:
+        policy_sha = security.sha256_text(
+            json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        )
+    policy_errors, policy_warnings = validate.validate_policy(snapshot)
+    now = db.now()
+    results: dict = {}
+    overall = "success"
+    cur = conn.execute(
+        "INSERT INTO builds(created_at, created_by, status, policy_sha, snapshot, "
+        "results, note) VALUES(?,?,?,?,?,?,?)",
+        (now, operator, "building", policy_sha,
+         json.dumps(snapshot, ensure_ascii=False), "{}", note),
+    )
+    build_id = cur.lastrowid
+    for target in snapshot["targets"]:
+        errors = list(policy_errors)
+        warnings = list(policy_warnings)
+        text = ""
+        verification = "未通过"
+        if not policy_errors:
+            try:
+                text = render.render_target(snapshot, target)
+                errors.extend(validate.validate_rendered(text))
+            except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
+                errors.append(f"渲染失败：{exc}")
+        # Mihomo 目标在核心可用时追加官方配置检查（mihomo -t）
+        if not errors and target["engine"] == "mihomo":
+            checked, core_error = tester.validate_config(text)
+            if checked:
+                if core_error:
+                    errors.append(core_error)
+                else:
+                    verification = "核心校验通过（mihomo -t），实机行为待验收"
+        if not errors and not verification.startswith("核心"):
+            # Stash 无官方无头校验工具；核心缺失时 Mihomo 也只有静态校验
+            verification = "静态通过，实机待验收" if not errors else "未通过"
+        if errors:
+            overall = "failed"
+            verification = "未通过"
+        else:
+            path = artifact_path(build_id, target["name"])
+            path.write_text(text, encoding="utf-8")
+        results[target["name"]] = {
+            "ok": not errors,
+            "engine": target["engine"],
+            "platform": target["platform"],
+            "errors": errors,
+            "warnings": warnings,
+            "sha256": security.sha256_text(text) if text else "",
+            "size": len(text.encode()),
+            "verification": verification,
+        }
+    conn.execute(
+        "UPDATE builds SET status=?, results=? WHERE id=?",
+        (overall, json.dumps(results, ensure_ascii=False), build_id),
+    )
+    security.audit(conn, operator, "创建候选构建", "build", build_id,
+                   {"status": overall, "note": note})
+    return build_id, overall
 
 
 @router.post("/builds", status_code=201)
 def create_build(body: BuildBody, user=CurrentUser):
     with db.tx() as conn:
-        snapshot = collect_snapshot(conn)
-        if not snapshot["targets"]:
-            raise HTTPException(400, "尚未配置任何发布目标，请先在“发布目标”中添加")
-        policy_errors, policy_warnings = validate.validate_policy(snapshot)
-        policy_sha = security.sha256_text(
-            json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
-        )
-        now = db.now()
-        results: dict = {}
-        overall = "success"
-        cur = conn.execute(
-            "INSERT INTO builds(created_at, created_by, status, policy_sha, snapshot, "
-            "results, note) VALUES(?,?,?,?,?,?,?)",
-            (now, user["username"], "building", policy_sha,
-             json.dumps(snapshot, ensure_ascii=False), "{}", body.note),
-        )
-        build_id = cur.lastrowid
-        for target in snapshot["targets"]:
-            errors = list(policy_errors)
-            warnings = list(policy_warnings)
-            text = ""
-            verification = "未通过"
-            if not policy_errors:
-                try:
-                    text = render.render_target(snapshot, target)
-                    errors.extend(validate.validate_rendered(text))
-                except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
-                    errors.append(f"渲染失败：{exc}")
-            # Mihomo 目标在核心可用时追加官方配置检查（mihomo -t）
-            if not errors and target["engine"] == "mihomo":
-                checked, core_error = tester.validate_config(text)
-                if checked:
-                    if core_error:
-                        errors.append(core_error)
-                    else:
-                        verification = "核心校验通过（mihomo -t），实机行为待验收"
-            if not errors and not verification.startswith("核心"):
-                # Stash 无官方无头校验工具；核心缺失时 Mihomo 也只有静态校验
-                verification = "静态通过，实机待验收" if not errors else "未通过"
-            if errors:
-                overall = "failed"
-                verification = "未通过"
-            else:
-                path = artifact_path(build_id, target["name"])
-                path.write_text(text, encoding="utf-8")
-            results[target["name"]] = {
-                "ok": not errors,
-                "engine": target["engine"],
-                "platform": target["platform"],
-                "errors": errors,
-                "warnings": warnings,
-                "sha256": security.sha256_text(text) if text else "",
-                "size": len(text.encode()),
-                "verification": verification,
-            }
-        conn.execute(
-            "UPDATE builds SET status=?, results=? WHERE id=?",
-            (overall, json.dumps(results, ensure_ascii=False), build_id),
-        )
-        security.audit(conn, user["username"], "创建候选构建", "build", build_id,
-                       {"status": overall, "note": body.note})
+        try:
+            build_id, _ = create_candidate(conn, user["username"], body.note)
+        except BuildError as exc:
+            raise HTTPException(400, str(exc))
         row = _get_build(conn, build_id)
     return _build_public(row, with_results=True)
 
@@ -181,9 +254,48 @@ def get_build(bid: int, user=CurrentUser):
     return _build_public(row, with_results=True)
 
 
+@router.post("/builds/batch/delete")
+def batch_delete_builds(body: BatchIds, user=CurrentUser):
+    """批量删除构建：仍被通道指针引用的构建保留并返回原因。
+
+    历史发布记录不属于有效引用，会随构建一并清理（删除前由界面确认）。
+    """
+    deleted: list[int] = []
+    blocked: list[dict] = []
+    with db.tx() as conn:
+        for bid in dict.fromkeys(body.ids):
+            build = db.one(conn, "SELECT * FROM builds WHERE id=?", (bid,))
+            if not build:
+                blocked.append({"id": bid, "name": f"#{bid}",
+                                "reason": "候选构建不存在（可能已被删除）"})
+                continue
+            channels = _channel_refs(conn, bid)
+            if channels:
+                blocked.append({"id": bid, "name": f"#{bid}",
+                                "reason": _channel_reason(channels)})
+                continue
+            _delete_build(conn, build, user["username"])
+            deleted.append(bid)
+    for bid in deleted:
+        _purge_artifacts(bid)
+    return {"ok": True, "deleted": deleted, "blocked": blocked}
+
+
+@router.delete("/builds/{bid}")
+def delete_build(bid: int, user=CurrentUser):
+    with db.tx() as conn:
+        build = _get_build(conn, bid)
+        channels = _channel_refs(conn, bid)
+        if channels:
+            raise HTTPException(400, f"构建 #{bid} {_channel_reason(channels)}")
+        removed = _delete_build(conn, build, user["username"])
+    _purge_artifacts(bid)
+    return {"ok": True, "deleted_releases": removed}
+
+
 @router.get("/builds/{bid}/artifact/{target_name}")
 def get_artifact(bid: int, target_name: str, user=CurrentUser):
-    """产物不含令牌与节点凭据（均为 {FEED} 占位与子资源引用），可直接预览。"""
+    """产物仅对维护者开放；本地单节点的凭据会直接出现在产物中。"""
     with db.connect() as conn:
         _get_build(conn, bid)
     path = artifact_path(bid, target_name)
@@ -219,18 +331,28 @@ class PromoteBody(BaseModel):
     reason: str = Field(default="", max_length=256)
 
 
-def _promote(conn, build, channel: str, action: str, operator: str, reason: str):
+def promote_internal(conn, build, channel: str, action: str, operator: str, reason: str):
     if build["status"] != "success":
         raise HTTPException(400, "只有校验全部通过的候选构建才能发布")
+    now = db.now()
     conn.execute(
-        "INSERT INTO pointers(channel, build_id) VALUES(?, ?) "
-        "ON CONFLICT(channel) DO UPDATE SET build_id=excluded.build_id",
-        (channel, build["id"]),
+        "INSERT INTO pointers(channel, build_id, released_at, operator, action, reason) "
+        "VALUES(?,?,?,?,?,?) "
+        "ON CONFLICT(channel) DO UPDATE SET build_id=excluded.build_id, "
+        "released_at=excluded.released_at, operator=excluded.operator, "
+        "action=excluded.action, reason=excluded.reason",
+        (channel, build["id"], now, operator, action, reason),
     )
     conn.execute(
         "INSERT INTO releases(build_id, channel, action, operator, reason, created_at) "
         "VALUES(?,?,?,?,?,?)",
-        (build["id"], channel, action, operator, reason, db.now()),
+        (build["id"], channel, action, operator, reason, now),
+    )
+    # 发布历史只保留最近 N 条；完整操作仍可在审计日志中追溯
+    conn.execute(
+        "DELETE FROM releases WHERE id NOT IN "
+        "(SELECT id FROM releases ORDER BY id DESC LIMIT ?)",
+        (config.RELEASE_HISTORY_LIMIT,),
     )
     security.audit(conn, operator,
                    "发布到稳定通道" if action == "promote" and channel == "stable"
@@ -244,7 +366,7 @@ def promote_build(bid: int, body: PromoteBody, user=CurrentUser):
         raise HTTPException(400, "通道仅支持 stable / candidate")
     with db.tx() as conn:
         build = _get_build(conn, bid)
-        _promote(conn, build, body.channel, "promote", user["username"], body.reason)
+        promote_internal(conn, build, body.channel, "promote", user["username"], body.reason)
     return {"ok": True, "channel": body.channel, "build_id": bid}
 
 
@@ -258,7 +380,7 @@ def rollback_to(channel: str, body: RollbackBody, user=CurrentUser):
     """回滚即把通道指针移回指定的历史构建；客户端下次拉取才生效。"""
     with db.tx() as conn:
         build = _get_build(conn, body.build_id)
-        _promote(conn, build, channel, "rollback", user["username"], body.reason)
+        promote_internal(conn, build, channel, "rollback", user["username"], body.reason)
     return {"ok": True, "channel": channel, "build_id": body.build_id}
 
 
@@ -271,12 +393,39 @@ def list_channels(user=CurrentUser):
             result[channel] = None
         for r in rows:
             build = db.one(conn, "SELECT * FROM builds WHERE id=?", (r["build_id"],))
-            result[r["channel"]] = _build_public(build, with_results=True) if build else None
+            if not build:
+                continue
+            data = _build_public(build, with_results=True)
+            # 旧数据没有指针元数据时，回退到该通道最近一条发布记录
+            release = db.one(
+                conn,
+                "SELECT * FROM releases WHERE channel=? ORDER BY id DESC LIMIT 1",
+                (r["channel"],),
+            )
+            data["publish"] = {
+                "at": r["released_at"] or (release["created_at"] if release else ""),
+                "operator": r["operator"] or (release["operator"] if release else ""),
+                "action": r["action"] or (release["action"] if release else ""),
+                "reason": r["reason"] or (release["reason"] if release else ""),
+            }
+            result[r["channel"]] = data
     return result
 
 
 @router.get("/releases")
-def list_releases(user=CurrentUser):
+def list_releases(auto_only: bool = False, user=CurrentUser):
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM releases ORDER BY id DESC LIMIT 200")
+        if auto_only:
+            # 自动任务固定以“系统”身份发布；手动发布不进入自动发布页
+            rows = db.all_(
+                conn,
+                "SELECT * FROM releases WHERE operator='系统' "
+                "ORDER BY id DESC LIMIT ?",
+                (config.RELEASE_HISTORY_LIMIT,),
+            )
+        else:
+            rows = db.all_(
+                conn, "SELECT * FROM releases ORDER BY id DESC LIMIT ?",
+                (config.RELEASE_HISTORY_LIMIT,),
+            )
     return [db.row_to_dict(r) for r in rows]

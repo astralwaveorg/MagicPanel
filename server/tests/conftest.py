@@ -11,6 +11,7 @@ TEST_DATA = None
 def client(tmp_path, monkeypatch):
     """每个用例独立数据目录与全新应用实例。"""
     monkeypatch.setenv("MAGICPANEL_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MAGICPANEL_SCHEDULER", "0")
     for name in list(sys.modules):
         if name.startswith("app"):
             del sys.modules[name]

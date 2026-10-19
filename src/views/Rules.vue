@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">分流规则</h2>
     <p class="mp-page-desc">
-      按声明顺序从上到下首次匹配；最后一条必须是 MATCH 兜底。调整顺序后立即生效于下一次构建。
+      按声明顺序从上到下首次匹配；最后一条必须是 MATCH 兜底。按住左侧手柄可拖动排序，调整顺序后立即生效于下一次构建。
     </p>
 
     <div class="mp-toolbar">
@@ -17,11 +17,14 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table :data="rows" v-loading="loading">
-          <el-table-column label="顺序" width="90" align="center">
-            <template #default="{ $index }">
-              <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
-              <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id">
+          <el-table-column label="顺序" width="104" align="center">
+            <template #default="{ row, $index }">
+              <div class="order-cell">
+                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
+                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
+              </div>
             </template>
           </el-table-column>
           <el-table-column prop="type" label="类型" width="130">
@@ -40,7 +43,7 @@
           <el-table-column prop="note" label="备注" min-width="140">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column label="操作" width="150">
             <template #default="{ row }">
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
@@ -92,10 +95,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 
 const ruleTypes = [
@@ -110,6 +114,16 @@ const loading = ref(false)
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
+const tableRef = ref(null)
+const sorter = useRowSortable(tableRef, rows, async (ids) => {
+  try {
+    await api('/api/v1/rules/reorder', { method: 'POST', body: ids })
+    ElMessage.success('顺序已更新')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+  await load()
+})
 
 const NO_RESOLVE_TYPES = ['IP-CIDR', 'IP-CIDR6', 'GEOIP', 'RULE-SET', 'SRC-IP-CIDR']
 
@@ -134,8 +148,10 @@ async function load() {
   } finally {
     loading.value = false
   }
+  await sorter.init()
 }
 onMounted(load)
+onBeforeUnmount(sorter.destroy)
 
 function openEdit(row) {
   editing.value = row || null
@@ -191,3 +207,23 @@ async function remove(row) {
   }
 }
 </script>
+
+<style scoped>
+.order-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.drag-handle {
+  cursor: grab;
+  color: var(--mp-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 3px;
+  margin-right: 2px;
+  user-select: none;
+  touch-action: none;
+}
+.drag-handle:active { cursor: grabbing; }
+.order-cell .el-button { margin: 0; padding: 4px 2px; }
+</style>

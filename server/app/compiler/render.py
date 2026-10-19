@@ -1,14 +1,16 @@
 """按目标渲染完整配置。
 
 产物中的 `{FEED}` 占位符由分发层在响应时替换为设备专属地址，
-`{FEED_HOST}` 替换为面板域名（用于置顶 DIRECT 规则），
-构建产物本身不含任何令牌或节点凭据。
+`{FEED_HOST}` 替换为面板域名（用于置顶 DIRECT 规则）。
+订阅来源仍以 provider 占位引用；本地单节点的凭据会直接写入产物，
+因此构建产物与 builds 快照都包含本地节点凭据，不能公开分发。
 """
 import urllib.parse
 
 import yaml
 
 from .. import config
+from ..services import local_nodes as local_node_service
 
 DNS_MIHOOMO = {
     "enable": True,
@@ -75,9 +77,9 @@ def _provider_entry(src: dict, engine: str) -> dict:
     return entry
 
 
-def _group_entry(group: dict, engine: str) -> dict:
+def _group_entry(group: dict, engine: str, local_names: list[str] | None = None) -> dict:
     entry = {"name": group["name"], "type": group["type"]}
-    proxies = list(group.get("proxies") or [])
+    proxies = list(group.get("proxies") or []) + list(local_names or [])
     use = list(group.get("use_sources") or [])
     if group["type"] in ("url-test", "fallback", "load-balance") \
             and config.GUARD_PROXY not in proxies:
@@ -159,6 +161,13 @@ def render_target(snapshot: dict, target: dict) -> str:
         "proxies": [_guard_proxy()],
     }
 
+    local_enabled = {
+        node["id"]: node for node in snapshot.get("local_nodes", [])
+        if node.get("enabled")
+    }
+    for node in local_enabled.values():
+        cfg["proxies"].append(local_node_service.render_proxy(node))
+
     sources = [s for s in snapshot["sources"] if s.get("enabled")]
     if sources:
         cfg["proxy-providers"] = {
@@ -167,7 +176,14 @@ def render_target(snapshot: dict, target: dict) -> str:
 
     groups = snapshot["groups"]
     if groups:
-        cfg["proxy-groups"] = [_group_entry(g, engine) for g in groups]
+        cfg["proxy-groups"] = []
+        for group in groups:
+            names = [
+                local_node_service.marked_name(local_enabled[node_id]["name"])
+                for node_id in (group.get("local_nodes") or [])
+                if node_id in local_enabled
+            ]
+            cfg["proxy-groups"].append(_group_entry(group, engine, names))
 
     rps = [r for r in snapshot["rule_providers"] if r.get("enabled")]
     if rps:

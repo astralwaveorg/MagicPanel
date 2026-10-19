@@ -53,9 +53,11 @@ def _target_public(row) -> dict:
 
 
 def _device_public(row, base_url: str = "") -> dict:
+    # name 是下载文件名；note 是用户可读的设备名，缺省时回退文件名。
     return {
         "id": row["id"],
         "name": row["name"],
+        "display_name": row["note"] or row["name"],
         "platform": row["platform"],
         "target_id": row["target_id"],
         "channel": row["channel"],
@@ -85,7 +87,7 @@ def _get_device(conn, did: int):
 @router.get("/targets")
 def list_targets(user=CurrentUser):
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM targets ORDER BY id")
+        rows = db.all_(conn, "SELECT * FROM targets ORDER BY sort, id")
     return [_target_public(r) for r in rows]
 
 
@@ -96,16 +98,29 @@ def create_target(body: TargetBody, user=CurrentUser):
         if db.one(conn, "SELECT id FROM targets WHERE name=?", (body.name,)):
             raise HTTPException(409, "同名发布目标已存在")
         now = db.now()
+        sort = db.one(conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM targets")["n"]
         cur = conn.execute(
             "INSERT INTO targets(name, engine, platform, description, extra_yaml, "
-            "update_interval, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            "update_interval, sort, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
             (body.name, body.engine, body.platform, body.description,
-             body.extra_yaml, body.update_interval, now, now),
+             body.extra_yaml, body.update_interval, sort, now, now),
         )
         security.audit(conn, user["username"], "新增发布目标", "target", cur.lastrowid,
                        {"name": body.name})
         row = _get_target(conn, cur.lastrowid)
     return _target_public(row)
+
+
+@router.post("/targets/reorder")
+def reorder_targets(ids: list[int], user=CurrentUser):
+    with db.tx() as conn:
+        existing = {r["id"] for r in db.all_(conn, "SELECT id FROM targets")}
+        if set(ids) != existing:
+            raise HTTPException(400, "排序列表与现有发布目标不一致")
+        for index, tid in enumerate(ids, start=1):
+            conn.execute("UPDATE targets SET sort=? WHERE id=?", (index, tid))
+        security.audit(conn, user["username"], "调整发布目标顺序", "target", "")
+    return {"ok": True}
 
 
 @router.put("/targets/{tid}")
