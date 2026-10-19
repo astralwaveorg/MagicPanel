@@ -43,7 +43,7 @@ CLIENT_RESOURCES = [
 IMPORT_GUIDES = [
     {"platform": "Stash（iOS / Mac / tvOS）", "steps": [
         "复制设备对应的订阅地址",
-        "打开 Stash → 设置 → 配置文件 → 新建 → 选择「服务商配置」",
+        "打开 Stash → 设置 → 配置文件 → 新建 → 选择“服务商配置”",
         "粘贴地址并下载；首行为 #SUBSCRIBED 的配置会按提示间隔自动更新",
     ]},
     {"platform": "FlClash（Android）", "steps": [

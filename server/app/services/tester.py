@@ -28,6 +28,8 @@ DELAY_URL = "https://www.gstatic.com/generate_204"
 DELAY_TIMEOUT_MS = 5000
 CONCURRENCY = 16
 STARTUP_TIMEOUT = 8.0
+UPLOAD_MAX_BYTES = 100 * 1024 * 1024
+EXTRACT_MAX_BYTES = 300 * 1024 * 1024
 
 
 class TestError(Exception):
@@ -40,20 +42,23 @@ def core_path() -> Path:
 
 def core_status() -> dict:
     path = core_path()
+    base = {"path": str(path), "pinned_version": MIHOMO_VERSION,
+            "platform": f"{platform.system().lower()}/{platform.machine().lower()}"}
+    try:
+        base["asset_hint"] = _asset_name()
+    except TestError:
+        base["asset_hint"] = ""
     if not path.exists():
-        return {"available": False, "version": "", "path": str(path),
-                "pinned_version": MIHOMO_VERSION}
+        return {"available": False, "version": "", **base}
     version = ""
     try:
         out = subprocess.run([str(path), "-v"], capture_output=True, text=True,
                              timeout=10)
         version = (out.stdout or out.stderr).strip().splitlines()[0]
     except (OSError, subprocess.TimeoutExpired, IndexError):
-        return {"available": False, "version": "", "path": str(path),
-                "pinned_version": MIHOMO_VERSION,
+        return {"available": False, "version": "", **base,
                 "error": "核心文件存在但无法执行，请重新安装"}
-    return {"available": True, "version": version, "path": str(path),
-            "pinned_version": MIHOMO_VERSION}
+    return {"available": True, "version": version, **base}
 
 
 def _download_with_curl(url: str, proxy: str) -> bytes | None:
@@ -83,8 +88,6 @@ def install_core(proxy: str = "") -> dict:
     """从固定版本发布页下载核心；上游未提供逐文件校验值，记录实际摘要供核对。"""
     name = _asset_name()
     url = f"{RELEASE_BASE}/{MIHOMO_VERSION}/{name}"
-    target = core_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
     try:
         with httpx.Client(timeout=120.0, follow_redirects=True, trust_env=False,
                           proxy=proxy or None) as client:
@@ -101,6 +104,13 @@ def install_core(proxy: str = "") -> dict:
         binary = gzip.decompress(blob)
     except OSError as exc:
         raise TestError(f"解压失败：{exc}") from exc
+    return _verify_and_replace(binary, require_version=MIHOMO_VERSION)
+
+
+def _verify_and_replace(binary: bytes, require_version: str = "") -> dict:
+    """执行 -v 校验后原子替换核心；require_version 非空时要求版本一致。"""
+    target = core_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".tmp")
     tmp.write_bytes(binary)
     tmp.chmod(0o755)
@@ -111,11 +121,66 @@ def install_core(proxy: str = "") -> dict:
         tmp.unlink(missing_ok=True)
         raise TestError(f"核心无法在当前平台运行：{exc}") from exc
     first_line = (out.stdout or out.stderr).strip().splitlines()
-    if not first_line or MIHOMO_VERSION.lstrip("v") not in first_line[0]:
+    if not first_line or "mihomo" not in first_line[0].lower():
+        tmp.unlink(missing_ok=True)
+        raise TestError("文件可执行但不是 Mihomo 核心，已丢弃")
+    if require_version and require_version.lstrip("v") not in first_line[0]:
         tmp.unlink(missing_ok=True)
         raise TestError("核心版本校验失败，已丢弃下载文件")
     tmp.replace(target)
     return {"version": first_line[0], "sha256": hashlib.sha256(binary).hexdigest()}
+
+
+def _looks_executable(data: bytes) -> bool:
+    """常见可执行格式魔数：ELF / Mach-O（含通用二进制）/ PE / 脚本。"""
+    return data.startswith((
+        b"\x7fELF",
+        b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",  # Mach-O 64 位两种字节序
+        b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xce",  # Mach-O 32 位
+        b"\xca\xfe\xba\xbe",                       # Mach-O 通用二进制
+        b"MZ", b"#!",
+    ))
+
+
+def _extract_upload(blob: bytes) -> bytes:
+    """识别上传格式并取出核心二进制：gzip 单文件 / zip 内的 mihomo 条目 / 裸二进制。"""
+    if blob.startswith(b"\x1f\x8b"):
+        try:
+            data = gzip.decompress(blob)
+        except OSError as exc:
+            raise TestError(f"gzip 解压失败：{exc}") from exc
+    elif blob.startswith(b"PK\x03\x04"):
+        import io
+        import zipfile
+        try:
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                candidates = [
+                    i for i in zf.infolist()
+                    if not i.is_dir()
+                    and Path(i.filename).name.lower().startswith("mihomo")
+                ]
+                if not candidates:
+                    raise TestError("zip 中没有找到 mihomo 可执行文件")
+                entry = max(candidates, key=lambda i: i.file_size)
+                if entry.file_size > EXTRACT_MAX_BYTES:
+                    raise TestError("解压后的核心超过 300 MB，已拒绝")
+                data = zf.read(entry)
+        except zipfile.BadZipFile as exc:
+            raise TestError(f"zip 解压失败：{exc}") from exc
+    else:
+        data = blob
+    if len(data) > EXTRACT_MAX_BYTES:
+        raise TestError("解压后的核心超过 300 MB，已拒绝")
+    if not _looks_executable(data):
+        raise TestError("文件不是可执行的核心程序（支持 .gz / .zip / 裸二进制）")
+    return data
+
+
+def install_core_from_upload(blob: bytes) -> dict:
+    """本地上传安装 / 更新核心：自动解压、执行校验后替换。版本由上传文件决定。"""
+    if not blob or len(blob) > UPLOAD_MAX_BYTES:
+        raise TestError("上传文件需为 100 MB 以内")
+    return _verify_and_replace(_extract_upload(blob))
 
 
 def validate_config(text: str, feed_placeholder: str = "https://127.0.0.1") -> tuple[bool, str]:

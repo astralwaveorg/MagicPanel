@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      顺序即配置中的声明顺序；地区筛选为空的组会保留「空组保护」占位，避免被客户端隐式改写为直连。
+      顺序即声明顺序；地区筛选为空的组保留 <strong>空组保护</strong> 占位，避免被客户端隐式改写为直连。
     </p>
 
     <div class="mp-toolbar">
@@ -13,7 +13,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="还没有策略组。"
-      next="点击「添加策略组」，先建「节点选择」等入口组，再建地区自动组。"
+      next="点击“添加策略组”，先建入口组（如“节点选择”），再建地区自动组。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -217,7 +217,7 @@ async function move(index, delta) {
 }
 
 async function remove(row) {
-  if (!await confirmBox(`删除策略组「${row.name}」？`, '删除策略组')) return
+  if (!await confirmBox(`删除策略组 “${row.name}”？`, '删除策略组')) return
   try {
     await api(`/api/v1/groups/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

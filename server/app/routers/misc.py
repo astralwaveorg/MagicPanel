@@ -1,7 +1,7 @@
 """总览、审计、设置、核心与备份。"""
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .. import db, security
@@ -130,6 +130,24 @@ def core_install(user=CurrentUser):
         raise HTTPException(400, str(exc))
     with db.tx() as conn:
         security.audit(conn, user["username"], "安装测速核心", "core", "",
+                       {"version": result["version"], "sha256": result["sha256"]})
+    return result
+
+
+@router.post("/core/upload")
+async def core_upload(request: Request, user=CurrentUser):
+    """本地上传安装 / 更新核心（.gz / .zip / 裸二进制，原始字节直传）。
+
+    适用于服务端无法直连 GitHub 的环境：在本机下载与服务端平台一致的
+    发布包后上传，服务端自动解压并校验后替换现有核心。
+    """
+    data = await request.body()
+    try:
+        result = tester.install_core_from_upload(data)
+    except tester.TestError as exc:
+        raise HTTPException(400, str(exc))
+    with db.tx() as conn:
+        security.audit(conn, user["username"], "上传安装测速核心", "core", "",
                        {"version": result["version"], "sha256": result["sha256"]})
     return result
 

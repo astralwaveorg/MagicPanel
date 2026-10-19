@@ -19,7 +19,7 @@
               </div>
             </template>
             <div v-else style="font-size:13px;color:var(--mp-text-secondary)">
-              尚未发布。在「构建与发布」中创建候选构建并发布后，设备才能拉取配置。
+              尚未发布。在 <strong>构建与发布</strong> 中创建候选构建并发布后，设备才能拉取配置。
             </div>
           </div>
         </el-col>
@@ -31,7 +31,7 @@
       <EmptyState
         v-if="!data.sources?.length"
         reason="还没有节点来源。"
-        next="前往「节点来源」添加机场订阅地址，并执行一次抓取。"
+        next="前往“节点来源”添加订阅地址并执行抓取。"
       />
       <div v-else class="mp-table-wrap">
         <el-table :data="data.sources" size="small">
@@ -56,11 +56,11 @@
       <EmptyState
         v-if="!data.sources?.length"
         reason="还没有节点来源。"
-        next="前往「节点来源」添加机场订阅地址，并执行一次测速。"
+        next="前往“节点来源”添加订阅地址并执行测速。"
       />
       <template v-else>
         <p v-if="!testedSources.length" style="font-size:13px;color:var(--mp-text-secondary);margin:0">
-          还没有测速数据。前往「节点来源」执行测速后，这里会汇总各来源的可用率，供发布前确认节点质量。
+          还没有测速数据。在 <strong>节点来源</strong> 执行测速后，这里汇总各来源可用率。
         </p>
         <div v-else class="avail-list">
           <div v-for="s in data.sources" :key="s.name" class="avail-row">
@@ -92,7 +92,7 @@
       <EmptyState
         v-if="!data.devices?.length"
         reason="还没有设备。"
-        next="前往「设备」添加设备，取得各自的固定订阅地址。"
+        next="前往“设备”添加设备，取得固定订阅地址。"
       />
       <div v-else class="mp-table-wrap">
         <el-table :data="data.devices" size="small">

@@ -25,7 +25,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="还没有候选构建。"
-      next="点击「创建候选构建」把当前策略编译为各目标的完整配置。"
+      next="点击“创建候选构建”，把当前策略编译为各目标的完整配置。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">

@@ -13,7 +13,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="还没有发布目标。"
-      next="点击「添加发布目标」，例如 stash / ios 与 mihomo / android 各建一个。"
+      next="点击“添加发布目标”，例如 stash / ios 与 mihomo / android 各建一个。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -147,7 +147,7 @@ async function save() {
 }
 
 async function remove(row) {
-  if (!await confirmBox(`删除发布目标「${row.name}」？`, '删除发布目标')) return
+  if (!await confirmBox(`删除发布目标 “${row.name}”？`, '删除发布目标')) return
   try {
     await api(`/api/v1/targets/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

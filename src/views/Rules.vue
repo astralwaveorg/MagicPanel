@@ -13,7 +13,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="还没有分流规则。"
-      next="点击「添加规则」；构建前至少需要一条 MATCH 兜底规则。"
+      next="点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -167,7 +167,7 @@ async function move(index, delta) {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除规则「${row.type},${row.value || '(兜底)'},${row.target}」？`, '删除规则',
+    `删除规则 “${row.type},${row.value || '(兜底)'} → ${row.target}”？`, '删除规则',
     { type: 'warning' },
   )) return
   try {

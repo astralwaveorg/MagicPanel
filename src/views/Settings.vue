@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">设置</h2>
-    <p class="mp-page-desc">对外地址、维护者账号与备份。</p>
+    <p class="mp-page-desc">对外地址、测速核心、门户 PIN、账号与备份。</p>
 
     <div class="mp-card">
       <h3>分发设置</h3>
@@ -23,12 +23,38 @@
     </div>
 
     <div class="mp-card">
+      <h3>测速核心</h3>
+      <div v-if="core" style="display:flex;flex-direction:column;gap:10px;max-width:640px">
+        <StatusDot :kind="core.available ? 'ok' : 'muted'"
+                   :text="core.available ? `已安装：${core.version}` : '未安装'" />
+        <div style="font-size:12.5px;color:var(--mp-text-secondary)">
+          服务端平台 <span class="mono">{{ core.platform }}</span><template v-if="core.asset_hint">，手动下载请选 <span class="mono">{{ core.asset_hint }}</span></template>
+        </div>
+        <div>
+          <el-button type="primary" plain :loading="coreBusy" @click="installCoreOnline">
+            在线安装（{{ core.pinned_version }}）
+          </el-button>
+          <el-upload
+            :auto-upload="false" :show-file-list="false" :on-change="onUploadCore"
+            style="display:inline-block;margin-left:10px"
+          >
+            <el-button plain :loading="coreBusy">本地上传安装 / 更新</el-button>
+          </el-upload>
+        </div>
+        <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0">
+          服务端无法访问 GitHub 时，从
+          <a href="https://github.com/MetaCubeX/mihomo/releases" target="_blank" rel="noopener">Mihomo 发布页</a>
+          下载与服务端平台一致的包上传（.gz / .zip / 裸二进制），自动解压校验并替换。
+        </p>
+      </div>
+    </div>
+
+    <div class="mp-card">
       <h3>门户展示页（/）</h3>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        门户页用于快速查看并复制各设备的订阅地址，凭 4 位 PIN 进入。
-        PIN 与维护者账号绑定，每人设置自己的 PIN，任一有效 PIN 都可进入；
-        撤销某人的 PIN 不影响其他人。PIN 只是查看门槛，订阅链接本身的安全性由地址中的高熵令牌承担；
-        PIN 连续输错 5 次会锁定 10 分钟。
+        门户页凭 4 位 PIN 进入，用于快速复制设备订阅地址；已登录维护者免 PIN。
+        PIN 与账号绑定，一人一 PIN，任一有效即可进入，撤销某人的不影响其他人。
+        PIN 只是查看门槛，链接安全由地址中的高熵令牌承担；连续输错 5 次锁定 10 分钟。
       </p>
       <el-form label-position="top" style="max-width:420px">
         <el-form-item :label="store.user?.has_portal_pin ? '更换我的 PIN（4 位数字）' : '设置我的 PIN（4 位数字）'">
@@ -75,7 +101,7 @@
         <el-button type="primary" plain @click="userDialog = true">添加维护者</el-button>
       </div>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        所有维护者共享同一份配置数据，账号仅用于访问控制，不隔离各自资料。
+        所有维护者共享同一份数据，账号仅用于访问控制。
       </p>
       <div class="mp-table-wrap">
         <el-table :data="users" size="small">
@@ -119,8 +145,7 @@
     <div class="mp-card">
       <h3>备份与恢复</h3>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        备份包含加密后的订阅地址与设备令牌摘要，需与服务端 data/secret.key 分开保管。
-        恢复会覆盖当前全部数据。
+        备份含加密后的订阅地址与令牌摘要，需与服务端 data/secret.key 分开保管；恢复会覆盖全部数据。
       </p>
       <el-button @click="exportBackup">导出备份（JSON）</el-button>
       <el-upload :auto-upload="false" :show-file-list="false" accept=".json" :on-change="importBackup">
@@ -155,7 +180,9 @@ import { api } from '../api'
 import { confirmBox } from '../confirm'
 import { store } from '../store'
 import { fmtTime } from '../format'
+import { uploadCore } from '../core'
 import UserAvatar from '../components/UserAvatar.vue'
+import StatusDot from '../components/StatusDot.vue'
 
 const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 12, core_proxy: '' })
 const savingSettings = ref(false)
@@ -168,6 +195,8 @@ const changingPwd = ref(false)
 const portalEnabled = ref(false)
 const portalPin = ref('')
 const savingPin = ref(false)
+const core = ref(null)
+const coreBusy = ref(false)
 
 const pinUsersText = computed(() => {
   const names = users.value
@@ -178,8 +207,9 @@ const pinUsersText = computed(() => {
 
 async function load() {
   try {
-    const [s, u, p] = await Promise.all([
+    const [s, u, p, c] = await Promise.all([
       api('/api/v1/settings'), api('/api/v1/users'), api('/api/v1/portal/status'),
+      api('/api/v1/core/status'),
     ])
     Object.assign(settings, {
       base_url: s.base_url || '',
@@ -189,6 +219,7 @@ async function load() {
     })
     users.value = u
     portalEnabled.value = p.enabled
+    core.value = c
     // 本人 PIN 状态以 /auth/me 为准（users 列表里也有，但这里同步当前会话）
     const me = users.value.find((x) => x.username === store.user?.username)
     if (me && store.user) store.user.has_portal_pin = me.has_portal_pin
@@ -197,6 +228,32 @@ async function load() {
   }
 }
 onMounted(load)
+
+async function installCoreOnline() {
+  coreBusy.value = true
+  try {
+    const result = await api('/api/v1/core/install', { method: 'POST' })
+    ElMessage.success(`核心已安装：${result.version}`)
+    core.value = await api('/api/v1/core/status')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    coreBusy.value = false
+  }
+}
+
+async function onUploadCore(file) {
+  coreBusy.value = true
+  try {
+    const result = await uploadCore(file.raw)
+    ElMessage.success(`核心已安装：${result.version}`)
+    core.value = await api('/api/v1/core/status')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    coreBusy.value = false
+  }
+}
 
 async function savePin() {
   if (!/^\d{4}$/.test(portalPin.value)) return ElMessage.warning('PIN 必须是 4 位数字')
@@ -266,7 +323,7 @@ async function addUser() {
 }
 
 async function removeUser(row) {
-  if (!await confirmBox(`删除维护者「${row.username}」？其所有会话将失效。`, '删除维护者')) return
+  if (!await confirmBox(`删除维护者 “${row.username}”？其所有会话将失效。`, '删除维护者')) return
   try {
     await api(`/api/v1/users/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

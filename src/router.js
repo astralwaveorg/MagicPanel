@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { api } from './api'
 import { store } from './store'
 
-// 「/」为门户展示页（PIN 门禁，无需登录）；管理端统一挂在 /admin 下。
+// “/” 为门户展示页（PIN 门禁，无需登录）；管理端统一挂在 /admin 下。
 const routes = [
   { path: '/', component: () => import('./views/Portal.vue'), meta: { title: 'MagicHub - 欢迎访问订阅配置服务中心', standalone: true } },
   { path: '/admin/setup', component: () => import('./views/Setup.vue'), meta: { title: '初始化' } },

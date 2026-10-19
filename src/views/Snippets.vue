@@ -21,7 +21,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="还没有功能模块。"
-      next="点击「添加模块」，例如为 Stash 增加面板、为 Mihomo 追加 DNS 配置。"
+      next="点击“添加模块”，例如为 Stash 增加面板、为 Mihomo 追加 DNS 配置。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -191,7 +191,7 @@ async function save() {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除模块「${row.name}」？删除后下次构建不再包含该片段。`, '删除功能模块')) return
+    `删除模块 “${row.name}”？下次构建不再包含该片段。`, '删除功能模块')) return
   try {
     await api(`/api/v1/snippets/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

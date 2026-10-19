@@ -142,7 +142,7 @@
         </footer>
 
         <div v-if="query && !hasAnyResult" class="pt-noresult">
-          没有匹配「{{ query }}」的内容
+          没有匹配 “{{ query }}” 的内容
         </div>
       </main>
 

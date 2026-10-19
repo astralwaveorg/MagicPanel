@@ -1,10 +1,7 @@
 <template>
   <div class="mp-auth-page">
     <div class="mp-auth-card">
-      <h2 style="margin:0 0 4px">初始化 MagicPanel</h2>
-      <p style="color:var(--mp-text-secondary);font-size:13px;margin:0 0 20px">
-        创建第一位维护者账号。之后可在「设置」中添加其他维护者，所有人共享同一份配置数据。
-      </p>
+      <h2 style="margin:0 0 20px">初始化 MagicPanel</h2>
       <el-form :model="form" label-position="top" @submit.prevent>
         <el-form-item label="用户名">
           <el-input v-model="form.username" autocomplete="username" placeholder="字母、数字、_ . -" />

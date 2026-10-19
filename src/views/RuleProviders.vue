@@ -13,7 +13,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="还没有规则来源。"
-      next="点击「添加规则来源」，远程来源填写 URL，内联来源直接粘贴规则内容。"
+      next="点击“添加规则来源”：远程来源填 URL，内联来源直接粘贴规则内容。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -215,7 +215,7 @@ async function refresh(row) {
 }
 
 async function remove(row) {
-  if (!await confirmBox(`删除规则来源「${row.name}」？`, '删除规则来源')) return
+  if (!await confirmBox(`删除规则来源 “${row.name}”？`, '删除规则来源')) return
   try {
     await api(`/api/v1/rule-providers/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

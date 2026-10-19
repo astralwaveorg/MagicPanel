@@ -13,11 +13,17 @@
       style="margin-bottom: 14px"
     >
       <template #title>
-        测速核心未安装，无法测试节点可用性。
+        测速核心未安装，测速不可用。
         <el-button size="small" type="warning" plain :loading="installingCore"
                    style="margin-left: 8px" @click="installCore">
-          安装 Mihomo 核心（{{ core.pinned_version }}）
+          在线安装（{{ core.pinned_version }}）
         </el-button>
+        <el-upload
+          :auto-upload="false" :show-file-list="false" :on-change="onUploadCore"
+          style="display:inline-block;margin-left:8px"
+        >
+          <el-button size="small" plain :loading="installingCore">本地上传</el-button>
+        </el-upload>
       </template>
     </el-alert>
 
@@ -29,7 +35,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="还没有节点来源。"
-      next="点击右上角「添加节点来源」，填入机场订阅地址后执行抓取。"
+      next="点击“添加节点来源”，填入订阅地址后执行抓取。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -114,12 +120,12 @@
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.filter_unavailable">
-            只分发可用节点（执行「测速」后，拨测失败的节点不再下发给设备；重新抓取后需重新测速）
+            只分发可用节点（测速失败的节点不下发；重新抓取后需重新测速）
           </el-checkbox>
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.allow_private">
-            允许访问内网地址（仅在订阅确实位于家庭内网时开启，存在 SSRF 风险）
+            允许访问内网地址（仅订阅确位于内网时开启，存在 SSRF 风险）
           </el-checkbox>
         </el-form-item>
       </el-form>
@@ -160,6 +166,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { uploadCore } from '../core'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
@@ -200,6 +207,19 @@ async function installCore() {
   installingCore.value = true
   try {
     const result = await api('/api/v1/core/install', { method: 'POST' })
+    ElMessage.success(`核心已安装：${result.version}`)
+    core.value = await api('/api/v1/core/status')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    installingCore.value = false
+  }
+}
+
+async function onUploadCore(file) {
+  installingCore.value = true
+  try {
+    const result = await uploadCore(file.raw)
     ElMessage.success(`核心已安装：${result.version}`)
     core.value = await api('/api/v1/core/status')
   } catch (e) {
@@ -268,7 +288,7 @@ async function refresh(row) {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除节点来源「${row.name}」？已发布的历史构建不受影响，新的构建将不再包含该来源。`,
+    `删除节点来源 “${row.name}”？历史构建不受影响，新构建不再包含该来源。`,
     '删除节点来源', { type: 'warning' },
   )) return
   try {

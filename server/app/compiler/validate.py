@@ -1,7 +1,7 @@
 """策略与产物的静态校验：引用、环路、空组、正则与 YAML 往返。
 
 静态通过不代表目标客户端实机可用；Stash 没有官方无头校验工具，
-其结果只能标记为「静态通过，实机待验收」。
+其结果只能标记为“静态通过，实机待验收”。
 """
 import re
 
@@ -27,25 +27,25 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
     edges: dict[str, list[str]] = {}
     for g in groups:
         if g["type"] not in config.GROUP_TYPES:
-            errors.append(f"策略组「{g['name']}」类型不支持：{g['type']}")
+            errors.append(f"策略组“{g['name']}”类型不支持：{g['type']}")
         if g.get("filter"):
             try:
                 re.compile(g["filter"])
             except re.error as exc:
-                errors.append(f"策略组「{g['name']}」过滤正则无效：{exc}")
+                errors.append(f"策略组“{g['name']}”过滤正则无效：{exc}")
         refs = []
         for p in g.get("proxies") or []:
             if p in config.BUILTIN_TARGETS or p == config.GUARD_PROXY:
                 continue
             if p not in group_set:
-                errors.append(f"策略组「{g['name']}」引用了不存在的策略组「{p}」")
+                errors.append(f"策略组“{g['name']}”引用了不存在的策略组“{p}”")
             else:
                 refs.append(p)
         for u in g.get("use_sources") or []:
             if u not in sources:
-                errors.append(f"策略组「{g['name']}」引用了不可用节点来源「{u}」")
+                errors.append(f"策略组“{g['name']}”引用了不可用节点来源“{u}”")
         if not (g.get("proxies") or g.get("use_sources")):
-            errors.append(f"策略组「{g['name']}」为空：既无成员也无节点来源")
+            errors.append(f"策略组“{g['name']}”为空：既无成员也无节点来源")
         edges[g["name"]] = refs
 
     visiting: set[str] = set()
@@ -79,7 +79,7 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
             continue
         if rtype == "RULE-SET":
             if r["value"] not in providers:
-                errors.append(f"规则引用了不存在的规则来源「{r['value']}」")
+                errors.append(f"规则引用了不存在的规则来源“{r['value']}”")
         elif rtype in ("MATCH", "FINAL"):
             has_final = True
         elif not r.get("value"):
@@ -90,7 +90,7 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         seen.add(key)
         target = r["target"]
         if target not in group_set and target not in config.BUILTIN_TARGETS:
-            errors.append(f"规则 {rtype},{r.get('value', '')} 指向不存在的目标「{target}」")
+            errors.append(f"规则 {rtype},{r.get('value', '')} 指向不存在的目标“{target}”")
     if not has_final:
         errors.append("缺少兜底规则：请添加一条 MATCH 规则")
 
@@ -100,13 +100,13 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         if g["name"] not in used_groups and not any(
             g["name"] in (x.get("proxies") or []) for x in groups
         ):
-            warnings.append(f"策略组「{g['name']}」未被任何规则或策略组引用")
+            warnings.append(f"策略组“{g['name']}”未被任何规则或策略组引用")
     used_providers = {
         r["value"] for r in snapshot["rules"]
         if r.get("enabled", True) and r["type"] == "RULE-SET"
     }
     for name in providers - used_providers:
-        warnings.append(f"规则来源「{name}」已启用但未被规则引用")
+        warnings.append(f"规则来源“{name}”已启用但未被规则引用")
 
     return errors, warnings
 

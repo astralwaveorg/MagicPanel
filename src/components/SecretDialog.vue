@@ -11,9 +11,9 @@
       <div class="mono" style="margin: 6px 0 10px">{{ url }}</div>
       <canvas ref="qrCanvas" style="display:block;margin:0 auto 10px"></canvas>
       <div style="font-size: 12.5px">
-        该地址包含访问凭据，<strong>只在本对话框显示这一次</strong>，关闭后无法再次查看。
-        泄露后任何持有地址的人都能下载完整配置；请在「设备」页轮换令牌使旧地址立即失效，
-        必要时还需联系机场重置订阅凭据。
+        该地址包含访问凭据，<strong>只显示这一次</strong>，关闭后无法再次查看。
+        泄露后持地址者可下载完整配置；在 <strong>设备</strong> 页轮换令牌可使旧地址立即失效，
+        节点凭据需联系机场重置。
       </div>
     </div>
     <template #footer>

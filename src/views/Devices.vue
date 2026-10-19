@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">设备</h2>
     <p class="mp-page-desc">
-      每台设备使用各自固定的订阅地址。令牌泄露后可轮换使旧地址失效；已下发的节点凭据仍需联系机场重置。
+      每台设备一个固定订阅地址；令牌泄露可轮换使其失效，已下发的节点凭据需联系机场重置。
     </p>
 
     <div class="mp-toolbar">
@@ -13,12 +13,12 @@
     <EmptyState
       v-if="!targets.length"
       reason="还没有发布目标，无法添加设备。"
-      next="先在「发布目标」中添加至少一个目标（引擎 + 平台）。"
+      next="先在“发布目标”中添加目标（引擎 + 平台）。"
     />
     <EmptyState
       v-else-if="!rows.length"
       reason="还没有设备。"
-      next="点击「添加设备」，创建后请立即保存仅显示一次的订阅地址。"
+      next="点击“添加设备”；订阅地址只显示一次，请立即保存。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -189,7 +189,7 @@ async function reveal(row) {
 
 async function rotate(row) {
   if (!await confirmBox(
-    `轮换「${row.name}」的令牌？旧订阅地址立即失效，设备需要改用新地址才能继续更新。`,
+    `轮换 “${row.name}” 的令牌？旧订阅地址立即失效，设备需改用新地址。`,
     '轮换令牌', { type: 'warning', confirmButtonText: '轮换' },
   )) return
   try {
@@ -204,7 +204,7 @@ async function rotate(row) {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除设备「${row.name}」？其订阅地址将同时失效，设备无法再下载配置。`,
+    `删除设备 “${row.name}”？其订阅地址同时失效。`,
     '删除设备', { type: 'warning' },
   )) return
   try {

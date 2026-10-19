@@ -103,7 +103,7 @@ def create_build(body: BuildBody, user=CurrentUser):
     with db.tx() as conn:
         snapshot = collect_snapshot(conn)
         if not snapshot["targets"]:
-            raise HTTPException(400, "尚未配置任何发布目标，请先在「发布目标」中添加")
+            raise HTTPException(400, "尚未配置任何发布目标，请先在“发布目标”中添加")
         policy_errors, policy_warnings = validate.validate_policy(snapshot)
         policy_sha = security.sha256_text(
             json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
