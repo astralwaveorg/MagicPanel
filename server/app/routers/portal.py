@@ -160,7 +160,7 @@ def portal_data(body: PinBody, request: Request):
             devices.append(item)
         rules = [
             {"type": r["type"], "value": r["value"], "target": r["target"],
-             "note": r["note"]}
+             "note": r["note"], "no_resolve": bool(r["no_resolve"])}
             for r in db.all_(
                 conn,
                 "SELECT * FROM rules WHERE enabled=1 AND type!='RULE-SET' "

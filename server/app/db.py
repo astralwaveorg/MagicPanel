@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS rules (
   target TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   note TEXT NOT NULL DEFAULT '',
+  no_resolve INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -220,6 +221,9 @@ def init_db() -> None:
         # load-balance 的分配策略（consistent-hashing / round-robin / sticky-sessions）
         _ensure_column(conn, "proxy_groups", "strategy",
                        "strategy TEXT NOT NULL DEFAULT ''")
+        # 分流规则的 no-resolve 修饰符（仅 IP 类规则有效）
+        _ensure_column(conn, "rules", "no_resolve",
+                       "no_resolve INTEGER NOT NULL DEFAULT 0")
         for key, value in config.SETTINGS_DEFAULTS.items():
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value)

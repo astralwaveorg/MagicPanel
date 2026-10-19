@@ -31,6 +31,9 @@
             <template #default="{ row }"><span class="mono">{{ row.value || '—' }}</span></template>
           </el-table-column>
           <el-table-column prop="target" label="目标" min-width="110" />
+          <el-table-column label="no-resolve" width="100" align="center">
+            <template #default="{ row }">{{ row.no_resolve ? '是' : '—' }}</template>
+          </el-table-column>
           <el-table-column label="启用" width="70">
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
           </el-table-column>
@@ -75,6 +78,9 @@
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.enabled">启用</el-checkbox>
+          <el-checkbox v-if="canNoResolve" v-model="form.no_resolve">
+            no-resolve（仅匹配 IP 字面量，不触发域名解析）
+          </el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -105,9 +111,14 @@ const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 
-const emptyForm = () => ({ type: 'DOMAIN-SUFFIX', value: '', target: 'DIRECT', enabled: true, note: '' })
+const NO_RESOLVE_TYPES = ['IP-CIDR', 'IP-CIDR6', 'GEOIP', 'RULE-SET', 'SRC-IP-CIDR']
+
+const emptyForm = () => ({
+  type: 'DOMAIN-SUFFIX', value: '', target: 'DIRECT', enabled: true, note: '', no_resolve: false,
+})
 const form = reactive(emptyForm())
 const isFinal = computed(() => ['MATCH', 'FINAL'].includes(form.type))
+const canNoResolve = computed(() => NO_RESOLVE_TYPES.includes(form.type))
 
 async function load() {
   loading.value = true
@@ -129,7 +140,8 @@ onMounted(load)
 function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
-    type: row.type, value: row.value, target: row.target, enabled: row.enabled, note: row.note,
+    type: row.type, value: row.value, target: row.target, enabled: row.enabled,
+    note: row.note, no_resolve: row.no_resolve,
   } : {})
   dialog.value = true
 }

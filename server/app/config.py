@@ -20,6 +20,8 @@ RULE_TYPES = {
     "IP-CIDR", "IP-CIDR6", "GEOIP", "GEOSITE", "RULE-SET",
     "SRC-IP-CIDR", "DST-PORT", "PROCESS-NAME", "MATCH",
 }
+# 允许附加 no-resolve 修饰符的规则类型（IP 字面量匹配，不触发域名解析）
+NO_RESOLVE_TYPES = {"IP-CIDR", "IP-CIDR6", "GEOIP", "RULE-SET", "SRC-IP-CIDR"}
 TOKEN_PREFIX = "mp_"
 DEFAULT_UA = "Stash"
 FETCH_MAX_BYTES = 10 * 1024 * 1024

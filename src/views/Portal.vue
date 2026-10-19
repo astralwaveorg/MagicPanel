@@ -264,9 +264,8 @@ function channelText(ch) {
   return c ? `构建 #${c.build_id}` : '未发布'
 }
 function ruleLine(r) {
-  return ['MATCH', 'FINAL'].includes(r.type)
-    ? `MATCH,${r.target}`
-    : `${r.type},${r.value},${r.target}`
+  if (['MATCH', 'FINAL'].includes(r.type)) return `MATCH,${r.target}`
+  return `${r.type},${r.value},${r.target}${r.no_resolve ? ',no-resolve' : ''}`
 }
 
 async function copy(text, key) {

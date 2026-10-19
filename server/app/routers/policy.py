@@ -32,6 +32,7 @@ class RuleBody(BaseModel):
     target: str = Field(min_length=1, max_length=64)
     enabled: bool = True
     note: str = Field(default="", max_length=256)
+    no_resolve: bool = False
 
 
 def _group_public(row) -> dict:
@@ -46,6 +47,7 @@ def _group_public(row) -> dict:
 def _rule_public(row) -> dict:
     data = db.row_to_dict(row)
     data["enabled"] = bool(row["enabled"])
+    data["no_resolve"] = bool(row["no_resolve"])
     return data
 
 
@@ -181,6 +183,8 @@ def _check_rule(body: RuleBody) -> None:
         raise HTTPException(400, f"不支持的规则类型：{body.type}")
     if body.type not in ("MATCH", "FINAL") and not body.value:
         raise HTTPException(400, "该规则类型需要填写匹配值")
+    if body.no_resolve and body.type not in config.NO_RESOLVE_TYPES:
+        raise HTTPException(400, "no-resolve 仅适用于 IP 类规则（IP-CIDR / GEOIP / RULE-SET 等）")
 
 
 @router.get("/rules")
@@ -197,10 +201,10 @@ def create_rule(body: RuleBody, user=CurrentUser):
         sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
         now = db.now()
         cur = conn.execute(
-            "INSERT INTO rules(sort, type, value, target, enabled, note, created_at, "
-            "updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
             (sort, body.type, body.value, body.target, int(body.enabled),
-             body.note, now, now),
+             body.note, int(body.no_resolve), now, now),
         )
         security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
                        {"rule": f"{body.type},{body.value},{body.target}"})
@@ -215,9 +219,9 @@ def update_rule(rid: int, body: RuleBody, user=CurrentUser):
         _get_rule(conn, rid)
         conn.execute(
             "UPDATE rules SET type=?, value=?, target=?, enabled=?, note=?, "
-            "updated_at=? WHERE id=?",
+            "no_resolve=?, updated_at=? WHERE id=?",
             (body.type, body.value, body.target, int(body.enabled), body.note,
-             db.now(), rid),
+             int(body.no_resolve), db.now(), rid),
         )
         security.audit(conn, user["username"], "更新分流规则", "rule", rid,
                        {"rule": f"{body.type},{body.value},{body.target}"})

@@ -113,7 +113,10 @@ def _group_entry(group: dict, engine: str) -> dict:
 def _rule_line(rule: dict) -> str:
     if rule["type"] in ("MATCH", "FINAL"):
         return f"MATCH,{rule['target']}"
-    return f"{rule['type']},{rule['value']},{rule['target']}"
+    line = f"{rule['type']},{rule['value']},{rule['target']}"
+    if rule.get("no_resolve") and rule["type"] in config.NO_RESOLVE_TYPES:
+        line += ",no-resolve"
+    return line
 
 
 def _rule_provider_entry(rp: dict) -> dict:

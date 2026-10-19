@@ -294,3 +294,26 @@ def test_group_load_balance_and_relay(client):
     assert "type: relay" in art_m
     # load-balance 也插入空组保护
     assert "load-balance" in art_m and "空组保护" in art_m
+
+
+def test_rule_no_resolve(client):
+    """no-resolve 修饰符：仅 IP 类规则可用，渲染到产物行尾。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    # 域名类规则不允许 no-resolve
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "example.com", "target": "DIRECT",
+        "no_resolve": True})
+    assert r.status_code == 400
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "IP-CIDR", "value": "10.0.0.0/8", "target": "DIRECT",
+        "no_resolve": True})
+    assert r.status_code == 201 and r.json()["no_resolve"] is True
+    client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "DIRECT"})
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "mihomo-android", "engine": "mihomo", "platform": "android"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/mihomo-android").json()["content"]
+    assert "- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve" in art

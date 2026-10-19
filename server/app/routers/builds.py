@@ -42,7 +42,7 @@ def collect_snapshot(conn) -> dict:
     ]
     rules = [
         {"type": r["type"], "value": r["value"], "target": r["target"],
-         "enabled": bool(r["enabled"])}
+         "enabled": bool(r["enabled"]), "no_resolve": bool(r["no_resolve"])}
         for r in db.all_(conn, "SELECT * FROM rules ORDER BY sort, id")
     ]
     targets = [
