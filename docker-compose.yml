@@ -5,6 +5,8 @@ services:
     build: .
     container_name: magicpanel
     restart: unless-stopped
+    # 以宿主机属主运行，保证 bind 挂载的 ./data 可写（NAS 上 1000:1001 为首位用户）
+    user: "1000:1001"
     environment:
       TZ: Asia/Shanghai
     volumes:
