@@ -102,7 +102,7 @@
       </template>
     </el-dialog>
 
-    <SecretDialog v-model:visible="secretVisible" :url="secretUrl" />
+    <SecretDialog v-model:visible="secretVisible" />
   </div>
 </template>
 
@@ -122,7 +122,6 @@ const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const secretVisible = ref(false)
-const secretUrl = ref('')
 
 const emptyForm = () => ({ name: '', platform: 'ios', target_id: null, channel: 'stable', note: '' })
 const form = reactive(emptyForm())
@@ -164,8 +163,7 @@ async function save() {
     if (editing.value) {
       await api(`/api/v1/devices/${editing.value.id}`, { method: 'PUT', body: form })
     } else {
-      const created = await api('/api/v1/devices', { method: 'POST', body: form })
-      secretUrl.value = created.subscription_url
+      await api('/api/v1/devices', { method: 'POST', body: form })
       secretVisible.value = true
     }
     dialog.value = false
@@ -180,8 +178,12 @@ async function save() {
 async function reveal(row) {
   try {
     const resp = await api(`/api/v1/devices/${row.id}/reveal`, { method: 'POST' })
-    secretUrl.value = resp.subscription_url
-    secretVisible.value = true
+    try {
+      await navigator.clipboard.writeText(resp.subscription_url)
+      ElMessage.success('订阅地址已复制')
+    } catch {
+      ElMessage.warning('复制失败，请到首页（门户）查看')
+    }
   } catch (e) {
     ElMessage.error(e.message)
   }
@@ -194,7 +196,6 @@ async function rotate(row) {
   )) return
   try {
     const resp = await api(`/api/v1/devices/${row.id}/rotate-token`, { method: 'POST' })
-    secretUrl.value = resp.subscription_url
     secretVisible.value = true
     await load()
   } catch (e) {

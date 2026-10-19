@@ -64,13 +64,17 @@
                 </div>
                 <p class="pt-card-meta">{{ platformLabel(d.platform) }} · {{ d.target_name }}</p>
                 <p v-if="d.note" class="pt-card-note">{{ d.note }}</p>
-                <p class="pt-url">{{ d.subscription_url || '暂无可用地址' }}</p>
                 <div class="pt-card-actions">
                   <button
                     class="pt-btn primary"
                     :disabled="!d.subscription_url"
                     @click="copy(d.subscription_url, 'dev-' + d.name)"
                   >{{ copied === 'dev-' + d.name ? '已复制' : '复制地址' }}</button>
+                  <a
+                    v-if="d.subscription_url"
+                    class="pt-btn"
+                    :href="installUrl(d)"
+                  >一键导入</a>
                   <button
                     class="pt-btn"
                     :disabled="!d.subscription_url"
@@ -140,12 +144,12 @@
         <!-- 导入指引 -->
         <section v-if="guides.length">
           <h2 class="pt-sec-title">导入指引</h2>
-          <details v-for="g in guides" :key="g.platform" class="pt-guide">
-            <summary>{{ g.platform }}</summary>
+          <div v-for="g in guides" :key="g.platform" class="pt-guide">
+            <div class="pt-guide-title">{{ g.platform }}</div>
             <ol>
               <li v-for="(step, i) in g.steps" :key="i">{{ step }}</li>
             </ol>
-          </details>
+          </div>
         </section>
 
         <footer class="pt-footer">
@@ -167,7 +171,7 @@
           <p class="pt-modal-title">{{ qrDevice }}</p>
           <img :src="qrUrl" alt="订阅二维码">
           <p class="pt-url">{{ qrText }}</p>
-          <button class="pt-btn primary" @click="closeQr">关闭</button>
+          <button class="pt-btn" @click="closeQr">关闭</button>
         </div>
       </div>
     </template>
@@ -285,6 +289,12 @@ async function copy(text, key) {
 }
 
 function copyRule(r, i) { copy(ruleLine(r), 'rule-' + i) }
+
+// Stash 与 Mihomo/Clash 均支持 install-config URL Scheme 一键导入
+function installUrl(d) {
+  const scheme = d.engine === 'stash' ? 'stash' : 'clash'
+  return `${scheme}://install-config?url=${encodeURIComponent(d.subscription_url)}`
+}
 
 async function showQr(d) {
   qrDevice.value = d.name
@@ -561,6 +571,8 @@ onMounted(async () => {
   background: rgba(255, 255, 255, 0.07);
   color: #dfe3f0;
   cursor: pointer;
+  text-align: center;
+  text-decoration: none;
   transition: background 0.15s, border-color 0.15s;
 }
 .pt-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.4); }
@@ -620,6 +632,7 @@ onMounted(async () => {
   padding: 12px 16px;
 }
 .pt-guide summary { cursor: pointer; font-size: 14px; font-weight: 500; }
+.pt-guide-title { font-size: 14px; font-weight: 500; }
 .pt-guide ol { margin: 10px 0 2px; padding-left: 20px; color: #aab1c8; font-size: 13px; line-height: 2; }
 
 .pt-footer {
