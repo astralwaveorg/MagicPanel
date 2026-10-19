@@ -1,7 +1,5 @@
-# syntax=docker/dockerfile:1
-
 # ---- 前端构建 ----
-FROM node:20-alpine AS web
+FROM node:22-alpine AS web
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
