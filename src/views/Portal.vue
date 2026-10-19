@@ -574,7 +574,7 @@ onMounted(async () => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.pt-card-actions { display: flex; gap: 10px; }
+.pt-card-actions { display: flex; gap: 10px; margin-top: 14px; }
 .pt-btn {
   flex: 1;
   padding: 9px 0;
