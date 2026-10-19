@@ -106,15 +106,25 @@
           </div>
         </section>
 
-        <!-- 分流规则 -->
-        <section v-if="rules.length">
+        <!-- 分流规则：默认折叠，搜索时自动展开匹配项 -->
+        <section v-if="rules.length || (!query && ruleTotal)">
           <h2 class="pt-sec-title">分流规则<small>个人维护，点击复制</small></h2>
-          <ul class="pt-rules">
+          <button
+            v-if="!query && !rulesExpanded"
+            class="pt-rules-toggle"
+            @click="rulesExpanded = true"
+          >共 {{ ruleTotal }} 条，点击展开</button>
+          <ul v-else class="pt-rules">
             <li v-for="(r, i) in rules" :key="i" @click="copyRule(r, i)">
               <span class="pt-rule-line">{{ ruleLine(r) }}</span>
               <span class="pt-rule-note">{{ copied === 'rule-' + i ? '已复制' : (r.note || '') }}</span>
             </li>
           </ul>
+          <button
+            v-if="!query && rulesExpanded"
+            class="pt-rules-toggle"
+            @click="rulesExpanded = false"
+          >收起</button>
         </section>
 
         <!-- 规则来源 -->
@@ -204,6 +214,7 @@ const qrUrl = ref('')
 const qrText = ref('')
 const qrDevice = ref('')
 const qrCache = new Map()
+const rulesExpanded = ref(false)
 let lockTimer = null
 
 const CATEGORY_LABELS = {
@@ -240,6 +251,8 @@ const clients = computed(() =>
 
 const rules = computed(() =>
   (data.value?.rules || []).filter((r) => hit(r.type, r.value, r.target, r.note)))
+
+const ruleTotal = computed(() => data.value?.rules?.length || 0)
 
 const ruleProviders = computed(() =>
   (data.value?.rule_providers || []).filter((p) => hit(p.name, p.behavior, p.kind)))
@@ -581,6 +594,20 @@ onMounted(async () => {
 .pt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 规则 */
+.pt-rules-toggle {
+  width: 100%;
+  padding: 11px 16px;
+  font-size: 13px;
+  text-align: left;
+  color: #8ba0f8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.pt-rules-toggle:hover { border-color: rgba(108, 123, 255, 0.55); }
+.pt-rules-toggle + .pt-rules-toggle { margin-top: 8px; }
 .pt-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .pt-rules li {
   display: flex;
