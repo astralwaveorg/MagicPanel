@@ -30,7 +30,7 @@ def test_core_upload_gzip(client):
     status = client.get("/api/v1/core/status").json()
     assert status["available"] is True
     assert "v9.9.9" in status["version"]
-    assert status["platform"] and status["pinned_version"]
+    assert status["platform"] and status["asset_hint"]
 
     # 再次上传即为更新
     newer = FAKE_CORE.replace(b"v9.9.9", b"v9.9.10")

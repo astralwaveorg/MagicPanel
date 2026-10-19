@@ -32,7 +32,7 @@
         </div>
         <div>
           <el-button type="primary" plain :loading="coreBusy" @click="installCoreOnline">
-            在线安装（{{ core.pinned_version }}）
+            在线安装最新版
           </el-button>
           <el-upload
             :auto-upload="false" :show-file-list="false" :on-change="onUploadCore"

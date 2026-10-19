@@ -8,6 +8,7 @@ UDP 行为未单独验证。
 import gzip
 import hashlib
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -22,8 +23,10 @@ import yaml
 
 from .. import config
 
-MIHOMO_VERSION = "v1.19.32"
+# 兜底版本：无法解析最新发布版本时使用
+MIHOMO_FALLBACK_VERSION = "v1.19.32"
 RELEASE_BASE = "https://github.com/MetaCubeX/mihomo/releases/download"
+RELEASE_LATEST = "https://github.com/MetaCubeX/mihomo/releases/latest"
 DELAY_URL = "https://www.gstatic.com/generate_204"
 DELAY_TIMEOUT_MS = 5000
 CONCURRENCY = 16
@@ -42,10 +45,10 @@ def core_path() -> Path:
 
 def core_status() -> dict:
     path = core_path()
-    base = {"path": str(path), "pinned_version": MIHOMO_VERSION,
+    base = {"path": str(path),
             "platform": f"{platform.system().lower()}/{platform.machine().lower()}"}
     try:
-        base["asset_hint"] = _asset_name()
+        base["asset_hint"] = _asset_name("<版本>")
     except TestError:
         base["asset_hint"] = ""
     if not path.exists():
@@ -61,6 +64,23 @@ def core_status() -> dict:
     return {"available": True, "version": version, **base}
 
 
+def resolve_latest_version(proxy: str = "") -> str:
+    """解析 Mihomo 最新发布版本；解析失败回退到内置版本。
+
+    走 releases/latest 的 302 重定向取 tag，不占 GitHub API 配额。
+    """
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True, trust_env=False,
+                          proxy=proxy or None) as client:
+            resp = client.get(RELEASE_LATEST)
+        tag = resp.url.path.rstrip("/").rsplit("/", 1)[-1]
+        if re.match(r"^v?\d+\.\d+\.\d+", tag):
+            return tag if tag.startswith("v") else f"v{tag}"
+    except (httpx.HTTPError, ValueError, IndexError):
+        pass
+    return MIHOMO_FALLBACK_VERSION
+
+
 def _download_with_curl(url: str, proxy: str) -> bytes | None:
     """httpx 失败时的回退通道；返回 None 表示失败。"""
     cmd = ["curl", "-fsSL", "--max-time", "120"]
@@ -74,7 +94,7 @@ def _download_with_curl(url: str, proxy: str) -> bytes | None:
     return out.stdout if out.returncode == 0 and out.stdout else None
 
 
-def _asset_name() -> str:
+def _asset_name(version: str) -> str:
     system = platform.system().lower()
     machine = platform.machine().lower()
     arch = {"x86_64": "amd64", "amd64": "amd64", "arm64": "arm64",
@@ -85,13 +105,14 @@ def _asset_name() -> str:
     # 固定选 v1 基准变体，兼容性最好，拨测场景对指令集不敏感
     if arch == "amd64":
         arch = "amd64-v1"
-    return f"mihomo-{system}-{arch}-{MIHOMO_VERSION}.gz"
+    return f"mihomo-{system}-{arch}-{version}.gz"
 
 
 def install_core(proxy: str = "") -> dict:
-    """从固定版本发布页下载核心；上游未提供逐文件校验值，记录实际摘要供核对。"""
-    name = _asset_name()
-    url = f"{RELEASE_BASE}/{MIHOMO_VERSION}/{name}"
+    """下载最新发布版本的核心；上游未提供逐文件校验值，记录实际摘要供核对。"""
+    version = resolve_latest_version(proxy)
+    name = _asset_name(version)
+    url = f"{RELEASE_BASE}/{version}/{name}"
     try:
         with httpx.Client(timeout=120.0, follow_redirects=True, trust_env=False,
                           proxy=proxy or None) as client:
@@ -108,7 +129,7 @@ def install_core(proxy: str = "") -> dict:
         binary = gzip.decompress(blob)
     except OSError as exc:
         raise TestError(f"解压失败：{exc}") from exc
-    return _verify_and_replace(binary, require_version=MIHOMO_VERSION)
+    return _verify_and_replace(binary, require_version=version)
 
 
 def _verify_and_replace(binary: bytes, require_version: str = "") -> dict:

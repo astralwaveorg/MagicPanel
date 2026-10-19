@@ -16,7 +16,7 @@
         测速核心未安装，测速不可用。
         <el-button size="small" type="warning" plain :loading="installingCore"
                    style="margin-left: 8px" @click="installCore">
-          在线安装（{{ core.pinned_version }}）
+          在线安装最新版
         </el-button>
         <el-upload
           :auto-upload="false" :show-file-list="false" :on-change="onUploadCore"
