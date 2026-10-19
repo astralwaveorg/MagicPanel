@@ -81,6 +81,10 @@ def _asset_name() -> str:
             "aarch64": "arm64"}.get(machine)
     if system not in ("darwin", "linux") or not arch:
         raise TestError(f"当前平台不支持自动安装核心：{system}/{machine}")
+    # amd64 不带后缀的发布包按 GOAMD64=v3 构建（需 AVX2，低功耗 NAS CPU 无法运行）；
+    # 固定选 v1 基准变体，兼容性最好，拨测场景对指令集不敏感
+    if arch == "amd64":
+        arch = "amd64-v1"
     return f"mihomo-{system}-{arch}-{MIHOMO_VERSION}.gz"
 
 
