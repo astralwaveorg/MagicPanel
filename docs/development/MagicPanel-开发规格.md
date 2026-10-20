@@ -156,7 +156,7 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 
 | 接口 | 作用 |
 | --- | --- |
-| `GET/HEAD /feed/{token}/config.yaml` | 设备完整配置；首行 `#SUBSCRIBED` 指向自身地址；带 ETag、`profile-update-interval`、`Cache-Control: private, no-cache` |
+| `GET/HEAD /feed/{token}/config.yaml` | 设备完整配置；首行 `#SUBSCRIBED` 指向自身地址（**Stash 客户端例外**：它自己会补这一行，服务端不再重复补）；带 ETag、`profile-update-interval`、`Cache-Control: private, no-cache` |
 | `GET/HEAD /feed/{token}/res/provider/{name}` | 节点来源最近一次成功快照 |
 | `GET/HEAD /feed/{token}/res/rule/{name}` | 规则来源快照（远程抓取或内联内容） |
 

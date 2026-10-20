@@ -1325,3 +1325,38 @@ def test_personal_config_applied_by_production_script(client):
             assert "ghfast.top" in doc["_direct_domains"]
             assert "geosite:private,cn,apple" in doc["_fake_ip_filter"]
             assert "+.xboxlive.com" in doc["_fake_ip_filter"]
+
+
+def test_feed_marker_and_duplicate_rules(client):
+    """Stash 客户端自己补 #SUBSCRIBED（避免重复）；完全重复的规则只保留一条。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    client.put("/api/v1/base-config?engine=stash", headers=h, json={
+        "content": "mode: rule\nlog-level: warning\nipv6: false\n"
+                   "_direct_domains:\n- testserver\n- example.com\n"})
+    client.post("/api/v1/builds", headers=h, json={})
+    client.post("/api/v1/builds", headers=h, json={})
+    r = client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
+    assert r.status_code == 200, r.text
+    device = client.post("/api/v1/devices", headers=h, json={
+        "name": "测试机", "platform": "ios", "target_id": 1, "channel": "stable"}).json()
+    token = device["token"]
+    url = f"/feed/{token}/config.yaml"
+
+    # 浏览器下载：保留 #SUBSCRIBED 首行（导入后客户端才知道从哪更新）
+    resp = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    assert resp.status_code == 200
+    assert resp.text.startswith("#SUBSCRIBED ")
+    assert resp.text.count("#SUBSCRIBED ") == 1
+
+    # Stash 客户端：不再补行，避免与客户端自己写的行重复
+    resp = client.get(url, headers={"User-Agent": "Stash/3.7.0 (macOS)"})
+    assert resp.status_code == 200
+    assert "#SUBSCRIBED" not in resp.text
+
+    # 面板置顶规则与个人直连域名同名时只保留一条
+    rules = [l[2:] for l in resp.text.splitlines() if l.startswith("- ")]
+    # 面板置顶规则替换占位符后与个人直连域名同名，只保留一条
+    assert rules.count("DOMAIN-SUFFIX,testserver,DIRECT") == 1
+    assert "DOMAIN-SUFFIX,example.com,DIRECT" in rules

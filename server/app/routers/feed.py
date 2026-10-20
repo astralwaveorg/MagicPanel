@@ -82,7 +82,11 @@ def device_config(token: str, request: Request):
         feed_base = f"{_base_url(request, conn)}/feed/{token}"
         text = render.substitute_feed(path.read_text(encoding="utf-8"), feed_base)
         subscribe_url = f"{feed_base}/config.yaml"
-        text = f"#SUBSCRIBED {subscribe_url}\n" + text
+        # Stash 保存订阅时会自己补一行 #SUBSCRIBED，服务端再补一行就会重复；
+        # 浏览器下载（门户「下载配置」）仍需要这行，导入后客户端才知道从哪更新。
+        agent = (request.headers.get("user-agent") or "").lower()
+        if "stash" not in agent:
+            text = f"#SUBSCRIBED {subscribe_url}\n" + text
         etag = security.sha256_text(f"{build['id']}:{target['name']}:{token[:10]}")[:32]
         interval = db.get_setting(conn, "profile_update_interval", "12")
         # Content-Disposition 仅允许 ASCII；中文名经 RFC 5987 编码

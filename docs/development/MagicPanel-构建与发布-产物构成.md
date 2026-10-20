@@ -44,7 +44,7 @@
                                     │
                        客户端拉取 /feed/<token>/config.yaml
                                     ▼
-        {FEED} 替换成设备专属地址、{FEED_HOST} 替换成面板域名、加 #SUBSCRIBED 首行
+        {FEED} 替换成设备专属地址、{FEED_HOST} 替换成面板域名；浏览器下载时加 #SUBSCRIBED 首行（Stash 客户端自己会补，服务端不重复补）；rules 段内完全重复的条目只保留一条
                                     │
         客户端再去拉 /feed/<token>/res/provider/<来源>  ← 实时快照，不是构建产物
                   /feed/<token>/res/rule/<规则来源>    ← 实时规则内容
@@ -106,7 +106,7 @@
 
 | 位置 | 内容 | 变化原因 |
 | --- | --- | --- |
-| 首行 `#SUBSCRIBED <设备专属订阅地址>` | 每个设备不同 | 按 token 拼接 |
+| 首行 `#SUBSCRIBED <设备专属订阅地址>` | 每个设备不同 | 按 token 拼接；仅浏览器下载时输出（Stash 客户端自己会写这一行） |
 | 全文中的 `{FEED}` | 替换为 `https://面板域名/feed/<token>` | 每个设备不同（**产物里不含设备令牌**） |
 | 全文中的 `{FEED_HOST}` | 替换为面板域名（供置顶 DIRECT 规则用） | 部署域名决定 |
 | `Content-Disposition` 文件名 | 设备名（中文按 RFC 5987 编码） | 每台设备不同 |

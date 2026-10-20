@@ -252,4 +252,38 @@ def render_target(snapshot: dict, target: dict) -> str:
 
 def substitute_feed(text: str, feed_base: str) -> str:
     host = urllib.parse.urlsplit(feed_base).hostname or ""
-    return text.replace("{FEED}", feed_base).replace("{FEED_HOST}", host)
+    text = text.replace("{FEED}", feed_base).replace("{FEED_HOST}", host)
+    return dedupe_rules(text)
+
+
+def dedupe_rules(text: str) -> str:
+    """去掉 rules 段里完全重复的条目（保留首次出现）。
+
+    面板置顶规则（DOMAIN-SUFFIX,<面板域名>,DIRECT）与个人直连域名清单
+    可能指向同一个域名，替换占位符后就会出现两条一模一样的规则。
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    seen: set[str] = set()
+    in_rules = False
+    for line in lines:
+        stripped = line.strip()
+        if not in_rules and stripped == "rules:" and not line.startswith((" ", "\t")):
+            in_rules = True
+            out.append(line)
+            continue
+        if in_rules:
+            if stripped.startswith("- "):
+                key = stripped[2:].strip()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(line)
+                continue
+            if stripped and not line.startswith((" ", "\t", "-")):
+                in_rules = False  # 下一个顶层键
+        out.append(line)
+    result = "\n".join(out)
+    if text.endswith("\n"):
+        result += "\n"
+    return result
