@@ -2253,3 +2253,23 @@ def test_base_config_leaf_sources(client):
     leaf = body["leaf_sources"]
     assert leaf["dns.nameserver"] == "通用配置"
     assert leaf["mode"] == "内置默认"
+
+
+def test_portal_pin_is_four_digits(client):
+    """门户 PIN 统一 4 位：新建必须是 4 位数字；历史 6 位仍能校验通过。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    # 新建必须是 4 位
+    assert client.post("/api/v1/portal/my-pin", headers=h,
+                       json={"pin": "12345"}).status_code == 422
+    assert client.post("/api/v1/portal/my-pin", headers=h,
+                       json={"pin": "123456"}).status_code == 422
+    r = client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "2468"})
+    assert r.status_code == 201, r.text
+    # 门户页用该 PIN 打开（匿名访问：清掉会话，已登录维护者本来就免 PIN）
+    client.cookies.clear()
+    r = client.post("/api/v1/portal/data", json={"pin": "2468"})
+    assert r.status_code == 200, r.text
+    assert "devices" in r.json()
+    # 错误 PIN 被拒（403 = PIN 不正确；401 会误导为"会话问题"）
+    assert client.post("/api/v1/portal/data", json={"pin": "1111"}).status_code == 403

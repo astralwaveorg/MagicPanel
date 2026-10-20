@@ -5,7 +5,7 @@
       <div class="pt-gate-card" :class="{ shake: shaking }">
         <img class="pt-gate-logo" src="/logo.svg" alt="MagicPanel">
         <div class="pt-logo">MagicPanel</div>
-        <p class="pt-gate-desc">输入 PIN（6 位，历史 4 位仍可用）查看订阅与资源</p>
+        <p class="pt-gate-desc">输入 PIN（4 位；历史 6 位仍可用）查看订阅与资源</p>
         <input
           ref="pinInput"
           v-model="pin"
@@ -382,7 +382,7 @@ async function fetchData() {
 
 function onPinInput() {
   pin.value = pin.value.replace(/\D/g, '').slice(0, 6)
-  // 4 位是历史 PIN，6 位是新规范
+  // 4 位是当前规范；历史 6 位 PIN 仍然允许输入（散列照旧校验）
   if (pin.value.length === 4 || pin.value.length === 6) fetchData()
 }
 

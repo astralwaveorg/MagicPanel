@@ -28,7 +28,13 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   try { data = text ? JSON.parse(text) : null } catch { data = { detail: text || '响应格式错误' } }
   if (!resp.ok) {
     let msg = data?.detail ?? `请求失败（${resp.status}）`
-    if (Array.isArray(msg)) msg = msg.map((e) => e.msg || JSON.stringify(e)).join('；')
+    if (Array.isArray(msg)) {
+      msg = msg.map((e) => {
+        const text = e?.msg || JSON.stringify(e)
+        // Pydantic 会给自定义校验消息加 "Value error, " 前缀，去掉更干净
+        return String(text).replace(/^Value error,\s*/, '')
+      }).join('；')
+    }
     throw new ApiError(resp.status, String(msg))
   }
   return data

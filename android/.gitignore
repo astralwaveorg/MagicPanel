@@ -1,0 +1,6 @@
+# 构建产物
+build/
+.gradle/
+local.properties
+# 签名密钥不入库（发布用请另行备份）
+app/magicpanel.keystore

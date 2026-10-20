@@ -69,3 +69,18 @@ tar xzf magicpanel-*.tar.gz && cd magicpanel
 运行数据（数据库、加密密钥、构建产物）位于 `data/`，备份时请同时保存 `data/secret.key`（与备份文件分开存放）。
 
 内置定时任务随应用启动，按单进程运行；如需临时关闭可设置环境变量 `MAGICPANEL_SCHEDULER=0`，日常开关在“自动发布”页面。
+
+
+## 安卓客户端
+
+管理端的 Android 原壳（Kotlin + WebView），源码在 `android/`，产物：
+
+```
+dist/MagicPanel-1.0.0.apk
+```
+
+- 包名 `top.magichub.panel`，minSdk 24 / targetSdk 35
+- 已签名（v2 + v3），可直接安装；小米 17 Pro Max、一加 13 等 Android 15/16 机型已适配
+- App 内「⋮ → 面板地址」可切换部署地址，不必重新打包
+- 构建与签名说明见 [`android/README.md`](android/README.md)
+- 接口清单与客户端能力说明见 [`docs/development/接口清单与安卓客户端说明.md`](docs/development/接口清单与安卓客户端说明.md)

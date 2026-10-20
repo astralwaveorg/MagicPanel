@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MagicPanel</string>
+    <string name="menu_reload">刷新</string>
+    <string name="menu_home">回到概览</string>
+    <string name="menu_settings">面板地址</string>
+    <string name="menu_relogin">重新登录</string>
+    <string name="error_title">连接不上面板</string>
+    <string name="error_desc">请检查网络后重试</string>
+    <string name="retry">重试</string>
+    <string name="downloading">正在下载</string>
+    <string name="download_started">已开始下载，文件在"下载"目录</string>
+    <string name="no_picker">没有可用的文件选择器</string>
+    <string name="no_browser">没有可用的浏览器</string>
+    <string name="relogged">已清除登录状态，请重新登录</string>
+    <string name="settings_title">面板地址</string>
+    <string name="settings_hint">面板部署在哪个域名就填哪个，结尾不要带斜杠。改动后立即生效。</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="saved">已保存</string>
+    <string name="bad_url">地址无效，请以 http:// 或 https:// 开头</string>
+</resources>

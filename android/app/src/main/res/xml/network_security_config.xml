@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 面板走 HTTPS（含 8443 端口）；只对自建域名放宽，其余保持默认安全策略。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">magichub.top</domain>
+    </domain-config>
+</network-security-config>

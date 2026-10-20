@@ -119,13 +119,13 @@
     <div class="mp-card">
       <h3>门户展示页（/）</h3>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        门户页凭 6 位 PIN 进入，用于快速复制设备订阅地址；已登录维护者免 PIN。
+        门户页凭 4 位 PIN 进入，用于快速复制设备订阅地址；已登录维护者免 PIN。
         PIN 与账号绑定，一人一 PIN，任一有效即可进入，撤销某人的不影响其他人。
         PIN 只是查看门槛，链接安全由地址中的高熵令牌承担；连续输错 5 次锁定 10 分钟。
       </p>
       <el-form label-position="top" style="max-width:420px">
-        <el-form-item :label="store.user?.has_portal_pin ? '更换我的 PIN（6 位数字）' : '设置我的 PIN（6 位数字）'">
-          <el-input v-model="portalPin" maxlength="6" placeholder="6 位数字"
+        <el-form-item :label="store.user?.has_portal_pin ? '更换我的 PIN（4 位数字）' : '设置我的 PIN（4 位数字）'">
+          <el-input v-model="portalPin" maxlength="4" placeholder="4 位数字"
                     style="max-width:200px" class="mono" />
         </el-form-item>
         <el-button type="primary" :loading="savingPin" @click="savePin">

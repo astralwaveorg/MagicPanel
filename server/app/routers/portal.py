@@ -1,14 +1,16 @@
 """门户展示页：PIN 仅用于查看门槛，订阅链接本身的安全性由高熵令牌承担。
 
-PIN 为 4 位数字，只保存散列；验证有简单的失败锁定（单进程内存计数）。
+PIN 统一为 4 位数字，只保存散列；验证有简单的失败锁定（单进程内存计数）。
+历史 6 位 PIN 仍然可以继续使用，但不能再新建 6 位。
 """
 import hashlib
 import hmac
 import secrets
+import re
 import time
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .. import db, security
 from ..deps import CurrentUser
@@ -102,12 +104,26 @@ def _pin_matches(pin: str, stored: str) -> bool:
 
 
 class PinBody(BaseModel):
-    # 兼容历史 4 位 PIN（老散列），新设置的 PIN 一律 6 位
+    """门户校验用的 PIN。
+
+    新规范统一为 4 位；历史上设过 6 位 PIN 的维护者，其已存 PIN 仍然可用
+    （散列照旧校验），只是不能再新建 6 位 PIN。
+    """
     pin: str = Field(default="", pattern=r"^(\d{4}|\d{6})?$")
 
 
 class StrictPinBody(BaseModel):
-    pin: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    """新建/更换 PIN 时使用：统一 4 位数字。"""
+
+    pin: str = Field(default="")
+
+    @field_validator("pin")
+    @classmethod
+    def _check_pin(cls, v: str) -> str:
+        # 自己给中文提示：Pydantic 默认是 "String should have at least 4 characters"
+        if not re.fullmatch(r"\d{4}", v or ""):
+            raise ValueError("PIN 必须是 4 位数字")
+        return v
 
 
 def _session_user(conn, request: Request):

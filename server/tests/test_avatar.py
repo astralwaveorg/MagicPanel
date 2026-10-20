@@ -56,9 +56,9 @@ def test_portal_session_bypasses_pin(client):
     assert r.status_code == 200 and r.json()["devices"]
 
     # 设置 PIN 后未登录访客按 PIN 进入，已登录仍免 PIN
-    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "246810"})
+    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "2468"})
     client.cookies.clear()
-    assert client.post("/api/v1/portal/data", json={"pin": "246810"}).status_code == 200
+    assert client.post("/api/v1/portal/data", json={"pin": "2468"}).status_code == 200
     client.post("/api/v1/auth/login",
                 json={"username": "admin", "password": "admin-pass-1"})
     assert client.post("/api/v1/portal/data", json={"pin": ""}).status_code == 200

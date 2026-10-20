@@ -91,7 +91,7 @@
             <template v-if="s.tested_at">
               <el-progress
                 :percentage="availRate(s)"
-                :status="availRate(s) >= 50 ? 'success' : 'exception'"
+                :color="availColor(availRate(s))"
                 :stroke-width="10"
                 style="flex:1"
               >
@@ -173,6 +173,27 @@ const testedSources = computed(() =>
 function availRate(s) {
   const total = (s.tested_ok || 0) + (s.tested_failed || 0)
   return total ? Math.round((s.tested_ok / total) * 100) : 0
+}
+
+// 可用率配色：每 10% 一档，从红逐步过渡到绿；30% 以上开始明显往绿色走。
+// 以前只有"成功/失败"两色，30% 和 80% 看起来一样，看不出差别。
+const AVAIL_COLORS = [
+  '#e64a4a', // 0%
+  '#ee5a45', // 10%
+  '#f26a42', // 20%
+  '#f47b42', // 30%
+  '#f59444', // 40%
+  '#eda94c', // 50%
+  '#d6bb46', // 60%
+  '#a9c34c', // 70%
+  '#74bf52', // 80%
+  '#45b25a', // 90%
+  '#22a45a', // 100%
+]
+
+function availColor(percent) {
+  const step = Math.min(10, Math.max(0, Math.floor((percent || 0) / 10)))
+  return AVAIL_COLORS[step]
 }
 
 async function load() {

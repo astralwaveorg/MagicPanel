@@ -1,0 +1,2 @@
+-keep class top.magichub.panel.** { *; }
+-dontwarn android.webkit.**
