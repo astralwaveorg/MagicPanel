@@ -4,7 +4,7 @@
     <aside class="mp-aside">
       <div class="mp-brand">
         <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel" title="返回门户首页" @click="router.push('/')">
-        <span class="mp-brand-text" title="返回总览" @click="router.push('/admin')">
+        <span class="mp-brand-text" title="返回概览" @click="router.push('/admin')">
           MagicPanel
           <small>代理订阅配置管理</small>
         </span>
@@ -32,7 +32,7 @@
     <el-drawer v-model="drawer" direction="ltr" size="240px" :with-header="false">
       <div class="mp-brand">
         <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel" title="返回门户首页" @click="drawer = false; router.push('/')">
-        <span class="mp-brand-text" title="返回总览" @click="drawer = false; router.push('/admin')">
+        <span class="mp-brand-text" title="返回概览" @click="drawer = false; router.push('/admin')">
           MagicPanel
           <small>代理订阅配置管理</small>
         </span>
@@ -98,7 +98,7 @@ const isAuthPage = computed(() =>
 // 侧边栏顺序按使用频率：日常改动（来源/策略组/规则）→ 取订阅地址 → 构建发布，
 // 其后是低频的配置与运维页，设置永远在最后。
 const menu = [
-  { path: '/admin', title: '总览', icon: Odometer },
+  { path: '/admin', title: '概览', icon: Odometer },
   { path: '/admin/sources', title: '节点来源', icon: Connection },
   { path: '/admin/groups', title: '策略组', icon: SetUp },
   { path: '/admin/rules', title: '分流规则', icon: Filter },

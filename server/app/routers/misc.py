@@ -1,4 +1,4 @@
-"""总览、审计、设置、核心与备份。"""
+"""概览、审计、设置、核心与备份。"""
 import json
 
 from fastapi import APIRouter, HTTPException, Request

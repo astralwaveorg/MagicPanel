@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2 class="mp-page-title">总览</h2>
+    <h2 class="mp-page-title">概览</h2>
     <p class="mp-page-desc">
       下载成功仅代表客户端取回了文件，不代表配置已加载、VPN 已启动或规则已生效。
     </p>
