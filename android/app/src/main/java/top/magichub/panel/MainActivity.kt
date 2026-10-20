@@ -22,7 +22,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import top.magichub.panel.databinding.ActivityMainBinding
 
@@ -54,10 +53,8 @@ class MainActivity : AppCompatActivity() {
         applyInsets()
         setupToolbar()
         setupWebView()
+        setupHomeFab()
 
-        binding.swipe.setOnRefreshListener {
-            if (binding.web.canGoBack()) binding.web.goBack() else binding.web.reload()
-        }
         binding.errorRetry.setOnClickListener {
             binding.errorBox.visibility = View.GONE
             binding.web.reload()
@@ -76,7 +73,14 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             binding.topBar.setPadding(0, bars.top, 0, 0)
-            binding.swipe.setPadding(0, 0, 0, bars.bottom)
+            binding.content.setPadding(0, 0, 0, bars.bottom)
+            // 悬浮按钮要让开手势条
+            val fab = binding.homeFab
+            val lp = fab.layoutParams as? android.widget.FrameLayout.LayoutParams
+            if (lp != null) {
+                lp.bottomMargin = (16 * resources.displayMetrics.density).toInt() + bars.bottom
+                fab.layoutParams = lp
+            }
             insets
         }
     }
@@ -141,17 +145,15 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                binding.swipe.isRefreshing = false
+                hideProgress()
                 binding.errorBox.visibility = View.GONE
-                binding.progress.visibility = View.GONE
             }
 
             override fun onReceivedError(
                 view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError
             ) {
                 if (request.isForMainFrame) {
-                    binding.swipe.isRefreshing = false
-                    binding.progress.visibility = View.GONE
+                    hideProgress()
                     binding.errorBox.visibility = View.VISIBLE
                 }
             }
@@ -159,9 +161,11 @@ class MainActivity : AppCompatActivity() {
 
         web.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
-                binding.progress.visibility =
-                    if (newProgress >= 100) View.GONE else View.VISIBLE
-                binding.progress.progress = newProgress
+                if (newProgress >= 100) {
+                    hideProgress()
+                } else {
+                    showProgress(newProgress)
+                }
             }
 
             override fun onShowFileChooser(
@@ -188,6 +192,27 @@ class MainActivity : AppCompatActivity() {
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             download(url, userAgent, contentDisposition, mimeType)
         }
+    }
+
+    // ---- 加载指示：任何路径都要能关掉，不能一直转圈 ----
+
+    private var progressWatchdog: Runnable? = null
+
+    private fun showProgress(value: Int) {
+        binding.progress.visibility = View.VISIBLE
+        binding.progress.progress = value
+        // 看门狗：某些情况下页面不会回调 onPageFinished（例如被重定向到
+        // 空白页），超时后强制收起，避免进度条一直挂在屏幕上。
+        progressWatchdog?.let { binding.root.removeCallbacks(it) }
+        val watchdog = Runnable { hideProgress() }
+        progressWatchdog = watchdog
+        binding.root.postDelayed(watchdog, PROGRESS_TIMEOUT_MS)
+    }
+
+    private fun hideProgress() {
+        progressWatchdog?.let { binding.root.removeCallbacks(it) }
+        progressWatchdog = null
+        binding.progress.visibility = View.GONE
     }
 
     @Deprecated("兼容旧版 Android 的 onActivityResult")
@@ -234,6 +259,94 @@ class MainActivity : AppCompatActivity() {
         var name = android.webkit.URLUtil.guessFileName(url, contentDisposition, null)
         if (name.isNullOrBlank()) name = "magichub-download"
         return name
+    }
+
+    // ---- 悬浮小房子：可拖动、释放后吸附到左右边缘 ----
+
+    private var fabDragging = false
+    private var fabDownRawX = 0f
+    private var fabDownRawY = 0f
+    private var fabStartX = 0f
+    private var fabStartY = 0f
+
+    private fun setupHomeFab() {
+        val fab = binding.homeFab
+        // 默认右下角；上次拖动过的位置会被记住（横向吸附边 + 纵向比例）
+        val savedSide = prefs.getFloat(KEY_FAB_X, 1f)
+        val savedYRatio = prefs.getFloat(KEY_FAB_Y, -1f)
+        fab.post {
+            val parent = fab.parent as? android.view.ViewGroup ?: return@post
+            val margin = (14 * resources.displayMetrics.density).toInt()
+            val maxX = (parent.width - fab.width - margin).coerceAtLeast(margin)
+            val maxY = (parent.height - fab.height - margin).coerceAtLeast(margin)
+            fab.x = if (savedSide < 0.5f) margin.toFloat() else maxX.toFloat()
+            fab.y = if (savedYRatio < 0f) maxY.toFloat()
+            else (parent.height * savedYRatio).coerceIn(margin.toFloat(), maxY.toFloat())
+        }
+        fab.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    fabDragging = false
+                    fabDownRawX = event.rawX
+                    fabDownRawY = event.rawY
+                    fabStartX = view.x
+                    fabStartY = view.y
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - fabDownRawX
+                    val dy = event.rawY - fabDownRawY
+                    if (!fabDragging && (kotlin.math.abs(dx) > TOUCH_SLOP || kotlin.math.abs(dy) > TOUCH_SLOP)) {
+                        fabDragging = true
+                        // 拖动时半透明并缩小，不要挡住内容
+                        view.animate().alpha(0.55f).scaleX(0.9f).scaleY(0.9f)
+                            .setDuration(120).start()
+                    }
+                    if (fabDragging) {
+                        val parent = view.parent as? android.view.ViewGroup ?: return@setOnTouchListener true
+                        val margin = (14 * resources.displayMetrics.density).toInt()
+                        val maxX = (parent.width - view.width - margin).coerceAtLeast(margin)
+                        val maxY = (parent.height - view.height - margin).coerceAtLeast(margin)
+                        view.x = (fabStartX + dx).coerceIn(margin.toFloat(), maxX.toFloat())
+                        view.y = (fabStartY + dy).coerceIn(margin.toFloat(), maxY.toFloat())
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    if (fabDragging) {
+                        view.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(120).start()
+                        snapFabToEdge(view)
+                    } else {
+                        // 没拖动就是点击：回到门户首页
+                        openUrl("/")
+                    }
+                    fabDragging = false
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 释放后吸附到更近的一侧，并记住选择。 */
+    private fun snapFabToEdge(fab: android.view.View) {
+        val parent = fab.parent as? android.view.ViewGroup ?: return
+        val margin = (14 * resources.displayMetrics.density).toInt()
+        val left = margin.toFloat()
+        val right = (parent.width - fab.width - margin).toFloat()
+        val target = if (fab.x + fab.width / 2f < parent.width / 2f) left else right
+        fab.animate().x(target).setDuration(160).withEndAction {
+            val parent = fab.parent as? android.view.ViewGroup
+            val ratio = if (parent != null && parent.height > 0) {
+                (fab.y / parent.height).coerceIn(0.05f, 0.95f)
+            } else {
+                0.9f
+            }
+            prefs.edit()
+                .putFloat(KEY_FAB_X, if (target == left) 0f else 1f)
+                .putFloat(KEY_FAB_Y, ratio)
+                .apply()
+        }.start()
     }
 
     // ---- 地址与跳转 ----
@@ -313,6 +426,10 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val REQUEST_FILE = 1001
+        private const val PROGRESS_TIMEOUT_MS = 15000L
+        private const val KEY_FAB_X = "fab_side"
+        private const val KEY_FAB_Y = "fab_y_ratio"
+        private const val TOUCH_SLOP = 12f
         private const val PREFS = "magichub_panel"
         private const val KEY_URL = "base_url"
         private const val DEFAULT_URL = "https://magichub.top:8443"

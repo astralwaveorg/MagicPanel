@@ -12,8 +12,8 @@ android {
         // Android 7.0 起：覆盖小米 17 Pro Max / 一加 13 等 Android 15/16 设备
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
         resourceConfigurations += listOf("zh", "zh-rCN", "en")
     }
 

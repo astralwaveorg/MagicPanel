@@ -11,9 +11,9 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="@color/surface_dark"
+        app:menu="@menu/main"
         app:title="@string/app_name"
-        app:titleTextColor="@color/text_dark"
-        app:menu="@menu/main" />
+        app:titleTextColor="@color/text_dark" />
 
     <ProgressBar
         android:id="@+id/progress"
@@ -24,52 +24,68 @@
         android:max="100"
         android:visibility="gone" />
 
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/swipe"
+    <!--
+      这里刻意不用 SwipeRefreshLayout：它的下拉手势会抢走 WebView 的向下滑动，
+      导致手指往下划总是触发刷新。刷新改由工具栏按钮负责。
+    -->
+    <FrameLayout
+        android:id="@+id/content"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <FrameLayout
+        <WebView
+            android:id="@+id/web"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
+            android:layout_height="match_parent"
+            android:background="@color/bg_dark" />
 
-            <WebView
-                android:id="@+id/web"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@color/bg_dark" />
+        <LinearLayout
+            android:id="@+id/errorBox"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/bg_dark"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone">
 
-            <LinearLayout
-                android:id="@+id/errorBox"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@color/bg_dark"
-                android:gravity="center"
-                android:orientation="vertical"
-                android:visibility="gone">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/error_title"
+                android:textColor="@color/text_dark"
+                android:textSize="18sp" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/error_title"
-                    android:textColor="@color/text_dark"
-                    android:textSize="18sp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/error_desc"
+                android:textColor="@color/text_dim" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="@string/error_desc"
-                    android:textColor="@color/text_dim" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/errorRetry"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/retry" />
+        </LinearLayout>
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/errorRetry"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="@string/retry" />
-            </LinearLayout>
-        </FrameLayout>
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+        <!-- 悬浮小房子：可拖动、释放后吸附到左右边缘，点击回到门户首页 -->
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/homeFab"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_marginEnd="14dp"
+            android:layout_marginBottom="18dp"
+            android:contentDescription="@string/home_portal"
+            android:src="@drawable/ic_home"
+            app:backgroundTint="@color/fab_bg"
+            app:borderWidth="0dp"
+            app:elevation="8dp"
+            app:strokeColor="@color/fab_stroke"
+            app:strokeWidth="1dp"
+            app:tint="@color/brand" />
+    </FrameLayout>
 </LinearLayout>
