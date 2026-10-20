@@ -1155,3 +1155,87 @@ def test_settings_intervals_default_to_one_hour(client):
     settings = client.get("/api/v1/settings", headers=h).json()
     assert settings["profile_update_interval"] == "1"
     assert settings["auto_build_interval_hours"] == "1"
+
+
+def test_production_fixes_script(client):
+    """一次性生产修正脚本：百度网盘分流、规则来源行为、客户端更新间隔。"""
+    import importlib.util
+    import os
+    from app import db, security
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    # 造出与线上一致的结构：cn 规则、classical 规则来源、Hysteria2 本地节点
+    client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "Google", "kind": "inline", "behavior": "classical",
+        "inline_content": "payload:\n  - example.com\n"})
+    client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "cn", "kind": "inline", "behavior": "domain",
+        "inline_content": "payload:\n  - example.cn\n"})
+    client.post("/api/v1/sources", headers=h, json={
+        "name": "机场", "url": "https://airport.example.com/sub"})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "节点选择", "type": "select", "proxies": ["DIRECT"]})
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "RULE-SET", "value": "cn", "target": "节点选择"})
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "MATCH", "target": "节点选择"})
+    client.post("/api/v1/local-nodes", headers=h, json={
+        "name": "US 01", "protocol": "hysteria2", "server": "lax.example.com",
+        "port": 443,
+        "params": {"password": "pw", "sni": "lax.example.com",
+                   "down": "1000 Mbps"}})
+
+    repo_root = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(repo_root, "scripts", "apply_production_fixes.py")
+    spec = importlib.util.spec_from_file_location("apply_production_fixes", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.main()
+
+    with db.connect() as conn:
+        group = db.one(conn, "SELECT * FROM proxy_groups WHERE name='百度网盘'")
+        assert group is not None
+        assert json.loads(group["proxies"]) == ["节点选择", "DIRECT"]
+        rules = db.all_(conn, "SELECT * FROM rules ORDER BY sort, id")
+        baidu = [r for r in rules if r["value"] == "pan.baidu.com"]
+        assert baidu and baidu[0]["target"] == "百度网盘"
+        cn = next(r for r in rules if r["value"] == "cn")
+        # 百度规则必须排在 cn 之前
+        assert baidu[0]["sort"] < cn["sort"]
+        provider = db.one(conn, "SELECT * FROM rule_providers WHERE name='Google'")
+        assert provider["behavior"] == "domain"
+        source = db.one(conn, "SELECT * FROM sources WHERE name='机场'")
+        assert source["client_interval"] == 3600
+        node = db.one(conn, "SELECT * FROM local_nodes WHERE name='US 01'")
+        params = json.loads(security.decrypt_text(node["params_enc"]))
+        assert params["down"] == 1000
+
+    # 幂等：再执行一次不产生重复规则
+    spec.loader.exec_module(module)
+    module.main()
+    with db.connect() as conn:
+        count = db.one(conn, "SELECT COUNT(*) AS c FROM rules "
+                              "WHERE value='pan.baidu.com'")["c"]
+        assert count == 1
+
+
+def test_build_does_not_hold_write_lock_during_core_check(client, monkeypatch):
+    """构建期间不得长时间持有写锁：否则设备拉取配置会 database is locked。"""
+    from app import db
+    from app.services import tester
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    original = tester.validate_config
+
+    def probe(text):
+        # 核心校验期间：另一个事务必须能立刻写入
+        with db.tx() as conn:
+            conn.execute("UPDATE settings SET value=value WHERE key='base_url'")
+        return original(text)
+
+    monkeypatch.setattr(tester, "validate_config", probe)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build

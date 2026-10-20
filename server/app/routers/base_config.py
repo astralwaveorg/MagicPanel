@@ -183,14 +183,16 @@ def apply(body: ApplyBody, user=CurrentUser):
         raise HTTPException(400, "通道仅支持 stable / candidate")
     with db.tx() as conn:
         _save(conn, engine, body.content, user["username"])
-        try:
-            build_id, status = builds.create_candidate(
-                conn, user["username"], note=body.note or "更新基础配置")
-        except builds.BuildError as exc:
-            raise HTTPException(400, str(exc))
-        if status != "success":
+    try:
+        build_id, status = builds.create_candidate(
+            user["username"], note=body.note or "更新基础配置")
+    except builds.BuildError as exc:
+        raise HTTPException(400, str(exc))
+    if status != "success":
+        with db.connect() as conn:
             row = builds._get_build(conn, build_id)
-            raise HTTPException(400, f"构建未通过校验：{json_results(row)}")
+        raise HTTPException(400, f"构建未通过校验：{json_results(row)}")
+    with db.tx() as conn:
         build = builds._get_build(conn, build_id)
         builds.promote_internal(conn, build, body.channel, "promote",
                                 user["username"], body.note or "更新基础配置")

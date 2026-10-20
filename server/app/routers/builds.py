@@ -170,14 +170,17 @@ def current_policy(conn) -> tuple[dict, str]:
     return snapshot, policy_sha
 
 
-def create_candidate(conn, operator: str, note: str = "",
+def create_candidate(operator: str, note: str = "",
                      snapshot: dict | None = None,
                      policy_sha: str | None = None) -> tuple[int, str]:
-    """在给定事务内创建候选构建，返回 (build_id, status)。
+    """创建候选构建，返回 (build_id, status)。
 
     定时任务与手动创建共用；没有发布目标时抛 BuildError。
+    写事务只用于落库，渲染与核心校验在事务之外执行，
+    避免慢校验长期占用 SQLite 写锁（设备拉取配置会被阻塞）。
     """
-    snapshot = collect_snapshot(conn) if snapshot is None else snapshot
+    with db.connect() as conn:
+        snapshot = collect_snapshot(conn) if snapshot is None else snapshot
     if not snapshot["targets"]:
         raise BuildError("尚未配置任何发布目标，请先在“发布目标”中添加")
     if policy_sha is None:
@@ -188,14 +191,15 @@ def create_candidate(conn, operator: str, note: str = "",
     now = db.now()
     results: dict = {}
     overall = "success"
-    cur = conn.execute(
-        "INSERT INTO builds(created_at, created_by, status, policy_sha, snapshot, "
-        "results, note) VALUES(?,?,?,?,?,?,?)",
-        (now, operator, "building", policy_sha,
-         security.encrypt_payload(json.dumps(snapshot, ensure_ascii=False)),
-         "{}", note),
-    )
-    build_id = cur.lastrowid
+    with db.tx() as conn:
+        cur = conn.execute(
+            "INSERT INTO builds(created_at, created_by, status, policy_sha, snapshot, "
+            "results, note) VALUES(?,?,?,?,?,?,?)",
+            (now, operator, "building", policy_sha,
+             security.encrypt_payload(json.dumps(snapshot, ensure_ascii=False)),
+             "{}", note),
+        )
+        build_id = cur.lastrowid
     for target in snapshot["targets"]:
         errors = list(policy_errors)
         warnings = list(policy_warnings)
@@ -234,22 +238,23 @@ def create_candidate(conn, operator: str, note: str = "",
             "size": len(text.encode()),
             "verification": verification,
         }
-    conn.execute(
-        "UPDATE builds SET status=?, results=? WHERE id=?",
-        (overall, json.dumps(results, ensure_ascii=False), build_id),
-    )
-    security.audit(conn, operator, "创建候选构建", "build", build_id,
-                   {"status": overall, "note": note})
+    with db.tx() as conn:
+        conn.execute(
+            "UPDATE builds SET status=?, results=? WHERE id=?",
+            (overall, json.dumps(results, ensure_ascii=False), build_id),
+        )
+        security.audit(conn, operator, "创建候选构建", "build", build_id,
+                       {"status": overall, "note": note})
     return build_id, overall
 
 
 @router.post("/builds", status_code=201)
 def create_build(body: BuildBody, user=CurrentUser):
-    with db.tx() as conn:
-        try:
-            build_id, _ = create_candidate(conn, user["username"], body.note)
-        except BuildError as exc:
-            raise HTTPException(400, str(exc))
+    try:
+        build_id, _ = create_candidate(user["username"], body.note)
+    except BuildError as exc:
+        raise HTTPException(400, str(exc))
+    with db.connect() as conn:
         row = _get_build(conn, build_id)
     return _build_public(row, with_results=True)
 

@@ -188,19 +188,23 @@ def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
 
 
 def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
-    with db.tx() as conn:
+    """自动构建与发布：读策略（只读）→ 构建（自管事务）→ 发布（短事务）。
+
+    构建过程可能跑几十秒的 mihomo -t，绝不能占着写锁，
+    否则设备拉取配置会因 database is locked 失败。
+    """
+    with db.connect() as conn:
         if not _enabled(conn, "auto_build_enabled", "1"):
             return
         try:
-            interval_hours = max(1, int(_setting(conn, "auto_build_interval_hours", "12")))
+            interval_hours = max(1, int(_setting(conn, "auto_build_interval_hours", "1")))
         except ValueError:
-            interval_hours = 12
+            interval_hours = 1
         last_attempt = _setting(conn, "auto_build_last_attempt", "")
         if not force and not _due(last_attempt, interval_hours * 3600, now):
             return
         latest = db.one(
             conn, "SELECT * FROM builds WHERE status='success' ORDER BY id DESC LIMIT 1")
-
         try:
             snapshot, policy_sha = builds.current_policy(conn)
         except Exception as exc:
@@ -211,10 +215,12 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
             summary["build_error"] = "尚未配置任何发布目标"
             return
         if latest and latest["policy_sha"] == policy_sha:
-            db.set_setting(conn, "auto_build_last_attempt", db.now())
+            with db.tx() as wconn:
+                db.set_setting(wconn, "auto_build_last_attempt", db.now())
             summary["build"] = "策略未变化，跳过"
             return
         publish = _enabled(conn, "auto_publish_enabled", "1")
+        channel = _setting(conn, "auto_publish_channel", "stable")
         if publish:
             ready, missing, skipped = _publish_tests_ready(conn)
             if skipped:
@@ -225,37 +231,36 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
                     "自动发布等待测速结果：" + "、".join(missing)
                 )
                 return
+    with db.tx() as conn:
         db.set_setting(conn, "auto_build_last_attempt", db.now())
-        try:
-            build_id, status = builds.create_candidate(
-                conn, AUTO_OPERATOR, note="自动构建", snapshot=snapshot,
-                policy_sha=policy_sha,
-            )
-        except builds.BuildError as exc:
-            summary["build_error"] = str(exc)
-            return
-        except Exception as exc:
-            summary["build_error"] = f"自动构建失败：{exc}"
-            logger.exception("自动构建失败")
-            return
-        summary["build"] = {"id": build_id, "status": status}
-        if status != "success":
-            return
-        if not publish:
-            return
-        channel = _setting(conn, "auto_publish_channel", "stable")
-        if channel not in ("stable", "candidate"):
-            channel = "stable"
-        build = builds._get_build(conn, build_id)
-        try:
+    try:
+        build_id, status = builds.create_candidate(
+            AUTO_OPERATOR, note="自动构建", snapshot=snapshot,
+            policy_sha=policy_sha,
+        )
+    except builds.BuildError as exc:
+        summary["build_error"] = str(exc)
+        return
+    except Exception as exc:
+        summary["build_error"] = f"自动构建失败：{exc}"
+        logger.exception("自动构建失败")
+        return
+    summary["build"] = {"id": build_id, "status": status}
+    if status != "success" or not publish:
+        return
+    if channel not in ("stable", "candidate"):
+        channel = "stable"
+    try:
+        with db.tx() as conn:
+            build = builds._get_build(conn, build_id)
             builds.promote_internal(
                 conn, build, channel, "promote", AUTO_OPERATOR, "自动构建发布",
             )
-        except Exception as exc:
-            summary["build_error"] = f"自动发布失败：{exc}"
-            logger.exception("自动发布失败")
-            return
-        summary["published"] = channel
+    except Exception as exc:
+        summary["build_error"] = f"自动发布失败：{exc}"
+        logger.exception("自动发布失败")
+        return
+    summary["published"] = channel
 
 
 def _has_activity(summary: dict) -> bool:
