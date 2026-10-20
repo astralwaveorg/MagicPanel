@@ -37,7 +37,14 @@ rsync -az --delete \
   ./ "$NAS_HOST:$NAS_DIR/"
 
 echo "== 重建并重启容器 =="
-ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && docker compose up -d --build"
+# 刚重启时 NAS 的外网可能还没恢复，npm/pip 拉包会失败；
+# 需要时用 DEPLOY_PROXY=http://host:port 走局域网代理。
+BUILD_ARGS=""
+if [ -n "${DEPLOY_PROXY:-}" ]; then
+  BUILD_ARGS="--build-arg HTTP_PROXY=$DEPLOY_PROXY --build-arg HTTPS_PROXY=$DEPLOY_PROXY --build-arg NO_PROXY=localhost,127.0.0.1,10.0.0.0/8"
+  echo "使用构建代理：$DEPLOY_PROXY"
+fi
+ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && docker compose up -d --build $BUILD_ARGS"
 
 echo "== 等待健康检查 =="
 STATUS=""
