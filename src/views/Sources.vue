@@ -76,8 +76,8 @@
       <div class="mp-table-wrap">
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
                   @selection-change="onSelectionChange">
-          <el-table-column type="selection" width="44" fixed />
-          <el-table-column prop="name" label="名称" min-width="100" fixed />
+          <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
+          <el-table-column prop="name" label="名称" min-width="100" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="订阅地址" width="110">
             <template #default="{ row }">
               <el-button size="small" @click="copyUrl(row)">复制 URL</el-button>
@@ -137,7 +137,7 @@
           <el-table-column label="过滤不可用" width="100" align="center">
             <template #default="{ row }">{{ row.filter_unavailable ? '开启' : '关闭' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="252" fixed="right">
+          <el-table-column label="操作" width="252" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="openNodes(row)">节点</el-button>
@@ -389,6 +389,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import { uploadCore } from '../core'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -406,6 +407,7 @@ const INTERVAL_PRESETS = [
 ]
 
 const rows = ref([])
+const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)

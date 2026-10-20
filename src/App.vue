@@ -43,6 +43,13 @@
           <span>{{ item.title }}</span>
         </el-menu-item>
       </el-menu>
+      <div class="mp-aside-footer">
+        <span class="mp-aside-user">
+          <UserAvatar :user="store.user" :size="26" />
+          <span class="mp-aside-name">{{ store.user?.display_name || store.user?.username }}</span>
+        </span>
+        <el-button text size="small" @click="onLogout">退出</el-button>
+      </div>
     </el-drawer>
 
     <div class="mp-main">
@@ -50,14 +57,14 @@
         <el-button text @click="drawer = true" aria-label="打开菜单">
           <el-icon :size="20"><Menu /></el-icon>
         </el-button>
-        <strong>{{ route.meta.title }}</strong>
+        <strong class="mp-topbar-title">{{ route.meta.title }}</strong>
         <span style="flex:1"></span>
         <el-button text @click="onToggleTheme" :aria-label="theme === 'dark' ? '切换为亮色' : '切换为暗色'">
           <el-icon :size="17"><Sunny v-if="theme === 'dark'" /><Moon v-else /></el-icon>
         </el-button>
         <UserAvatar :user="store.user" :size="24" />
-        <span style="font-size:13px;color:var(--mp-text-secondary)">{{ store.user?.display_name || store.user?.username }}</span>
-        <el-button text size="small" @click="onLogout">退出</el-button>
+        <span class="mp-topbar-user">{{ store.user?.display_name || store.user?.username }}</span>
+        <el-button class="mp-topbar-logout" text size="small" @click="onLogout">退出</el-button>
       </div>
       <main class="mp-content">
         <router-view v-slot="{ Component }">

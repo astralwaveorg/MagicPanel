@@ -22,7 +22,7 @@
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id">
-          <el-table-column label="顺序" width="104" align="center">
+          <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
                 <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
@@ -116,6 +116,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -157,6 +158,7 @@ const TEMPLATES = {
 }
 
 const rows = ref([])
+const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)

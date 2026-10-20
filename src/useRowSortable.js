@@ -14,6 +14,10 @@ export function useRowSortable(tableRef, rows, onReorder) {
     sortable = Sortable.create(el, {
       animation: 150,
       handle: '.drag-handle',
+      // 触屏上必须加延迟：否则手指一按就被当成页面滚动，拖不动
+      delay: 200,
+      delayOnTouchOnly: true,
+      touchStartThreshold: 8,
       ghostClass: 'mp-drag-ghost',
       chosenClass: 'mp-drag-chosen',
       onEnd: async () => {

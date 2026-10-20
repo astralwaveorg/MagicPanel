@@ -8,9 +8,26 @@
       每一层只保存"与上层不同"的差异，没改过的键会跟随上层。
     </p>
 
+    <!-- 手机：作用域改用下拉选择，左侧长列表在窄屏太占版面 -->
+    <el-select
+      v-if="isMobile"
+      v-model="scopePicker"
+      class="mp-artifact-picker"
+      placeholder="选择要配置的作用域"
+    >
+      <el-option-group v-for="group in scopeGroups" :key="group.kind" :label="group.title">
+        <el-option
+          v-for="s in group.items"
+          :key="scopeKey(s)"
+          :value="scopeKey(s)"
+          :label="s.label"
+        />
+      </el-option-group>
+    </el-select>
+
     <div class="mp-artifact-grid">
       <!-- 左：作用域 -->
-      <aside class="mp-artifact-aside">
+      <aside v-if="!isMobile" class="mp-artifact-aside">
         <div v-for="group in scopeGroups" :key="group.kind" class="mp-scope-group">
           <div class="mp-scope-group-title">
             {{ group.title }}
@@ -76,7 +93,33 @@
               点击"值"即可就地编辑；改动只影响当前作用域，保存时自动只记录与上层不同的部分。
             </span>
           </div>
-          <el-table :data="effectiveRows" size="small" class="mp-effective-table"
+          <!-- 窄屏：表格会把"值"挤到屏幕外，改成卡片列表（键在上、值在下） -->
+          <div v-if="isMobile" class="mp-effective-list">
+            <div v-for="row in effectiveRows" :key="row.path" class="mp-effective-item">
+              <div class="mp-effective-item-head">
+                <span class="mono mp-effective-key">{{ row.path }}</span>
+                <el-tag size="small" :type="row.source === layerLabel ? 'primary' : 'info'"
+                        effect="plain">{{ row.source }}</el-tag>
+              </div>
+              <div class="mp-effective-item-value">
+                <template v-if="editingPath === row.path">
+                  <el-input v-if="row.simple" v-model="editText" size="small" class="mono"
+                            @keyup.enter="commitEdit" @keyup.esc="cancelEdit" />
+                  <el-input v-else v-model="editText" type="textarea" :rows="3" size="small"
+                            class="mono" @keyup.esc="cancelEdit" />
+                  <div class="mp-effective-actions">
+                    <el-button size="small" type="primary" text @click="commitEdit">确定</el-button>
+                    <el-button size="small" text @click="cancelEdit">取消</el-button>
+                  </div>
+                </template>
+                <span v-else class="mono mp-effective-value"
+                      :class="{ editable: !readonly && !row.isDict }"
+                      @click="startEdit(row)">{{ row.display }}</span>
+              </div>
+            </div>
+          </div>
+
+          <el-table v-else :data="effectiveRows" size="small" class="mp-effective-table"
                     row-key="path">
             <el-table-column label="键" min-width="210">
               <template #default="{ row }">
@@ -239,9 +282,12 @@ import { ElMessage } from 'element-plus'
 import { dump, load as yamlLoad } from 'js-yaml'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import { PLATFORM_LABELS } from '../format'
 
 const scopes = ref([])
+const isMobile = useMobile()
+const scopePicker = ref('')
 const platforms = ref([])
 const current = ref(null)
 const state = ref(null)
@@ -434,7 +480,7 @@ function confirmAddParam() {
 }
 
 function scopeKey(s) {
-  return `${s.kind}:${s.engine}:${s.target}:${s.device_id}`
+  return `${s.kind}:${s.engine}:${s.platform || ''}:${s.device_id || 0}`
 }
 
 function scopeTag(s) {
@@ -528,6 +574,13 @@ async function loadSchema(engine) {
   presetKey.value = ''
 }
 
+// 手机上下拉切换作用域
+watch(scopePicker, (key) => {
+  if (!key) return
+  const target = scopes.value.flatMap((g) => g.items).find((s) => scopeKey(s) === key)
+  if (target && (!current.value || scopeKey(current.value) !== key)) select(target)
+})
+
 async function select(scope) {
   const previous = current.value
   current.value = scope
@@ -538,6 +591,7 @@ async function select(scope) {
     if (scope.device_id) params.set('device_id', String(scope.device_id))
     const data = await api(`/api/v1/base-config?${params.toString()}`)
     state.value = data
+    scopePicker.value = scopeKey(scope)
     Object.keys(doc).forEach((key) => delete doc[key])
     Object.assign(doc, data.effective || {})
     raw.value = data.content || ''
@@ -680,6 +734,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.mp-artifact-picker {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
 .mp-artifact-grid {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
@@ -736,6 +795,27 @@ onMounted(async () => {
 .mp-section-title { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .mp-subsection { font-size: 12px; color: var(--mp-text-secondary); margin-bottom: 8px; }
 .mp-effective-table { margin-bottom: 4px; }
+.mp-effective-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mp-effective-item {
+  border: 1px solid var(--el-border-color-lighter, #eee);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.mp-effective-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.mp-effective-item-value {
+  font-size: 13px;
+}
+
 .mp-effective-toolbar {
   display: flex;
   align-items: center;
@@ -783,9 +863,7 @@ onMounted(async () => {
 .mp-overlay-value {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
   color: var(--mp-text-dim, #888);
 }
 </style>

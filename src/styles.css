@@ -100,6 +100,7 @@ html, body, #app {
   display: none;
   align-items: center;
   gap: 12px;
+  min-width: 0;
   padding: 10px 16px;
   background: var(--mp-surface);
   border-bottom: 1px solid var(--mp-border);
@@ -107,6 +108,15 @@ html, body, #app {
   top: 0;
   z-index: 10;
 }
+.mp-topbar-title {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.mp-topbar-user { font-size: 13px; color: var(--mp-text-secondary); white-space: nowrap; }
 .mp-content { padding: 20px 24px 48px; max-width: 1280px; width: 100%; margin: 0 auto; }
 
 .mp-page-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
@@ -140,6 +150,9 @@ html, body, #app {
   margin-top: 12px;
   flex-wrap: wrap;
 }
+/* 顺序单元格：拖拽手柄 + ↑↓ */
+.order-cell { display: flex; align-items: center; justify-content: center; gap: 0; }
+.order-cell .el-button { margin: 0; }
 .mp-drag-ghost { opacity: 0.35; }
 .mp-drag-chosen { background: var(--mp-surface-2); }
 .mp-nowrap { white-space: nowrap; }
@@ -203,12 +216,99 @@ html, body, #app {
 .el-menu { border-right: none; }
 .mp-aside .el-menu, .el-drawer .el-menu { background: transparent; }
 
-/* 移动端 */
+/* ============================================================
+   移动端适配层（≤768px）
+   原则：手机上以"单手可点、内容不横向溢出、输入不误缩放"为准。
+   ============================================================ */
 @media (max-width: 768px) {
   .mp-aside { display: none; }
-  .mp-topbar { display: flex; }
-  .mp-content { padding: 14px 12px 40px; }
+  .mp-topbar { display: flex; gap: 8px; padding: 8px 10px; }
+  /* 窄屏顶栏只留：菜单 + 标题 + 主题 + 头像；用户名与退出移入抽屉 */
+  .mp-topbar-user, .mp-topbar-logout { display: none; }
+  .mp-content { padding: 12px 10px 28px; }
   .mp-auth-card { padding: 24px 20px; }
+
+  /* 页面头 */
+  .mp-page-title { font-size: 17px; }
+  .mp-page-desc { font-size: 12.5px; line-height: 1.65; margin-bottom: 12px; }
+
+  /* 卡片与间距 */
+  .mp-card { padding: 12px 12px 14px; margin-bottom: 12px; border-radius: 10px; }
+  .mp-card h3 { font-size: 13.5px; margin-bottom: 10px; }
+  .mp-form-hint, .mp-dialog-desc { font-size: 12px; line-height: 1.65; }
+
+  /* 触摸目标：手机上按钮与输入框要够高（≥38px） */
+  .el-button { min-height: 38px; }
+  .el-button--small { min-height: 34px; padding: 7px 11px; }
+  .el-button--large { min-height: 44px; }
+  .el-input__wrapper, .el-select__wrapper, .el-textarea__inner { min-height: 40px; }
+  /* iOS 聚焦输入框会自动放大页面（<16px 时），统一 16px 规避 */
+  .el-input__inner, .el-select__selected-item, .el-textarea__inner,
+  .el-input-number .el-input__inner { font-size: 16px; }
+
+  /* 表单 */
+  .el-form-item { margin-bottom: 14px; }
+  .el-form-item__label { padding-bottom: 4px; font-size: 13px; line-height: 1.4; }
+  .el-radio-group { flex-wrap: wrap; row-gap: 6px; }
+  .el-select, .el-input, .el-input-number { width: 100%; }
+
+  /* 工具栏：主按钮独占一行；批量操作按钮排成两列网格，手指好点 */
+  .mp-toolbar { gap: 8px; margin-bottom: 10px; }
+  .mp-toolbar .left { width: 100%; gap: 8px; }
+  .mp-toolbar > .el-button { width: 100%; margin-left: 0; }
+  .mp-toolbar > .el-button + .el-button { margin-left: 0; }
+  .mp-toolbar .left .el-button { flex: 1 1 calc(50% - 4px); margin-left: 0; }
+  .mp-toolbar .left .mp-selected-hint { width: 100%; }
+  .mp-toolbar .left .el-button.link { flex: 0 0 auto; }
+
+  /* 顺序列：手机上触屏拖不动手柄，改用 ↑↓ 按钮，手柄隐藏；
+     两个按钮必须同一行（列宽只有 56px），否则会竖着排开 */
+  .drag-handle { display: none; }
+  .order-cell {
+    flex-wrap: nowrap !important;
+    gap: 0 !important;
+    justify-content: center;
+    align-items: center;
+  }
+  .order-cell .el-button {
+    margin: 0 !important;
+    padding: 4px 3px !important;
+    min-width: 24px;
+    height: 30px;
+    line-height: 1;
+  }
+
+  /* 表格：字号与内边距收紧；固定列由脚本在窄屏关闭 */
+  .el-table { font-size: 13px; }
+  .el-table th.el-table__cell { font-size: 12px; padding: 8px 0; }
+  .el-table td.el-table__cell { padding: 8px 0; }
+  .el-table .cell { line-height: 1.45; }
+  .el-table__body tr > td:first-child { padding-left: 10px; }
+  .mp-table-wrap { margin: 0 -12px; padding: 0 12px; }
+
+  /* 弹窗：接近全屏，底部按钮并排铺满 */
+  .el-dialog { width: 94vw !important; margin-top: 5vh !important; max-height: 90vh; }
+  .el-dialog__header { padding: 14px 16px 10px; margin-right: 0; }
+  .el-dialog__body { padding: 4px 16px 12px; max-height: 64vh; overflow-y: auto; }
+  .el-dialog__footer { padding: 10px 12px; display: flex; }
+  .el-dialog__footer .el-button { flex: 1; margin: 0 5px !important; }
+  .el-overlay-dialog { overflow: hidden; }
+
+  /* 确认框 */
+  .el-message-box { width: 88vw !important; max-width: 92vw; }
+  .el-message-box__message { font-size: 13.5px; line-height: 1.6; }
+  .el-message-box__btns { display: flex; }
+  .el-message-box__btns .el-button { flex: 1; margin: 0 5px !important; }
+
+  /* 轻提示：居中占位，避免顶在右上角遮住内容 */
+  .el-message { width: calc(100% - 28px); max-width: 92vw; top: 12px; }
+  .el-notification { width: calc(100% - 28px); max-width: 92vw; }
+
+  /* 分页（组件内部另有窄屏布局，这里兜底防止溢出） */
+  .mp-pagination { justify-content: center; }
+
+  /* 头像与按钮组 */
+  .mp-artifact-grid { gap: 10px; }
 }
 
 .mp-field-hint { color: var(--mp-text-secondary); font-size: 12px; margin-left: 8px; font-weight: 400; }

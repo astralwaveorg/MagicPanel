@@ -60,7 +60,7 @@
       <div class="mp-table-wrap">
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
                   @selection-change="onSelectionChange">
-          <el-table-column type="selection" width="44" fixed />
+          <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="构建" width="90">
             <template #default="{ row }"><span class="mono">#{{ row.id }}</span></template>
           </el-table-column>
@@ -91,7 +91,7 @@
           <el-table-column prop="note" label="备注" min-width="120">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="360" fixed="right">
+          <el-table-column label="操作" width="360" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="openDetail(row)">详情</el-button>
@@ -199,6 +199,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -207,6 +208,7 @@ import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
 
 const rows = ref([])
+const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)

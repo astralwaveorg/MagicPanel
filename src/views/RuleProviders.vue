@@ -50,8 +50,8 @@
       <div class="mp-table-wrap">
         <el-table ref="tableRef" :data="pagedRows" v-loading="loading" row-key="id"
                   @selection-change="onSelectionChange">
-          <el-table-column type="selection" width="44" fixed />
-          <el-table-column prop="name" label="名称" min-width="110" fixed />
+          <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
+          <el-table-column prop="name" label="名称" min-width="110" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="类型" width="80">
             <template #default="{ row }">{{ row.kind === 'remote' ? '远程' : '内联' }}</template>
           </el-table-column>
@@ -80,7 +80,7 @@
           <el-table-column label="最近成功" min-width="160">
             <template #default="{ row }"><span class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="192" fixed="right">
+          <el-table-column label="操作" width="192" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" :disabled="!row.has_content" @click="preview(row)">内容</el-button>
@@ -209,6 +209,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
@@ -225,6 +226,7 @@ const INTERVAL_PRESETS = [
 ]
 
 const rows = ref([])
+const isMobile = useMobile()
 const total = ref(0)
 const loading = ref(false)
 const error = ref('')

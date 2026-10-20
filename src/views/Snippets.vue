@@ -29,7 +29,7 @@
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
         <el-table :data="filtered" v-loading="loading">
-          <el-table-column prop="name" label="名称" min-width="130" fixed />
+          <el-table-column prop="name" label="名称" min-width="130" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="分类" width="90">
             <template #default="{ row }">{{ CATEGORY_LABELS[row.category] || row.category }}</template>
           </el-table-column>
@@ -49,7 +49,7 @@
           <el-table-column label="更新时间" min-width="130">
             <template #default="{ row }">{{ fmtTime(row.updated_at) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="210" fixed="right">
+          <el-table-column label="操作" width="210" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <el-button size="small" @click="preview(row)">内容</el-button>
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
@@ -123,6 +123,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
@@ -134,6 +135,7 @@ const CATEGORY_LABELS = {
 const ENGINE_LABELS = { stash: '仅 Stash', mihomo: '仅 Mihomo', all: '全部引擎' }
 
 const rows = ref([])
+const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)

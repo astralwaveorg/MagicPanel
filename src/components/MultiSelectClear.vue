@@ -21,9 +21,22 @@ defineEmits(['clear'])
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 .mp-multi-select-main {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
+}
+/* 控件本体必须撑满主体，窄屏下 el-select 默认会被压成一个箭头小方块 */
+.mp-multi-select-main :deep(.el-select),
+.mp-multi-select-main :deep(.el-input) {
+  width: 100%;
+  min-width: 0;
+}
+.mp-multi-select > .el-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 </style>

@@ -34,8 +34,8 @@
       <div class="mp-table-wrap">
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
                   @selection-change="onSelectionChange">
-          <el-table-column type="selection" width="44" fixed />
-          <el-table-column label="顺序" width="96" align="center">
+          <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
+          <el-table-column label="顺序" :width="isMobile ? 56 : 96" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
                 <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
@@ -46,7 +46,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="文件名" min-width="130" fixed>
+          <el-table-column label="文件名" min-width="130" :fixed="isMobile ? false : 'left'">
             <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
           </el-table-column>
           <el-table-column label="设备名" min-width="130">
@@ -74,7 +74,7 @@
           <el-table-column label="最近来源 IP" min-width="120">
             <template #default="{ row }"><span class="mono">{{ row.last_pull_ip || '—' }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="290" fixed="right">
+          <el-table-column label="操作" width="290" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="reveal(row)">复制地址</el-button>
@@ -171,6 +171,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -179,6 +180,7 @@ import SecretDialog from '../components/SecretDialog.vue'
 import { fmtTime, PLATFORM_LABELS, CHANNEL_LABELS, ENGINE_LABELS } from '../format'
 
 const rows = ref([])
+const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)

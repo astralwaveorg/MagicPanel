@@ -31,8 +31,8 @@
       <div class="mp-table-wrap">
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
                   @selection-change="onSelectionChange">
-          <el-table-column type="selection" width="44" fixed />
-          <el-table-column label="顺序" width="104" align="center">
+          <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
+          <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
                 <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
@@ -185,6 +185,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useMobile } from '../mobile'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -199,6 +200,7 @@ const ruleTypes = [
 ]
 
 const rows = ref([])
+const isMobile = useMobile()
 const selected = ref([])
 const batchDialog = ref(false)
 const batchSaving = ref(false)
