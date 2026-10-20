@@ -306,6 +306,8 @@ def init_db() -> None:
         _ensure_column(conn, "rules", "no_resolve",
                        "no_resolve INTEGER NOT NULL DEFAULT 0")
         # 差异配置：策略组与规则可限定适用目标（空 = 全部目标）
+        _ensure_column(conn, "proxy_groups", "local_first",
+                       "local_first INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "proxy_groups", "targets",
                        "targets TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(conn, "rules", "targets",

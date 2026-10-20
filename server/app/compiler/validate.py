@@ -150,9 +150,19 @@ def validate_rendered(text: str, engine: str = "") -> list[str]:
     # 等于设备断网。规则按"适用引擎平台"过滤后可能整条消失，必须在这里兜住。
     if data.get("mode") in ("rule",):
         rules = [r for r in (data.get("rules") or []) if isinstance(r, str)]
-        if not any(r.strip().split(",")[0].strip() in ("MATCH", "FINAL")
-                   for r in rules):
+        def _is_final(rule: str) -> bool:
+            return rule.strip().split(",")[0].strip() in ("MATCH", "FINAL")
+        final_at = next((i for i, r in enumerate(rules) if _is_final(r)), -1)
+        if final_at < 0:
             errors.append("产物缺少兜底规则（MATCH/FINAL），未命中的流量会被客户端拒绝")
+        else:
+            after = [r for r in rules[final_at + 1:] if not _is_final(r)]
+            if after:
+                errors.append(
+                    f"兜底规则（{rules[final_at].split(',')[0]}）之后还有 "
+                    f"{len(after)} 条普通规则永远匹配不到，请把兜底规则放到最后"
+                )
+
 
     allowed = config.ENGINE_RULE_TYPES.get(engine)
     group_names = [g.get("name") for g in (data.get("proxy-groups") or [])

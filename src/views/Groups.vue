@@ -109,6 +109,15 @@
                        :disabled="!n.enabled"
                        :label="`${n.marked_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
           </el-select>
+          <div v-if="form.local_nodes.length" class="mp-form-hint">
+            <el-checkbox v-model="form.local_first" style="margin-right:14px">
+              本地节点排在最前
+            </el-checkbox>
+            <span>
+              开启后本地节点会排到该组其它成员之前（fallback / url-test 组按顺序取用），
+              适合"优先用自己的机房节点、机场节点兜底"。
+            </span>
+          </div>
         </el-form-item>
         <template v-if="form.type !== 'relay'">
           <el-form-item label="节点来源（从来源中取节点，可多选）">
@@ -200,7 +209,7 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
 
 const emptyForm = () => ({
   name: '', type: 'select', hidden: false, filter: '', use_sources: [],
-  local_nodes: [], proxies: [],
+  local_nodes: [], proxies: [], local_first: false,
   url: 'https://www.gstatic.com/generate_204', interval: 600, timeout: 8000,
   tolerance: 150, lazy: true, strategy: '', targets: [],
 })
@@ -258,6 +267,7 @@ function openEdit(row) {
   Object.assign(form, emptyForm(), row ? {
     name: row.name, type: row.type, hidden: row.hidden, filter: row.filter,
     use_sources: [...row.use_sources], local_nodes: [...(row.local_nodes || [])],
+    local_first: !!row.local_first,
     proxies: [...row.proxies],
     url: row.url, interval: row.interval, timeout: row.timeout,
     tolerance: row.tolerance, lazy: row.lazy, strategy: row.strategy || '',

@@ -1992,3 +1992,52 @@ def test_paged_list_endpoints(client):
         assert r.status_code == 200, (path, r.text)
         body = r.json()
         assert "items" in body and "total" in body
+
+
+def test_local_first_puts_local_nodes_before_group_members(client):
+    """策略组开启「本地节点排在最前」后，产物里本地节点排在其它成员之前。"""
+    import yaml as _yaml
+    from app import db
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    node = client.post("/api/v1/local-nodes", headers=h, json={
+        "name": "本地甲", "protocol": "http", "server": "1.2.3.4", "port": 80}).json()
+    gid = client.post("/api/v1/groups", headers=h, json={
+        "name": "机房优先组", "type": "fallback", "proxies": ["DIRECT"],
+        "local_nodes": [node["id"]], "local_first": True}).json()
+    assert gid["local_first"] is True
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    cfg = _yaml.safe_load(art)
+    group = next(g for g in cfg["proxy-groups"] if g["name"] == "机房优先组")
+    members = group["proxies"]
+    # 空组保护在前（占位），其后应是本地节点，再往后才是普通成员
+    assert "[单] 本地甲" in members
+    assert members.index("[单] 本地甲") < members.index("DIRECT")
+
+
+def test_fallback_rule_is_moved_to_end_of_artifact(client):
+    """兜底规则排在中间时，产物里必须被提到末尾——否则它后面的规则永远不生效。"""
+    import yaml as _yaml
+    from app import db
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    # 在兜底规则之后再插一条规则（界面允许任意顺序）
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "late.example.com", "target": "节点选择"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    rules = _yaml.safe_load(art)["rules"]
+    assert rules[-1].split(",")[0] in ("MATCH", "FINAL")
+    # 兜底之后不允许再有普通规则
+    first_final = next(i for i, r in enumerate(rules)
+                       if r.split(",")[0] in ("MATCH", "FINAL"))
+    assert all(r.split(",")[0] in ("MATCH", "FINAL") for r in rules[first_final + 1:])

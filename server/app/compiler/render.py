@@ -103,7 +103,12 @@ def _provider_entry(src: dict, engine: str) -> dict:
 
 def _group_entry(group: dict, engine: str, local_names: list[str] | None = None) -> dict:
     entry = {"name": group["name"], "type": group["type"]}
-    proxies = list(group.get("proxies") or []) + list(local_names or [])
+    # 本地单节点可以排在最前（"优先美国"这类组用得上：机房节点先试，
+    # 机场节点兜底）。local_nodes 本身是有序的 id 列表，顺序即优先级。
+    if group.get("local_first"):
+        proxies = list(local_names or []) + list(group.get("proxies") or [])
+    else:
+        proxies = list(group.get("proxies") or []) + list(local_names or [])
     use = list(group.get("use_sources") or [])
     if group["type"] in ("url-test", "fallback", "load-balance") \
             and config.GUARD_PROXY not in proxies:
@@ -158,7 +163,7 @@ def _rule_line(rule: dict) -> str:
 def _rule_provider_entry(rp: dict) -> dict:
     entry = {
         "type": "http",
-        "url": f"{{FEED}}/res/rule/{rp['name']}",
+        "url": f"{{FEED}}/res/rule/{urllib.parse.quote(rp['name'])}",
         "path": f"./rules/{rp['name']}.yaml",
         "behavior": rp["behavior"],
         "interval": rp.get("client_interval") or rp["interval"],
@@ -253,6 +258,24 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
                     f"规则 {r['type']},{r.get('value', '')} 指向的策略组"
                     f"“{ref}”不适用于本目标，已剔除")
     rules = kept_rules
+
+    # 兜底规则（MATCH/FINAL）必须排在最后：客户端是"从上往下第一条命中即生效"，
+    # 兜底之后的规则永远匹配不到。管理界面上规则的排列顺序可以随意，
+    # 产物里统一把兜底规则提到末尾，避免用户新增的规则被兜底吃掉。
+    finals = [r for r in rules if r["type"] in ("MATCH", "FINAL")]
+    if finals:
+        rest = [r for r in rules if r["type"] not in ("MATCH", "FINAL")]
+        moved = len(rules) - len(rest) - len(finals)
+        rules = rest + finals
+        if warnings is not None:
+            if moved:
+                warnings.append(
+                    f"兜底规则（MATCH/FINAL）已自动移到产物末尾，"
+                    f"其后 {moved} 条规则原本永远匹配不到，现已生效")
+            if len(finals) > 1:
+                warnings.append(
+                    f"存在 {len(finals)} 条兜底规则（MATCH/FINAL），"
+                    "客户端只认第一条，其余不会生效")
 
     # 剔除策略组成员里指向不存在策略组的引用
     for g in groups:

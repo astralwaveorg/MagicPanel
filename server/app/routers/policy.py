@@ -26,6 +26,7 @@ class GroupBody(BaseModel):
     lazy: bool = True
     strategy: str = Field(default="", max_length=32)
     targets: list[str] = Field(default_factory=list)  # 适用引擎平台，空 = 全部
+    local_first: bool = False   # 本地单节点排在组成员最前
 
 
 class RuleBody(BaseModel):
@@ -46,6 +47,7 @@ def _group_public(row) -> dict:
     data["local_nodes"] = json.loads(row["local_nodes"] or "[]")
     data["proxies"] = json.loads(row["proxies"] or "[]")
     data["targets"] = json.loads(row["targets"] or "[]")
+    data["local_first"] = bool(row["local_first"]) if "local_first" in row.keys() else False
     return data
 
 
@@ -54,6 +56,7 @@ def _rule_public(row) -> dict:
     data["enabled"] = bool(row["enabled"])
     data["no_resolve"] = bool(row["no_resolve"])
     data["targets"] = json.loads(row["targets"] or "[]")
+    data["local_first"] = bool(row["local_first"]) if "local_first" in row.keys() else False
     return data
 
 
@@ -129,14 +132,16 @@ def create_group(body: GroupBody, user=CurrentUser):
             cur = db.insert_unique(conn,
                 "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
                 "local_nodes, proxies, url, interval, timeout, tolerance, lazy, strategy, "
-                "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "targets, local_first, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (body.name, body.type, sort, int(body.hidden), body.filter,
                  json.dumps(body.use_sources, ensure_ascii=False),
                  json.dumps(local_ids, ensure_ascii=False),
                  json.dumps(body.proxies, ensure_ascii=False),
                  body.url, body.interval, body.timeout, body.tolerance,
                  int(body.lazy), body.strategy,
-                 json.dumps(body.targets, ensure_ascii=False), now, now),
+                 json.dumps(body.targets, ensure_ascii=False), int(body.local_first),
+                 now, now),
             )
             security.audit(conn, user["username"], "新增策略组", "group", cur.lastrowid,
                            {"name": body.name})
@@ -166,14 +171,14 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
             "local_nodes=?, proxies=?, url=?, interval=?, timeout=?, tolerance=?, "
-            "lazy=?, strategy=?, targets=?, updated_at=? WHERE id=?",
+            "lazy=?, strategy=?, targets=?, local_first=?, updated_at=? WHERE id=?",
             (body.name, body.type, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
              json.dumps(local_ids, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance, int(body.lazy),
              body.strategy, json.dumps(body.targets, ensure_ascii=False),
-             db.now(), gid),
+             int(body.local_first), db.now(), gid),
         )
         security.audit(conn, user["username"], "更新策略组", "group", gid,
                        {"name": body.name})

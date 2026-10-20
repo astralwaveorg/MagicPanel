@@ -48,6 +48,7 @@ def collect_snapshot(conn) -> dict:
          "local_nodes": json.loads(r["local_nodes"] or "[]"),
          "proxies": json.loads(r["proxies"] or "[]"), "url": r["url"],
          "targets": json.loads(r["targets"] or "[]"),
+         "local_first": bool(r["local_first"]) if "local_first" in r.keys() else False,
          "interval": r["interval"], "timeout": r["timeout"],
          "tolerance": r["tolerance"], "lazy": bool(r["lazy"]),
          "strategy": r["strategy"]}
