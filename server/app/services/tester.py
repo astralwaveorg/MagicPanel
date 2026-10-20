@@ -208,6 +208,28 @@ def install_core_from_upload(blob: bytes) -> dict:
     return _verify_and_replace(_extract_upload(blob))
 
 
+# 核心校验使用固定工作目录：Geo 数据一旦下载成功即可长期复用，
+# 不会每次校验都重新下载（重复下载既慢又可能因网络不可达而挂起）。
+VALIDATE_WORKDIR = config.DATA_DIR / "core-work"
+
+# 配置里出现这些引用时，核心需要对应的 Geo 数据文件
+GEO_FILES = (
+    ("geosite:", "geosite.dat", "GeoSite.dat"),
+    ("geoip:", "geoip.dat", "GeoIP.dat"),
+    ("mmdb", "country.mmdb", "Country.mmdb"),
+)
+
+
+def missing_geo_file(text: str) -> str:
+    """返回配置所需但本地缺失的 Geo 数据文件名；都不缺时返回空串。"""
+    workdir = VALIDATE_WORKDIR
+    existing = {p.name.lower() for p in workdir.iterdir()} if workdir.exists() else set()
+    for marker, filename, label in GEO_FILES:
+        if marker in text and filename.lower() not in existing:
+            return label
+    return ""
+
+
 def validate_config(text: str, feed_placeholder: str = "https://127.0.0.1") -> tuple[bool, str]:
     """用核心执行配置检查（mihomo -t）。
 
@@ -217,13 +239,20 @@ def validate_config(text: str, feed_placeholder: str = "https://127.0.0.1") -> t
     status = core_status()
     if not status["available"]:
         return False, ""
-    workdir = Path(tempfile.mkdtemp(prefix="mihomo-validate-", dir=config.DATA_DIR))
+    missing = missing_geo_file(text)
+    if missing:
+        # 缺 Geo 数据时核心会尝试联网下载，境内常常下载不动并挂到超时；
+        # 这里提前给出可执行的提示，而不是干等超时。
+        return True, (f"核心校验缺少 {missing}（配置里用到了 geosite:/geoip: 等引用），"
+                      "请把该数据文件放到 data/core-work/ 后重试，"
+                      "或把这些引用改成显式域名")
+    VALIDATE_WORKDIR.mkdir(parents=True, exist_ok=True)
+    cfg = VALIDATE_WORKDIR / "config.yaml"
     try:
-        cfg = workdir / "config.yaml"
         cfg.write_text(text.replace("{FEED}", feed_placeholder), encoding="utf-8")
         try:
             out = subprocess.run(
-                [str(core_path()), "-d", str(workdir), "-t", "-f", str(cfg)],
+                [str(core_path()), "-d", str(VALIDATE_WORKDIR), "-t", "-f", str(cfg)],
                 capture_output=True, text=True, timeout=30,
             )
         except subprocess.TimeoutExpired:
@@ -233,7 +262,10 @@ def validate_config(text: str, feed_placeholder: str = "https://127.0.0.1") -> t
             return True, "核心校验未通过：" + (tail[-1] if tail else "未知错误")
         return True, ""
     finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+        try:
+            cfg.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _free_port() -> int:
