@@ -19,7 +19,7 @@
               </div>
             </template>
             <div v-else style="font-size:13px;color:var(--mp-text-secondary)">
-              尚未发布。在 <strong>构建与发布</strong> 中创建候选构建并发布后，设备才能拉取配置。
+              尚未发布。在 <strong>构建发布</strong> 中创建候选构建并发布后，设备才能拉取配置。
             </div>
           </div>
         </el-col>
@@ -92,7 +92,7 @@
       <EmptyState
         v-if="!data.devices?.length"
         reason="还没有设备。"
-        next="前往“设备”添加设备，取得固定订阅地址。"
+        next="前往“设备管理”添加设备，取得固定订阅地址。"
       />
       <div v-else class="mp-table-wrap">
         <el-table :data="data.devices" size="small">

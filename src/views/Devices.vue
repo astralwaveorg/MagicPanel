@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2 class="mp-page-title">设备</h2>
+    <h2 class="mp-page-title">设备管理</h2>
     <p class="mp-page-desc">
       每台设备一个固定订阅地址；令牌泄露可轮换使其失效，已下发的节点凭据需联系机场重置。
     </p>

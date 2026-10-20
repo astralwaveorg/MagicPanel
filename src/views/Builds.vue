@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2 class="mp-page-title">构建与发布</h2>
+    <h2 class="mp-page-title">构建发布</h2>
     <p class="mp-page-desc">
       构建把当前策略固化为不可变候选并逐目标校验；发布只移动通道指针，失败构建不能发布。
       回滚后客户端需下一次拉取才生效。
