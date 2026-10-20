@@ -10,6 +10,7 @@
 | [总体设计](network/Home-Proxy-Architecture.md) | 已购买 Stash：Windows + 两台 Mac、家庭路径、云端统一与故障隔离 |
 | [客户端选型与兼容性](network/Client-Selection-and-Compatibility.md) | 开放比较、授权、Stash／Mihomo 差异、完整配置更新与验收 |
 | [远程配置管理实现规格](development/MagicPanel-开发规格.md) | MagicPanel 已实现代码的架构、数据模型、编译校验、发布流水线、订阅协议与安全模型 |
+| [构建与发布：产物构成与可变边界](development/MagicPanel-构建与发布-产物构成.md) | 一次构建固化了什么、发布动了什么、产物里哪些固定/哪些实时、谁能改什么、什么时候生效 |
 | [Mac mini 服务与迁移方案](network/Mac-mini-LAN-Proxy-Plan.md) | 稳定端口、NAS 消费层、手动接入、切换／回退与验收 |
 | [R6S 安全稳定性审阅](network/audits/R6S-Security-Stability-Review.md) | 只读检查证据、问题优先级与待审核建议，不是整改记录 |
 | [MacBook 代理卸载记录](network/audits/MacBook-Proxy-Cleanup.md) | 本机仅保留 Stash；旧 Surge 扩展已终止，待正常重启删除 |
