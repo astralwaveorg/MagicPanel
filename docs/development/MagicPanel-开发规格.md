@@ -66,7 +66,8 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 5. 引擎方言差异（依据 Stash 与 Mihomo 官方文档）：远程代理集 —— Stash 用 `headers` + `benchmark-url` / `benchmark-timeout`，Mihomo 用 `header` + `health-check`；策略组 —— Stash 无 `url` / `timeout`（测速参数来自节点与集合级 `benchmark-url`），`load-balance` 的 `strategy` 只输出 `consistent-hashing` / `round-robin`，Mihomo 另支持 `sticky-sessions`；本地单节点 —— Stash 的 Hysteria2 用 `auth` + `up-speed` / `down-speed`、TUIC 必须带 `version`，Mihomo 用 `password` + `up` / `down`；`udp` 只在官方有文档的引擎输出。
 6. 静态校验：YAML 往返、策略组引用存在性、循环引用检测、空组、本地节点引用、规则目标存在性、RULE-SET 引用、正则合法性、兜底 MATCH 存在、重复规则提示。任一错误使构建失败且不可发布。
 7. 基础配置保护：基础配置与目标扩展都不得写入 `proxies` / `proxy-providers` / `proxy-groups` / `rule-providers` / `rules`（列表是“追加”语义，写在兜底规则之后永不生效且会绕过引用校验）。
-8. 校验边界：Mihomo 目标在测速核心已安装时追加官方配置检查（`mihomo -t -f`，`{FEED}` 占位替换为回环地址，不发生真实请求），通过标记为“核心校验通过，实机行为待验收”；Stash 没有官方无头校验工具，结果只能标记为“静态通过，实机待验收”。
+8. 面板域名置顶直连规则（`DOMAIN-SUFFIX,{FEED_HOST},DIRECT`）由基础配置里的应用级伪键 `_panel_direct_rule` 控制（默认开启，伪键不写入产物）；`空组保护` 占位节点恒定注入，属安全兜底，不提供开关。
+9. 校验边界：Mihomo 目标在测速核心已安装时追加官方配置检查（`mihomo -t -f`，`{FEED}` 占位替换为回环地址，不发生真实请求），通过标记为“核心校验通过，实机行为待验收”；Stash 没有官方无头校验工具，结果只能标记为“静态通过，实机待验收”。
 
 ## 节点测速与不可用过滤
 

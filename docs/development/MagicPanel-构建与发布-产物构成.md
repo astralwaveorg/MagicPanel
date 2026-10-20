@@ -65,7 +65,7 @@
 | `proxy-providers` | 每个启用来源的 HTTP provider 条目：url=`{FEED}/res/provider/<名称>`、path、interval、UA、filter；Stash 用 `benchmark-url`/`benchmark-timeout`，Mihomo 用 `health-check` | `sources` 表 | ✅ 可改名称/UA/间隔/客户端间隔/过滤/启用 | 下次构建（条目参数） |
 | `proxy-groups` | 组名、类型、成员（组名 / DIRECT / REJECT / `[单] xxx`）、`use` 来源、filter、interval/tolerance/lazy/hidden；`url`/`timeout` 与 `strategy` 按引擎输出 | `proxy_groups` 表 | ✅ 可改 | 下次构建 |
 | `rule-providers` | 每个启用规则来源的条目：url=`{FEED}/res/rule/<名称>`、path、behavior、interval、format | `rule_providers` 表 | ✅ 可改 | 下次构建（条目参数） |
-| `rules` | ①**置顶** `DOMAIN-SUFFIX,{FEED_HOST},DIRECT`（面板域名强制直连，防 VPN 运行中更新配置失败）②用户规则按顺序 | 规则表 + 编译器置顶 | ✅ 规则可改 / ❌ 置顶那条不可改 | 下次构建 |
+| `rules` | ①**置顶** `DOMAIN-SUFFIX,{FEED_HOST},DIRECT`（面板域名强制直连，防 VPN 运行中更新配置失败）②用户规则按顺序 | 规则表 + 编译器置顶 | ✅ 规则可改 / ⚠️ 置顶那条可在「产物配置」里用 `_panel_direct_rule` 开关 | 下次构建 |
 | `dns` | 仅 Mihomo 目标：fake-ip、DNS 服务器、nameserver-policy、fake-ip-filter | 基础配置优先，未配置时用内置默认值 | ✅ 可改 | 下次构建 |
 | 合并后的功能模块 | 启用的 snippets 按 engine 匹配后合并：字典递归、列表追加、标量覆盖 | `snippets` 表 | ✅ 可改 | 下次构建 |
 | 目标扩展覆盖 | 目标级 `extra_yaml` 合并，**优先级最高** | `targets` 表 | ✅ 可改 | 下次构建 |
