@@ -6,7 +6,16 @@
     </p>
 
     <div class="mp-toolbar">
-      <div class="left"></div>
+      <div class="left">
+        <template v-if="selected.length">
+          <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
+          <el-button @click="openBatch">批量修改</el-button>
+          <el-button @click="batchEnable(true)">批量启用</el-button>
+          <el-button @click="batchEnable(false)">批量停用</el-button>
+          <el-button type="danger" plain @click="removeSelected">批量删除</el-button>
+          <el-button link @click="clearSelection">取消选择</el-button>
+        </template>
+      </div>
       <el-button type="primary" @click="openEdit()">添加规则</el-button>
     </div>
 
@@ -20,7 +29,9 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id">
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+                  @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="44" fixed />
           <el-table-column label="顺序" width="104" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
@@ -87,10 +98,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="适用引擎平台（不选 = 全部）">
-          <el-select v-model="form.targets" multiple style="width:100%"
-                     placeholder="不选表示适用于全部目标">
-            <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
-          </el-select>
+          <MultiSelectClear :has-value="form.targets.length" @clear="form.targets = []">
+            <el-select v-model="form.targets" multiple style="width:100%"
+                       placeholder="不选表示适用于全部目标">
+              <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
+            </el-select>
+          </MultiSelectClear>
           <div class="mp-form-hint">
             只在选中的引擎平台里生效；若该规则指向的策略组不适用于同一平台，规则会被自动剔除。
           </div>
@@ -110,6 +123,60 @@
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchDialog" title="批量修改分流规则" width="min(560px, 94vw)">
+      <p class="mp-dialog-desc">
+        将选中的 {{ selected.length }} 条规则按下面的设置统一修改。
+        只勾选的项会生效：勾上但没选内容 = 清空该项；不勾 = 保持原样。
+      </p>
+      <el-form :model="batch" label-position="top">
+        <el-form-item>
+          <el-checkbox v-model="batch.useTarget">修改目标</el-checkbox>
+        </el-form-item>
+        <el-select v-if="batch.useTarget" v-model="batch.target" filterable style="width:100%"
+                   placeholder="选择统一的出站">
+          <el-option v-for="g in groups" :key="g.name" :value="g.name" :label="g.name" />
+          <el-option value="DIRECT" label="DIRECT（直连）" />
+          <el-option value="REJECT" label="REJECT（拒绝）" />
+        </el-select>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useTargets">修改适用引擎平台</el-checkbox>
+        </el-form-item>
+        <MultiSelectClear v-if="batch.useTargets"
+                          :has-value="batch.targets.length" @clear="batch.targets = []">
+          <el-select v-model="batch.targets" multiple style="width:100%"
+                     placeholder="不选即清空（改为适用于全部）">
+            <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
+          </el-select>
+        </MultiSelectClear>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useEnabled">修改启用状态</el-checkbox>
+        </el-form-item>
+        <el-radio-group v-if="batch.useEnabled" v-model="batch.enabled">
+          <el-radio :value="true">启用</el-radio>
+          <el-radio :value="false">停用</el-radio>
+        </el-radio-group>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useNote">修改备注</el-checkbox>
+        </el-form-item>
+        <el-input v-if="batch.useNote" v-model="batch.note" placeholder="留空即清空备注" />
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useNoResolve">修改 no-resolve</el-checkbox>
+        </el-form-item>
+        <el-radio-group v-if="batch.useNoResolve" v-model="batch.no_resolve">
+          <el-radio :value="true">是</el-radio>
+          <el-radio :value="false">否</el-radio>
+        </el-radio-group>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchDialog = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" @click="saveBatch">应用</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -121,6 +188,7 @@ import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
+import MultiSelectClear from '../components/MultiSelectClear.vue'
 import ErrorState from '../components/ErrorState.vue'
 
 // 与后端 config.RULE_TYPES 保持一致（少一种就会导致该类型根本建不出来）
@@ -131,6 +199,16 @@ const ruleTypes = [
 ]
 
 const rows = ref([])
+const selected = ref([])
+const batchDialog = ref(false)
+const batchSaving = ref(false)
+const batch = reactive({
+  useTarget: false, target: '',
+  useTargets: false, targets: [],
+  useEnabled: false, enabled: true,
+  useNote: false, note: '',
+  useNoResolve: false, no_resolve: false,
+})
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)
@@ -243,6 +321,95 @@ async function remove(row) {
   try {
     await api(`/api/v1/rules/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+function onSelectionChange(selection) {
+  selected.value = selection
+}
+
+function clearSelection() {
+  selected.value = []
+  tableRef.value?.clearSelection()
+}
+
+function openBatch() {
+  if (!selected.value.length) return
+  batch.useTarget = false; batch.target = ''
+  batch.useTargets = false; batch.targets = []
+  batch.useEnabled = false; batch.enabled = true
+  batch.useNote = false; batch.note = ''
+  batch.useNoResolve = false; batch.no_resolve = false
+  batchDialog.value = true
+}
+
+async function saveBatch() {
+  if (!selected.value.length) return
+  const payload = { ids: selected.value.map((r) => r.id) }
+  if (batch.useTarget) payload.target = batch.target
+  if (batch.useTargets) payload.targets = batch.targets
+  if (batch.useEnabled) payload.enabled = batch.enabled
+  if (batch.useNote) payload.note = batch.note
+  if (batch.useNoResolve) payload.no_resolve = batch.no_resolve
+  const keys = Object.keys(payload).filter((k) => k !== 'ids')
+  if (!keys.length) {
+    ElMessage.warning('请至少勾选一项要修改的内容')
+    return
+  }
+  batchSaving.value = true
+  try {
+    const resp = await api('/api/v1/rules/batch', { method: 'PATCH', body: payload })
+    batchDialog.value = false
+    ElMessage.success(`已更新 ${resp.updated} 条分流规则`)
+    if (resp.skipped?.length) {
+      ElMessage.warning(resp.skipped.map((s) => `${s.name}：${s.reason}`).join('；'), { duration: 8000 })
+    }
+    clearSelection()
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    batchSaving.value = false
+  }
+}
+
+async function batchEnable(enabled) {
+  if (!selected.value.length) return
+  try {
+    const resp = await api('/api/v1/rules/batch', {
+      method: 'PATCH',
+      body: { ids: selected.value.map((r) => r.id), enabled },
+    })
+    ElMessage.success(`已${enabled ? '启用' : '停用'} ${resp.updated} 条规则`)
+    clearSelection()
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function removeSelected() {
+  if (!selected.value.length) return
+  const ids = selected.value.map((r) => r.id)
+  const ok = await confirmBox(
+    `删除选中的 ${ids.length} 条分流规则？兜底规则（MATCH / FINAL）不会被删除。`,
+    '批量删除分流规则', { type: 'warning', confirmButtonText: '删除' })
+  if (!ok) return
+  try {
+    const resp = await api('/api/v1/rules/batch/delete', {
+      method: 'POST', body: { ids },
+    })
+    if (resp.blocked?.length) {
+      ElMessage.warning(
+        `已删除 ${resp.deleted.length} 条；${resp.blocked.length} 条未删：`
+        + resp.blocked.map((b) => `${b.name}（${b.reason}）`).join('；'), { duration: 9000 })
+    } else {
+      ElMessage.success(`已删除 ${resp.deleted.length} 条分流规则`)
+    }
+    clearSelection()
     await load()
   } catch (e) {
     ElMessage.error(e.message)

@@ -2063,3 +2063,105 @@ def test_guard_proxy_is_last_member_of_auto_groups(client):
         members = g.get("proxies") or []
         if "空组保护" in members:
             assert members[-1] == "空组保护", (g["name"], members)
+
+
+def test_batch_update_and_delete_groups(client):
+    """策略组批量修改 / 批量删除。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    ids = []
+    for i in range(3):
+        r = client.post("/api/v1/groups", headers=h, json={
+            "name": f"批组{i}", "type": "select", "proxies": ["DIRECT"]})
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+    # 批量改：只提交 use_sources 与 hidden，其余不动
+    r = client.patch("/api/v1/groups/batch", headers=h, json={
+        "ids": ids[:2], "use_sources": ["测试机场"], "hidden": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 2
+    g = client.get("/api/v1/groups", headers=h).json()
+    by_name = {x["name"]: x for x in g}
+    assert by_name["批组0"]["use_sources"] == ["测试机场"]
+    assert by_name["批组0"]["hidden"] is True
+    assert by_name["批组2"]["use_sources"] == []      # 没选中的不动
+    assert by_name["批组2"]["hidden"] is False
+    # 空列表 = 清空
+    r = client.patch("/api/v1/groups/batch", headers=h, json={
+        "ids": ids[:2], "use_sources": []})
+    assert r.status_code == 200, r.text
+    g = client.get("/api/v1/groups", headers=h).json()
+    assert {x["name"]: x for x in g}["批组0"]["use_sources"] == []
+    # relay 组不接受节点来源 → 跳过并说明
+    relay = client.post("/api/v1/groups", headers=h, json={
+        "name": "链组", "type": "relay", "proxies": ["DIRECT", "REJECT"]}).json()
+    r = client.patch("/api/v1/groups/batch", headers=h, json={
+        "ids": [relay["id"]], "use_sources": ["测试机场"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["updated"] == 0
+    assert body["skipped"] and "relay" in body["skipped"][0]["reason"]
+    # 批量删除：被规则引用的保留
+    r = client.post("/api/v1/groups/batch/delete", headers=h, json={
+        "ids": [ids[0], ids[2]]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deleted"] == [ids[0], ids[2]]
+    # 字段全空 → 400
+    assert client.patch("/api/v1/groups/batch", headers=h, json={
+        "ids": ids[:2]}).status_code == 400
+
+
+def test_batch_update_and_delete_rules(client):
+    """分流规则批量修改 / 批量删除（兜底规则不删）。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    ids = []
+    for i in range(3):
+        r = client.post("/api/v1/rules", headers=h, json={
+            "type": "DOMAIN-SUFFIX", "value": f"batch{i}.example.com",
+            "target": "节点选择"})
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+    # 批量改目标 + 停用
+    r = client.patch("/api/v1/rules/batch", headers=h, json={
+        "ids": ids[:2], "target": "地区自动", "enabled": False, "note": "批量备注"})
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 2
+    rules = client.get("/api/v1/rules", headers=h).json()
+    by_value = {x["value"]: x for x in rules}
+    assert by_value["batch0.example.com"]["target"] == "地区自动"
+    assert by_value["batch0.example.com"]["enabled"] is False
+    assert by_value["batch0.example.com"]["note"] == "批量备注"
+    assert by_value["batch2.example.com"]["target"] == "节点选择"   # 未选中不动
+    # 目标不存在 → 跳过
+    r = client.patch("/api/v1/rules/batch", headers=h, json={
+        "ids": ids[:1], "target": "不存在的组"})
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 0
+    assert r.json()["skipped"]
+    # 批量删除：MATCH 兜底不删
+    final_id = next(x["id"] for x in rules if x["type"] == "MATCH")
+    r = client.post("/api/v1/rules/batch/delete", headers=h, json={
+        "ids": ids + [final_id]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body["deleted"]) == set(ids)
+    assert any(b["id"] == final_id for b in body["blocked"])
+
+
+def test_batch_group_update_drops_self_reference(client):
+    """批量修改包含策略时，不能把组自己加进自己的成员里。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    gid = client.post("/api/v1/groups", headers=h, json={
+        "name": "自环组", "type": "select", "proxies": ["DIRECT"]}).json()["id"]
+    r = client.patch("/api/v1/groups/batch", headers=h, json={
+        "ids": [gid], "proxies": ["自环组", "DIRECT"]})
+    assert r.status_code == 200, r.text
+    g = client.get("/api/v1/groups", headers=h).json()
+    members = next(x for x in g if x["name"] == "自环组")["proxies"]
+    assert "自环组" not in members
+    assert "DIRECT" in members

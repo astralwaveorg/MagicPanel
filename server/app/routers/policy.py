@@ -207,6 +207,248 @@ def delete_group(gid: int, user=CurrentUser):
     return {"ok": True}
 
 
+# ---- 批量操作 ----
+
+class BatchIds(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+class BatchGroupPatch(BaseModel):
+    """批量修改策略组。字段为 null 表示不修改；空列表表示清空。"""
+    ids: list[int] = Field(default_factory=list)
+    proxies: list[str] | None = None
+    targets: list[str] | None = None
+    local_nodes: list[int] | None = None
+    use_sources: list[str] | None = None
+    filter: str | None = None
+    hidden: bool | None = None
+    local_first: bool | None = None
+
+
+class BatchRulePatch(BaseModel):
+    """批量修改分流规则。字段为 null 表示不修改；空列表表示清空。"""
+    ids: list[int] = Field(default_factory=list)
+    target: str | None = None
+    targets: list[str] | None = None
+    enabled: bool | None = None
+    note: str | None = None
+    no_resolve: bool | None = None
+
+
+@router.patch("/groups/batch")
+def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
+    """批量修改策略组的共性配置。
+
+    - 只改提交了的字段（null = 不改，空列表 = 清空）；
+    - relay 组不支持"节点来源"，这类组会被跳过并在 skipped 里说明；
+    - 引用了不存在策略组的成员会被剔除，避免产物加载失败。
+    """
+    ids = list(dict.fromkeys(body.ids))
+    if not ids:
+        raise HTTPException(400, "请先选择要修改的策略组")
+    if body.proxies is None and body.targets is None and body.local_nodes is None \
+            and body.use_sources is None and body.filter is None \
+            and body.hidden is None and body.local_first is None:
+        raise HTTPException(400, "请至少选择一个要修改的字段")
+    updated = 0
+    skipped: list[dict] = []
+    missing: list[int] = []
+    with db.tx() as conn:
+        group_names = {r["name"] for r in db.all_(conn, "SELECT name FROM proxy_groups")}
+        source_names = {r["name"] for r in db.all_(conn, "SELECT name FROM sources")}
+        local_ids = {int(r["id"]) for r in db.all_(
+            conn, "SELECT id FROM local_nodes WHERE enabled=1")}
+        target_names = {r["name"] for r in db.all_(conn, "SELECT name FROM targets")}
+        for gid in ids:
+            row = db.one(conn, "SELECT * FROM proxy_groups WHERE id=?", (gid,))
+            if not row:
+                missing.append(gid)
+                continue
+            fields: list[str] = []
+            args: list = []
+            notes: list[str] = []
+            if body.proxies is not None:
+                # 剔除不存在的成员，并剔除指向自己的引用（自引用客户端加载会失败）
+                keep = [p for p in body.proxies
+                        if (p in group_names and p != row["name"])
+                        or p in config.BUILTIN_TARGETS]
+                dropped = len(body.proxies) - len(keep)
+                if dropped:
+                    notes.append(f"剔除了 {dropped} 个不存在或指向自己的成员引用")
+                fields.append("proxies=?")
+                args.append(json.dumps(keep, ensure_ascii=False))
+            if body.targets is not None:
+                keep = [t for t in body.targets if t in target_names]
+                if len(keep) != len(body.targets):
+                    notes.append("剔除了不存在的引擎平台")
+                fields.append("targets=?")
+                args.append(json.dumps(keep, ensure_ascii=False))
+            if body.local_nodes is not None:
+                keep = [i for i in body.local_nodes if i in local_ids]
+                if len(keep) != len(body.local_nodes):
+                    notes.append("剔除了不存在或已停用的本地节点")
+                fields.append("local_nodes=?")
+                args.append(json.dumps(keep, ensure_ascii=False))
+            if body.use_sources is not None:
+                if row["type"] == "relay":
+                    skipped.append({"id": gid, "name": row["name"],
+                                    "reason": "relay 组不支持节点来源，已跳过该字段"})
+                else:
+                    keep = [s for s in body.use_sources if s in source_names]
+                    if len(keep) != len(body.use_sources):
+                        notes.append("剔除了不存在的节点来源")
+                    fields.append("use_sources=?")
+                    args.append(json.dumps(keep, ensure_ascii=False))
+            if body.filter is not None:
+                fields.append("filter=?")
+                args.append(body.filter.strip())
+            if body.hidden is not None:
+                fields.append("hidden=?")
+                args.append(int(body.hidden))
+            if body.local_first is not None:
+                fields.append("local_first=?")
+                args.append(int(body.local_first))
+            if not fields:
+                continue
+            fields.append("updated_at=?")
+            conn.execute(
+                f"UPDATE proxy_groups SET {', '.join(fields)} WHERE id=?",
+                (*args, db.now(), gid))
+            updated += 1
+            if notes:
+                skipped.append({"id": gid, "name": row["name"],
+                                "reason": "；".join(notes)})
+        security.audit(conn, user["username"], "批量修改策略组", "group",
+                       ",".join(str(i) for i in ids),
+                       {"proxies": body.proxies, "targets": body.targets,
+                        "local_nodes": body.local_nodes,
+                        "use_sources": body.use_sources, "filter": body.filter,
+                        "hidden": body.hidden})
+    return {"ok": True, "updated": updated, "missing": missing, "skipped": skipped}
+
+
+@router.post("/groups/batch/delete")
+def batch_delete_groups(body: BatchIds, user=CurrentUser):
+    """批量删除策略组：被其它组或规则引用的保留并说明原因。"""
+    deleted: list[int] = []
+    blocked: list[dict] = []
+    with db.tx() as conn:
+        for gid in dict.fromkeys(body.ids):
+            row = db.one(conn, "SELECT * FROM proxy_groups WHERE id=?", (gid,))
+            if not row:
+                blocked.append({"id": gid, "name": f"#{gid}",
+                                "reason": "策略组不存在（可能已被删除）"})
+                continue
+            refs = [g["name"] for g in db.all_(
+                conn, "SELECT id, name, proxies FROM proxy_groups")
+                if g["id"] != gid and row["name"] in json.loads(g["proxies"] or "[]")]
+            if refs:
+                blocked.append({"id": gid, "name": row["name"],
+                                "reason": f"仍被策略组引用：{'、'.join(refs)}"})
+                continue
+            used = db.one(conn, "SELECT COUNT(*) AS c FROM rules WHERE target=?",
+                          (row["name"],))["c"]
+            if used:
+                blocked.append({"id": gid, "name": row["name"],
+                                "reason": f"仍有 {used} 条分流规则指向该策略组"})
+                continue
+            conn.execute("DELETE FROM proxy_groups WHERE id=?", (gid,))
+            deleted.append(gid)
+            security.audit(conn, user["username"], "批量删除策略组", "group", gid,
+                           {"name": row["name"]})
+    return {"ok": True, "deleted": deleted, "blocked": blocked}
+
+
+@router.patch("/rules/batch")
+def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
+    """批量修改分流规则的共性配置（目标、适用平台、启用状态、备注、no-resolve）。"""
+    ids = list(dict.fromkeys(body.ids))
+    if not ids:
+        raise HTTPException(400, "请先选择要修改的分流规则")
+    if body.target is None and body.targets is None and body.enabled is None \
+            and body.note is None and body.no_resolve is None:
+        raise HTTPException(400, "请至少选择一个要修改的字段")
+    updated = 0
+    skipped: list[dict] = []
+    missing: list[int] = []
+    with db.tx() as conn:
+        group_names = {r["name"] for r in db.all_(conn, "SELECT name FROM proxy_groups")}
+        target_names = {r["name"] for r in db.all_(conn, "SELECT name FROM targets")}
+        for rid in ids:
+            row = db.one(conn, "SELECT * FROM rules WHERE id=?", (rid,))
+            if not row:
+                missing.append(rid)
+                continue
+            fields: list[str] = []
+            args: list = []
+            notes: list[str] = []
+            if body.target is not None:
+                if body.target not in group_names \
+                        and body.target not in config.BUILTIN_TARGETS:
+                    notes.append(f"目标“{body.target}”不存在，已跳过")
+                else:
+                    fields.append("target=?")
+                    args.append(body.target)
+            if body.targets is not None:
+                keep = [t for t in body.targets if t in target_names]
+                if len(keep) != len(body.targets):
+                    notes.append("剔除了不存在的引擎平台")
+                fields.append("targets=?")
+                args.append(json.dumps(keep, ensure_ascii=False))
+            if body.enabled is not None:
+                fields.append("enabled=?")
+                args.append(int(body.enabled))
+            if body.note is not None:
+                fields.append("note=?")
+                args.append(body.note)
+            if body.no_resolve is not None:
+                fields.append("no_resolve=?")
+                args.append(int(body.no_resolve))
+            if not fields:
+                if notes:
+                    skipped.append({"id": rid,
+                                    "name": f"{row['type']},{row['value'][:24]}",
+                                    "reason": "；".join(notes)})
+                continue
+            fields.append("updated_at=?")
+            conn.execute(
+                f"UPDATE rules SET {', '.join(fields)} WHERE id=?",
+                (*args, db.now(), rid))
+            updated += 1
+            if notes:
+                skipped.append({"id": rid, "name": f"{row['type']},{row['value'][:24]}",
+                                "reason": "；".join(notes)})
+        security.audit(conn, user["username"], "批量修改分流规则", "rule",
+                       ",".join(str(i) for i in ids),
+                       {"target": body.target, "targets": body.targets,
+                        "enabled": body.enabled, "note": body.note})
+    return {"ok": True, "updated": updated, "missing": missing, "skipped": skipped}
+
+
+@router.post("/rules/batch/delete")
+def batch_delete_rules(body: BatchIds, user=CurrentUser):
+    """批量删除分流规则：兜底规则（MATCH / FINAL）不删，删了设备就没有兜底了。"""
+    deleted: list[int] = []
+    blocked: list[dict] = []
+    with db.tx() as conn:
+        for rid in dict.fromkeys(body.ids):
+            row = db.one(conn, "SELECT * FROM rules WHERE id=?", (rid,))
+            if not row:
+                blocked.append({"id": rid, "name": f"#{rid}",
+                                "reason": "规则不存在（可能已被删除）"})
+                continue
+            if row["type"] in ("MATCH", "FINAL"):
+                blocked.append({"id": rid,
+                                "name": f"{row['type']},{row['value'][:24]}",
+                                "reason": "兜底规则不能批量删除，请先新增另一条兜底规则"})
+                continue
+            conn.execute("DELETE FROM rules WHERE id=?", (rid,))
+            deleted.append(rid)
+            security.audit(conn, user["username"], "批量删除分流规则", "rule", rid,
+                           {"rule": f"{row['type']},{row['value']}"})
+    return {"ok": True, "deleted": deleted, "blocked": blocked}
+
+
 @router.post("/groups/reorder")
 def reorder_groups(ids: list[int], user=CurrentUser):
     """列表已分页：按提交的这些 id 重排（它们之间按新顺序，其余记录不动）。"""

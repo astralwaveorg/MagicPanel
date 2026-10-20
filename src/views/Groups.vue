@@ -6,7 +6,14 @@
     </p>
 
     <div class="mp-toolbar">
-      <div class="left"></div>
+      <div class="left">
+        <template v-if="selected.length">
+          <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
+          <el-button @click="openBatch">批量修改</el-button>
+          <el-button type="danger" plain @click="removeSelected">批量删除</el-button>
+          <el-button link @click="clearSelection">取消选择</el-button>
+        </template>
+      </div>
       <el-button type="primary" @click="openEdit()">添加策略组</el-button>
     </div>
 
@@ -20,7 +27,9 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id">
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+                  @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="44" fixed />
           <el-table-column label="顺序" width="104" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
@@ -41,7 +50,7 @@
           <el-table-column label="隐藏" width="70">
             <template #default="{ row }">{{ row.hidden ? '隐藏' : '显示' }}</template>
           </el-table-column>
-          <el-table-column label="包含策略组" min-width="380">
+          <el-table-column label="包含策略" min-width="380">
             <template #default="{ row }">{{ row.proxies.join('、') || '—' }}</template>
           </el-table-column>
           <el-table-column label="节点来源" min-width="140">
@@ -87,28 +96,34 @@
         <el-form-item :label="form.type === 'relay'
           ? '成员（按顺序组成转发链，至少两个，仅限策略组、本地节点或 DIRECT / REJECT）'
           : '成员（其他策略组或 DIRECT / REJECT，按顺序）'">
-          <el-select v-model="form.proxies" multiple filterable allow-create default-first-option
-                     style="width:100%" placeholder="选择或输入">
-            <el-option v-for="g in otherGroups" :key="g" :label="g" :value="g" />
-            <el-option value="DIRECT" label="DIRECT（直连）" />
-            <el-option value="REJECT" label="REJECT（拒绝）" />
-          </el-select>
+          <MultiSelectClear :has-value="form.proxies.length" @clear="form.proxies = []">
+            <el-select v-model="form.proxies" multiple filterable allow-create default-first-option
+                       style="width:100%" placeholder="选择或输入">
+              <el-option v-for="g in otherGroups" :key="g" :label="g" :value="g" />
+              <el-option value="DIRECT" label="DIRECT（直连）" />
+              <el-option value="REJECT" label="REJECT（拒绝）" />
+            </el-select>
+          </MultiSelectClear>
         </el-form-item>
         <el-form-item label="适用引擎平台（不选 = 全部）">
-          <el-select v-model="form.targets" multiple style="width:100%"
-                     placeholder="不选表示适用于全部目标">
-            <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
-          </el-select>
+          <MultiSelectClear :has-value="form.targets.length" @clear="form.targets = []">
+            <el-select v-model="form.targets" multiple style="width:100%"
+                       placeholder="不选表示适用于全部目标">
+              <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
+            </el-select>
+          </MultiSelectClear>
           <div class="mp-form-hint">
             只在选中的引擎平台里出现该策略组；指向它的规则会随之生效。
           </div>
         </el-form-item>
         <el-form-item label="本地节点（单节点，可多选）">
-          <el-select v-model="form.local_nodes" multiple filterable style="width:100%">
-            <el-option v-for="n in localNodes" :key="n.id" :value="n.id"
-                       :disabled="!n.enabled"
-                       :label="`${n.marked_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
-          </el-select>
+          <MultiSelectClear :has-value="form.local_nodes.length" @clear="form.local_nodes = []">
+            <el-select v-model="form.local_nodes" multiple filterable style="width:100%">
+              <el-option v-for="n in localNodes" :key="n.id" :value="n.id"
+                         :disabled="!n.enabled"
+                         :label="`${n.marked_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
+            </el-select>
+          </MultiSelectClear>
           <div v-if="form.local_nodes.length" class="mp-form-hint">
             <el-checkbox v-model="form.local_first" style="margin-right:14px">
               本地节点排在最前
@@ -121,9 +136,11 @@
         </el-form-item>
         <template v-if="form.type !== 'relay'">
           <el-form-item label="节点来源（从来源中取节点，可多选）">
-            <el-select v-model="form.use_sources" multiple style="width:100%">
-              <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
-            </el-select>
+            <MultiSelectClear :has-value="form.use_sources.length" @clear="form.use_sources = []">
+              <el-select v-model="form.use_sources" multiple style="width:100%">
+                <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
+              </el-select>
+            </MultiSelectClear>
           </el-form-item>
           <el-form-item label="过滤正则（仅保留匹配的节点，可选）">
             <el-input v-model="form.filter" class="mono" />
@@ -170,6 +187,81 @@
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchDialog" title="批量修改策略组" width="min(620px, 94vw)">
+      <p class="mp-dialog-desc">
+        将选中的 {{ selected.length }} 个策略组按下面的设置统一修改。
+        只勾选的项会生效：勾上但没选内容 = 清空该项；不勾 = 保持原样。
+        relay 组不支持"节点来源"，这类组会自动跳过该字段。
+      </p>
+      <el-form :model="batch" label-position="top">
+        <el-form-item>
+          <el-checkbox v-model="batch.useProxies">修改包含策略</el-checkbox>
+        </el-form-item>
+        <MultiSelectClear v-if="batch.useProxies"
+                          :has-value="batch.proxies.length" @clear="batch.proxies = []">
+          <el-select v-model="batch.proxies" multiple filterable allow-create default-first-option
+                     style="width:100%" placeholder="选择或输入（留空即清空）">
+            <el-option v-for="g in otherGroups" :key="g" :label="g" :value="g" />
+            <el-option value="DIRECT" label="DIRECT（直连）" />
+            <el-option value="REJECT" label="REJECT（拒绝）" />
+          </el-select>
+        </MultiSelectClear>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useTargets">修改适用引擎平台</el-checkbox>
+        </el-form-item>
+        <MultiSelectClear v-if="batch.useTargets"
+                          :has-value="batch.targets.length" @clear="batch.targets = []">
+          <el-select v-model="batch.targets" multiple style="width:100%"
+                     placeholder="不选即清空（改为适用于全部）">
+            <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
+          </el-select>
+        </MultiSelectClear>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useLocalNodes">修改本地节点</el-checkbox>
+        </el-form-item>
+        <MultiSelectClear v-if="batch.useLocalNodes"
+                          :has-value="batch.local_nodes.length" @clear="batch.local_nodes = []">
+          <el-select v-model="batch.local_nodes" multiple filterable style="width:100%"
+                     placeholder="留空即清空">
+            <el-option v-for="n in localNodes" :key="n.id" :value="n.id"
+                       :disabled="!n.enabled"
+                       :label="`${n.marked_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
+          </el-select>
+        </MultiSelectClear>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useSources">修改节点来源</el-checkbox>
+        </el-form-item>
+        <MultiSelectClear v-if="batch.useSources"
+                          :has-value="batch.use_sources.length" @clear="batch.use_sources = []">
+          <el-select v-model="batch.use_sources" multiple style="width:100%"
+                     placeholder="留空即清空">
+            <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
+          </el-select>
+        </MultiSelectClear>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useFilter">修改过滤正则</el-checkbox>
+        </el-form-item>
+        <el-input v-if="batch.useFilter" v-model="batch.filter" class="mono"
+                  placeholder="留空即清空过滤正则" />
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useHidden">修改客户端可见性</el-checkbox>
+        </el-form-item>
+        <el-radio-group v-if="batch.useHidden" v-model="batch.hidden">
+          <el-radio :value="false">显示</el-radio>
+          <el-radio :value="true">隐藏</el-radio>
+        </el-radio-group>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchDialog = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" @click="saveBatch">应用</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -181,9 +273,21 @@ import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
+import MultiSelectClear from '../components/MultiSelectClear.vue'
 import ErrorState from '../components/ErrorState.vue'
 
 const rows = ref([])
+const selected = ref([])
+const batchDialog = ref(false)
+const batchSaving = ref(false)
+const batch = reactive({
+  useProxies: false, proxies: [],
+  useTargets: false, targets: [],
+  useLocalNodes: false, local_nodes: [],
+  useSources: false, use_sources: [],
+  useFilter: false, filter: '',
+  useHidden: false, hidden: false,
+})
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)
@@ -314,6 +418,83 @@ async function remove(row) {
   try {
     await api(`/api/v1/groups/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+function onSelectionChange(selection) {
+  selected.value = selection
+}
+
+function clearSelection() {
+  selected.value = []
+  tableRef.value?.clearSelection()
+}
+
+function openBatch() {
+  if (!selected.value.length) return
+  // 每次打开都重置：只保留"要改什么"的勾选，值取第一个选中项的当前值
+  batch.useProxies = false; batch.proxies = []
+  batch.useTargets = false; batch.targets = []
+  batch.useLocalNodes = false; batch.local_nodes = []
+  batch.useSources = false; batch.use_sources = []
+  batch.useFilter = false; batch.filter = ''
+  batch.useHidden = false; batch.hidden = false
+  batchDialog.value = true
+}
+
+async function saveBatch() {
+  if (!selected.value.length) return
+  const payload = { ids: selected.value.map((r) => r.id) }
+  if (batch.useProxies) payload.proxies = batch.proxies
+  if (batch.useTargets) payload.targets = batch.targets
+  if (batch.useLocalNodes) payload.local_nodes = batch.local_nodes
+  if (batch.useSources) payload.use_sources = batch.use_sources
+  if (batch.useFilter) payload.filter = batch.filter
+  if (batch.useHidden) payload.hidden = batch.hidden
+  const keys = Object.keys(payload).filter((k) => k !== 'ids')
+  if (!keys.length) {
+    ElMessage.warning('请至少勾选一项要修改的内容')
+    return
+  }
+  batchSaving.value = true
+  try {
+    const resp = await api('/api/v1/groups/batch', { method: 'PATCH', body: payload })
+    batchDialog.value = false
+    ElMessage.success(`已更新 ${resp.updated} 个策略组`)
+    if (resp.skipped?.length) {
+      ElMessage.warning(resp.skipped.map((s) => `${s.name}：${s.reason}`).join('；'), { duration: 8000 })
+    }
+    clearSelection()
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    batchSaving.value = false
+  }
+}
+
+async function removeSelected() {
+  if (!selected.value.length) return
+  const ids = selected.value.map((r) => r.id)
+  const ok = await confirmBox(
+    `删除选中的 ${ids.length} 个策略组？被其它策略组或分流规则引用的会保留并说明原因。`,
+    '批量删除策略组', { type: 'warning', confirmButtonText: '删除' })
+  if (!ok) return
+  try {
+    const resp = await api('/api/v1/groups/batch/delete', {
+      method: 'POST', body: { ids },
+    })
+    if (resp.blocked?.length) {
+      ElMessage.warning(
+        `已删除 ${resp.deleted.length} 个；${resp.blocked.length} 个被引用未删：`
+        + resp.blocked.map((b) => `${b.name}（${b.reason}）`).join('；'), { duration: 9000 })
+    } else {
+      ElMessage.success(`已删除 ${resp.deleted.length} 个策略组`)
+    }
+    clearSelection()
     await load()
   } catch (e) {
     ElMessage.error(e.message)
