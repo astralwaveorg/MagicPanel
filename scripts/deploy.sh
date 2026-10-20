@@ -22,6 +22,16 @@ if [ "$SKIP_TESTS" = "0" ]; then
   (cd server && ../.venv/bin/python -m pytest tests -q)
 fi
 
+echo "== 权限自检 =="
+# 容器以非 root 运行，镜像内文件必须对其他用户可读，否则启动即 PermissionError
+BAD=$(find server/app scripts -type f ! -perm -004 | grep -v __pycache__ || true)
+if [ -n "$BAD" ]; then
+  echo "以下文件缺少其他用户可读权限，会导致容器启动失败：" >&2
+  echo "$BAD" >&2
+  echo "修复：chmod 644 $BAD" >&2
+  exit 1
+fi
+
 echo "== 同步代码到 $NAS_HOST:$NAS_DIR =="
 # data 目录是线上持久化数据，排除且 --delete 不会触及
 rsync -az --delete \
