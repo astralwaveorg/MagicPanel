@@ -1,12 +1,15 @@
-"""产物基础配置：按「引擎默认 / 指定发布目标」维护的顶层键文档。
+"""产物基础配置：内置默认 → 通用配置 → 目标通用 → 设备专属 的多级联动。
 
-这是产物内容的最低优先级层：结构化内容（节点、策略组、分流规则）由各自页面维护，
-基础配置不允许覆盖；功能模块与发布目标扩展在其之上叠加。
+层级语义（后者覆盖前者）：
+① 内置默认：随程序发布，只读可见；
+② 通用配置：按引擎维护，作用于该引擎的全部目标与设备；
+③ 目标通用：按发布目标维护（可选中间层）；
+④ 设备专属：按设备维护，只对该设备最终下发的配置生效。
 
-作用范围：
-- `target` 为空：引擎默认，作用于该引擎的全部目标；
-- `target` 为某个发布目标名：该目标的专属基础配置，叠加在引擎默认之上
-  （字典递归、列表整体替换），保存后独立生效，不再随引擎默认变化。
+每层只保存"与上层不同"的差异，因此：
+- 上层默认值变化时，本层没显式改过的键会自动跟随；
+- "恢复默认"= 清空本层差异，回到继承上层；
+- 界面可以逐层展示"生效值来自哪一层"。
 """
 import json
 
@@ -30,11 +33,13 @@ class BaseConfigBody(BaseModel):
 class PreviewBody(BaseModel):
     engine: str = "stash"
     target: str = Field(default="", max_length=64)
+    device_id: int = 0
 
 
 class ApplyBody(BaseModel):
     engine: str = "stash"
     target: str = Field(default="", max_length=64)
+    device_id: int = 0
     content: str = Field(default="", max_length=200_000)
     channel: str = "stable"
     note: str = Field(default="", max_length=256)
@@ -46,37 +51,63 @@ def _engine(engine: str) -> str:
     return engine
 
 
-def _check_target(conn, engine: str, name: str) -> str:
-    """校验作用范围：目标必须存在且引擎一致；返回目标名（空 = 引擎默认）。"""
-    if not name:
-        return ""
-    row = db.one(conn, "SELECT * FROM targets WHERE name=?", (name,))
-    if not row:
-        raise HTTPException(404, "发布目标不存在")
-    if row["engine"] != engine:
-        raise HTTPException(400, f"发布目标“{name}”的引擎是 {row['engine']}，与所选引擎不一致")
-    return name
+def _check_scope(conn, engine: str, target: str, device_id: int) -> tuple[str, int]:
+    """校验作用域：目标与设备必须存在且与引擎一致。"""
+    target_name = target
+    if device_id:
+        dev = db.one(conn, "SELECT * FROM devices WHERE id=?", (device_id,))
+        if not dev:
+            raise HTTPException(404, "设备不存在")
+        row = db.one(conn, "SELECT * FROM targets WHERE id=?", (dev["target_id"],))
+        if not row:
+            raise HTTPException(400, "该设备关联的发布目标不存在")
+        if row["engine"] != engine:
+            raise HTTPException(400, f"设备所属目标“{row['name']}”的引擎是 {row['engine']}，与所选引擎不一致")
+        target_name = row["name"]
+    elif target:
+        row = db.one(conn, "SELECT * FROM targets WHERE name=?", (target,))
+        if not row:
+            raise HTTPException(404, "发布目标不存在")
+        if row["engine"] != engine:
+            raise HTTPException(400, f"发布目标“{target}”的引擎是 {row['engine']}，与所选引擎不一致")
+    return target_name, int(device_id or 0)
 
 
-def _load(conn, engine: str, target: str = "") -> tuple[str, dict, str]:
-    row = db.one(conn, "SELECT * FROM base_configs WHERE engine=? AND target=?",
-                 (engine, target))
+def _all_docs(conn) -> dict:
+    """读取全部作用域的覆盖文档，键为 (engine, target, device_id)。"""
+    docs: dict = {}
+    for row in db.all_(conn, "SELECT engine, target, device_id, content FROM base_configs"):
+        try:
+            docs[(row["engine"], row["target"] or "", int(row["device_id"] or 0))] = \
+                base_config_service.parse_content(row["content"])
+        except ValueError:
+            continue
+    return docs
+
+
+def _scope_key(target: str, device_id: int) -> tuple[str, int]:
+    """作用域存储键：设备专属用 ('', device_id)，其余用 (target, 0)。"""
+    if device_id:
+        return "", int(device_id)
+    return target or "", 0
+
+
+def _load_scope(conn, engine: str, target: str, device_id: int):
+    key_target, key_device = _scope_key(target, device_id)
+    row = db.one(
+        conn, "SELECT * FROM base_configs WHERE engine=? AND target=? AND device_id=?",
+        (engine, key_target, key_device))
     if not row:
-        doc = base_config_service.default_doc(engine)
-        return base_config_service.to_yaml(doc), doc, ""
+        return "", {}, ""
     try:
         doc = base_config_service.parse_content(row["content"])
     except ValueError:
-        doc = base_config_service.default_doc(engine)
+        doc = {}
     return row["content"], doc, row["updated_at"]
 
 
-def _is_default(engine: str, doc: dict, target: str = "") -> bool:
-    return base_config_service.normalize(doc) == \
-        base_config_service.normalize(base_config_service.default_doc(engine))
-
-
-def _save(conn, engine: str, target: str, content: str, operator: str) -> dict:
+def _save_scope(conn, engine: str, target: str, device_id: int,
+                content: str, operator: str) -> dict:
     try:
         doc = base_config_service.parse_content(content)
         base_config_service.validate_doc(doc)
@@ -84,15 +115,16 @@ def _save(conn, engine: str, target: str, content: str, operator: str) -> dict:
         raise HTTPException(400, str(exc))
     normalized = base_config_service.normalize(doc)
     text = base_config_service.to_yaml(normalized)
+    key_target, key_device = _scope_key(target, device_id)
     conn.execute(
-        "INSERT INTO base_configs(engine, target, content, updated_at) "
-        "VALUES(?,?,?,?) "
-        "ON CONFLICT(engine, target) DO UPDATE SET content=excluded.content, "
+        "INSERT INTO base_configs(engine, target, device_id, content, updated_at) "
+        "VALUES(?,?,?,?,?) "
+        "ON CONFLICT(engine, target, device_id) DO UPDATE SET content=excluded.content, "
         "updated_at=excluded.updated_at",
-        (engine, target, text, db.now()),
-    )
-    security.audit(conn, operator, "更新基础配置", "base_config",
-                   f"{engine}:{target or '默认'}", {"keys": sorted(normalized.keys())})
+        (engine, key_target, key_device, text, db.now()))
+    label = f"{engine}:{target or '通用'}:{device_id or 0}"
+    security.audit(conn, operator, "更新基础配置", "base_config", label,
+                   {"keys": sorted(normalized.keys())})
     return normalized
 
 
@@ -114,100 +146,155 @@ def get_schema(engine: str = "stash", user=CurrentUser):
 
 @router.get("/scopes")
 def list_scopes(user=CurrentUser):
-    """列出可用的作用范围：引擎默认 + 各发布目标。"""
+    """列出全部作用域（内置默认 / 通用配置 / 目标通用 / 设备专属）。"""
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT name, engine, platform, description "
-                             "FROM targets ORDER BY id")
-        saved = {(r["engine"], r["target"]) for r in db.all_(
-            conn, "SELECT engine, target FROM base_configs WHERE target<>''")}
+        docs = _all_docs(conn)
+        targets = db.all_(conn, "SELECT * FROM targets ORDER BY id")
+        devices = db.all_(conn, "SELECT * FROM devices ORDER BY id")
     scopes = []
     for engine in base_config_service.ENGINES:
-        scopes.append({"engine": engine, "target": "", "label": f"{engine} 引擎默认",
-                       "platform": "", "customized": (engine, "") in saved})
-    for row in rows:
         scopes.append({
-            "engine": row["engine"], "target": row["name"],
-            "label": f"{row['name']}（{row['platform']}）",
-            "platform": row["platform"],
-            "description": row["description"],
-            "customized": (row["engine"], row["name"]) in saved,
+            "kind": "builtin", "engine": engine, "target": "", "device_id": 0,
+            "label": f"{engine} 内置默认",
+            "detail": "程序内置，只读；作为该引擎全部配置的起点",
+            "customized": False,
+        })
+    for engine in base_config_service.ENGINES:
+        scopes.append({
+            "kind": "engine", "engine": engine, "target": "", "device_id": 0,
+            "label": f"{engine} 通用配置",
+            "detail": "覆盖内置默认，作用于该引擎的全部目标与设备",
+            "customized": bool(docs.get((engine, "", 0))),
+        })
+    for row in targets:
+        key = (row["engine"], row["name"], 0)
+        if docs.get(key):
+            scopes.append({
+                "kind": "target", "engine": row["engine"], "target": row["name"],
+                "device_id": 0, "label": f"{row['name']}（目标通用）",
+                "detail": row["description"] or "该发布目标专用的基础配置",
+                "customized": True,
+            })
+    for dev in devices:
+        target = next((t for t in targets if t["id"] == dev["target_id"]), None)
+        if not target:
+            continue
+        key = (target["engine"], "", int(dev["id"]))
+        scopes.append({
+            "kind": "device", "engine": target["engine"], "target": target["name"],
+            "device_id": int(dev["id"]),
+            "label": f"{dev['note'] or dev['name']}（设备专属）",
+            "detail": f"目标 {target['name']}；只影响这台设备",
+            "customized": bool(docs.get(key)),
         })
     return {"scopes": scopes}
 
 
 @router.get("")
-def get_base_config(engine: str = "stash", target: str = "",
+def get_base_config(engine: str = "stash", target: str = "", device_id: int = 0,
                     user=CurrentUser):
+    """返回该作用域的完整信息：继承值、本层差异、生效值、每个键的来源。"""
     engine = _engine(engine)
     with db.connect() as conn:
-        _check_target(conn, engine, target)
-        content, doc, updated_at = _load(conn, engine, target)
+        target_name, dev_id = _check_scope(conn, engine, target, device_id)
+        docs = _all_docs(conn)
+        _, overlay, updated_at = _load_scope(conn, engine, target_name, dev_id)
+    layers = base_config_service.scope_layers(engine, target_name, dev_id, docs)
+    inherited, _ = base_config_service.cascade(layers[:-1]) if len(layers) > 1 else ({}, {})
+    effective, sources = base_config_service.cascade(layers)
     return {
         "engine": engine,
-        "target": target,
-        "content": content,
-        "doc": base_config_service.normalize(doc),
+        "target": target_name,
+        "device_id": dev_id,
+        "inherited": inherited,
+        "overlay": overlay,
+        "effective": effective,
+        "sources": sources,
+        "layers": [{"label": label, "keys": sorted(doc.keys())} for label, doc in layers],
+        "content": base_config_service.to_yaml(effective),
         "updated_at": updated_at,
-        "is_default": _is_default(engine, doc, target),
+        "is_default": not overlay,
     }
 
 
 @router.put("")
-def put_base_config(body: BaseConfigBody, engine: str = "stash",
-                    target: str = "", user=CurrentUser):
+def put_base_config(body: BaseConfigBody, engine: str = "stash", target: str = "",
+                    device_id: int = 0, user=CurrentUser):
+    """保存本层覆盖：提交的是"本层编辑后的生效值"，服务端自动与上层求差异。"""
     engine = _engine(engine)
     with db.tx() as conn:
-        _check_target(conn, engine, target)
-        _, _, updated_at = _load(conn, engine, target)
+        target_name, dev_id = _check_scope(conn, engine, target, device_id)
+        docs = _all_docs(conn)
+        _, _, updated_at = _load_scope(conn, engine, target_name, dev_id)
         if body.updated_at and updated_at and body.updated_at != updated_at:
             raise HTTPException(409, "基础配置已被其他维护者修改，请刷新后再保存")
-        _save(conn, engine, target, body.content, user["username"])
-        content, doc, updated_at = _load(conn, engine, target)
+        try:
+            effective = base_config_service.parse_content(body.content)
+            base_config_service.validate_doc(effective)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        layers = base_config_service.scope_layers(engine, target_name, dev_id, docs)
+        inherited, _ = (base_config_service.cascade(layers[:-1])
+                        if len(layers) > 1 else ({}, {}))
+        overlay = base_config_service.diff_overlay(inherited, effective)
+        base_config_service.validate_doc(overlay)
+        _save_scope(conn, engine, target_name, dev_id,
+                    base_config_service.to_yaml(base_config_service.normalize(overlay)),
+                    user["username"])
+        content, stored, updated_at = _load_scope(conn, engine, target_name, dev_id)
+        docs = _all_docs(conn)
+    layers = base_config_service.scope_layers(engine, target_name, dev_id, docs)
+    effective, sources = base_config_service.cascade(layers)
     return {
         "ok": True,
         "engine": engine,
-        "target": target,
+        "target": target_name,
+        "device_id": dev_id,
+        "overlay": stored,
+        "effective": effective,
+        "sources": sources,
         "content": content,
-        "doc": base_config_service.normalize(doc),
         "updated_at": updated_at,
-        "is_default": _is_default(engine, doc, target),
+        "is_default": not stored,
     }
 
 
 @router.post("/reset")
-def reset_base_config(engine: str = "stash", target: str = "",
+def reset_base_config(engine: str = "stash", target: str = "", device_id: int = 0,
                       user=CurrentUser):
-    """恢复默认：引擎默认范围恢复为内置默认；目标范围恢复为继承引擎默认。
-
-    个人维护的直连域名与 Fake-IP 过滤属于「配置」而不是「默认值」，
-    恢复默认时予以保留，避免误清空手工维护的清单。
-    """
+    """恢复默认：清空本层覆盖，回到继承上层（内置默认 → 通用 → 目标）。"""
     engine = _engine(engine)
-    default = base_config_service.default_doc(engine)
     with db.tx() as conn:
-        _check_target(conn, engine, target)
-        if target:
-            with db.connect() as conn2:
-                _, engine_doc, _ = _load(conn2, engine, "")
-            default = engine_doc
-        # 保留个人配置（伪键）
-        _, current, _ = _load(conn, engine, target)
-        for key in (base_config_service.DIRECT_DOMAINS_KEY,
-                    base_config_service.FAKE_IP_FILTER_KEY,
-                    base_config_service.PANEL_DIRECT_KEY):
-            if key in current:
-                default[key] = current[key]
-        _save(conn, engine, target, base_config_service.to_yaml(default),
-              user["username"])
-        content, doc, updated_at = _load(conn, engine, target)
+        target_name, dev_id = _check_scope(conn, engine, target, device_id)
+        _, overlay, _ = _load_scope(conn, engine, target_name, dev_id)
+        # 个人直连域名与 Fake-IP 过滤属于「配置」而非「默认值」，恢复默认时保留
+        keep = {key: overlay[key] for key in
+                (base_config_service.DIRECT_DOMAINS_KEY,
+                 base_config_service.FAKE_IP_FILTER_KEY,
+                 base_config_service.PANEL_DIRECT_KEY)
+                if key in overlay}
+        if keep:
+            _save_scope(conn, engine, target_name, dev_id,
+                        base_config_service.to_yaml(keep), user["username"])
+        else:
+            key_target, key_device = _scope_key(target_name, dev_id)
+            conn.execute(
+                "DELETE FROM base_configs WHERE engine=? AND target=? AND device_id=?",
+                (engine, key_target, key_device))
+        docs = _all_docs(conn)
+    layers = base_config_service.scope_layers(engine, target_name, dev_id, docs)
+    effective, sources = base_config_service.cascade(layers)
     return {
         "ok": True,
         "engine": engine,
-        "target": target,
-        "content": content,
-        "doc": base_config_service.normalize(doc),
-        "updated_at": updated_at,
-        "is_default": _is_default(engine, doc, target),
+        "target": target_name,
+        "device_id": dev_id,
+        "overlay": {},
+        "effective": effective,
+        "sources": sources,
+        "content": base_config_service.to_yaml(effective),
+        "updated_at": "",
+        "is_default": True,
     }
 
 
@@ -236,6 +323,18 @@ def preview(body: PreviewBody, user=CurrentUser):
         target = _pick_target(conn, engine, body.target)
         snapshot, _sha = builds.current_policy(conn)
     text = render.render_target(snapshot, target, warnings)
+    if body.device_id:
+        with db.connect() as conn:
+            docs = _all_docs(conn)
+            dev = db.one(conn, "SELECT * FROM devices WHERE id=?", (body.device_id,))
+        if dev:
+            device_doc = docs.get((target["engine"], "", int(dev["id"])))
+            if device_doc:
+                try:
+                    text = render.apply_device_overlay(
+                        text, base_config_service.to_yaml(device_doc))
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc))
     return {
         "target": target["name"],
         "engine": target["engine"],
@@ -251,8 +350,21 @@ def apply(body: ApplyBody, user=CurrentUser):
     if body.channel not in ("stable", "candidate"):
         raise HTTPException(400, "通道仅支持 stable / candidate")
     with db.tx() as conn:
-        _check_target(conn, engine, body.target)
-        _save(conn, engine, body.target, body.content, user["username"])
+        target_name, dev_id = _check_scope(conn, engine, body.target, body.device_id)
+        docs = _all_docs(conn)
+        try:
+            effective = base_config_service.parse_content(body.content)
+            base_config_service.validate_doc(effective)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        layers = base_config_service.scope_layers(engine, target_name, dev_id, docs)
+        inherited, _ = (base_config_service.cascade(layers[:-1])
+                        if len(layers) > 1 else ({}, {}))
+        overlay = base_config_service.diff_overlay(inherited, effective)
+        base_config_service.validate_doc(overlay)
+        _save_scope(conn, engine, target_name, dev_id,
+                    base_config_service.to_yaml(base_config_service.normalize(overlay)),
+                    user["username"])
     try:
         build_id, status = builds.create_candidate(
             user["username"], note=body.note or "更新基础配置")

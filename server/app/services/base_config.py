@@ -1,12 +1,25 @@
-"""产物基础配置：按引擎维护的顶层键文档。
+"""产物基础配置：多级联动的顶层键文档。
 
-这是产物内容的第 ① 层（优先级最低）：用户在这里定制端口、模式、日志、IPv6、
-profile、DNS 以及任意自定义顶层键；结构化内容（proxies / proxy-groups /
-rules 等）由各自的业务页面维护，基础配置不允许覆盖。
+层级（后者覆盖前者）：
+① 内置默认：随程序发布，只读可见；
+② 通用配置：按引擎（Stash / Mihomo）维护，作用���该引擎的全部目标；
+③ 目标通用：按发布目标维护，可选中间层；
+④ 设备专属：按设备维护，只对该设备的最终配置生效。
+
+每层只存"与上层不同"的差异（overlay），因此上层默认值变化时，
+没有被显式改过的键会自动跟随；"恢复默认"= 清空本层差异。
+
+结构化内容（proxies / proxy-groups / rules 等）由各自的业务页面维护，
+基础配置各层都不允许覆盖。
 """
 from copy import deepcopy
 
 import yaml
+from deepmerge import Merger
+from deepmerge.strategy import dict as DictStrategy
+from deepmerge.strategy import fallback as FallbackStrategy
+from deepmerge.strategy import list as ListStrategy
+from deepmerge.strategy import type_conflict as TypeConflictStrategy
 
 ENGINES = ("stash", "mihomo")
 
@@ -77,6 +90,95 @@ DEFAULT_ENGINE = "stash"
 def default_doc(engine: str) -> dict:
     key = "official" if engine == "stash" else "compat"
     return deepcopy(PRESETS[engine][key][1])
+
+
+# ---- 多级联动：合并、差异、来源 ----
+
+# 多级联动的合并策略（用成熟库 deepmerge 实现，避免手写合并出纰漏）：
+# - 字典：递归合并（并集，逐键覆盖）
+# - 列表：整体替换（不拼接，避免配置语义含糊）
+# - 标量 / 类型冲突：后者覆盖前者
+_MERGER = Merger(
+    [(list, ListStrategy.ListStrategies.strategy_override),
+     (dict, DictStrategy.DictStrategies.strategy_merge)],
+    FallbackStrategy.FallbackStrategies.strategy_override,
+    TypeConflictStrategy.TypeConflictStrategies.strategy_override,
+)
+
+
+def merge_docs(base: dict, overlay: dict) -> dict:
+    """合并一层覆盖：键级并集，同键后者覆盖前者。
+
+    字典递归合并、列表整体替换、标量覆盖——语义由 deepmerge 的策略显式声明。
+    """
+    if not overlay:
+        return deepcopy(base or {})
+    if not base:
+        return deepcopy(overlay)
+    return _MERGER.merge(deepcopy(base), deepcopy(overlay))
+
+
+def diff_overlay(base: dict, effective: dict) -> dict:
+    """比较"上层生效值"与"本层编辑后的值"，得出本层真正需要覆盖的差异。
+
+    字典递归比较，列表整体比较；相同则不写入本层（保持"跟随上层"）。
+    """
+    overlay: dict = {}
+    for key, value in (effective or {}).items():
+        if key not in (base or {}):
+            overlay[key] = deepcopy(value)
+            continue
+        old = base[key]
+        if isinstance(value, dict) and isinstance(old, dict):
+            sub = diff_overlay(old, value)
+            if sub:
+                overlay[key] = sub
+        elif value != old:
+            overlay[key] = deepcopy(value)
+    return overlay
+
+
+def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
+    """按层级顺序合并，返回 (生效文档, 每个键的来源层级)。
+
+    layers 形如 [("内置默认", {...}), ("通用配置", {...}), ("设备专属", {...})]，
+    来源记录到最后一次改写该键的层（顶层键粒度），便于界面展示"这个值来自哪一层"。
+    """
+    effective: dict = {}
+    sources: dict = {}
+    for label, doc in layers:
+        for key, value in (doc or {}).items():
+            if isinstance(value, dict) and isinstance(effective.get(key), dict):
+                effective[key] = merge_docs(effective[key], value)
+            else:
+                effective[key] = deepcopy(value)
+            # 后面的层级优先：来源记录最后一次改写该键的层
+            sources[key] = label
+    return effective, sources
+
+
+def scope_layers(engine: str, target: str = "", device_id: int = 0,
+                 docs: dict | None = None) -> list[tuple[str, dict]]:
+    """按作用域取出各层文档（从低到高：内置默认 → 通用配置 → 目标通用 → 设备专属）。
+
+    返回的列表**包含当前作用域自己那一层**，因此：
+    - layers[:-1] 是当前层的"继承值"（上层合并结果）；
+    - layers 是完整链路，合并结果即"生效值"。
+    """
+    docs = docs or {}
+    layers: list[tuple[str, dict]] = [("内置默认", deepcopy(default_doc(engine)))]
+    engine_doc = docs.get((engine, "", 0))
+    if engine_doc is not None:
+        layers.append(("通用配置", deepcopy(engine_doc)))
+    if target:
+        target_doc = docs.get((engine, target, 0))
+        if target_doc is not None:
+            layers.append(("目标通用", deepcopy(target_doc)))
+        if device_id:
+            device_doc = docs.get((engine, "", int(device_id)))
+            if device_doc is not None:
+                layers.append(("设备专属", deepcopy(device_doc)))
+    return layers
 
 
 def parse_content(content: str) -> dict:

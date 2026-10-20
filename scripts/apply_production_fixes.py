@@ -115,8 +115,8 @@ def apply_personal_config(conn) -> dict:
     result = {}
     now = db.now()
     for engine in bc.ENGINES:
-        row = db.one(conn, "SELECT * FROM base_configs WHERE engine=? AND target=''",
-                     (engine,))
+        row = db.one(conn, "SELECT * FROM base_configs "
+                           "WHERE engine=? AND target='' AND device_id=0", (engine,))
         if row:
             try:
                 doc = bc.parse_content(row["content"])
@@ -128,17 +128,48 @@ def apply_personal_config(conn) -> dict:
         doc[bc.FAKE_IP_FILTER_KEY] = list(FAKE_IP_FILTER)
         text = bc.to_yaml(bc.normalize(doc))
         conn.execute(
-            "INSERT INTO base_configs(engine, target, content, updated_at) "
-            "VALUES(?,?,?,?) "
-            "ON CONFLICT(engine, target) DO UPDATE SET content=excluded.content, "
-            "updated_at=excluded.updated_at",
-            (engine, "", text, now),
+            "INSERT INTO base_configs(engine, target, device_id, content, updated_at) "
+            "VALUES(?,?,?,?,?) "
+            "ON CONFLICT(engine, target, device_id) DO UPDATE SET "
+            "content=excluded.content, updated_at=excluded.updated_at",
+            (engine, "", 0, text, now),
         )
         result[engine] = len(DIRECT_DOMAINS)
     security.audit(conn, "astral", "更新基础配置", "base_config", "personal",
                    {"direct_domains": len(DIRECT_DOMAINS),
                     "fake_ip_filter": len(FAKE_IP_FILTER)})
     return result
+
+
+def normalize_overlays(conn) -> int:
+    """把各作用域里"整份文档"收敛为"只存与上层不同的差异"。"""
+    changed = 0
+    for row in db.all_(conn, "SELECT engine, target, device_id, content FROM base_configs"):
+        engine, target, device_id = row["engine"], row["target"] or "", int(row["device_id"] or 0)
+        try:
+            stored = bc.parse_content(row["content"])
+        except ValueError:
+            continue
+        if not stored:
+            continue
+        docs = {}
+        for r in db.all_(conn, "SELECT engine, target, device_id, content FROM base_configs"):
+            try:
+                docs[(r["engine"], r["target"] or "", int(r["device_id"] or 0))] = \
+                    bc.parse_content(r["content"])
+            except ValueError:
+                continue
+        layers = bc.scope_layers(engine, target, device_id, docs)
+        inherited, _ = (bc.cascade(layers[:-1]) if len(layers) > 1 else ({}, {}))
+        overlay = bc.diff_overlay(inherited, stored)
+        if overlay != stored:
+            conn.execute(
+                "UPDATE base_configs SET content=?, updated_at=? "
+                "WHERE engine=? AND target=? AND device_id=?",
+                (bc.to_yaml(bc.normalize(overlay)), db.now(),
+                 engine, target, device_id))
+            changed += 1
+    return changed
 
 
 def main() -> None:
@@ -153,6 +184,7 @@ def main() -> None:
         conn.execute("UPDATE sources SET client_interval=3600, updated_at=?", (now,))
         conn.execute("UPDATE rule_providers SET client_interval=3600, updated_at=?", (now,))
         personal = apply_personal_config(conn)
+        normalized = normalize_overlays(conn)
         # 本地节点带宽字段规范化为整数 Mbps（Stash 用 down-speed，Mihomo 用 down）
         for row in db.all_(conn, "SELECT id, params_enc FROM local_nodes "
                                  "WHERE protocol='hysteria2'"):
@@ -174,6 +206,7 @@ def main() -> None:
         "baidu_rules_added": added,
         "client_interval": 3600,
         "personal_config": personal,
+        "overlays_normalized": normalized,
     }, ensure_ascii=False))
 
 

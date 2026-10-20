@@ -885,18 +885,23 @@ def test_base_config_defaults_and_crud(client):
 
     stash = client.get("/api/v1/base-config?engine=stash", headers=h).json()
     assert stash["is_default"] is True
-    assert stash["doc"]["mode"] == "rule"
+    assert stash["effective"]["mode"] == "rule"
     # Stash 官方精简：不含端口与 profile
-    assert "mixed-port" not in stash["doc"] and "profile" not in stash["doc"]
+    assert "mixed-port" not in stash["effective"] and "profile" not in stash["effective"]
     mihomo = client.get("/api/v1/base-config?engine=mihomo", headers=h).json()
-    assert mihomo["doc"]["mixed-port"] == 7890
-    assert mihomo["doc"]["profile"]["store-selected"] is True
+    assert mihomo["effective"]["mixed-port"] == 7890
+    assert mihomo["effective"]["profile"]["store-selected"] is True
 
+    # 只改一个键：服务端只把这个键的差异存进本层，其余继续跟随上层
     saved = client.put("/api/v1/base-config?engine=stash", headers=h, json={
-        "content": "mode: global\nlog-level: info\nipv6: true\n"})
+        "content": "mode: global\nlog-level: warning\nipv6: false\n"})
     assert saved.status_code == 200, saved.text
-    assert saved.json()["doc"]["mode"] == "global"
+    assert saved.json()["effective"]["mode"] == "global"
     assert saved.json()["is_default"] is False
+    assert saved.json()["overlay"] == {"mode": "global"}
+    # 来源标注：被本层改写的键来源是「通用配置」，其余仍是「内置默认」
+    assert saved.json()["sources"]["mode"] == "通用配置"
+    assert saved.json()["sources"]["log-level"] == "内置默认"
 
     # 乐观锁：版本不一致时拒绝
     stale = client.put("/api/v1/base-config?engine=stash", headers=h, json={
@@ -1499,14 +1504,21 @@ def test_device_level_override_only_affects_that_device(client):
     client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "个性化设备", "platform": "ios", "target_id": 1,
-        "channel": "stable", "extra_yaml": "mixed-port: 7899\n"}).json()
+        "channel": "stable"}).json()
     other = client.post("/api/v1/devices", headers=h, json={
         "name": "普通设备", "platform": "ios", "target_id": 1,
         "channel": "stable"}).json()
+    # 设备专属作用域：只存与上层不同的差异
+    r = client.put(f"/api/v1/base-config?engine=stash&device_id={dev['id']}",
+                   headers=h, json={"content": "mode: rule\nlog-level: debug\n"
+                                              "ipv6: false\n"})
+    assert r.status_code == 200, r.text
+    assert r.json()["overlay"]["log-level"] == "debug"
+    assert r.json()["sources"]["log-level"] == "设备专属"
     a = client.get(f"/feed/{dev['token']}/config.yaml").text
     b = client.get(f"/feed/{other['token']}/config.yaml").text
-    assert "mixed-port: 7899" in a
-    assert "mixed-port: 7899" not in b
+    assert "log-level: debug" in a
+    assert "log-level: debug" not in b
     # ETag 必须不同，避免缓存串味
     ra = client.get(f"/feed/{dev['token']}/config.yaml")
     rb = client.get(f"/feed/{other['token']}/config.yaml")
@@ -1519,12 +1531,14 @@ def test_device_override_rejects_structural_keys(client):
     h = auth_headers(csrf)
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "坏设备", "platform": "ios", "target_id": 1,
-        "channel": "stable", "extra_yaml": "rules:\n  - MATCH,DIRECT\n"}).json()
+        "channel": "stable"}).json()
     client.post("/api/v1/builds", headers=h, json={})
     client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
-    resp = client.get(f"/feed/{dev['token']}/config.yaml")
-    assert resp.status_code == 500
-    assert "rules" in resp.text
+    # 结构键在设备专属作用域同样被拒绝
+    r = client.put(f"/api/v1/base-config?engine=stash&device_id={dev['id']}",
+                   headers=h, json={"content": "rules:\n  - MATCH,DIRECT\n"})
+    assert r.status_code == 400
+    assert "rules" in r.text
 
 
 def test_no_differentiation_keeps_artifact_identical(client):
@@ -1580,7 +1594,7 @@ def test_reset_base_config_keeps_personal_config(client):
     assert r.status_code == 200, r.text
     r = client.post("/api/v1/base-config/reset?engine=stash", headers=h)
     assert r.status_code == 200, r.text
-    doc = r.json()["doc"]
+    doc = r.json()["effective"]
     assert doc["_direct_domains"] == ["example.com"]
     assert doc["_fake_ip_filter"] == ["+.lan"]
     # 其余键恢复为默认
@@ -1623,10 +1637,80 @@ def test_mihomo_android_keeps_process_rules():
         snapshot, {"name": "mihomo-android", "engine": "mihomo", "platform": "android"},
         warnings)
     assert "PROCESS-NAME,com.tencent.mm,节点选择" in text
-    # Stash + Android：官方没有该平台客户端，进程规则被剔除并给出提示
+    # Stash + Android：官方文档未收录该平台的早期版本，不做裁剪也不告警
     warnings = []
     text2 = render.render_target(
         snapshot, {"name": "stash-android", "engine": "stash", "platform": "android"},
         warnings)
-    assert "PROCESS-NAME,com.tencent.mm" not in text2
-    assert any("没有" in w and "android" in w for w in warnings)
+    assert "PROCESS-NAME,com.tencent.mm" in text2
+    assert not any("没有" in w for w in warnings)
+    # Stash + iOS：官方明确说明会被忽略，裁掉是等价且更干净的做法
+    warnings = []
+    text3 = render.render_target(
+        snapshot, {"name": "stash-ios", "engine": "stash", "platform": "ios"},
+        warnings)
+    assert "PROCESS-NAME,com.tencent.mm" not in text3
+    assert any("剔除" in w for w in warnings)
+
+
+def test_base_config_merge_semantics():
+    """层级合并语义：键级并集，同键后者覆盖；字典递归、列表整体替换。"""
+    from app.services import base_config as bc
+    base = {
+        "mode": "rule",
+        "log-level": "warning",
+        "dns": {"nameserver": ["a", "b"], "ipv6": False},
+        "filter": ["x"],
+    }
+    over = {
+        "mode": "global",
+        "dns": {"nameserver": ["c"]},
+        "filter": ["y"],
+        "extra": 1,
+    }
+    merged = bc.merge_docs(base, over)
+    # 同键后者覆盖
+    assert merged["mode"] == "global"
+    # 字典递归合并：dns.ipv6 保留，dns.nameserver 被整体替换
+    assert merged["dns"] == {"nameserver": ["c"], "ipv6": False}
+    # 列表整体替换，不拼接
+    assert merged["filter"] == ["y"]
+    # 只在上层出现的键保留
+    assert merged["log-level"] == "warning"
+    # 上层没有的键新增
+    assert merged["extra"] == 1
+    # 不修改入参
+    assert base["dns"]["nameserver"] == ["a", "b"]
+    assert base["mode"] == "rule"
+    # 空覆盖 / 空基础
+    assert bc.merge_docs(base, {}) == base
+    assert bc.merge_docs({}, over) == over
+
+
+def test_base_config_diff_overlay_keeps_only_changes():
+    """本层只保存与上层不同的差异，其余键继续跟随上层。"""
+    from app.services import base_config as bc
+    inherited = {"mode": "rule", "log-level": "warning",
+                 "dns": {"nameserver": ["a"], "ipv6": False}}
+    effective = {"mode": "global", "log-level": "warning",
+                 "dns": {"nameserver": ["b"], "ipv6": False}, "new": 2}
+    overlay = bc.diff_overlay(inherited, effective)
+    assert overlay == {"mode": "global", "dns": {"nameserver": ["b"]}, "new": 2}
+    # 合并回去与编辑结果一致
+    assert bc.merge_docs(inherited, overlay) == effective
+
+
+def test_base_config_cascade_sources():
+    """多级联动：生效值来自最高优先级的那一层。"""
+    from app.services import base_config as bc
+    docs = {
+        ("stash", "", 0): {"mode": "global", "log-level": "info"},
+        ("stash", "", 7): {"mode": "rule"},
+    }
+    layers = bc.scope_layers("stash", "stash-ios", 7, docs)
+    effective, sources = bc.cascade(layers)
+    assert effective["mode"] == "rule"          # 设备专属覆盖通用配置
+    assert effective["log-level"] == "info"     # 通用配置覆盖内置默认
+    assert sources["mode"] == "设备专属"
+    assert sources["log-level"] == "通用配置"
+    assert sources["ipv6"] == "内置默认"

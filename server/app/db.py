@@ -203,9 +203,10 @@ CREATE TABLE IF NOT EXISTS snippets (
 CREATE TABLE IF NOT EXISTS base_configs (
   engine TEXT NOT NULL DEFAULT 'stash',
   target TEXT NOT NULL DEFAULT '',
+  device_id INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (engine, target)
+  PRIMARY KEY (engine, target, device_id)
 );
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -321,9 +322,10 @@ def _migrate_settings(conn) -> None:
 
 
 def _migrate_base_configs_scope(conn) -> None:
-    """base_configs 由 engine 单列主键改为 (engine, target) 复合主键。
+    """base_configs 主键演进：engine → (engine, target) → (engine, target, device_id)。
 
-    旧表无法存放同一引擎的多份目标级配置，需要重建；只在旧结构时执行一次。
+    每一级作用域都要能并存多份配置，旧主键放不下，需要重建表；
+    只在检测到旧结构时执行一次，存量内容按作用域原样搬过去。
     """
     info = list(conn.execute("PRAGMA table_info(base_configs)"))
     if not info:
@@ -332,20 +334,26 @@ def _migrate_base_configs_scope(conn) -> None:
     if "target" not in cols:
         conn.execute("ALTER TABLE base_configs ADD COLUMN target TEXT NOT NULL DEFAULT ''")
         info = list(conn.execute("PRAGMA table_info(base_configs)"))
+    if "device_id" not in cols:
+        conn.execute(
+            "ALTER TABLE base_configs ADD COLUMN device_id INTEGER NOT NULL DEFAULT 0")
+        info = list(conn.execute("PRAGMA table_info(base_configs)"))
     pk_cols = [r["name"] for r in sorted(
         (x for x in info if x["pk"]), key=lambda x: x["pk"])]
-    if pk_cols == ["engine", "target"]:
+    if pk_cols == ["engine", "target", "device_id"]:
         return
     conn.execute("DROP TABLE IF EXISTS base_configs_scope_new")
     conn.execute("""CREATE TABLE base_configs_scope_new (
         engine TEXT NOT NULL DEFAULT 'stash',
         target TEXT NOT NULL DEFAULT '',
+        device_id INTEGER NOT NULL DEFAULT 0,
         content TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL,
-        PRIMARY KEY (engine, target))""")
+        PRIMARY KEY (engine, target, device_id))""")
     conn.execute(
-        "INSERT OR REPLACE INTO base_configs_scope_new(engine, target, content, updated_at) "
-        "SELECT engine, '', content, updated_at FROM base_configs")
+        "INSERT OR REPLACE INTO base_configs_scope_new"
+        "(engine, target, device_id, content, updated_at) "
+        "SELECT engine, target, 0, content, updated_at FROM base_configs")
     conn.execute("DROP TABLE base_configs")
     conn.execute("ALTER TABLE base_configs_scope_new RENAME TO base_configs")
 
@@ -354,12 +362,13 @@ def _migrate_base_configs(conn) -> None:
     """按引擎写入默认基础配置（已存在的不覆盖）。"""
     from .services import base_config as base_config_service
 
+    # 播种为空覆盖：内置默认才是起点，通用层默认不覆盖任何键
     for engine in base_config_service.ENGINES:
-        doc = base_config_service.default_doc(engine)
         conn.execute(
-            "INSERT OR IGNORE INTO base_configs(engine, target, content, updated_at) "
-            "VALUES(?,?,?,?)",
-            (engine, "", base_config_service.to_yaml(doc), now()),
+            "INSERT OR IGNORE INTO base_configs"
+            "(engine, target, device_id, content, updated_at) "
+            "VALUES(?,?,?,?,?)",
+            (engine, "", 0, base_config_service.to_yaml({}), now()),
         )
 
 

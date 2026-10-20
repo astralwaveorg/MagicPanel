@@ -10,6 +10,7 @@ import json
 import urllib.parse
 
 from .. import db, security
+from ..services import base_config as base_config_service
 from ..compiler import render
 from ..services import tester
 from .builds import artifact_path
@@ -56,6 +57,19 @@ def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
     )
 
 
+def _device_overlay(conn, device) -> str:
+    """取该设备的专属基础配置（设备专属作用域），没有则为空。"""
+    row = db.one(conn, "SELECT content FROM base_configs "
+                       "WHERE device_id=? AND target='' LIMIT 1", (device["id"],))
+    if not row:
+        return ""
+    try:
+        doc = base_config_service.parse_content(row["content"])
+    except ValueError:
+        return ""
+    return base_config_service.to_yaml(doc)
+
+
 def _device_build(conn, device):
     pointer = db.one(
         conn, "SELECT build_id FROM pointers WHERE channel=?", (device["channel"],)
@@ -81,8 +95,8 @@ def device_config(token: str, request: Request):
             return Response("artifact missing", status_code=503)
         feed_base = f"{_base_url(request, conn)}/feed/{token}"
         raw = path.read_text(encoding="utf-8")
-        # 设备级个性化：叠加在该设备目标产物之上（结构键受保护）
-        overlay = (device["extra_yaml"] or "").strip()
+        # 设备专属配置：叠加在该设备目标产物之上（结构键受保护）
+        overlay = _device_overlay(conn, device)
         if overlay:
             try:
                 raw = render.apply_device_overlay(raw, overlay)

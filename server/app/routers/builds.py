@@ -64,21 +64,23 @@ def collect_snapshot(conn) -> dict:
          "extra_yaml": r["extra_yaml"]}
         for r in db.all_(conn, "SELECT * FROM targets ORDER BY id")
     ]
-    base_docs: dict[str, dict] = {}
-    base_targets: dict[str, dict] = {}
-    for row in db.all_(conn, "SELECT engine, target, content FROM base_configs"):
+    base_docs: dict[str, dict] = {}      # 引擎通用配置：engine → 覆盖文档
+    base_targets: dict[str, dict] = {}   # 目标通用配置：目标名 → 覆盖文档
+    base_devices: dict[str, dict] = {}   # 设备专属配置：设备 id → 覆盖文档
+    for row in db.all_(conn, "SELECT engine, target, device_id, content "
+                             "FROM base_configs"):
         try:
             doc = base_config_service.normalize(
                 base_config_service.parse_content(row["content"]))
         except ValueError:
             continue
-        if row["target"]:
-            # 目标级基础配置：只覆盖该目标，键为目标名
+        device_id = int(row["device_id"] or 0)
+        if device_id:
+            base_devices[str(device_id)] = doc
+        elif row["target"]:
             base_targets[row["target"]] = doc
         else:
             base_docs[row["engine"]] = doc
-    for engine in base_config_service.ENGINES:
-        base_docs.setdefault(engine, base_config_service.default_doc(engine))
     snippets = [
         {"name": r["name"], "category": r["category"], "engine": r["engine"],
          "content": r["content"]}
@@ -89,7 +91,7 @@ def collect_snapshot(conn) -> dict:
         "sources": sources, "rule_providers": rule_providers,
         "local_nodes": local_nodes, "groups": groups, "rules": rules,
         "targets": targets, "snippets": snippets, "base": base_docs,
-        "base_targets": base_targets,
+        "base_targets": base_targets, "base_devices": base_devices,
     }
 
 

@@ -133,10 +133,10 @@ def server_base_config(conn) -> bool:
     if row and row["content"] == text:
         return False
     conn.execute(
-        "INSERT INTO base_configs(engine, target, content, updated_at) "
-        "VALUES(?,?,?,?) ON CONFLICT(engine, target) DO UPDATE SET "
+        "INSERT INTO base_configs(engine, target, device_id, content, updated_at) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(engine, target, device_id) DO UPDATE SET "
         "content=excluded.content, updated_at=excluded.updated_at",
-        ("stash", "stash-macos-server", text, db.now()))
+        ("stash", "stash-macos-server", 0, text, db.now()))
     return True
 
 

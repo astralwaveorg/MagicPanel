@@ -57,14 +57,11 @@ HEALTH_CHECK = {
 #   PROCESS-NAME / PROCESS-PATH 规则，配置中的进程相关规则将被忽略」
 #   https://stash.wiki/rules/rule-types
 # - Mihomo 在 Android 上 PROCESS-NAME 可匹配包名（官方明确可用），故不裁剪
-# - Stash 官方没有 Android / Windows 客户端，这些平台的 Stash 目标无意义，一并剔除
+# 说明：Stash 的 Windows / Android 属于早期版本，官方文档尚未收录，
+# 因此不做裁剪（保持与 Clash 兼容的行为），只对官方明确说明的平台裁剪。
 PLATFORM_UNSUPPORTED_RULES = {
     ("stash", "ios"): {"PROCESS-NAME", "PROCESS-PATH"},
     ("stash", "tvos"): {"PROCESS-NAME", "PROCESS-PATH"},
-    ("stash", "android"): {"PROCESS-NAME", "PROCESS-PATH"},
-    ("stash", "windows"): {"PROCESS-NAME", "PROCESS-PATH"},
-    ("mihomo", "ios"): {"PROCESS-NAME", "PROCESS-PATH"},
-    ("mihomo", "tvos"): {"PROCESS-NAME", "PROCESS-PATH"},
 }
 
 
@@ -213,12 +210,6 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
     engine = target.get("engine") or ""
     platform = (target.get("platform") or "").lower()
     unsupported = PLATFORM_UNSUPPORTED_RULES.get((engine, platform), set())
-    # 该引擎在该平台没有官方客户端：产物无人能消费，给出提示
-    if platform not in config.ENGINE_PLATFORMS.get(engine, set()) \
-            and warnings is not None:
-        warnings.append(
-            f"{engine} 官方没有 {platform} 平台客户端，该目标的产物无法被对应客户端使用"
-            "（Stash 仅 iOS / tvOS / macOS / visionOS；Mihomo 常见于 Windows / Android / Linux / macOS）")
 
     # 复制一份再改，避免污染快照（同一快照会渲染多个目标）
     groups = [dict(g, proxies=list(g.get("proxies") or []))
@@ -279,12 +270,15 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
 def render_target(snapshot: dict, target: dict, warnings: list | None = None) -> str:
     """渲染单个目标的完整配置文本。"""
     engine = target["engine"]
-    # ① 基础配置：引擎默认 → 目标级覆盖（字典递归、列表整体替换）
-    bases = snapshot.get("base") or {}
-    base = base_config_service.normalize(bases.get(engine) or {})
+    # ① 基础配置：内置默认 → 引擎通用 → 目标通用（设备专属在分发时叠加）
+    layers = [("内置默认", base_config_service.default_doc(engine))]
+    engine_base = (snapshot.get("base") or {}).get(engine)
+    if engine_base:
+        layers.append(("通用配置", base_config_service.normalize(engine_base)))
     target_base = (snapshot.get("base_targets") or {}).get(target.get("name") or "")
     if target_base:
-        base = _merge_dns(base, base_config_service.normalize(target_base))
+        layers.append(("目标通用", base_config_service.normalize(target_base)))
+    base, _sources = base_config_service.cascade(layers)
     # 应用级伪键：不写入产物，只控制面板内置行为
     panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))
     direct_domains = base_config_service.normalize_domains(

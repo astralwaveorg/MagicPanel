@@ -40,14 +40,6 @@ MIHOMO_RULE_TYPES = {
 }
 ENGINE_RULE_TYPES = {"stash": STASH_RULE_TYPES, "mihomo": MIHOMO_RULE_TYPES}
 
-# 官方客户端的可用平台（用于给出"该目标没有对应客户端"的提示）
-# Stash：https://stash.wiki/ 明确只覆盖 iOS / tvOS / macOS / visionOS
-# Mihomo：官方无 iOS / tvOS 客户端
-ENGINE_PLATFORMS = {
-    "stash": {"ios", "tvos", "macos", "visionos"},
-    "mihomo": {"windows", "android", "linux", "macos"},
-}
-
 # 允许附加 no-resolve 修饰符的规则类型（IP 字面量匹配，不触发域名解析）
 NO_RESOLVE_TYPES = {"IP-CIDR", "IP-CIDR6", "GEOIP", "RULE-SET", "SRC-IP-CIDR"}
 TOKEN_PREFIX = "mp_"
