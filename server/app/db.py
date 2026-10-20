@@ -199,6 +199,11 @@ CREATE TABLE IF NOT EXISTS snippets (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS base_configs (
+  engine TEXT PRIMARY KEY,
+  content TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''
@@ -253,6 +258,11 @@ def init_db() -> None:
                        "auto_test INTEGER NOT NULL DEFAULT 1")
         _ensure_column(conn, "rule_providers", "last_attempt_at",
                        "last_attempt_at TEXT")
+        # 客户端更新间隔：客户端拉取子资源的周期；0 表示跟随抓取间隔
+        _ensure_column(conn, "sources", "client_interval",
+                       "client_interval INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "rule_providers", "client_interval",
+                       "client_interval INTEGER NOT NULL DEFAULT 0")
         # 发布目标支持拖动排序
         _ensure_column(conn, "targets", "sort", "sort INTEGER NOT NULL DEFAULT 0")
         # 通道指针记录最近一次发布/回滚的来源，供界面展示“当前版本由谁、何时发布”
@@ -284,6 +294,46 @@ def init_db() -> None:
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value)
             )
+        _migrate_settings(conn)
+        _migrate_base_configs(conn)
+        _migrate_build_snapshots(conn)
+
+
+def _migrate_settings(conn) -> None:
+    """把旧的默认间隔（12 小时）迁移到 1 小时；仅改仍等于旧默认的行。"""
+    for key in ("profile_update_interval", "auto_build_interval_hours"):
+        conn.execute(
+            "UPDATE settings SET value=? WHERE key=? AND value='12'",
+            (config.SETTINGS_DEFAULTS[key], key),
+        )
+
+
+def _migrate_base_configs(conn) -> None:
+    """按引擎写入默认基础配置（已存在的不覆盖）。"""
+    from .services import base_config as base_config_service
+
+    for engine in base_config_service.ENGINES:
+        doc = base_config_service.default_doc(engine)
+        conn.execute(
+            "INSERT OR IGNORE INTO base_configs(engine, content, updated_at) "
+            "VALUES(?,?,?)",
+            (engine, base_config_service.to_yaml(doc), now()),
+        )
+
+
+def _migrate_build_snapshots(conn) -> None:
+    """构建快照可能含本地节点凭据，逐条加密（幂等）。"""
+    from . import security
+
+    rows = conn.execute(
+        "SELECT id, snapshot FROM builds WHERE snapshot != '' "
+        "AND snapshot NOT LIKE 'enc:v1:%'"
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            "UPDATE builds SET snapshot=? WHERE id=?",
+            (security.encrypt_payload(row["snapshot"]), row["id"]),
+        )
 
 
 @contextmanager

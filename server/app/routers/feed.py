@@ -129,6 +129,10 @@ def provider_resource(token: str, name: str, request: Request):
                     pass  # 快照异常时回退为完整内容，不阻断分发
         etag_src = (source["sha256"] or "") + (
             ":filtered" if source["filter_unavailable"] else "")
+        if source["filter_unavailable"]:
+            # 过滤结果随测速变化，ETag 必须跟着变，否则客户端拿不到新的节点列表
+            etag_src += ":" + security.sha256_text(
+                source["test_results"] or "{}")[:16]
         etag = security.sha256_text(etag_src or text)[:32]
 
         def record():

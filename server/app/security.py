@@ -55,6 +55,25 @@ def decrypt_text(token: str) -> str:
     return _fernet().decrypt(token.encode()).decode()
 
 
+PAYLOAD_PREFIX = "enc:v1:"
+
+
+def encrypt_payload(plain: str) -> str:
+    """把整段文本加密后带版本前缀存库，便于识别与迁移。"""
+    if not plain:
+        return plain
+    return PAYLOAD_PREFIX + encrypt_text(plain)
+
+
+def decrypt_payload(payload: str) -> str:
+    """兼容历史明文：没有版本前缀的直接返回。"""
+    if not payload:
+        return ""
+    if payload.startswith(PAYLOAD_PREFIX):
+        return decrypt_text(payload[len(PAYLOAD_PREFIX):])
+    return payload
+
+
 def mask_url(url: str) -> str:
     """凭据类 URL 的展示形态：协议 + 主机 + 长度提示，不含路径与查询串。"""
     if not url:

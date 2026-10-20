@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from .. import config, db, security
 from ..compiler import render, validate
 from ..deps import CurrentUser
+from ..services import base_config as base_config_service
 from ..services import tester
 
 router = APIRouter(prefix="/api/v1", tags=["builds"])
@@ -23,12 +24,14 @@ CHANNELS = {"stable", "candidate"}
 def collect_snapshot(conn) -> dict:
     sources = [
         {"name": r["name"], "enabled": bool(r["enabled"]), "filter": r["filter"],
-         "ua": r["ua"], "interval": r["interval"]}
+         "ua": r["ua"], "interval": r["interval"],
+         "client_interval": r["client_interval"]}
         for r in db.all_(conn, "SELECT * FROM sources ORDER BY id")
     ]
     rule_providers = [
         {"name": r["name"], "behavior": r["behavior"], "format": r["format"],
-         "kind": r["kind"], "interval": r["interval"], "enabled": bool(r["enabled"])}
+         "kind": r["kind"], "interval": r["interval"],
+         "client_interval": r["client_interval"], "enabled": bool(r["enabled"])}
         for r in db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
     ]
     local_nodes = [
@@ -56,9 +59,18 @@ def collect_snapshot(conn) -> dict:
     ]
     targets = [
         {"name": r["name"], "engine": r["engine"], "platform": r["platform"],
-         "extra_yaml": r["extra_yaml"], "update_interval": r["update_interval"]}
+         "extra_yaml": r["extra_yaml"]}
         for r in db.all_(conn, "SELECT * FROM targets ORDER BY id")
     ]
+    base_docs: dict[str, dict] = {}
+    for row in db.all_(conn, "SELECT engine, content FROM base_configs"):
+        try:
+            base_docs[row["engine"]] = base_config_service.normalize(
+                base_config_service.parse_content(row["content"]))
+        except ValueError:
+            base_docs[row["engine"]] = base_config_service.default_doc(row["engine"])
+    for engine in base_config_service.ENGINES:
+        base_docs.setdefault(engine, base_config_service.default_doc(engine))
     snippets = [
         {"name": r["name"], "category": r["category"], "engine": r["engine"],
          "content": r["content"]}
@@ -68,7 +80,7 @@ def collect_snapshot(conn) -> dict:
     return {
         "sources": sources, "rule_providers": rule_providers,
         "local_nodes": local_nodes, "groups": groups, "rules": rules,
-        "targets": targets, "snippets": snippets,
+        "targets": targets, "snippets": snippets, "base": base_docs,
     }
 
 
@@ -93,7 +105,8 @@ def _build_public(row, with_results: bool = False) -> dict:
     }
     if with_results:
         data["results"] = json.loads(row["results"] or "{}")
-        data["snapshot"] = json.loads(row["snapshot"])
+        data["snapshot"] = json.loads(
+            security.decrypt_payload(row["snapshot"] or "{}") or "{}")
     return data
 
 
@@ -179,7 +192,8 @@ def create_candidate(conn, operator: str, note: str = "",
         "INSERT INTO builds(created_at, created_by, status, policy_sha, snapshot, "
         "results, note) VALUES(?,?,?,?,?,?,?)",
         (now, operator, "building", policy_sha,
-         json.dumps(snapshot, ensure_ascii=False), "{}", note),
+         security.encrypt_payload(json.dumps(snapshot, ensure_ascii=False)),
+         "{}", note),
     )
     build_id = cur.lastrowid
     for target in snapshot["targets"]:

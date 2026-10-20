@@ -132,7 +132,8 @@ def put_settings(body: SettingsBody, user=CurrentUser):
 
 BACKUP_TABLES = [
     "users", "sources", "rule_providers", "local_nodes", "proxy_groups", "rules",
-    "targets", "devices", "builds", "releases", "pointers", "settings",
+    "targets", "snippets", "devices", "builds", "releases", "pointers", "settings",
+    "base_configs",
 ]
 
 

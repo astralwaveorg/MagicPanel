@@ -292,8 +292,9 @@ def test_group_load_balance_and_relay(client):
     bid = build["id"]
     art_s = client.get(f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"]
     art_m = client.get(f"/api/v1/builds/{bid}/artifact/mihomo-android").json()["content"]
-    # strategy 是 Mihomo 扩展字段，Stash 产物不输出
-    assert "strategy: sticky-sessions" in art_m and "strategy:" not in art_s
+    # Stash 官方支持 load-balance 的 strategy，但只认 consistent-hashing / round-robin
+    assert "strategy: sticky-sessions" in art_m
+    assert "strategy: consistent-hashing" in art_s
     # Stash 的 relay 用 benchmark-* 测速字段
     assert "type: relay" in art_s and "benchmark-url:" in art_s
     assert "type: relay" in art_m
@@ -588,7 +589,7 @@ def test_automation_settings_and_run_endpoint(client, monkeypatch):
     h = auth_headers(csrf)
     status = client.get("/api/v1/automation/status", headers=h).json()
     assert status["autostart"] is False
-    assert status["settings"]["auto_build_interval_hours"] == "12"
+    assert status["settings"]["auto_build_interval_hours"] == "1"
 
     # 非法开关 / 通道 / 间隔被拒绝
     for values in (
@@ -870,3 +871,287 @@ def test_local_node_crud_render_and_group_reference(client):
                       json=body).status_code == 200
     assert client.delete(f"/api/v1/local-nodes/{node['id']}",
                          headers=h).status_code == 200
+
+
+# ---- 基础配置、引擎差异、链路修复 ----
+
+import json  # noqa: E402
+import yaml  # noqa: E402
+
+
+def test_base_config_defaults_and_crud(client):
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+
+    stash = client.get("/api/v1/base-config?engine=stash", headers=h).json()
+    assert stash["is_default"] is True
+    assert stash["doc"]["mode"] == "rule"
+    # Stash 官方精简：不含端口与 profile
+    assert "mixed-port" not in stash["doc"] and "profile" not in stash["doc"]
+    mihomo = client.get("/api/v1/base-config?engine=mihomo", headers=h).json()
+    assert mihomo["doc"]["mixed-port"] == 7890
+    assert mihomo["doc"]["profile"]["store-selected"] is True
+
+    saved = client.put("/api/v1/base-config?engine=stash", headers=h, json={
+        "content": "mode: global\nlog-level: info\nipv6: true\n"})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["doc"]["mode"] == "global"
+    assert saved.json()["is_default"] is False
+
+    # 乐观锁：版本不一致时拒绝
+    stale = client.put("/api/v1/base-config?engine=stash", headers=h, json={
+        "content": "mode: rule\n", "updated_at": "2000-01-01T00:00:00+08:00"})
+    assert stale.status_code == 409
+
+    reset = client.post("/api/v1/base-config/reset?engine=stash", headers=h)
+    assert reset.status_code == 200 and reset.json()["is_default"] is True
+
+    schema = client.get("/api/v1/base-config/schema?engine=stash", headers=h).json()
+    keys = [f["key"] for f in schema["fields"]]
+    assert "mode" in keys and "dns.nameserver" in keys
+    # Stash 不暴露 Mihomo 专有的 profile 开关
+    assert "profile.store-selected" not in keys
+    assert schema["presets"]
+
+
+def test_base_config_validation_and_protected_keys(client):
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    for content in ("rules:\n- MATCH,DIRECT\n", "proxy-groups:\n- name: x\n"):
+        r = client.put("/api/v1/base-config?engine=stash", headers=h,
+                       json={"content": content})
+        assert r.status_code == 400, content
+    bad_inputs = [
+        "[]\n",                       # 不是映射
+        "mode: [unclosed\n",          # YAML 语法错误
+        "",                           # 空
+        "mode: xxx\n",                # 取值非法
+        "log-level: verbose\n",       # 取值非法
+        "mixed-port: 70000\n",        # 端口越界
+        "mixed-port: 'abc'\n",        # 端口类型错误
+        'allow-lan: "yes"\n',         # 布尔类型错误
+    ]
+    for content in bad_inputs:
+        r = client.put("/api/v1/base-config?engine=mihomo", headers=h,
+                       json={"content": content})
+        assert r.status_code == 400, content
+
+
+def test_base_config_render_preview_and_policy_sha(client):
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    content = "mode: rule\nlog-level: info\nipv6: false\nsocks-port: 7892\n"
+    assert client.put("/api/v1/base-config?engine=stash", headers=h,
+                      json={"content": content}).status_code == 200
+
+    before = len(client.get("/api/v1/builds", headers=h).json())
+    preview = client.post("/api/v1/base-config/preview", headers=h,
+                           json={"engine": "stash", "target": "stash-ios"})
+    assert preview.status_code == 200, preview.text
+    text = preview.json()["content"]
+    assert "log-level: info" in text and "socks-port: 7892" in text
+    assert "{FEED}" in text and "{FEED_HOST}" in text
+    # 预览不产生构建
+    assert len(client.get("/api/v1/builds", headers=h).json()) == before
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    art = client.get(f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    assert art == text
+    sha1 = build["policy_sha"]
+
+    client.put("/api/v1/base-config?engine=stash", headers=h,
+               json={"content": "mode: rule\nlog-level: debug\n"})
+    build2 = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build2["policy_sha"] != sha1
+
+
+def test_base_config_apply_builds_and_publishes(client):
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    r = client.post("/api/v1/base-config/apply", headers=h, json={
+        "engine": "stash", "content": "mode: rule\nlog-level: info\n",
+        "channel": "stable", "note": "基础配置发布"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "success"
+    channels = client.get("/api/v1/channels", headers=h).json()
+    assert channels["stable"]["id"] == r.json()["build_id"]
+    art = client.get(
+        f"/api/v1/builds/{r.json()['build_id']}/artifact/stash-ios").json()["content"]
+    assert "log-level: info" in art
+
+
+def test_artifact_keys_follow_official_docs(client):
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    node = client.post("/api/v1/local-nodes", headers=h, json={
+        "name": "H1", "protocol": "hysteria2", "server": "h.example.com",
+        "port": 443,
+        "params": {"password": "pw", "sni": "h.example.com", "down": 1000},
+    }).json()
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "单组", "type": "select", "proxies": ["DIRECT"],
+        "local_nodes": [node["id"]]})
+    client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "单组"})
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    art_s = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    art_m = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/mihomo-android").json()["content"]
+
+    # 远程代理集：Stash 用 benchmark-*，Mihomo 用 health-check
+    assert "benchmark-url:" in art_s and "health-check:" not in art_s
+    assert "health-check:" in art_m and "benchmark-url:" not in art_m
+    assert "headers:" in art_s and "header:" not in art_s
+    assert "header:" in art_m
+
+    # 本地节点 Hysteria2：Stash 用 auth / down-speed，Mihomo 用 password / down
+    assert "auth: pw" in art_s and "password: pw" not in art_s
+    assert "down-speed: 1000" in art_s
+    assert "password: pw" in art_m and "auth: pw" not in art_m
+    assert "down: 1000 Mbps" in art_m
+
+    # 策略组：Stash 无 url/timeout，Mihomo 有
+    groups_s = yaml.safe_load(art_s)["proxy-groups"]
+    groups_m = yaml.safe_load(art_m)["proxy-groups"]
+    g_s = next(g for g in groups_s if g["name"] == "地区自动")
+    g_m = next(g for g in groups_m if g["name"] == "地区自动")
+    assert "url" not in g_s and "timeout" not in g_s
+    assert g_m["url"].startswith("http") and "timeout" in g_m
+    # 顶层键：Stash 官方精简，Mihomo 保留端口与 profile
+    assert "mixed-port" not in yaml.safe_load(art_s)
+    assert yaml.safe_load(art_m)["mixed-port"] == 7890
+
+
+def test_target_extra_yaml_rejects_structural_keys(client):
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    r = client.post("/api/v1/targets", headers=h, json={
+        "name": "bad-target", "engine": "stash", "platform": "ios",
+        "extra_yaml": "rules:\n- MATCH,DIRECT\n"})
+    assert r.status_code == 400
+    ok = client.post("/api/v1/targets", headers=h, json={
+        "name": "ok-target", "engine": "stash", "platform": "ios",
+        "extra_yaml": "log-level: info\n"})
+    assert ok.status_code == 201, ok.text
+
+
+def test_build_snapshot_is_encrypted(client):
+    from app import db
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    with db.connect() as conn:
+        row = db.one(conn, "SELECT snapshot FROM builds WHERE id=?", (build["id"],))
+    assert row["snapshot"].startswith("enc:v1:")
+    detail = client.get(f"/api/v1/builds/{build['id']}", headers=h).json()
+    assert detail["snapshot"]["groups"] and detail["snapshot"]["base"]
+
+
+def test_provider_etag_follows_test_results(client):
+    from app import db, security
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    dev = client.post("/api/v1/devices", headers=h, json={
+        "name": "设备A", "platform": "ios", "target_id": 1,
+        "channel": "stable"}).json()
+    token = dev["token"]
+    with db.connect() as conn:
+        source = db.one(conn, "SELECT * FROM sources WHERE name='测试机场'")
+    snapshot = ("proxies:\n- name: n1\n  type: ss\n  server: a.example.com\n"
+                "  port: 443\n  cipher: aes-256-gcm\n  password: p\n")
+    with db.tx() as conn:
+        conn.execute(
+            "UPDATE sources SET snapshot_enc=?, sha256=?, filter_unavailable=1, "
+            "test_results=? WHERE id=?",
+            (security.encrypt_text(snapshot), security.sha256_text(snapshot),
+             json.dumps({"n1": 120}), source["id"]))
+    first = client.get(f"/feed/{token}/res/provider/测试机场")
+    assert first.status_code == 200
+    etag1 = first.headers["etag"]
+    with db.tx() as conn:
+        conn.execute("UPDATE sources SET test_results=? WHERE id=?",
+                     (json.dumps({"n1": -1}), source["id"]))
+    second = client.get(f"/feed/{token}/res/provider/测试机场")
+    assert second.headers["etag"] != etag1
+    assert "n1" not in second.text
+    # 带旧 ETag 再取应返回 200 而不是 304
+    third = client.get(f"/feed/{token}/res/provider/测试机场",
+                       headers={"If-None-Match": etag1})
+    assert third.status_code == 200
+
+
+def test_fetch_failure_persists_state_and_backs_off(client, monkeypatch):
+    import httpx
+    from app import db
+    from app.services import fetcher, scheduler
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    source = client.post("/api/v1/sources", headers=h, json={
+        "name": "坏来源", "url": "https://example.com:notaport/sub"}).json()
+
+    def boom(*args, **kwargs):
+        raise httpx.InvalidURL("Invalid port")
+
+    monkeypatch.setattr(fetcher, "fetch", boom)
+    r = client.post(f"/api/v1/sources/{source['id']}/refresh", headers=h)
+    assert r.status_code == 502
+    with db.connect() as conn:
+        row = db.one(conn, "SELECT * FROM sources WHERE id=?", (source["id"],))
+    assert row["last_status"] == "failed"
+    assert row["fail_count"] == 1
+    assert row["last_attempt_at"], "失败后必须记录尝试时间，避免每个 tick 重试"
+    summary = scheduler.run_once(force=False)
+    assert summary["sources_failed"] == 0
+
+
+def test_scheduler_records_gate_reason_once(client):
+    from app.services import scheduler
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    client.post("/api/v1/sources", headers=h, json={
+        "name": "门禁机场", "url": "https://airport.example.com/sub",
+        "filter_unavailable": True, "auto_fetch": False})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "门禁组", "type": "select", "proxies": ["DIRECT"]})
+    client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "门禁组"})
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-ios", "engine": "stash", "platform": "ios"})
+
+    summary = scheduler.run_once(force=True)
+    assert "等待测速结果" in (summary.get("build_error") or "")
+    runs = client.get("/api/v1/automation/runs", headers=h).json()
+    assert any("等待测速结果" in (r["summary"].get("build_error") or "")
+               for r in runs)
+    count = len(runs)
+    scheduler.run_once(force=True)
+    assert len(client.get("/api/v1/automation/runs", headers=h).json()) == count
+
+
+def test_client_interval_reaches_artifact(client):
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    with_source = client.get("/api/v1/sources", headers=h).json()[0]
+    updated = client.put(f"/api/v1/sources/{with_source['id']}", headers=h, json={
+        "name": with_source["name"], "client_interval": 3600}).json()
+    assert updated["client_interval"] == 3600
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    data = yaml.safe_load(art)
+    assert data["proxy-providers"]["测试机场"]["interval"] == 3600
+
+
+def test_settings_intervals_default_to_one_hour(client):
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    settings = client.get("/api/v1/settings", headers=h).json()
+    assert settings["profile_update_interval"] == "1"
+    assert settings["auto_build_interval_hours"] == "1"

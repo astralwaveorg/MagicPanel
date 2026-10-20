@@ -108,6 +108,9 @@
           <el-table-column label="抓取间隔" width="110" align="right">
             <template #default="{ row }">{{ row.auto_fetch === false ? '—' : row.interval }}</template>
           </el-table-column>
+          <el-table-column label="客户端更新" width="110" align="right">
+            <template #default="{ row }">{{ row.client_interval || '跟随' }}</template>
+          </el-table-column>
           <el-table-column label="测速间隔" width="110" align="right">
             <template #default="{ row }">
               {{ row.auto_test === false ? '关' : (row.test_interval ? row.test_interval : '关') }}
@@ -276,6 +279,9 @@
             <el-form-item label="测速间隔">
               <el-input-number v-model="form.test_interval" :min="0" :max="604800" style="width:100%" />
             </el-form-item>
+            <el-form-item label="客户端更新间隔">
+              <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
+            </el-form-item>
           </el-col>
         </el-row>
         <div class="mp-form-hint" style="margin:-6px 0 14px">
@@ -316,7 +322,7 @@
       <p class="mp-dialog-desc">
         将选中的 {{ selected.length }} 个节点来源的间隔统一修改。
         服务端按抓取间隔自动更新快照；测速间隔控制自动测速，0 表示不自动测速。
-        抓取间隔同时写入后续构建产物，供客户端按 provider 间隔更新。
+        客户端更新间隔写进产物的 provider 条目，客户端按它拉取节点子资源；0 表示跟随抓取间隔。
       </p>
       <p style="font-size:13px;margin:0 0 6px">抓取间隔（秒）</p>
       <el-input-number v-model="batchInterval" :min="600" :max="604800" style="width:100%" />
@@ -432,7 +438,8 @@ const urlCopied = ref(false)
 
 const emptyForm = () => ({
   name: '', url: '', enabled: true, filter: '', ua: 'Stash',
-  interval: 21600, test_interval: 21600, auto_fetch: true, auto_test: true,
+  interval: 21600, test_interval: 21600, client_interval: 0,
+  auto_fetch: true, auto_test: true,
   allow_private: false, filter_unavailable: false,
 })
 const form = reactive(emptyForm())
@@ -599,6 +606,7 @@ function openEdit(row) {
   Object.assign(form, emptyForm(), row ? {
     name: row.name, url: '', enabled: row.enabled, filter: row.filter,
     ua: row.ua, interval: row.interval, test_interval: row.test_interval,
+    client_interval: row.client_interval,
     auto_fetch: row.auto_fetch !== false,
     auto_test: row.auto_test !== false,
     allow_private: row.allow_private,

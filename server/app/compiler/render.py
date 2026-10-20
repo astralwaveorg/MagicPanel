@@ -10,6 +10,7 @@ import urllib.parse
 import yaml
 
 from .. import config
+from ..services import base_config as base_config_service
 from ..services import local_nodes as local_node_service
 
 DNS_MIHOOMO = {
@@ -45,15 +46,18 @@ HEALTH_CHECK = {
 }
 
 
-def _guard_proxy() -> dict:
-    return {
+def _guard_proxy(engine: str = "stash") -> dict:
+    entry = {
         "name": config.GUARD_PROXY,
         "type": "http",
         "server": "127.0.0.1",
         "port": 1,
-        "benchmark-url": "https://www.gstatic.com/generate_204",
-        "benchmark-timeout": 1,
     }
+    if engine == "stash":
+        # Stash 的单节点延迟测试参数；Mihomo 没有对应字段（组级 url 生效）
+        entry["benchmark-url"] = "https://www.gstatic.com/generate_204"
+        entry["benchmark-timeout"] = 1
+    return entry
 
 
 def _provider_entry(src: dict, engine: str) -> dict:
@@ -62,18 +66,19 @@ def _provider_entry(src: dict, engine: str) -> dict:
         "type": "http",
         "url": f"{{FEED}}/res/provider/{src['name']}",
         "path": f"./providers/{src['name']}.yaml",
-        "interval": src["interval"],
-        "health-check": dict(HEALTH_CHECK),
-        "benchmark-url": "https://www.gstatic.com/generate_204",
-        "benchmark-timeout": 8,
+        "interval": src.get("client_interval") or src["interval"],
     }
     if src.get("filter"):
         entry["filter"] = src["filter"]
-    # Mihomo 的 header 值是字符串列表；Stash 的 headers 值是字符串
     if engine == "stash":
+        # Stash 官方：集合级延迟测试参数用 benchmark-url / benchmark-timeout
         entry["headers"] = {"User-Agent": src.get("ua") or config.DEFAULT_UA}
+        entry["benchmark-url"] = HEALTH_CHECK["url"]
+        entry["benchmark-timeout"] = 8
     else:
+        # Mihomo 官方：健康检查用 health-check，鉴权头值是字符串列表
         entry["header"] = {"User-Agent": [src.get("ua") or config.DEFAULT_UA]}
+        entry["health-check"] = dict(HEALTH_CHECK)
     return entry
 
 
@@ -93,17 +98,24 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None)
     if group.get("hidden"):
         entry["hidden"] = True
     if group["type"] in ("url-test", "fallback", "load-balance"):
-        entry["url"] = group.get("url") or HEALTH_CHECK["url"]
         entry["interval"] = group.get("interval", 600)
-        entry["timeout"] = group.get("timeout", 8000)
         if group.get("lazy"):
             entry["lazy"] = True
         if group["type"] == "url-test" and group.get("tolerance"):
             entry["tolerance"] = group["tolerance"]
-        # strategy 为 Mihomo 扩展字段，Stash 不识别，仅 Mihomo 目标输出
-        if group["type"] == "load-balance" and group.get("strategy") \
-                and engine == "mihomo":
-            entry["strategy"] = group["strategy"]
+        if group["type"] == "load-balance" and group.get("strategy"):
+            # Stash 只支持 consistent-hashing / round-robin
+            if engine == "stash":
+                strategy = group["strategy"]
+                if strategy not in ("consistent-hashing", "round-robin"):
+                    strategy = "consistent-hashing"
+                entry["strategy"] = strategy
+            else:
+                entry["strategy"] = group["strategy"]
+        if engine != "stash":
+            # Stash 策略组没有 url / timeout 字段，测速参数来自节点与集合
+            entry["url"] = group.get("url") or HEALTH_CHECK["url"]
+            entry["timeout"] = group.get("timeout", 8000)
     if group["type"] == "relay":
         # Stash 链式转发用 benchmark-* 字段测速；Mihomo 沿用 url/interval
         if engine == "stash":
@@ -130,11 +142,22 @@ def _rule_provider_entry(rp: dict) -> dict:
         "url": f"{{FEED}}/res/rule/{rp['name']}",
         "path": f"./rules/{rp['name']}.yaml",
         "behavior": rp["behavior"],
-        "interval": rp["interval"],
+        "interval": rp.get("client_interval") or rp["interval"],
     }
     if rp.get("format") and rp["format"] != "yaml":
         entry["format"] = rp["format"]
     return entry
+
+
+def _merge_dns(base: dict, override: dict) -> dict:
+    """DNS 段：字典递归覆盖，列表整体替换（用户填写的为准）。"""
+    result = dict(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _merge_dns(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def _merge(dst: dict, src: dict) -> None:
@@ -151,22 +174,18 @@ def _merge(dst: dict, src: dict) -> None:
 def render_target(snapshot: dict, target: dict) -> str:
     """渲染单个目标的完整配置文本。"""
     engine = target["engine"]
-    cfg: dict = {
-        "mixed-port": 7890,
-        "allow-lan": False,
-        "mode": "rule",
-        "log-level": "warning",
-        "ipv6": False,
-        "profile": {"store-selected": True, "store-fake-ip": True},
-        "proxies": [_guard_proxy()],
-    }
+    # ① 基础配置（按引擎，来自构建快照，保证构建可复现）
+    base = base_config_service.normalize(
+        (snapshot.get("base") or {}).get(engine) or {})
+    cfg: dict = base_config_service.ordered(base)
 
     local_enabled = {
         node["id"]: node for node in snapshot.get("local_nodes", [])
         if node.get("enabled")
     }
+    cfg["proxies"] = [_guard_proxy(engine)]
     for node in local_enabled.values():
-        cfg["proxies"].append(local_node_service.render_proxy(node))
+        cfg["proxies"].append(local_node_service.render_proxy(node, engine))
 
     sources = [s for s in snapshot["sources"] if s.get("enabled")]
     if sources:
@@ -195,8 +214,10 @@ def render_target(snapshot: dict, target: dict) -> str:
     cfg["rules"] = ["DOMAIN-SUFFIX,{FEED_HOST},DIRECT"] + [_rule_line(r) for r in rules]
 
     # Stash 由客户端接管 DNS；Mihomo 需要显式 dns 段。
+    # 用户在基础配置里写了 dns 则逐项覆盖默认值（列表以用户为准）。
     if engine == "mihomo":
-        cfg["dns"] = dict(DNS_MIHOOMO)
+        user_dns = base.get("dns") or {}
+        cfg["dns"] = _merge_dns(DNS_MIHOOMO, user_dns)
 
     # 功能模块按引擎合并，目标扩展最后应用、优先级最高
     for snip in snapshot.get("snippets", []):

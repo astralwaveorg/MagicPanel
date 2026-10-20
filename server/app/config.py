@@ -35,14 +35,14 @@ RELEASE_HISTORY_LIMIT = 10       # 发布历史只保留最近 10 条（每日�
 SETTINGS_DEFAULTS = {
     "base_url": "",                 # 对外基础地址，如 https://panel.example.com
     "session_ttl_hours": str(SESSION_TTL_HOURS),
-    "profile_update_interval": "12",  # 小时，写入响应头 profile-update-interval
+    "profile_update_interval": "1",  # 小时，写入响应头 profile-update-interval
     # 内置定时任务
     "scheduler_enabled": "1",
     "auto_fetch_sources": "1",
     "auto_fetch_rules": "1",
     "auto_test_sources": "1",
     "auto_build_enabled": "1",
-    "auto_build_interval_hours": "12",
+    "auto_build_interval_hours": "1",
     "auto_publish_enabled": "1",
     "auto_publish_channel": "stable",   # stable / candidate
     "auto_build_last_attempt": "",      # 内部：上次自动构建检查时间

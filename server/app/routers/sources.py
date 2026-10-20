@@ -20,6 +20,7 @@ class SourceBody(BaseModel):
     ua: str = Field(default="Stash", max_length=128)
     interval: int = Field(default=21600, ge=600, le=604800)
     test_interval: int = Field(default=21600, ge=0, le=604800)
+    client_interval: int = Field(default=0, ge=0, le=604800)
     auto_fetch: bool = True
     auto_test: bool = True
     allow_private: bool = False
@@ -55,6 +56,7 @@ def _public(row, with_meta: bool = True) -> dict:
         "ua": row["ua"],
         "interval": row["interval"],
         "test_interval": row["test_interval"],
+        "client_interval": row["client_interval"],
         "auto_fetch": bool(row["auto_fetch"]),
         "auto_test": bool(row["auto_test"]),
         "allow_private": bool(row["allow_private"]),
@@ -136,12 +138,13 @@ def create_source(body: SourceBody, user=CurrentUser):
         now = db.now()
         cur = conn.execute(
             "INSERT INTO sources(name, url_enc, enabled, filter, ua, interval, "
-            "test_interval, auto_fetch, auto_test, allow_private, filter_unavailable, "
-            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "client_interval, test_interval, auto_fetch, auto_test, allow_private, "
+            "filter_unavailable, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, security.encrypt_text(body.url), int(body.enabled),
-             body.filter, body.ua, body.interval, body.test_interval,
-             int(body.auto_fetch), int(body.auto_test), int(body.allow_private),
-             int(body.filter_unavailable), now, now),
+             body.filter, body.ua, body.interval, body.client_interval,
+             body.test_interval, int(body.auto_fetch), int(body.auto_test),
+             int(body.allow_private), int(body.filter_unavailable), now, now),
         )
         security.audit(conn, user["username"], "新增节点来源", "source", cur.lastrowid,
                        {"name": body.name})
@@ -172,11 +175,12 @@ def update_source(source_id: int, body: SourceBody, user=CurrentUser):
             url_enc = security.encrypt_text(body.url)
         conn.execute(
             "UPDATE sources SET name=?, url_enc=?, enabled=?, filter=?, ua=?, "
-            "interval=?, test_interval=?, auto_fetch=?, auto_test=?, "
-            "allow_private=?, filter_unavailable=?, updated_at=? WHERE id=?",
+            "interval=?, client_interval=?, test_interval=?, auto_fetch=?, "
+            "auto_test=?, allow_private=?, filter_unavailable=?, updated_at=? "
+            "WHERE id=?",
             (body.name, url_enc, int(body.enabled), body.filter, body.ua,
-             body.interval, body.test_interval, int(body.auto_fetch),
-             int(body.auto_test), int(body.allow_private),
+             body.interval, body.client_interval, body.test_interval,
+             int(body.auto_fetch), int(body.auto_test), int(body.allow_private),
              int(body.filter_unavailable), db.now(), source_id),
         )
         security.audit(conn, user["username"], "更新节点来源", "source", source_id,

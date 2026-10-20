@@ -1,0 +1,211 @@
+"""产物基础配置：按引擎维护的顶层键文档。
+
+这是产物内容的第 ① 层（优先级最低）：用户在这里定制端口、模式、日志、IPv6、
+profile、DNS 以及任意自定义顶层键；结构化内容（proxies / proxy-groups /
+rules 等）由各自的业务页面维护，基础配置不允许覆盖。
+"""
+from copy import deepcopy
+
+import yaml
+
+ENGINES = ("stash", "mihomo")
+
+# 结构化内容由业务页面维护，基础配置与目标扩展都不允许覆盖
+PROTECTED_KEYS = {
+    "proxies": "节点由“节点来源 / 本地单节点”维护",
+    "proxy-providers": "远程代理集由“节点来源”维护",
+    "proxy-groups": "策略组由“策略组”页维护",
+    "rule-providers": "规则集合由“规则来源”维护",
+    "rules": "分流规则由“分流规则”页维护",
+}
+
+# 产物中固定出现的顶层键（顺序固定，保证产物排版稳定）
+CORE_KEYS = (
+    "mixed-port", "socks-port", "redir-port", "tproxy-port", "port",
+    "allow-lan", "bind-address", "mode", "log-level", "ipv6",
+    "external-controller", "secret", "profile",
+)
+
+MODE_VALUES = ("rule", "global", "direct")
+LOG_LEVELS = ("silent", "error", "warning", "info", "debug")
+PORT_KEYS = ("mixed-port", "socks-port", "redir-port", "tproxy-port", "port")
+BOOL_KEYS = ("allow-lan", "ipv6")
+
+# Stash 官方精简：只保留官方有文档的顶层键
+STASH_OFFICIAL = {
+    "mode": "rule",
+    "log-level": "warning",
+    "ipv6": False,
+}
+
+# 兼容现状（含 Clash 端口与 profile 段）
+COMPAT = {
+    "mixed-port": 7890,
+    "allow-lan": False,
+    "mode": "rule",
+    "log-level": "warning",
+    "ipv6": False,
+    "profile": {"store-selected": True, "store-fake-ip": True},
+}
+
+PRESETS = {
+    "stash": {
+        "official": ("Stash 官方精简", deepcopy(STASH_OFFICIAL)),
+        "compat": ("兼容现状（含端口与 profile）", deepcopy(COMPAT)),
+    },
+    "mihomo": {
+        "compat": ("Mihomo 现状", deepcopy(COMPAT)),
+        "official": ("Mihomo 官方精简", {
+            "mode": "rule",
+            "log-level": "warning",
+            "ipv6": False,
+        }),
+    },
+}
+
+DEFAULT_ENGINE = "stash"
+
+
+def default_doc(engine: str) -> dict:
+    key = "official" if engine == "stash" else "compat"
+    return deepcopy(PRESETS[engine][key][1])
+
+
+def parse_content(content: str) -> dict:
+    """解析 YAML 文本；必须是映射。"""
+    if content is None or not content.strip():
+        raise ValueError("基础配置不能为空")
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"YAML 解析失败：{exc}") from exc
+    if data is None:
+        raise ValueError("基础配置不能为空")
+    if not isinstance(data, dict):
+        raise ValueError("基础配置必须是键值映射")
+    return data
+
+
+def validate_doc(doc: dict) -> None:
+    """校验基础配置；不合法时抛 ValueError（中文提示）。"""
+    for key in doc:
+        if key in PROTECTED_KEYS:
+            raise ValueError(f"基础配置不能包含“{key}”：{PROTECTED_KEYS[key]}")
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("基础配置的键名非法")
+    if "mode" in doc and doc["mode"] not in MODE_VALUES:
+        raise ValueError(f"mode 仅支持：{'、'.join(MODE_VALUES)}")
+    if "log-level" in doc and doc["log-level"] not in LOG_LEVELS:
+        raise ValueError(f"log-level 仅支持：{'、'.join(LOG_LEVELS)}")
+    for key in BOOL_KEYS:
+        if key in doc and not isinstance(doc[key], bool):
+            raise ValueError(f"{key} 必须是布尔值")
+    for key in PORT_KEYS:
+        if key in doc:
+            value = doc[key]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{key} 必须是整数端口")
+            if not 1 <= value <= 65535:
+                raise ValueError(f"{key} 需在 1-65535 之间")
+    if "profile" in doc and not isinstance(doc["profile"], dict):
+        raise ValueError("profile 必须是键值映射")
+    if "dns" in doc and not isinstance(doc["dns"], dict):
+        raise ValueError("dns 必须是键值映射")
+    for key in ("proxy-server-nameserver",):
+        if key in doc and not isinstance(doc[key], list):
+            raise ValueError(f"{key} 必须是列表")
+
+
+def to_yaml(doc: dict) -> str:
+    return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=4096)
+
+
+def normalize(doc: dict) -> dict:
+    """规范化后进快照：空 dns 视为未配置；其余保持原样。"""
+    result = deepcopy(doc)
+    if isinstance(result.get("dns"), dict) and not result["dns"]:
+        result.pop("dns")
+    return result
+
+
+def ordered(doc: dict) -> dict:
+    """按固定顺序输出：核心键在前，其余用户键按字母序。"""
+    result: dict = {}
+    for key in CORE_KEYS:
+        if key in doc:
+            result[key] = doc[key]
+    for key in sorted(k for k in doc if k not in CORE_KEYS):
+        result[key] = doc[key]
+    return result
+
+
+# ---- 结构化表单 schema（前端据此渲染，与本地节点同样的数据驱动风格） ----
+
+def _field(key, label, kind="text", **kwargs):
+    data = {"key": key, "label": label, "type": kind}
+    data.update(kwargs)
+    return data
+
+
+SCHEMA = [
+    _field("mode", "运行模式", "select", group="basic",
+           options=[{"value": v, "label": v} for v in MODE_VALUES],
+           default="rule", engines=["stash", "mihomo"]),
+    _field("log-level", "日志级别", "select", group="basic",
+           options=[{"value": v, "label": v} for v in LOG_LEVELS],
+           default="warning", engines=["stash", "mihomo"]),
+    _field("ipv6", "IPv6", "switch", group="basic", default=False,
+           engines=["stash", "mihomo"]),
+    _field("mixed-port", "混合端口", "number", group="basic", default=7890,
+           engines=["mihomo"]),
+    _field("socks-port", "SOCKS 端口", "number", group="basic",
+           engines=["mihomo"]),
+    _field("redir-port", "透明端口", "number", group="basic",
+           engines=["mihomo"]),
+    _field("tproxy-port", "TProxy 端口", "number", group="basic",
+           engines=["mihomo"]),
+    _field("allow-lan", "允许局域网连接", "switch", group="basic",
+           default=False, engines=["mihomo"]),
+    _field("bind-address", "监听地址", "text", group="basic",
+           placeholder="留空表示不限制", engines=["mihomo"]),
+    _field("profile.store-selected", "记住策略组选择", "switch",
+           group="profile", default=True, engines=["mihomo"]),
+    _field("profile.store-fake-ip", "记住 Fake-IP 映射", "switch",
+           group="profile", default=True, engines=["mihomo"]),
+    # DNS
+    _field("dns.enable", "启用 DNS", "switch", group="dns", default=True,
+           engines=["mihomo"]),
+    _field("dns.enhanced-mode", "解析模式", "select", group="dns",
+           options=[{"value": "fake-ip", "label": "fake-ip"},
+                    {"value": "redir-host", "label": "redir-host"}],
+           default="fake-ip", engines=["mihomo"]),
+    _field("dns.fake-ip-range", "Fake-IP 网段", "text", group="dns",
+           default="198.18.0.1/16", engines=["mihomo"]),
+    _field("dns.default-nameserver", "引导 DNS（每行一个）", "list",
+           group="dns", engines=["stash", "mihomo"]),
+    _field("dns.nameserver", "主 DNS（每行一个）", "list", group="dns",
+           engines=["stash", "mihomo"]),
+    _field("dns.proxy-server-nameserver", "代理服务器 DNS（每行一个）", "list",
+           group="dns", engines=["stash", "mihomo"]),
+    _field("dns.skip-cert-verify", "跳过 DNS 证书校验", "switch", group="dns",
+           engines=["stash", "mihomo"]),
+    _field("dns.follow-rule", "DNS 跟随分流规则", "switch", group="dns",
+           engines=["stash"]),
+    _field("dns.respect-rules", "DNS 跟随分流规则", "switch", group="dns",
+           engines=["mihomo"]),
+    _field("dns.prefer-h3", "并发尝试 HTTP/3", "switch", group="dns",
+           engines=["mihomo"]),
+    _field("dns.fake-ip-filter", "不返回 Fake-IP 的域名（每行一个）", "list",
+           group="dns", engines=["stash", "mihomo"]),
+]
+
+
+def schema(engine: str) -> list[dict]:
+    return [deepcopy(f) for f in SCHEMA if engine in f.get("engines", [])]
+
+
+GROUP_LABELS = {
+    "basic": "基础",
+    "profile": "配置文件存储",
+    "dns": "DNS",
+}

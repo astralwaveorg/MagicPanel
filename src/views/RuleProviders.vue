@@ -119,6 +119,9 @@
                 <el-option value="ipcidr" label="ipcidr（IP 段）" />
                 <el-option value="classical" label="classical（经典规则）" />
               </el-select>
+              <div v-if="form.behavior === 'classical'" class="mp-form-hint">
+                Stash 官方不推荐 classical：只能顺序匹配，显著增加耗时与内存。纯域名集合建议改用 domain。
+              </div>
             </el-form-item>
           </el-col>
         </el-row>
@@ -148,6 +151,11 @@
           <el-col :span="12">
             <el-form-item label="抓取间隔（秒）">
               <el-input-number v-model="form.interval" :min="600" :max="604800" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="客户端更新间隔（秒，0 = 跟随抓取间隔）">
+              <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -274,7 +282,7 @@ watch(filteredRows, (list) => {
 })
 
 const emptyForm = () => ({
-  name: '', behavior: 'domain', format: 'yaml', kind: 'remote',
+  name: '', behavior: 'domain', format: 'yaml', kind: 'remote', client_interval: 0,
   url: '', inline_content: '', interval: 86400, enabled: true,
 })
 const form = reactive(emptyForm())
@@ -304,6 +312,7 @@ async function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     name: row.name, behavior: row.behavior, format: row.format, kind: row.kind,
+    client_interval: row.client_interval,
     url: row.url, inline_content: '', interval: row.interval, enabled: row.enabled,
   } : {})
   dialog.value = true

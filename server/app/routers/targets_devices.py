@@ -9,6 +9,7 @@ import yaml
 
 from .. import db, security
 from ..deps import CurrentUser
+from ..services import base_config as base_config_service
 
 router = APIRouter(prefix="/api/v1", tags=["targets-devices"])
 
@@ -46,6 +47,9 @@ def _check_target(body: TargetBody) -> None:
             raise HTTPException(400, f"目标扩展 YAML 解析失败：{exc}")
         if overlay is not None and not isinstance(overlay, dict):
             raise HTTPException(400, "目标扩展必须是 YAML 映射（键值结构）")
+        for key, reason in base_config_service.PROTECTED_KEYS.items():
+            if overlay and key in overlay:
+                raise HTTPException(400, f"目标扩展不能包含“{key}”：{reason}")
 
 
 def _target_public(row) -> dict:

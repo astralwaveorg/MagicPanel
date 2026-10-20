@@ -60,13 +60,13 @@
 
 | 产物顶层键 | 内容 | 来源 | 用户可改 | 何时生效 |
 | --- | --- | --- | --- | --- |
-| `mixed-port` / `allow-lan` / `mode` / `log-level` / `ipv6` / `profile` | 7890 / false / rule / warning / false / store-selected、store-fake-ip | 编译器常量 | ❌ 不可改 | — |
-| `proxies` | ①「空组保护」占位节点（127.0.0.1:1）② **本地单节点**（`[单] 名称`，含地址、端口、协议、凭据） | 常量 + `local_nodes` 表 | ⚠️ 可改本地节点本身 | 下次构建 |
-| `proxy-providers` | 每个启用来源的 HTTP provider 条目：url=`{FEED}/res/provider/<名称>`、path、interval、UA、filter、health-check | `sources` 表 | ✅ 可改名称/UA/间隔/过滤/启用 | 下次构建（条目参数） |
-| `proxy-groups` | 组名、类型、成员（组名 / DIRECT / REJECT / `[单] xxx`）、`use` 来源、filter、url-test/fallback/load-balance 的 url/interval/timeout/tolerance/lazy、relay 的链式成员 | `proxy_groups` 表 | ✅ 可改 | 下次构建 |
+| `mixed-port` / `allow-lan` / `mode` / `log-level` / `ipv6` / `profile` | 7890 / false / rule / warning / false / store-selected、store-fake-ip | **产物基础配置**（按引擎，「产物配置」页可改） | ✅ 可改 | 下次构建 |
+| `proxies` | ①「空组保护」占位节点（127.0.0.1:1）② **本地单节点**（`[单] 名称`，含地址、端口、协议、凭据；键名按引擎渲染） | 常量 + `local_nodes` 表 | ⚠️ 可改本地节点本身 | 下次构建 |
+| `proxy-providers` | 每个启用来源的 HTTP provider 条目：url=`{FEED}/res/provider/<名称>`、path、interval、UA、filter；Stash 用 `benchmark-url`/`benchmark-timeout`，Mihomo 用 `health-check` | `sources` 表 | ✅ 可改名称/UA/间隔/客户端间隔/过滤/启用 | 下次构建（条目参数） |
+| `proxy-groups` | 组名、类型、成员（组名 / DIRECT / REJECT / `[单] xxx`）、`use` 来源、filter、interval/tolerance/lazy/hidden；`url`/`timeout` 与 `strategy` 按引擎输出 | `proxy_groups` 表 | ✅ 可改 | 下次构建 |
 | `rule-providers` | 每个启用规则来源的条目：url=`{FEED}/res/rule/<名称>`、path、behavior、interval、format | `rule_providers` 表 | ✅ 可改 | 下次构建（条目参数） |
 | `rules` | ①**置顶** `DOMAIN-SUFFIX,{FEED_HOST},DIRECT`（面板域名强制直连，防 VPN 运行中更新配置失败）②用户规则按顺序 | 规则表 + 编译器置顶 | ✅ 规则可改 / ❌ 置顶那条不可改 | 下次构建 |
-| `dns` | 仅 Mihomo 目标：fake-ip、DNS 服务器、nameserver-policy、fake-ip-filter | 编译器常量（Stash 由客户端接管 DNS，不下发） | ❌ 不可改 | — |
+| `dns` | 仅 Mihomo 目标：fake-ip、DNS 服务器、nameserver-policy、fake-ip-filter | 基础配置优先，未配置时用内置默认值 | ✅ 可改 | 下次构建 |
 | 合并后的功能模块 | 启用的 snippets 按 engine 匹配后合并：字典递归、列表追加、标量覆盖 | `snippets` 表 | ✅ 可改 | 下次构建 |
 | 目标扩展覆盖 | 目标级 `extra_yaml` 合并，**优先级最高** | `targets` 表 | ✅ 可改 | 下次构建 |
 
@@ -179,11 +179,13 @@
 | 规则来源的 **URL / 内容** | ❌ 不需要（内容在子资源里） | 抓取后立即生效 |
 | 规则来源的 **behavior / format / 间隔** | ✅ 需要（写进 rule-provider 条目） | 发布后生效 |
 | 上游机场的节点内容 | ❌ 不需要 | 客户端拉子资源时实时生效 |
-| 设置里的客户端更新间隔 | ❌ 不需要 | 下一次响应头即生效 |
+| 设置里的客户端更新间隔 | ❌ 不需要 | 下一次响应头即生效（已统一为 1 小时） |
 | 设备绑定的目标 / 通道 | ❌ 不需要 | 下次拉取即生效 |
-| 测速结果（可用节点过滤） | ❌ 不需要 | 子资源实时过滤 |
+| 测速结果（可用节点过滤） | ❌ 不需要 | 子资源实时过滤（ETag 已纳入测速摘要，结果变化会真正下发） |
+| 产物基础配置（端口/模式/DNS 等） | ✅ 需要 | 下次构建 |
 
-> 记住这一条就够了：**凡是写进产物 YAML 的东西（组、规则、本地节点、provider 条目参数、扩展 YAML）都要重建；凡是走子资源实时读取的东西（上游节点、上游规则、测速过滤）都不用重建。**
+> 记住这一条就够了：**凡是写进产物 YAML 的东西（组、规则、本地节点、provider 条目参数、基础配置、扩展 YAML）都要重建；凡是走子资源实时读取的东西（上游节点、上游规则、测速过滤）都不用重建。**
+> 产物由四层叠加：**① 基础配置（按引擎，可在「产物配置」页改）→ ② 结构化内容（节点/策略组/规则，恒由服务端生成）→ ③ 功能模块 → ④ 发布目标扩展**。基础配置与目标扩展都不得写入 `rules` 等结构键。
 
 ---
 
@@ -238,10 +240,11 @@
 ## 8. 现状观察与改进建议（供讨论，非必做）
 
 1. **本地节点不参与自动测速**：目前测速只针对节点来源的快照；本地单节点既没有测速入口，也不会被「只分发可用节点」过滤。若自建节点较多，建议后续给本地节点加测速能力与独立开关。
-2. **`builds.snapshot` 含本地节点明文凭据**：与 `local_nodes` 表的加密落盘不一致。若威胁模型要求「数据库被读即失守」，可考虑快照整体加密或对本地节点参数做脱敏存储。
-3. **指针切换到客户端生效有窗口**：默认 `profile-update-interval=12` 小时，客户端最长可能 12 小时后才发现新版本；若需更快收敛，可调小该设置（改设置立即生效，无需重建）。
+2. ~~**`builds.snapshot` 含本地节点明文凭据**~~：已修复 —— 快照改为 `enc:v1:` 密文落盘（启动时迁移历史明文行），密文与 `data/secret.key` 绑定。
+3. **指针切换到客户端生效有窗口**：已把全局 `profile-update-interval` 与服务端 `auto_build_interval_hours` 统一为 **1 小时**（含存量数据迁移），端到端 ≤2 小时；也可用「产物配置 → 保存并构建发布」立即生效。
 4. **自动构建对「上游内容变化」不敏感**：这是有意的（避免无意义构建），但意味着「上游节点全部失效」不会触发重建；依赖的是 provider 层面的实时替换 + 客户端自带测速切换。
 5. **发布历史 10 条 ≈ 5 天**：每日两次自动发布时刚好覆盖；手动发布频繁时会挤掉自动发布记录，完整追溯请查审计日志。
+6. **目标级「更新提示(小时)」已废弃**：客户端更新间隔统一取全局设置，目标页不再提供该输入，避免「改了却不生效」。
 6. **目标级「更新提示(小时)」目前不生效**：`targets.update_interval` 只入库并在界面展示，分发层的 `profile-update-interval` 取的是全局设置 `profile_update_interval`。二者需要统一（要么目标级生效、要么把该字段从界面移除），否则容易误以为「改目标就能改客户端更新节奏」。
 
 ---

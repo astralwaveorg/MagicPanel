@@ -184,7 +184,7 @@ import { uploadCore } from '../core'
 import UserAvatar from '../components/UserAvatar.vue'
 import StatusDot from '../components/StatusDot.vue'
 
-const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 12, core_proxy: '' })
+const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '' })
 const savingSettings = ref(false)
 const users = ref([])
 const userDialog = ref(false)
@@ -214,7 +214,7 @@ async function load() {
     Object.assign(settings, {
       base_url: s.base_url || '',
       session_ttl_hours: Number(s.session_ttl_hours) || 168,
-      profile_update_interval: Number(s.profile_update_interval) || 12,
+      profile_update_interval: Number(s.profile_update_interval) || 1,
       core_proxy: s.core_proxy || '',
     })
     users.value = u

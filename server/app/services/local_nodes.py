@@ -19,6 +19,21 @@ VMESS_CIPHERS = ["auto", "aes-128-gcm", "chacha20-poly1305", "none"]
 NETWORKS = ["tcp", "ws", "grpc"]
 
 
+def _bandwidth_mbps(value) -> int:
+    """带宽统一以 Mbps 整数保存；兼容 "1000 Mbps" 这类写法。"""
+    if value is None or value == "":
+        return 0
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip().lower().replace("mbps", "").replace("m", "").strip()
+    try:
+        return int(float(text))
+    except ValueError:
+        return 0
+
+
 def _field(key, label, kind="text", **kwargs):
     data = {"key": key, "label": label, "type": kind}
     data.update(kwargs)
@@ -128,8 +143,8 @@ PROTOCOLS = {
                    options=[{"value": "", "label": "无"}, {"value": "salamander", "label": "salamander"}]),
             _field("obfs_password", "混淆密码", "password", default="",
                    show_if={"key": "obfs", "in": ["salamander"]}),
-            _field("up", "上行带宽", "text", default="", placeholder="例如 100 Mbps"),
-            _field("down", "下行带宽", "text", default="", placeholder="例如 300 Mbps"),
+            _field("up", "上行带宽 (Mbps)", "bandwidth", default=0),
+            _field("down", "下行带宽 (Mbps)", "bandwidth", default=0),
             _field("udp", "启用 UDP", "switch", default=True),
         ],
     },
@@ -137,6 +152,9 @@ PROTOCOLS = {
         "label": "TUIC",
         "default_port": 443,
         "fields": [
+            _field("version", "TUIC 版本", "select", default="5",
+                   options=[{"value": "5", "label": "v5"},
+                            {"value": "4", "label": "v4"}]),
             _field("uuid", "UUID", "password", required=True),
             _field("password", "密码", "password", required=True),
             _field("sni", "SNI", "text", default=""),
@@ -250,6 +268,10 @@ def normalize_params(protocol: str, params: dict) -> dict:
         value = params[key]
         if field["type"] == "switch":
             normalized[key] = bool(value)
+        elif field["type"] == "bandwidth":
+            normalized[key] = _bandwidth_mbps(value)
+            if normalized[key] < 0:
+                raise ValueError(f"{field['label']}不能为负数")
         elif field["type"] == "number":
             try:
                 normalized[key] = int(value)
@@ -314,12 +336,13 @@ def _common_tls(entry: dict, params: dict, sni_field: str = "servername",
         entry["skip-cert-verify"] = True
 
 
-def render_proxy(node: dict) -> dict:
-    """把一个本地节点渲染为 Clash/Mihomo 出站字典。"""
+def render_proxy(node: dict, engine: str = "mihomo") -> dict:
+    """把一个本地节点渲染为出站字典；Stash 与 Mihomo 的键名存在差异。"""
     params = node.get("params") or {}
     if isinstance(params, str):
         params = json.loads(params or "{}")
     protocol = node["protocol"]
+    stash = engine == "stash"
     entry = {
         "name": marked_name(node["name"]),
         "type": params.get("proxy_type") if protocol == "custom" else protocol,
@@ -349,8 +372,9 @@ def render_proxy(node: dict) -> dict:
             "uuid": params.get("uuid", ""),
             "alterId": int(params.get("alter_id") or 0),
             "cipher": params.get("cipher") or "auto",
-            "udp": bool(params.get("udp", True)),
         })
+        if not stash:
+            entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params)
         _put_network(entry, params)
     elif protocol == "vless":
@@ -358,7 +382,8 @@ def render_proxy(node: dict) -> dict:
         entry["tls"] = bool(params.get("tls", True))
         if params.get("flow"):
             entry["flow"] = params["flow"]
-        entry["udp"] = bool(params.get("udp", True))
+        if not stash:
+            entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params)
         _put_network(entry, params)
         if params.get("reality_public_key"):
@@ -368,45 +393,75 @@ def render_proxy(node: dict) -> dict:
             }
     elif protocol == "trojan":
         entry["password"] = params.get("password", "")
-        entry["udp"] = bool(params.get("udp", True))
+        if not stash:
+            entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params, sni_field="sni", sni_key="sni")
         _put_network(entry, params)
     elif protocol == "hysteria2":
-        entry["password"] = params.get("password", "")
-        entry["udp"] = bool(params.get("udp", True))
-        _common_tls(entry, params, sni_field="sni", sni_key="sni")
+        # Stash 用 auth / up-speed / down-speed；Mihomo 用 password / up / down
+        if stash:
+            entry["auth"] = params.get("password", "")
+        else:
+            entry["password"] = params.get("password", "")
+            entry["udp"] = bool(params.get("udp", True))
+        if params.get("sni"):
+            entry["sni"] = params["sni"]
+        if params.get("skip_cert_verify"):
+            entry["skip-cert-verify"] = True
+        up = _bandwidth_mbps(params.get("up"))
+        down = _bandwidth_mbps(params.get("down"))
+        if stash:
+            if up:
+                entry["up-speed"] = up
+            if down:
+                entry["down-speed"] = down
+        else:
+            if up:
+                entry["up"] = f"{up} Mbps"
+            if down:
+                entry["down"] = f"{down} Mbps"
         if params.get("obfs"):
             entry["obfs"] = params["obfs"]
             if params.get("obfs_password"):
                 entry["obfs-password"] = params["obfs_password"]
-        if params.get("up"):
-            entry["up"] = params["up"]
-        if params.get("down"):
-            entry["down"] = params["down"]
     elif protocol == "tuic":
-        entry.update({
-            "uuid": params.get("uuid", ""),
-            "password": params.get("password", ""),
-            "congestion-controller": params.get("congestion_controller") or "bbr",
-            "udp-relay-mode": params.get("udp_relay_mode") or "native",
-        })
-        _common_tls(entry, params, sni_field="sni", sni_key="sni")
-        if params.get("reduce_rtt"):
-            entry["reduce-rtt"] = True
+        version = str(params.get("version") or "5")
+        if stash:
+            # Stash 需要显式 version；v4 用 token，v5 用 uuid + password
+            entry["version"] = int(version)
+            if version == "4":
+                if params.get("token"):
+                    entry["token"] = params["token"]
+            else:
+                entry["uuid"] = params.get("uuid", "")
+                entry["password"] = params.get("password", "")
+        else:
+            entry["uuid"] = params.get("uuid", "")
+            entry["password"] = params.get("password", "")
+            entry["udp-relay-mode"] = params.get("udp_relay_mode") or "native"
+            if params.get("reduce_rtt"):
+                entry["reduce-rtt"] = True
+            entry["udp"] = bool(params.get("udp", True))
+        entry["congestion-controller"] = params.get("congestion_controller") or "bbr"
+        if params.get("sni"):
+            entry["sni"] = params["sni"]
+        if params.get("skip_cert_verify"):
+            entry["skip-cert-verify"] = True
     elif protocol in ("http", "socks5"):
         if params.get("username"):
             entry["username"] = params["username"]
         if params.get("password"):
             entry["password"] = params["password"]
-        if protocol == "socks5":
+        if protocol == "socks5" and not stash:
             entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params, sni_field="sni", sni_key="sni")
     elif protocol == "snell":
         entry.update({
             "psk": params.get("psk", ""),
             "version": int(params.get("version") or 3),
-            "udp": bool(params.get("udp", True)),
         })
+        if not stash:
+            entry["udp"] = bool(params.get("udp", True))
         if params.get("obfs"):
             entry["obfs-opts"] = {
                 "mode": params["obfs"],
@@ -414,7 +469,8 @@ def render_proxy(node: dict) -> dict:
             }
     elif protocol == "anytls":
         entry["password"] = params.get("password", "")
-        entry["udp"] = bool(params.get("udp", True))
+        if not stash:
+            entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params, sni_field="sni", sni_key="sni")
     elif protocol == "custom":
         if not entry.get("type"):

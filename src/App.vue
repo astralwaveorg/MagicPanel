@@ -75,7 +75,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Menu, Moon, Odometer, Connection, Collection, SetUp, Filter, Monitor,
-  Iphone, Promotion, Document, Sunny, Tools, MagicStick, Timer,
+  Iphone, Promotion, Document, Sunny, Tools, MagicStick, Timer, Operation,
 } from '@element-plus/icons-vue'
 import { confirmBox } from './confirm'
 import { api } from './api'
@@ -102,6 +102,7 @@ const menu = [
   { path: '/admin/groups', title: '策略组', icon: SetUp },
   { path: '/admin/rules', title: '分流规则', icon: Filter },
   { path: '/admin/snippets', title: '功能模块', icon: MagicStick },
+  { path: '/admin/artifact', title: '产物配置', icon: Operation },
   { path: '/admin/targets', title: '发布目标', icon: Monitor },
   { path: '/admin/devices', title: '设备', icon: Iphone },
   { path: '/admin/builds', title: '构建与发布', icon: Promotion },

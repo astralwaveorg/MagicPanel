@@ -23,6 +23,7 @@ _state: dict = {
     "last_tick_at": "",
     "last_result": None,
     "last_error": "",
+    "last_notice": "",
 }
 _lock = threading.Lock()
 _core_cache: dict = {"at": 0.0, "available": False, "status": None}
@@ -72,7 +73,8 @@ def _run_source_fetch(summary: dict, now: datetime, force: bool = False) -> None
         rows = db.all_(
             conn,
             "SELECT id, name, interval, last_attempt_at, last_fetched_at, "
-            "created_at FROM sources WHERE enabled=1 AND auto_fetch=1 ORDER BY id",
+            "created_at FROM sources WHERE enabled=1 AND auto_fetch=1 "
+            "AND interval>0 ORDER BY id",
         )
     for row in rows:
         last = row["last_attempt_at"] or row["last_fetched_at"]
@@ -145,12 +147,24 @@ def _run_rule_fetch(summary: dict, now: datetime, force: bool = False) -> None:
             logger.warning("自动抓取规则来源失败：%s：%s", row["name"], exc)
 
 
-def _publish_tests_ready(conn) -> tuple[bool, list[str]]:
-    """自动发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。"""
+def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
+    """自动发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。
+
+    关闭了自动测速（auto_test=0）或测速间隔为 0 的来源不会产生测速结果，
+    不参与门禁，否则会永久阻塞自动发布。
+    """
+    skipped = [
+        r["name"] for r in db.all_(
+            conn,
+            "SELECT name FROM sources WHERE enabled=1 AND filter_unavailable=1 "
+            "AND (auto_test=0 OR test_interval<=0) ORDER BY id",
+        )
+    ]
     rows = db.all_(
         conn,
         "SELECT name, test_results, tested_at, last_fetched_at FROM sources "
-        "WHERE enabled=1 AND filter_unavailable=1 ORDER BY id",
+        "WHERE enabled=1 AND filter_unavailable=1 AND auto_test=1 "
+        "AND test_interval>0 ORDER BY id",
     )
     missing: list[str] = []
     for row in rows:
@@ -170,7 +184,7 @@ def _publish_tests_ready(conn) -> tuple[bool, list[str]]:
             missing.append(f"{row['name']}（无测速结果）")
         elif fetched and tested < fetched:
             missing.append(f"{row['name']}（测速早于最近抓取）")
-    return not missing, missing
+    return not missing, missing, skipped
 
 
 def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
@@ -202,7 +216,9 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
             return
         publish = _enabled(conn, "auto_publish_enabled", "1")
         if publish:
-            ready, missing = _publish_tests_ready(conn)
+            ready, missing, skipped = _publish_tests_ready(conn)
+            if skipped:
+                summary["skipped"] = "未开启测速的来源不参与门禁：" + "、".join(skipped)
             if not ready:
                 # 不推进自动构建时间：测速完成后下一轮立即重试
                 summary["build_error"] = (
@@ -249,9 +265,15 @@ def _has_activity(summary: dict) -> bool:
 
 
 def _record_run(summary: dict, trigger: str, actor: str) -> None:
-    """手动运行必记；定时运行只在有实际动作时记，避免每 30 秒写一条。"""
+    """手动运行必记；定时运行在有实际动作或失败原因变化时记，避免每 30 秒刷屏。"""
+    notice = (summary.get("build_error", "") or summary.get("test_skipped", "")
+              or summary.get("skipped", ""))
     if trigger != "manual" and not _has_activity(summary):
-        return
+        # 没有动作但有失败原因：仅在原因变化时记一条，便于回溯
+        if not notice or notice == _state.get("last_notice", ""):
+            return
+    _state["last_notice"] = notice
+
     detail = {
         "trigger": trigger,
         "sources_fetched": summary["sources_fetched"],

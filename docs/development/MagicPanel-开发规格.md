@@ -44,7 +44,8 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 | users / sessions | 维护者账号（PBKDF2-SHA256），门户 PIN 散列存于 `users.portal_pin_hash`；会话只存令牌摘要，含独立 CSRF 令牌 |
 | sources（节点来源） | 订阅地址 Fernet 加密（`url_enc`）；最近一次成功快照加密留存；失败不覆盖旧快照；`filter_unavailable` 控制是否只分发可用节点；`test_results` 记录逐节点测速结果；`interval` 为抓取间隔、`test_interval` 为自动测速间隔（0 = 关闭）；`auto_fetch` 关闭后只使用本地快照（定时抓取与一键抓取跳过，仍可测速）；`auto_test` 关闭后不执行定时自动测速（仍可一键/单条手动测速）；`last_attempt_at` / `test_attempt_at` 记录最近一次尝试（含失败），供定时任务判断到期 |
 | rule_providers（规则来源） | 远程 / 内联两类；behavior、format、规则数与摘要；`interval` 为远程抓取间隔，`last_attempt_at` 记录最近尝试（含失败） |
-| local_nodes（本地单节点） | 手动填写的服务器、协议与参数；`params_enc` / `extra_yaml_enc` 加密落盘；产物中使用 `[单] 名称`，顶层 `proxies` 直接写入 |
+| local_nodes（本地单节点） | 手动填写的服务器、协议与参数；`params_enc` / `extra_yaml_enc` 加密落盘；产物中使用 `[单] 名称`，顶层 `proxies` 直接写入；Stash 与 Mihomo 的协议键名分别渲染 |
+| base_configs（产物基础配置） | 按引擎（stash / mihomo）各一份 YAML 文档，定义产物的顶层全局键（端口、模式、日志、IPv6、profile、DNS 及任意自定义键）；随构建快照固化 |
 | proxy_groups（策略组） | select / url-test / fallback；成员引用、节点来源、本地单节点 ID、过滤正则、测速参数 |
 | rules（分流规则） | 有序、首条匹配；RULE-SET 引用规则来源；MATCH 兜底 |
 | snippets（功能模块） | 脚本 / 复写 / 面板 / DNS / 通用五类 YAML 片段，按适用引擎（stash / mihomo / all）在构建时合并 |
@@ -60,11 +61,12 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 
 1. 构建时把来源、规则来源、策略组、规则、目标固化为 JSON 快照（`policy_sha` 为内容摘要），后续修改策略不影响已生成的构建。
 2. 逐目标渲染：Mihomo 的节点来源鉴权键为 `header`，Stash 为 `headers`；DNS 段只发给 Mihomo（Stash 由客户端接管 DNS）；启用的功能模块按合并顺序与引擎匹配后深度合并（字典递归、列表追加、标量覆盖），目标扩展 YAML 最后应用、优先级最高。
-3. 产物中的订阅来源仍以 `{FEED}` 占位，分发时才注入设备专属地址；本地单节点直接写入顶层 `proxies`，名称为 `[单] 名称`，因此构建产物与 builds 快照会包含本地节点凭据，只能在管理端预览。
+3. 产物分四层合并（优先级由低到高）：① 基础配置（按引擎，来自「产物配置」页，固化在构建快照里）② 结构化内容（节点、策略组、规则，恒由服务端生成，基础配置与目标扩展都不得覆盖）③ 功能模块（可复用片段）④ 发布目标扩展（单目标覆盖，最高优先级）。订阅来源仍以 `{FEED}` 占位；本地单节点直接写入顶层 `proxies`，名称为 `[单] 名称`，因此构建产物与 builds 快照会包含本地节点凭据，只能在管理端预览。
 4. 策略组的 `local_nodes` 保存本地节点 ID；渲染时解析为 `[单] 名称` 并追加到该组 `proxies`。停用的本地节点不写入产物，策略组引用停用节点时给出警告。
-5. 所有 url-test / fallback 组自动加入“空组保护”占位节点（127.0.0.1:1），防止地区筛选为空时被客户端隐式改写为 DIRECT。
+5. 引擎方言差异（依据 Stash 与 Mihomo 官方文档）：远程代理集 —— Stash 用 `headers` + `benchmark-url` / `benchmark-timeout`，Mihomo 用 `header` + `health-check`；策略组 —— Stash 无 `url` / `timeout`（测速参数来自节点与集合级 `benchmark-url`），`load-balance` 的 `strategy` 只输出 `consistent-hashing` / `round-robin`，Mihomo 另支持 `sticky-sessions`；本地单节点 —— Stash 的 Hysteria2 用 `auth` + `up-speed` / `down-speed`、TUIC 必须带 `version`，Mihomo 用 `password` + `up` / `down`；`udp` 只在官方有文档的引擎输出。
 6. 静态校验：YAML 往返、策略组引用存在性、循环引用检测、空组、本地节点引用、规则目标存在性、RULE-SET 引用、正则合法性、兜底 MATCH 存在、重复规则提示。任一错误使构建失败且不可发布。
-7. 校验边界：Mihomo 目标在测速核心已安装时追加官方配置检查（`mihomo -t -f`，`{FEED}` 占位替换为回环地址，不发生真实请求），通过标记为“核心校验通过，实机行为待验收”；Stash 没有官方无头校验工具，结果只能标记为“静态通过，实机待验收”。
+7. 基础配置保护：基础配置与目标扩展都不得写入 `proxies` / `proxy-providers` / `proxy-groups` / `rule-providers` / `rules`（列表是“追加”语义，写在兜底规则之后永不生效且会绕过引用校验）。
+8. 校验边界：Mihomo 目标在测速核心已安装时追加官方配置检查（`mihomo -t -f`，`{FEED}` 占位替换为回环地址，不发生真实请求），通过标记为“核心校验通过，实机行为待验收”；Stash 没有官方无头校验工具，结果只能标记为“静态通过，实机待验收”。
 
 ## 节点测速与不可用过滤
 
@@ -139,6 +141,7 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 | `POST /api/v1/sources/{id}/test` | 用本地核心测速全部节点，结果随来源返回 |
 | `PATCH /api/v1/sources/batch` / `POST /api/v1/sources/batch/delete` | 批量修改抓取/测速间隔 / 批量删除（引用校验） |
 | `GET /api/v1/local-nodes/schema` / `GET/POST /api/v1/local-nodes` / `PUT/DELETE /api/v1/local-nodes/{id}` | 本地单节点协议 schema、列表、增删改（参数加密落盘，删除校验策略组引用） |
+| `GET/PUT /api/v1/base-config` / `POST /api/v1/base-config/reset` / `GET /api/v1/base-config/schema` / `POST /api/v1/base-config/preview` / `POST /api/v1/base-config/apply` | 产物基础配置：按引擎读写与恢复默认、表单 schema、产物预览（不产生构建）、保存并构建发布 |
 | `PATCH /api/v1/rule-providers/batch` / `POST /api/v1/rule-providers/batch/delete` | 批量修改间隔 / 批量删除（引用校验） |
 | `DELETE /api/v1/builds/{id}` / `POST /api/v1/builds/batch/delete` | 删除构建 / 批量删除构建（通道引用保护） |
 | `POST /api/v1/groups/reorder` / `POST /api/v1/rules/reorder` / `POST /api/v1/targets/reorder` | 策略组 / 分流规则 / 发布目标拖动排序 |
@@ -171,6 +174,8 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 
 - 会话使用 HttpOnly + SameSite=Lax Cookie；写操作要求 `X-CSRF-Token` 与会话匹配。管理接口不开放 CORS。
 - 订阅地址、节点快照、设备令牌副本用 `data/secret.key` 的 Fernet 密钥加密；主密钥不进入备份导出文件，需另行保管。
+- 本地单节点的协议参数与高级 YAML 同样加密落盘（`params_enc` / `extra_yaml_enc`）；构建快照 `builds.snapshot` 可能含这些凭据，因此以 `enc:v1:` 密文存储（启动时迁移历史明文行，幂等），密文与 `data/secret.key` 绑定。
+- 产物文件本身必然含本地单节点凭据（客户端要用），只应在管理端预览，不做公开分发。
 - 抓取默认仅允许 http/https 且拒绝环回 / 私网 / 保留地址；确需内网订阅须在来源上显式开启。单资源上限 10 MB、超时 20 秒、最多 3 次重定向。
 - 令牌由密码学安全随机数生成；泄露后的处置是轮换或删除设备，已下发的节点凭据需联系机场重置。
 - 备份导出为 JSON（含加密态数据与令牌摘要）；恢复会覆盖全部数据，需 `confirm=true` 并重新登录。
@@ -192,6 +197,7 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 - 操作列使用网格布局：节点来源与构建的 5 个按钮为 3 + 2，规则来源的 4 个按钮为 2 × 2；窄屏下缩小间距与字号，表格横向滚动。
 - 规则来源表格不直接铺开长 URL，改为“复制 URL”按钮；复制成功或失败都会弹窗展示完整 URL，便于核对或手动复制。表格支持名称 / URL 模糊搜索与分页跳转。
 - 节点来源表格同样不展示订阅地址，只提供“复制 URL”按钮；点击时调用 `POST /api/v1/sources/{id}/reveal` 解密并记入审计，复制结果在弹窗中展示完整地址。
+- “产物配置”页按引擎（Stash / Mihomo）维护顶层全局键：表单由服务端 schema 驱动，高级 YAML 覆盖其余任意顶层键；提供官方精简 / 兼容现状两种预设、恢复默认、产物预览与“保存并构建发布”。基础配置随构建快照固化，改动后需重新构建并发布才会生效。
 - “节点来源”页提供“添加订阅”与“添加节点”两个入口。本地单节点协议从服务端 schema 动态渲染：协议、加密方式、传输方式、TLS、UDP 等能选择的一律用下拉/开关，其余字段用输入框；另提供高级 YAML 处理协议差异。节点名以 `[单] 名称` 展示并写入产物，策略组编辑中可按名称勾选本地节点。
 - 节点来源表单提供“自动抓取”和“自动测速”两个独立选项（默认勾选）。关闭自动抓取后隐藏抓取间隔输入框，列表状态显示“本地快照”、最近成功显示“本地快照”而不是时间，失败次数/最近错误显示“—”；定时抓取与一键抓取跳过该来源，但一键测速和自动测速仍会处理，构建与分发继续使用已有本地快照。关闭自动测速后隐藏测速间隔输入框，定时测速跳过该来源，但一键测速和单条“测速”仍可用。
 - “构建与发布”页顶部展示稳定 / 候选通道当前使用的构建号、策略摘要、发布或回滚时间、操作人以及自动 / 手动标签；自动发布完成后指针移动到新构建，旧构建仍保留用于回滚。

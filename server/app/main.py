@@ -7,8 +7,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import HTTPException as StarletteHTTPException
 
 from . import config, db
-from .routers import (auth, automation, builds, feed, local_nodes, misc, policy,
-                      portal, rule_providers, snippets, sources, targets_devices)
+from .routers import (auth, automation, base_config, builds, feed, local_nodes,
+                      misc, policy, portal, rule_providers, snippets, sources,
+                      targets_devices)
 from .services import scheduler
 
 
@@ -31,7 +32,8 @@ def create_app() -> FastAPI:
 
     for r in (auth.router, sources.router, rule_providers.router, policy.router,
               targets_devices.router, builds.router, misc.router, automation.router,
-              local_nodes.router, feed.router, portal.router, snippets.router):
+              local_nodes.router, base_config.router, feed.router, portal.router,
+              snippets.router):
         app.include_router(r)
 
     @app.middleware("http")

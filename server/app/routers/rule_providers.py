@@ -20,6 +20,7 @@ class RuleProviderBody(BaseModel):
     url: str = Field(default="", max_length=1024)
     inline_content: str = Field(default="", max_length=2_000_000)
     interval: int = Field(default=86400, ge=600, le=604800)
+    client_interval: int = Field(default=0, ge=0, le=604800)
     enabled: bool = True
 
 
@@ -41,6 +42,7 @@ def _public(row) -> dict:
         "kind": row["kind"],
         "url": row["url"],
         "interval": row["interval"],
+        "client_interval": row["client_interval"],
         "enabled": bool(row["enabled"]),
         "last_status": row["last_status"],
         "last_error": row["last_error"],
@@ -128,12 +130,12 @@ def create_provider(body: RuleProviderBody, user=CurrentUser):
         now = db.now()
         cur = conn.execute(
             "INSERT INTO rule_providers(name, behavior, format, kind, url, "
-            "inline_content, interval, enabled, content, rule_count, sha256, "
-            "last_status, last_fetched_at, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "inline_content, interval, client_interval, enabled, content, "
+            "rule_count, sha256, last_status, last_fetched_at, created_at, "
+            "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.behavior, body.format, body.kind, body.url,
-             body.inline_content, body.interval, int(body.enabled), content,
-             count, sha, status, fetched, now, now),
+             body.inline_content, body.interval, body.client_interval,
+             int(body.enabled), content, count, sha, status, fetched, now, now),
         )
         security.audit(conn, user["username"], "新增规则来源", "rule_provider",
                        cur.lastrowid, {"name": body.name})
@@ -166,6 +168,7 @@ def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
         sha = old["sha256"]
         status = old["last_status"]
         fetched = old["last_fetched_at"]
+        attempt = old["last_attempt_at"]
         if body.kind == "inline":
             content = body.inline_content
             count = fetcher.count_rules(content.encode(), body.behavior)
@@ -173,15 +176,18 @@ def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
             status = "ok"
             fetched = db.now()
         elif old["kind"] == "inline":
-            # 从 inline 切到 remote：清空旧快照，等待首次抓取
+            # 从 inline 切到 remote：清空旧快照与尝试时间，下一轮立即抓取
             content, count, sha, status, fetched = "", None, None, "never", None
+            attempt = None
         conn.execute(
             "UPDATE rule_providers SET name=?, behavior=?, format=?, kind=?, url=?, "
-            "inline_content=?, interval=?, enabled=?, content=?, rule_count=?, "
-            "sha256=?, last_status=?, last_fetched_at=?, updated_at=? WHERE id=?",
+            "inline_content=?, interval=?, client_interval=?, enabled=?, content=?, "
+            "rule_count=?, sha256=?, last_status=?, last_fetched_at=?, "
+            "last_attempt_at=?, updated_at=? WHERE id=?",
             (body.name, body.behavior, body.format, body.kind, body.url,
-             body.inline_content, body.interval, int(body.enabled), content, count,
-             sha, status, fetched, db.now(), rp_id),
+             body.inline_content, body.interval, body.client_interval,
+             int(body.enabled), content, count, sha, status, fetched, attempt,
+             db.now(), rp_id),
         )
         security.audit(conn, user["username"], "更新规则来源", "rule_provider", rp_id,
                        {"name": body.name})

@@ -39,9 +39,8 @@
             <template #default="{ row }">{{ row.description || '—' }}</template>
           </el-table-column>
           <el-table-column label="目标扩展" min-width="120">
-            <template #default="{ row }">{{ row.extra_yaml ? '有（整键覆盖）' : '—' }}</template>
+            <template #default="{ row }">{{ row.extra_yaml ? '有（字典递归 / 列表追加）' : '—' }}</template>
           </el-table-column>
-          <el-table-column label="更新提示(小时)" width="120" align="right" prop="update_interval" />
           <el-table-column label="操作" width="150">
             <template #default="{ row }">
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
@@ -82,7 +81,7 @@
         </el-form-item>
         <el-form-item>
           <template #label>
-            <span>目标扩展（YAML 映射，顶层键整键覆盖生成结果）</span>
+            <span>目标扩展（YAML 映射；字典递归合并、列表追加、标量覆盖）</span>
             <span class="mp-field-hint">{{ engineHint }}</span>
           </template>
           <div class="mp-template-bar">
@@ -94,8 +93,8 @@
           <el-input v-model="form.extra_yaml" type="textarea" :rows="8" class="mono"
                     :placeholder="enginePlaceholder" />
         </el-form-item>
-        <el-form-item label="更新提示（小时，写入 profile-update-interval 响应头）">
-          <el-input-number v-model="form.update_interval" :min="1" :max="168" />
+        <el-form-item label="客户端更新间隔">
+          <span class="mp-toolbar-hint">统一取“设置 → 客户端更新间隔”，对所有目标生效。</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -166,7 +165,7 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
 })
 
 const emptyForm = () => ({
-  name: '', engine: 'stash', platform: 'ios', description: '', extra_yaml: '', update_interval: 12,
+  name: '', engine: 'stash', platform: 'ios', description: '', extra_yaml: '',
 })
 const form = reactive(emptyForm())
 
@@ -211,7 +210,6 @@ function openEdit(row) {
   Object.assign(form, emptyForm(), row ? {
     name: row.name, engine: row.engine, platform: row.platform,
     description: row.description, extra_yaml: row.extra_yaml,
-    update_interval: row.update_interval,
   } : {})
   dialog.value = true
 }

@@ -244,14 +244,20 @@ def _free_port() -> int:
 
 def filter_snapshot(snapshot_yaml: str, failed_names: set[str]) -> str:
     """从节点快照中剔除测试失败的节点，返回新的 YAML 文本。"""
-    data = yaml.safe_load(snapshot_yaml)
+    try:
+        data = yaml.safe_load(snapshot_yaml)
+    except yaml.YAMLError as exc:
+        raise TestError(f"快照 YAML 解析失败：{exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("proxies"), list):
         raise TestError("快照内容不是有效的节点订阅")
     data["proxies"] = [
         p for p in data["proxies"]
         if not (isinstance(p, dict) and p.get("name") in failed_names)
     ]
-    return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=4096)
+    try:
+        return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=4096)
+    except yaml.YAMLError as exc:
+        raise TestError(f"快照序列化失败：{exc}") from exc
 
 
 def test_nodes(snapshot_yaml: str) -> dict:
