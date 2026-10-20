@@ -44,12 +44,16 @@ def prune_build_artifacts(conn) -> int:
                 removed += 1
             except OSError as exc:
                 logger.warning("删除构建产物目录失败 %s：%s", path, exc)
-    # 数据库里的旧构建记录同样回收（保留最近 N 条 + 指针指向的）
+    # 数据库里的旧构建记录同样回收（保留最近 N 条 + 指针指向的）。
+    # releases.build_id 有外键，必须先删对应的发布历史，
+    # 否则删除构建记录会触发外键约束失败，整轮清理回滚。
     old_ids = [int(r["id"]) for r in db.all_(
         conn, "SELECT id FROM builds ORDER BY id DESC LIMIT -1 OFFSET ?",
         (config.BUILD_ARTIFACT_KEEP,))]
     if old_ids:
         marks = ",".join("?" for _ in old_ids)
+        conn.execute(
+            f"DELETE FROM releases WHERE build_id IN ({marks})", old_ids)
         conn.execute(
             f"DELETE FROM builds WHERE id IN ({marks}) AND id NOT IN "
             f"(SELECT build_id FROM pointers)", old_ids)

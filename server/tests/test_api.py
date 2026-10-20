@@ -1928,3 +1928,28 @@ def test_overview_reports_health_snapshot(client):
     assert "core_available" in health
     # 没有任何备份时应该被点出来
     assert any("备份" in i for i in health["issues"]) or health["last_backup_at"]
+
+
+def test_retention_prunes_builds_with_release_rows(client):
+    """清理旧构建记录时，发布历史里的外键行必须一起删，否则整轮回滚。"""
+    from app import config, db
+    from app.services import retention
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    r = client.post(f"/api/v1/builds/{build['id']}/promote", headers=h,
+                    json={"channel": "candidate"})
+    assert r.status_code == 200, r.text
+    with db.connect() as conn:
+        assert db.one(conn, "SELECT COUNT(*) AS c FROM releases")["c"] >= 1
+    result = retention.run_once()
+    assert "artifacts" in result
+    with db.connect() as conn:
+        # 清理后外键仍然一致
+        broken = db.one(conn, "SELECT COUNT(*) AS c FROM releases r "
+                              "LEFT JOIN builds b ON b.id = r.build_id "
+                              "WHERE b.id IS NULL")["c"]
+        assert broken == 0
