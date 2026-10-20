@@ -1585,3 +1585,48 @@ def test_reset_base_config_keeps_personal_config(client):
     assert doc["_fake_ip_filter"] == ["+.lan"]
     # 其余键恢复为默认
     assert doc["mode"] == "rule"
+
+
+def test_validate_rendered_blocks_unsupported_rule_type_and_missing_target():
+    """引擎级校验：Stash 不支持的规则类型、指向不存在出站的规则必须报错。"""
+    from app.compiler import validate
+    text = (
+        "mode: rule\n"
+        "rules:\n"
+        "- UID,0,节点选择\n"
+        "- DOMAIN-SUFFIX,a.com,不存在的组\n"
+    )
+    errors = validate.validate_rendered(text, "stash")
+    assert any("UID" in e and "不被 stash 支持" in e for e in errors)
+    assert any("不存在的出站" in e for e in errors)
+    # Mihomo 支持 UID，但同样不允许指向不存在的出站
+    errors = validate.validate_rendered(text, "mihomo")
+    assert not any("不被 mihomo 支持" in e for e in errors)
+    assert any("不存在的出站" in e for e in errors)
+
+
+def test_mihomo_android_keeps_process_rules():
+    """Mihomo 在 Android 上 PROCESS-NAME 可匹配包名，不应被裁剪。"""
+    from app.compiler import render
+    snapshot = {
+        "sources": [], "rule_providers": [], "snippets": [],
+        "groups": [{"name": "节点选择", "type": "select", "proxies": ["DIRECT"],
+                    "use_sources": [], "local_nodes": [], "filter": "", "hidden": False,
+                    "url": "", "interval": 600, "timeout": 8000, "tolerance": 150,
+                    "lazy": True, "strategy": ""}],
+        "rules": [{"type": "PROCESS-NAME", "value": "com.tencent.mm", "target": "节点选择",
+                   "enabled": True},
+                  {"type": "MATCH", "value": "", "target": "节点选择", "enabled": True}],
+    }
+    warnings = []
+    text = render.render_target(
+        snapshot, {"name": "mihomo-android", "engine": "mihomo", "platform": "android"},
+        warnings)
+    assert "PROCESS-NAME,com.tencent.mm,节点选择" in text
+    # Stash + Android：官方没有该平台客户端，进程规则被剔除并给出提示
+    warnings = []
+    text2 = render.render_target(
+        snapshot, {"name": "stash-android", "engine": "stash", "platform": "android"},
+        warnings)
+    assert "PROCESS-NAME,com.tencent.mm" not in text2
+    assert any("没有" in w and "android" in w for w in warnings)

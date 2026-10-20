@@ -52,13 +52,19 @@ HEALTH_CHECK = {
     "expected-status": 204,
 }
 
-# 平台能力：这些规则类型依赖操作系统暴露进程信息，
-# 在移动端与电视端永远无法命中（依据官方文档：客户端不提供进程名）。
-# 见 docs/development/产物差异化-设备配置-分析与方案.md 附录 A。
+# 平台能力（依据官方文档）：
+# - Stash 官方原文：「由于 Network Extension 的限制，Stash iOS/tvOS 不支持
+#   PROCESS-NAME / PROCESS-PATH 规则，配置中的进程相关规则将被忽略」
+#   https://stash.wiki/rules/rule-types
+# - Mihomo 在 Android 上 PROCESS-NAME 可匹配包名（官方明确可用），故不裁剪
+# - Stash 官方没有 Android / Windows 客户端，这些平台的 Stash 目标无意义，一并剔除
 PLATFORM_UNSUPPORTED_RULES = {
-    "ios": {"PROCESS-NAME", "PROCESS-PATH"},
-    "android": {"PROCESS-NAME", "PROCESS-PATH"},
-    "tvos": {"PROCESS-NAME", "PROCESS-PATH"},
+    ("stash", "ios"): {"PROCESS-NAME", "PROCESS-PATH"},
+    ("stash", "tvos"): {"PROCESS-NAME", "PROCESS-PATH"},
+    ("stash", "android"): {"PROCESS-NAME", "PROCESS-PATH"},
+    ("stash", "windows"): {"PROCESS-NAME", "PROCESS-PATH"},
+    ("mihomo", "ios"): {"PROCESS-NAME", "PROCESS-PATH"},
+    ("mihomo", "tvos"): {"PROCESS-NAME", "PROCESS-PATH"},
 }
 
 
@@ -204,8 +210,15 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
     3. 策略组成员里引用了不存在策略组的成员一并剔除。
     """
     target_name = target.get("name") or ""
+    engine = target.get("engine") or ""
     platform = (target.get("platform") or "").lower()
-    unsupported = PLATFORM_UNSUPPORTED_RULES.get(platform, set())
+    unsupported = PLATFORM_UNSUPPORTED_RULES.get((engine, platform), set())
+    # 该引擎在该平台没有官方客户端：产物无人能消费，给出提示
+    if platform not in config.ENGINE_PLATFORMS.get(engine, set()) \
+            and warnings is not None:
+        warnings.append(
+            f"{engine} 官方没有 {platform} 平台客户端，该目标的产物无法被对应客户端使用"
+            "（Stash 仅 iOS / tvOS / macOS / visionOS；Mihomo 常见于 Windows / Android / Linux / macOS）")
 
     # 复制一份再改，避免污染快照（同一快照会渲染多个目标）
     groups = [dict(g, proxies=list(g.get("proxies") or []))
@@ -216,7 +229,7 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
     trimmed = [r for r in rules if r["type"] in unsupported]
     if trimmed and warnings is not None:
         warnings.append(
-            f"已按 {platform} 平台剔除 {len(trimmed)} 条进程类规则"
+            f"已按 {engine}/{platform} 剔除 {len(trimmed)} 条进程类规则"
             f"（该平台不提供进程信息）："
             + "、".join(sorted({r["type"] for r in trimmed})))
     rules = [r for r in rules if r["type"] not in unsupported]

@@ -217,7 +217,7 @@ def create_candidate(operator: str, note: str = "",
         if not policy_errors:
             try:
                 text = render.render_target(snapshot, target, warnings)
-                errors.extend(validate.validate_rendered(text))
+                errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
         # Mihomo 目标在核心可用时追加官方配置检查（mihomo -t）

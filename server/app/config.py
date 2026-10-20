@@ -20,6 +20,34 @@ RULE_TYPES = {
     "IP-CIDR", "IP-CIDR6", "GEOIP", "GEOSITE", "RULE-SET",
     "SRC-IP-CIDR", "DST-PORT", "PROCESS-NAME", "MATCH",
 }
+# 各引擎官方支持的规则类型（超出白名单的类型在产物里会导致客户端加载失败）
+# 依据：Stash https://stash.wiki/rules/rule-types ；
+#        Mihomo https://wiki.metacubex.one/config/rules/
+STASH_RULE_TYPES = {
+    "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX",
+    "GEOIP", "GEOSITE", "IP-CIDR", "IP-CIDR6", "IP-ASN", "DST-PORT", "SRC-IP",
+    "SRC-PORT", "NETWORK", "PROTOCOL", "USER-AGENT", "URL-REGEX", "RULE-SET",
+    "PROCESS-NAME", "PROCESS-PATH", "AND", "OR", "NOT", "SCRIPT", "MATCH",
+}
+MIHOMO_RULE_TYPES = {
+    "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX",
+    "GEOIP", "GEOSITE", "IP-CIDR", "IP-CIDR6", "IP-SUFFIX", "IP-ASN", "SRC-IP",
+    "SRC-IP-CIDR", "SRC-IP-SUFFIX", "SRC-IP-ASN", "SRC-GEOIP", "DST-PORT", "SRC-PORT",
+    "IN-PORT", "IN-TYPE", "IN-USER", "IN-NAME", "NETWORK", "DSCP", "RULE-SET",
+    "PROCESS-NAME", "PROCESS-PATH", "PROCESS-NAME-WILDCARD", "PROCESS-NAME-REGEX",
+    "PROCESS-PATH-WILDCARD", "PROCESS-PATH-REGEX", "UID", "AND", "OR", "NOT",
+    "SUB-RULE", "MATCH",
+}
+ENGINE_RULE_TYPES = {"stash": STASH_RULE_TYPES, "mihomo": MIHOMO_RULE_TYPES}
+
+# 官方客户端的可用平台（用于给出"该目标没有对应客户端"的提示）
+# Stash：https://stash.wiki/ 明确只覆盖 iOS / tvOS / macOS / visionOS
+# Mihomo：官方无 iOS / tvOS 客户端
+ENGINE_PLATFORMS = {
+    "stash": {"ios", "tvos", "macos", "visionos"},
+    "mihomo": {"windows", "android", "linux", "macos"},
+}
+
 # 允许附加 no-resolve 修饰符的规则类型（IP 字面量匹配，不触发域名解析）
 NO_RESOLVE_TYPES = {"IP-CIDR", "IP-CIDR6", "GEOIP", "RULE-SET", "SRC-IP-CIDR"}
 TOKEN_PREFIX = "mp_"

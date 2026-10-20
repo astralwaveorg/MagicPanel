@@ -126,8 +126,14 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
-def validate_rendered(text: str) -> list[str]:
-    """渲染产物的 YAML 往返校验。"""
+def validate_rendered(text: str, engine: str = "") -> list[str]:
+    """渲染产物的 YAML 往返校验 + 引擎级安全校验。
+
+    两类问题会让客户端**加载失败**，必须在服务端拦住：
+    1. 规则类型不在该引擎的官方白名单内（如 Stash 没有 UID 规则）；
+    2. 规则指向的出站（策略组 / 代理）不存在
+       （官方原文：分流规则引用的目标必须存在，否则配置加载失败）。
+    """
     errors: list[str] = []
     try:
         data = yaml.safe_load(text)
@@ -140,4 +146,28 @@ def validate_rendered(text: str) -> list[str]:
             errors.append(f"产物缺少字段：{key}")
     if data.get("mode") not in ("rule", "global", "direct"):
         errors.append(f"产物 mode 无效：{data.get('mode')}")
+
+    allowed = config.ENGINE_RULE_TYPES.get(engine)
+    groups = {g.get("name") for g in (data.get("proxy-groups") or [])
+              if isinstance(g, dict)}
+    proxies = {p.get("name") for p in (data.get("proxies") or [])
+               if isinstance(p, dict)}
+    known = groups | proxies | config.BUILTIN_TARGETS
+    for line in (data.get("rules") or []):
+        if not isinstance(line, str):
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        rtype = parts[0] if parts else ""
+        if allowed is not None and rtype not in allowed:
+            errors.append(f"规则类型 {rtype} 不被 {engine} 支持，会导致客户端加载失败")
+            continue
+        if rtype in ("MATCH", "FINAL"):
+            target = parts[1] if len(parts) > 1 else ""
+        elif len(parts) >= 3:
+            target = parts[2]
+        else:
+            continue
+        # no-resolve / no-track 修饰符不影响出站位置
+        if target not in known:
+            errors.append(f"规则 {rtype} 指向不存在的出站“{target}”，会导致客户端加载失败")
     return errors
