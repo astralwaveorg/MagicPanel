@@ -177,7 +177,11 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash",
 @router.post("/reset")
 def reset_base_config(engine: str = "stash", target: str = "",
                       user=CurrentUser):
-    """恢复默认：引擎默认范围恢复为内置默认；目标范围恢复为继承引擎默认。"""
+    """恢复默认：引擎默认范围恢复为内置默认；目标范围恢复为继承引擎默认。
+
+    个人维护的直连域名与 Fake-IP 过滤属于「配置」而不是「默认值」，
+    恢复默认时予以保留，避免误清空手工维护的清单。
+    """
     engine = _engine(engine)
     default = base_config_service.default_doc(engine)
     with db.tx() as conn:
@@ -186,6 +190,13 @@ def reset_base_config(engine: str = "stash", target: str = "",
             with db.connect() as conn2:
                 _, engine_doc, _ = _load(conn2, engine, "")
             default = engine_doc
+        # 保留个人配置（伪键）
+        _, current, _ = _load(conn, engine, target)
+        for key in (base_config_service.DIRECT_DOMAINS_KEY,
+                    base_config_service.FAKE_IP_FILTER_KEY,
+                    base_config_service.PANEL_DIRECT_KEY):
+            if key in current:
+                default[key] = current[key]
         _save(conn, engine, target, base_config_service.to_yaml(default),
               user["username"])
         content, doc, updated_at = _load(conn, engine, target)

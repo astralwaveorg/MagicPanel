@@ -28,7 +28,7 @@
             <el-option value="stable" label="稳定通道" />
             <el-option value="candidate" label="候选通道" />
           </el-select>
-          <el-button @click="reset">恢复默认</el-button>
+          <el-button @click="reset">恢复默认（保留个人配置）</el-button>
           <el-button @click="preview">预览</el-button>
           <el-button type="primary" :loading="saving" @click="save">保存</el-button>
           <el-button type="primary" plain :loading="applying" @click="apply">
@@ -270,7 +270,8 @@ async function save() {
 }
 
 async function reset() {
-  if (!await confirmBox('恢复该引擎的默认基础配置？', '恢复默认',
+  if (!await confirmBox('恢复该引擎的默认基础配置？个人直连域名与 Fake-IP 过滤会保留。',
+                        '恢复默认',
                         { type: 'warning' })) return
   try {
     const r = await api(

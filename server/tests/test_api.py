@@ -1567,3 +1567,21 @@ def test_audit_batch_delete_and_clear(client):
     # 空选择应被拒绝
     r = client.post("/api/v1/audit/delete", headers=h, json={})
     assert r.status_code == 400
+
+
+def test_reset_base_config_keeps_personal_config(client):
+    """恢复默认不应清空手工维护的个人直连域名与 Fake-IP 过滤。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    content = ("mode: rule\nlog-level: warning\nipv6: false\n"
+               "_direct_domains:\n- example.com\n"
+               "_fake_ip_filter:\n- '+.lan'\n")
+    r = client.put("/api/v1/base-config?engine=stash", headers=h, json={"content": content})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/v1/base-config/reset?engine=stash", headers=h)
+    assert r.status_code == 200, r.text
+    doc = r.json()["doc"]
+    assert doc["_direct_domains"] == ["example.com"]
+    assert doc["_fake_ip_filter"] == ["+.lan"]
+    # 其余键恢复为默认
+    assert doc["mode"] == "rule"

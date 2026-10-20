@@ -64,8 +64,7 @@ def rename_devices(conn) -> list:
             continue
         if db.one(conn, "SELECT id FROM devices WHERE name=?", (new,)):
             continue
-        conn.execute("UPDATE devices SET name=?, updated_at=? WHERE id=?",
-                     (new, db.now(), row["id"]))
+        conn.execute("UPDATE devices SET name=? WHERE id=?", (new, row["id"]))
         changed.append(f"{old} → {new}")
     return changed
 
@@ -117,6 +116,13 @@ def server_base_config(conn) -> bool:
         "log-level": "warning",
         "ipv6": False,
         "dns": {
+            # 自带解析链，不依赖客户端兜底；内网域名走系统解析
+            "nameserver": [
+                "https://dns.alidns.com/dns-query",
+                "https://doh.pub/dns-query",
+            ],
+            "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+            "proxy-server-nameserver": ["223.5.5.5", "119.29.29.29"],
             "nameserver-policy": {
                 "+.lan": "system",
                 "+.local": "system",
