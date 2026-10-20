@@ -34,6 +34,12 @@
             <template #default="{ row }"><span class="mono">{{ row.value || '—' }}</span></template>
           </el-table-column>
           <el-table-column prop="target" label="目标" min-width="110" />
+          <el-table-column label="适用目标" min-width="150">
+            <template #default="{ row }">
+              <span v-if="!row.targets || !row.targets.length">全部</span>
+              <span v-else>{{ row.targets.join('、') }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="no-resolve" width="100" align="center">
             <template #default="{ row }">{{ row.no_resolve ? '是' : '—' }}</template>
           </el-table-column>
@@ -76,6 +82,15 @@
             <el-option value="REJECT" label="REJECT（拒绝）" />
           </el-select>
         </el-form-item>
+        <el-form-item label="适用发布目标（不选 = 全部目标）">
+          <el-select v-model="form.targets" multiple style="width:100%"
+                     placeholder="不选表示适用于全部目标">
+            <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
+          </el-select>
+          <div class="mp-form-hint">
+            只在选中的发布目标里生效；若该规则指向的策略组不适用于同一目标，规则会被自动剔除。
+          </div>
+        </el-form-item>
         <el-form-item label="备注（可选）">
           <el-input v-model="form.note" />
         </el-form-item>
@@ -110,6 +125,7 @@ const ruleTypes = [
 const rows = ref([])
 const groups = ref([])
 const ruleProviders = ref([])
+const targets = ref([])
 const loading = ref(false)
 const dialog = ref(false)
 const saving = ref(false)
@@ -128,7 +144,8 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
 const NO_RESOLVE_TYPES = ['IP-CIDR', 'IP-CIDR6', 'GEOIP', 'RULE-SET', 'SRC-IP-CIDR']
 
 const emptyForm = () => ({
-  type: 'DOMAIN-SUFFIX', value: '', target: 'DIRECT', enabled: true, note: '', no_resolve: false,
+  type: 'DOMAIN-SUFFIX', value: '', target: 'DIRECT', enabled: true, note: '',
+  no_resolve: false, targets: [],
 })
 const form = reactive(emptyForm())
 const isFinal = computed(() => ['MATCH', 'FINAL'].includes(form.type))
@@ -137,12 +154,14 @@ const canNoResolve = computed(() => NO_RESOLVE_TYPES.includes(form.type))
 async function load() {
   loading.value = true
   try {
-    const [rules, gs, rps] = await Promise.all([
+    const [rules, gs, rps, targetList] = await Promise.all([
       api('/api/v1/rules'), api('/api/v1/groups'), api('/api/v1/rule-providers'),
+      api('/api/v1/targets'),
     ])
     rows.value = rules
     groups.value = gs
     ruleProviders.value = rps.filter((p) => p.enabled)
+    targets.value = targetList
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -157,7 +176,7 @@ function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     type: row.type, value: row.value, target: row.target, enabled: row.enabled,
-    note: row.note, no_resolve: row.no_resolve,
+    note: row.note, no_resolve: row.no_resolve, targets: [...(row.targets || [])],
   } : {})
   dialog.value = true
 }

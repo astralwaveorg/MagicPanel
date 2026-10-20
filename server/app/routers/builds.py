@@ -47,6 +47,7 @@ def collect_snapshot(conn) -> dict:
          "filter": r["filter"], "use_sources": json.loads(r["use_sources"] or "[]"),
          "local_nodes": json.loads(r["local_nodes"] or "[]"),
          "proxies": json.loads(r["proxies"] or "[]"), "url": r["url"],
+         "targets": json.loads(r["targets"] or "[]"),
          "interval": r["interval"], "timeout": r["timeout"],
          "tolerance": r["tolerance"], "lazy": bool(r["lazy"]),
          "strategy": r["strategy"]}
@@ -54,7 +55,8 @@ def collect_snapshot(conn) -> dict:
     ]
     rules = [
         {"type": r["type"], "value": r["value"], "target": r["target"],
-         "enabled": bool(r["enabled"]), "no_resolve": bool(r["no_resolve"])}
+         "enabled": bool(r["enabled"]), "no_resolve": bool(r["no_resolve"]),
+         "targets": json.loads(r["targets"] or "[]")}
         for r in db.all_(conn, "SELECT * FROM rules ORDER BY sort, id")
     ]
     targets = [
@@ -63,12 +65,18 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT * FROM targets ORDER BY id")
     ]
     base_docs: dict[str, dict] = {}
-    for row in db.all_(conn, "SELECT engine, content FROM base_configs"):
+    base_targets: dict[str, dict] = {}
+    for row in db.all_(conn, "SELECT engine, target, content FROM base_configs"):
         try:
-            base_docs[row["engine"]] = base_config_service.normalize(
+            doc = base_config_service.normalize(
                 base_config_service.parse_content(row["content"]))
         except ValueError:
-            base_docs[row["engine"]] = base_config_service.default_doc(row["engine"])
+            continue
+        if row["target"]:
+            # 目标级基础配置：只覆盖该目标，键为目标名
+            base_targets[row["target"]] = doc
+        else:
+            base_docs[row["engine"]] = doc
     for engine in base_config_service.ENGINES:
         base_docs.setdefault(engine, base_config_service.default_doc(engine))
     snippets = [
@@ -81,6 +89,7 @@ def collect_snapshot(conn) -> dict:
         "sources": sources, "rule_providers": rule_providers,
         "local_nodes": local_nodes, "groups": groups, "rules": rules,
         "targets": targets, "snippets": snippets, "base": base_docs,
+        "base_targets": base_targets,
     }
 
 
@@ -207,7 +216,7 @@ def create_candidate(operator: str, note: str = "",
         verification = "未通过"
         if not policy_errors:
             try:
-                text = render.render_target(snapshot, target)
+                text = render.render_target(snapshot, target, warnings)
                 errors.extend(validate.validate_rendered(text))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")

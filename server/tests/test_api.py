@@ -1360,3 +1360,210 @@ def test_feed_marker_and_duplicate_rules(client):
     # 面板置顶规则替换占位符后与个人直连域名同名，只保留一条
     assert rules.count("DOMAIN-SUFFIX,testserver,DIRECT") == 1
     assert "DOMAIN-SUFFIX,example.com,DIRECT" in rules
+
+
+def test_target_scoped_base_config_differs_per_target(client):
+    """目标级基础配置：同一引擎的不同目标可以产出不同产物。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    r = client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-desktop", "engine": "stash", "platform": "macos"})
+    assert r.status_code == 201, r.text
+    r = client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-server", "engine": "stash", "platform": "macos"})
+    assert r.status_code == 201, r.text
+
+    # 引擎默认：给全部 Stash 目标
+    client.put("/api/v1/base-config?engine=stash", headers=h, json={
+        "content": "mode: rule\nlog-level: warning\nipv6: false\nmixed-port: 7890\n"})
+    # 目标级：只给 server 覆盖端口
+    r = client.put("/api/v1/base-config?engine=stash&target=stash-server", headers=h, json={
+        "content": "mode: rule\nlog-level: warning\nipv6: false\nmixed-port: 7891\n"})
+    assert r.status_code == 200, r.text
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    desktop = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-desktop").json()["content"])
+    server = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-server").json()["content"])
+    assert desktop["mixed-port"] == 7890
+    assert server["mixed-port"] == 7891
+    # 目标级配置不写进其它目标
+    other = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"])
+    assert other["mixed-port"] == 7890
+
+
+def test_group_and_rule_target_scope_filters_output(client):
+    """策略组与规则的「适用目标」：只出现在指定目标里。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    for name in ("stash-a", "stash-b"):
+        client.post("/api/v1/targets", headers=h, json={
+            "name": name, "engine": "stash", "platform": "ios"})
+    # 桌面专用组与规则
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "桌面专用", "type": "select", "proxies": ["DIRECT"],
+        "targets": ["stash-a"]})
+    assert r.status_code == 201, r.text
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "desktop-only.com", "target": "桌面专用",
+        "targets": ["stash-a"]})
+    assert r.status_code == 201, r.text
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    a = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-a").json()["content"])
+    b = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-b").json()["content"])
+    assert any(g["name"] == "桌面专用" for g in a["proxy-groups"])
+    assert not any(g["name"] == "桌面专用" for g in b["proxy-groups"])
+    assert "DOMAIN-SUFFIX,desktop-only.com,桌面专用" in a["rules"]
+    assert "DOMAIN-SUFFIX,desktop-only.com,桌面专用" not in b["rules"]
+
+
+def test_rule_pointing_to_absent_group_is_dropped(client):
+    """规则指向不适用于本目标的组时，规则被剔除（否则客户端加载失败）。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    for name in ("stash-a", "stash-b"):
+        client.post("/api/v1/targets", headers=h, json={
+            "name": name, "engine": "stash", "platform": "ios"})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "仅A", "type": "select", "proxies": ["DIRECT"], "targets": ["stash-a"]})
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "x.com", "target": "仅A"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    b = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-b").json()["content"])
+    assert "DOMAIN-SUFFIX,x.com,仅A" not in b["rules"]
+    # 构建结果里应有剔除说明
+    results = build["results"]
+    assert any("仅A" in w for w in results["stash-b"]["warnings"])
+
+
+def test_final_rule_group_is_always_kept(client):
+    """兜底规则指向的组即使限定了其它目标，也必须保留。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    for name in ("stash-a", "stash-b"):
+        client.post("/api/v1/targets", headers=h, json={
+            "name": name, "engine": "stash", "platform": "ios"})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "兜底组", "type": "select", "proxies": ["DIRECT"],
+        "targets": ["stash-a"]})
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "MATCH", "value": "", "target": "兜底组"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    b = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-b").json()["content"])
+    assert any(g["name"] == "兜底组" for g in b["proxy-groups"])
+    assert "MATCH,兜底组" in b["rules"]
+
+
+def test_platform_trims_process_rules(client):
+    """移动端 / 电视端剔除进程类规则（该平台拿不到进程名）。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    for name, platform in (("stash-mac", "macos"), ("stash-ios", "ios")):
+        client.post("/api/v1/targets", headers=h, json={
+            "name": name, "engine": "stash", "platform": platform})
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "PROCESS-NAME", "value": "qbittorrent", "target": "节点选择"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    mac = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-mac").json()["content"])
+    ios = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"])
+    assert "PROCESS-NAME,qbittorrent,节点选择" in mac["rules"]
+    assert "PROCESS-NAME,qbittorrent,节点选择" not in ios["rules"]
+    assert any("剔除" in w for w in build["results"]["stash-ios"]["warnings"])
+
+
+def test_device_level_override_only_affects_that_device(client):
+    """设备级扩展：只对该设备生效，且不允许覆盖结构键。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    client.post("/api/v1/builds", headers=h, json={})
+    client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
+    dev = client.post("/api/v1/devices", headers=h, json={
+        "name": "个性化设备", "platform": "ios", "target_id": 1,
+        "channel": "stable", "extra_yaml": "mixed-port: 7899\n"}).json()
+    other = client.post("/api/v1/devices", headers=h, json={
+        "name": "普通设备", "platform": "ios", "target_id": 1,
+        "channel": "stable"}).json()
+    a = client.get(f"/feed/{dev['token']}/config.yaml").text
+    b = client.get(f"/feed/{other['token']}/config.yaml").text
+    assert "mixed-port: 7899" in a
+    assert "mixed-port: 7899" not in b
+    # ETag 必须不同，避免缓存串味
+    ra = client.get(f"/feed/{dev['token']}/config.yaml")
+    rb = client.get(f"/feed/{other['token']}/config.yaml")
+    assert ra.headers["etag"] != rb.headers["etag"]
+
+
+def test_device_override_rejects_structural_keys(client):
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    dev = client.post("/api/v1/devices", headers=h, json={
+        "name": "坏设备", "platform": "ios", "target_id": 1,
+        "channel": "stable", "extra_yaml": "rules:\n  - MATCH,DIRECT\n"}).json()
+    client.post("/api/v1/builds", headers=h, json={})
+    client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
+    resp = client.get(f"/feed/{dev['token']}/config.yaml")
+    assert resp.status_code == 500
+    assert "rules" in resp.text
+
+
+def test_no_differentiation_keeps_artifact_identical(client):
+    """不做任何差异化配置时，产物与既有行为保持一致（结构与内容都不变）。"""
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    client.post("/api/v1/builds", headers=h, json={})
+    a = client.get("/api/v1/builds/1/artifact/stash-ios").json()["content"]
+    client.post("/api/v1/builds", headers=h, json={})
+    b = client.get("/api/v1/builds/2/artifact/stash-ios").json()["content"]
+    assert a == b
+    # 断言关键结构仍然存在
+    cfg = yaml.safe_load(a)
+    assert cfg["rules"][0] == "DOMAIN-SUFFIX,{FEED_HOST},DIRECT"
+    assert cfg["rules"][-1].startswith("MATCH,")
+
+
+def test_audit_batch_delete_and_clear(client):
+    """审计日志：批量删除与清空。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    # 先产生几条记录
+    client.post("/api/v1/sources", headers=h, json={
+        "name": "机场", "url": "https://airport.example.com/sub"})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "组", "type": "select", "proxies": ["DIRECT"]})
+    rows = client.get("/api/v1/audit?limit=50", headers=h).json()
+    assert len(rows) >= 2
+    ids = [r["id"] for r in rows[:2]]
+    r = client.post("/api/v1/audit/delete", headers=h, json={"ids": ids})
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 2
+    after = client.get("/api/v1/audit?limit=50", headers=h).json()
+    assert not [x for x in after if x["id"] in ids]
+    # 清空全部
+    r = client.post("/api/v1/audit/delete", headers=h, json={"all": True})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v1/audit?limit=50", headers=h).json() == []
+    # 空选择应被拒绝
+    r = client.post("/api/v1/audit/delete", headers=h, json={})
+    assert r.status_code == 400

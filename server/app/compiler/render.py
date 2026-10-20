@@ -4,6 +4,13 @@
 `{FEED_HOST}` 替换为面板域名（用于置顶 DIRECT 规则）。
 订阅来源仍以 provider 占位引用；本地单节点的凭据会直接写入产物，
 因此构建产物与 builds 快照都包含本地节点凭据，不能公开分发。
+
+差异化维度（自下而上叠加）：
+① 基础配置：引擎默认 → 目标级覆盖
+② 结构内容：策略组与分流规则按「适用目标」过滤，并按平台能力剔除必然无效的规则
+③ 功能模块：按引擎过滤
+④ 目标扩展：目标 extra_yaml
+（⑤ 设备级覆盖在分发层叠加，见 routers/feed.py）
 """
 import urllib.parse
 
@@ -43,6 +50,15 @@ HEALTH_CHECK = {
     "timeout": 8000,
     "lazy": True,
     "expected-status": 204,
+}
+
+# 平台能力：这些规则类型依赖操作系统暴露进程信息，
+# 在移动端与电视端永远无法命中（依据官方文档：客户端不提供进程名）。
+# 见 docs/development/产物差异化-设备配置-分析与方案.md 附录 A。
+PLATFORM_UNSUPPORTED_RULES = {
+    "ios": {"PROCESS-NAME", "PROCESS-PATH"},
+    "android": {"PROCESS-NAME", "PROCESS-PATH"},
+    "tvos": {"PROCESS-NAME", "PROCESS-PATH"},
 }
 
 
@@ -171,12 +187,91 @@ def _merge(dst: dict, src: dict) -> None:
             dst[key] = value
 
 
-def render_target(snapshot: dict, target: dict) -> str:
+def applies_to(item: dict, target_name: str) -> bool:
+    """策略组 / 规则是否适用于该目标：未指定则适用于全部目标。"""
+    scope = item.get("targets") or []
+    if not scope:
+        return True
+    return target_name in scope
+
+
+def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tuple[list, list]:
+    """按目标过滤策略组与规则，并剔除当前平台必然无效的规则。
+
+    安全约束：
+    1. 兜底规则（MATCH/FINAL）永远保留，其指向的策略组强制保留；
+    2. 指向不存在策略组的规则自动丢弃（客户端加载即失败，必须杜绝）；
+    3. 策略组成员里引用了不存在策略组的成员一并剔除。
+    """
+    target_name = target.get("name") or ""
+    platform = (target.get("platform") or "").lower()
+    unsupported = PLATFORM_UNSUPPORTED_RULES.get(platform, set())
+
+    # 复制一份再改，避免污染快照（同一快照会渲染多个目标）
+    groups = [dict(g, proxies=list(g.get("proxies") or []))
+              for g in snapshot.get("groups", []) if applies_to(g, target_name)]
+    rules = [r for r in snapshot.get("rules", []) if r.get("enabled", True)
+             and applies_to(r, target_name)]
+
+    trimmed = [r for r in rules if r["type"] in unsupported]
+    if trimmed and warnings is not None:
+        warnings.append(
+            f"已按 {platform} 平台剔除 {len(trimmed)} 条进程类规则"
+            f"（该平台不提供进程信息）："
+            + "、".join(sorted({r["type"] for r in trimmed})))
+    rules = [r for r in rules if r["type"] not in unsupported]
+
+    # 兜底规则永远保留，其目标组必须存在，否则产物没有兜底、客户端无法加载
+    final_rules = [r for r in rules if r["type"] in ("MATCH", "FINAL")]
+    keep_groups = {r["target"] for r in final_rules}
+    group_names = {g["name"] for g in groups}
+    for name in keep_groups:
+        if name in group_names or name in config.BUILTIN_TARGETS:
+            continue
+        original = next((g for g in snapshot.get("groups", [])
+                         if g["name"] == name), None)
+        if original:
+            groups.append(dict(original, proxies=list(original.get("proxies") or [])))
+            group_names.add(name)
+            if warnings is not None:
+                warnings.append(f"兜底规则目标组“{name}”已强制保留到本目标")
+
+    # 剔除指向不存在策略组的规则（客户端加载时会直接报错）；兜底规则始终保留
+    kept_rules = []
+    for r in rules:
+        ref = r.get("target")
+        if r["type"] in ("MATCH", "FINAL") \
+                or ref in config.BUILTIN_TARGETS or ref in group_names:
+            kept_rules.append(r)
+        else:
+            if warnings is not None:
+                warnings.append(
+                    f"规则 {r['type']},{r.get('value', '')} 指向的策略组"
+                    f"“{ref}”不适用于本目标，已剔除")
+    rules = kept_rules
+
+    # 剔除策略组成员里指向不存在策略组的引用
+    for g in groups:
+        proxies = [p for p in (g.get("proxies") or [])
+                   if p in config.BUILTIN_TARGETS or p in group_names
+                   or p == config.GUARD_PROXY]
+        if len(proxies) != len(g.get("proxies") or []):
+            if warnings is not None:
+                warnings.append(
+                    f"策略组“{g['name']}”剔除了不适用于本目标的成员引用")
+        g["proxies"] = proxies
+    return groups, rules
+
+
+def render_target(snapshot: dict, target: dict, warnings: list | None = None) -> str:
     """渲染单个目标的完整配置文本。"""
     engine = target["engine"]
-    # ① 基础配置（按引擎，来自构建快照，保证构建可复现）
-    base = base_config_service.normalize(
-        (snapshot.get("base") or {}).get(engine) or {})
+    # ① 基础配置：引擎默认 → 目标级覆盖（字典递归、列表整体替换）
+    bases = snapshot.get("base") or {}
+    base = base_config_service.normalize(bases.get(engine) or {})
+    target_base = (snapshot.get("base_targets") or {}).get(target.get("name") or "")
+    if target_base:
+        base = _merge_dns(base, base_config_service.normalize(target_base))
     # 应用级伪键：不写入产物，只控制面板内置行为
     panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))
     direct_domains = base_config_service.normalize_domains(
@@ -199,7 +294,7 @@ def render_target(snapshot: dict, target: dict) -> str:
             s["name"]: _provider_entry(s, engine) for s in sources
         }
 
-    groups = snapshot["groups"]
+    groups, rules = _select_structure(snapshot, target, warnings)
     if groups:
         cfg["proxy-groups"] = []
         for group in groups:
@@ -214,7 +309,6 @@ def render_target(snapshot: dict, target: dict) -> str:
     if rps:
         cfg["rule-providers"] = {r["name"]: _rule_provider_entry(r) for r in rps}
 
-    rules = [r for r in snapshot["rules"] if r.get("enabled", True)]
     # 面板自身域名强制直连且置顶：VPN 运行中客户端更新配置不经过代理，
     # 避免节点失效导致配置无法更新（TLS 握手失败）。{FEED_HOST} 分发时替换。
     pinned = ["DOMAIN-SUFFIX,{FEED_HOST},DIRECT"] if panel_direct else []
@@ -287,3 +381,25 @@ def dedupe_rules(text: str) -> str:
     if text.endswith("\n"):
         result += "\n"
     return result
+
+
+def apply_device_overlay(text: str, overlay_yaml: str) -> str:
+    """设备级个性化：在目标产物之上叠加该设备自己的扩展 YAML。
+
+    结构键（节点 / 策略组 / 规则等）不允许被设备覆盖：
+    列表是追加语义，写在兜底规则之后永不生效，还会让客户端加载失败。
+    """
+    overlay_yaml = (overlay_yaml or "").strip()
+    if not overlay_yaml:
+        return text
+    overlay = yaml.safe_load(overlay_yaml) or {}
+    if not isinstance(overlay, dict):
+        return text
+    for key in base_config_service.PROTECTED_KEYS:
+        if key in overlay:
+            raise ValueError(f"设备扩展不允许覆盖结构键：{key}")
+    cfg = yaml.safe_load(text) or {}
+    if not isinstance(cfg, dict):
+        return text
+    _merge(cfg, overlay)
+    return yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False, width=4096)

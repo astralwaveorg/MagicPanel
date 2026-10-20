@@ -13,6 +13,7 @@ export function shortSha(sha) {
 
 export const PLATFORM_LABELS = {
   ios: 'iOS', macos: 'macOS', tvos: 'tvOS', windows: 'Windows', android: 'Android',
+  linux: 'Linux',
 }
 
 export const CHANNEL_LABELS = { stable: '稳定', candidate: '候选' }

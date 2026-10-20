@@ -2,17 +2,23 @@
   <div>
     <h2 class="mp-page-title">产物配置</h2>
     <p class="mp-page-desc">
-      产物的基础层：端口、模式、日志、IPv6、DNS 等顶层键按引擎分别配置。
+      产物的基础层：端口、模式、日志、IPv6、DNS 等顶层键。
+      可按引擎统一配置，也可只针对某个发布目标单独配置（叠加在引擎默认之上）。
       节点、策略组、分流规则由各自页面维护；功能模块与发布目标扩展在其上叠加，优先级更高。
     </p>
 
     <div class="mp-card">
       <div class="mp-toolbar">
         <div class="left">
-          <el-radio-group v-model="engine" size="small" @change="load">
+          <el-radio-group v-model="engine" size="small" @change="onEngineChange">
             <el-radio-button value="stash">Stash</el-radio-button>
             <el-radio-button value="mihomo">Mihomo</el-radio-button>
           </el-radio-group>
+          <el-select v-model="scopeTarget" size="small" style="width:230px" @change="load">
+            <el-option label="引擎默认（全部目标）" value="" />
+            <el-option v-for="t in targetsOfEngine" :key="t.name" :value="t.name"
+                       :label="t.name" />
+          </el-select>
           <el-select v-model="presetKey" size="small" style="width:200px" @change="applyPreset">
             <el-option v-for="p in presets" :key="p.key" :value="p.key" :label="p.label" />
           </el-select>
@@ -34,6 +40,12 @@
       <el-alert v-if="!isDefault" type="info" :closable="false" show-icon
                 style="margin-bottom:12px">
         已自定义。修改后需重新构建并发布，客户端才会拿到新内容。
+      </el-alert>
+
+      <el-alert v-if="scopeTarget" type="warning" :closable="false" show-icon
+                style="margin-bottom:12px">
+        当前作用范围：发布目标「{{ scopeTarget }}」。此处保存的是该目标的完整基础配置，
+        叠加在引擎默认之上；保存后不再随引擎默认变化。“恢复默认”可退回继承引擎默认。
       </el-alert>
 
       <el-form :model="doc" label-position="top">
@@ -99,6 +111,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 
 const engine = ref('stash')
+const scopeTarget = ref('')
 const channel = ref('stable')
 const doc = reactive({})
 const raw = ref('')
@@ -117,6 +130,9 @@ const previewTarget = ref('')
 const previewNote = ref('')
 
 const groupOrder = computed(() => Object.keys(groups.value))
+
+const targetsOfEngine = computed(() =>
+  targets.value.filter((t) => t.engine === engine.value))
 
 function fieldsOf(group) {
   return fields.value.filter((f) => f.group === group)
@@ -180,10 +196,18 @@ function toYaml(obj) {
   return dump(obj, { lineWidth: 120, noRefs: true, sortKeys: false })
 }
 
+function onEngineChange() {
+  // 切换引擎后，目标范围可能不适用：回到引擎默认
+  if (scopeTarget.value && !targetsOfEngine.value.some((t) => t.name === scopeTarget.value)) {
+    scopeTarget.value = ''
+  }
+  load()
+}
+
 async function load() {
   try {
     const [cfg, schema, targetList] = await Promise.all([
-      api(`/api/v1/base-config?engine=${engine.value}`),
+      api(`/api/v1/base-config?engine=${engine.value}&target=${encodeURIComponent(scopeTarget.value)}`),
       api(`/api/v1/base-config/schema?engine=${engine.value}`),
       api('/api/v1/targets'),
     ])
@@ -197,7 +221,7 @@ async function load() {
     presets.value = schema.presets
     presetKey.value = ''
     targets.value = targetList
-    if (!previewTarget.value) {
+    if (!previewTarget.value || !targetList.some((t) => t.name === previewTarget.value)) {
       const first = targetList.find((t) => t.engine === engine.value) || targetList[0]
       previewTarget.value = first ? first.name : ''
     }
@@ -229,10 +253,11 @@ function parseYaml(text) {
 async function save() {
   saving.value = true
   try {
-    const r = await api(`/api/v1/base-config?engine=${engine.value}`, {
-      method: 'PUT',
-      body: { content: raw.value, updated_at: updatedAt.value },
-    })
+    const r = await api(
+      `/api/v1/base-config?engine=${engine.value}&target=${encodeURIComponent(scopeTarget.value)}`, {
+        method: 'PUT',
+        body: { content: raw.value, updated_at: updatedAt.value },
+      })
     raw.value = r.content
     isDefault.value = r.is_default
     updatedAt.value = r.updated_at
@@ -248,7 +273,9 @@ async function reset() {
   if (!await confirmBox('恢复该引擎的默认基础配置？', '恢复默认',
                         { type: 'warning' })) return
   try {
-    const r = await api(`/api/v1/base-config/reset?engine=${engine.value}`, { method: 'POST' })
+    const r = await api(
+      `/api/v1/base-config/reset?engine=${engine.value}&target=${encodeURIComponent(scopeTarget.value)}`,
+      { method: 'POST' })
     raw.value = r.content
     isDefault.value = true
     updatedAt.value = r.updated_at
@@ -264,8 +291,8 @@ async function apply() {
   try {
     const r = await api('/api/v1/base-config/apply', {
       method: 'POST',
-      body: { engine: engine.value, content: raw.value, channel: channel.value,
-              note: '更新基础配置' },
+      body: { engine: engine.value, target: scopeTarget.value, content: raw.value,
+              channel: channel.value, note: '更新基础配置' },
     })
     ElMessage.success(`已构建 #${r.build_id} 并发布到${channel.value === 'stable' ? '稳定' : '候选'}通道`)
     await load()

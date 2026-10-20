@@ -143,7 +143,8 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at TEXT NOT NULL,
   last_pull_at TEXT,
   last_pull_ip TEXT,
-  pull_count INTEGER NOT NULL DEFAULT 0
+  pull_count INTEGER NOT NULL DEFAULT 0,
+  extra_yaml TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS builds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,9 +201,11 @@ CREATE TABLE IF NOT EXISTS snippets (
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS base_configs (
-  engine TEXT PRIMARY KEY,
+  engine TEXT NOT NULL DEFAULT 'stash',
+  target TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (engine, target)
 );
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -290,11 +293,20 @@ def init_db() -> None:
         # 分流规则的 no-resolve 修饰符（仅 IP 类规则有效）
         _ensure_column(conn, "rules", "no_resolve",
                        "no_resolve INTEGER NOT NULL DEFAULT 0")
+        # 差异配置：策略组与规则可限定适用目标（空 = 全部目标）
+        _ensure_column(conn, "proxy_groups", "targets",
+                       "targets TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(conn, "rules", "targets",
+                       "targets TEXT NOT NULL DEFAULT '[]'")
+        # 设备级个性化：分发时叠加在该设备目标产物之上
+        _ensure_column(conn, "devices", "extra_yaml",
+                       "extra_yaml TEXT NOT NULL DEFAULT ''")
         for key, value in config.SETTINGS_DEFAULTS.items():
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value)
             )
         _migrate_settings(conn)
+        _migrate_base_configs_scope(conn)
         _migrate_base_configs(conn)
         _migrate_build_snapshots(conn)
 
@@ -308,6 +320,36 @@ def _migrate_settings(conn) -> None:
         )
 
 
+def _migrate_base_configs_scope(conn) -> None:
+    """base_configs 由 engine 单列主键改为 (engine, target) 复合主键。
+
+    旧表无法存放同一引擎的多份目标级配置，需要重建；只在旧结构时执行一次。
+    """
+    info = list(conn.execute("PRAGMA table_info(base_configs)"))
+    if not info:
+        return
+    cols = {r["name"] for r in info}
+    if "target" not in cols:
+        conn.execute("ALTER TABLE base_configs ADD COLUMN target TEXT NOT NULL DEFAULT ''")
+        info = list(conn.execute("PRAGMA table_info(base_configs)"))
+    pk_cols = [r["name"] for r in sorted(
+        (x for x in info if x["pk"]), key=lambda x: x["pk"])]
+    if pk_cols == ["engine", "target"]:
+        return
+    conn.execute("DROP TABLE IF EXISTS base_configs_scope_new")
+    conn.execute("""CREATE TABLE base_configs_scope_new (
+        engine TEXT NOT NULL DEFAULT 'stash',
+        target TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (engine, target))""")
+    conn.execute(
+        "INSERT OR REPLACE INTO base_configs_scope_new(engine, target, content, updated_at) "
+        "SELECT engine, '', content, updated_at FROM base_configs")
+    conn.execute("DROP TABLE base_configs")
+    conn.execute("ALTER TABLE base_configs_scope_new RENAME TO base_configs")
+
+
 def _migrate_base_configs(conn) -> None:
     """按引擎写入默认基础配置（已存在的不覆盖）。"""
     from .services import base_config as base_config_service
@@ -315,9 +357,9 @@ def _migrate_base_configs(conn) -> None:
     for engine in base_config_service.ENGINES:
         doc = base_config_service.default_doc(engine)
         conn.execute(
-            "INSERT OR IGNORE INTO base_configs(engine, content, updated_at) "
-            "VALUES(?,?,?)",
-            (engine, base_config_service.to_yaml(doc), now()),
+            "INSERT OR IGNORE INTO base_configs(engine, target, content, updated_at) "
+            "VALUES(?,?,?,?)",
+            (engine, "", base_config_service.to_yaml(doc), now()),
         )
 
 

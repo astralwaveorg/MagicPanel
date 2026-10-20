@@ -14,7 +14,7 @@ from ..services import base_config as base_config_service
 router = APIRouter(prefix="/api/v1", tags=["targets-devices"])
 
 ENGINES = {"stash", "mihomo"}
-PLATFORMS = {"ios", "macos", "tvos", "windows", "android"}
+PLATFORMS = {"ios", "macos", "tvos", "windows", "android", "linux"}
 CHANNELS = {"stable", "candidate"}
 
 
@@ -33,6 +33,8 @@ class DeviceBody(BaseModel):
     target_id: int
     channel: str = "stable"
     note: str = Field(default="", max_length=256)
+    # 设备级个性化：分发时叠加在该设备目标产物之上（结构键不允许覆盖）
+    extra_yaml: str = Field(default="", max_length=200_000)
 
 
 def _check_target(body: TargetBody) -> None:
@@ -71,6 +73,7 @@ def _device_public(row, base_url: str = "") -> dict:
         "last_pull_at": row["last_pull_at"],
         "last_pull_ip": row["last_pull_ip"],
         "pull_count": row["pull_count"],
+        "extra_yaml": row["extra_yaml"] or "",
     }
 
 
@@ -193,10 +196,11 @@ def create_device(body: DeviceBody, request: Request, user=CurrentUser):
             raise HTTPException(409, "同名设备已存在")
         cur = conn.execute(
             "INSERT INTO devices(name, platform, target_id, channel, token_hash, "
-            "token_hint, token_enc, note, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            "token_hint, token_enc, note, extra_yaml, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.platform, body.target_id, body.channel,
              security.sha256_text(token), token[:10], security.encrypt_text(token),
-             body.note, db.now()),
+             body.note, body.extra_yaml, db.now()),
         )
         security.audit(conn, user["username"], "新增设备", "device", cur.lastrowid,
                        {"name": body.name})
@@ -223,9 +227,10 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名设备已存在")
         conn.execute(
-            "UPDATE devices SET name=?, platform=?, target_id=?, channel=?, note=? "
-            "WHERE id=?",
-            (body.name, body.platform, body.target_id, body.channel, body.note, did),
+            "UPDATE devices SET name=?, platform=?, target_id=?, channel=?, note=?, "
+            "extra_yaml=? WHERE id=?",
+            (body.name, body.platform, body.target_id, body.channel, body.note,
+             body.extra_yaml, did),
         )
         security.audit(conn, user["username"], "更新设备", "device", did,
                        {"name": body.name})

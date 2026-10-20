@@ -101,6 +101,14 @@
           <el-input v-model="form.note" placeholder="例如：客厅 Mac mini" />
           <div class="mp-form-hint">用于后台与门户展示；留空时显示文件名。</div>
         </el-form-item>
+        <el-form-item label="设备专属扩展（YAML，仅这台设备生效）">
+          <el-input v-model="form.extra_yaml" type="textarea" :rows="6" class="mono"
+                    placeholder="例如：&#10;mixed-port: 7891" />
+          <div class="mp-form-hint">
+            叠加在该设备所属发布目标的产物之上（字典递归、列表追加、标量覆盖）。
+            不允许写 proxies / proxy-providers / proxy-groups / rule-providers / rules。
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
@@ -129,7 +137,9 @@ const saving = ref(false)
 const editing = ref(null)
 const secretVisible = ref(false)
 
-const emptyForm = () => ({ name: '', platform: 'ios', target_id: null, channel: 'stable', note: '' })
+const emptyForm = () => ({
+  name: '', platform: 'ios', target_id: null, channel: 'stable', note: '', extra_yaml: '',
+})
 const form = reactive(emptyForm())
 
 function targetName(id) {
@@ -156,7 +166,7 @@ function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     name: row.name, platform: row.platform, target_id: row.target_id,
-    channel: row.channel, note: row.note,
+    channel: row.channel, note: row.note, extra_yaml: row.extra_yaml || '',
   } : { target_id: targets.value[0]?.id ?? null })
   dialog.value = true
 }

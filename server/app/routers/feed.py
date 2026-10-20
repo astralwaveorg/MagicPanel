@@ -80,14 +80,24 @@ def device_config(token: str, request: Request):
         if not path.exists():
             return Response("artifact missing", status_code=503)
         feed_base = f"{_base_url(request, conn)}/feed/{token}"
-        text = render.substitute_feed(path.read_text(encoding="utf-8"), feed_base)
+        raw = path.read_text(encoding="utf-8")
+        # 设备级个性化：叠加在该设备目标产物之上（结构键受保护）
+        overlay = (device["extra_yaml"] or "").strip()
+        if overlay:
+            try:
+                raw = render.apply_device_overlay(raw, overlay)
+            except ValueError as exc:
+                return Response(str(exc), status_code=500)
+        text = render.substitute_feed(raw, feed_base)
         subscribe_url = f"{feed_base}/config.yaml"
         # Stash 保存订阅时会自己补一行 #SUBSCRIBED，服务端再补一行就会重复；
         # 浏览器下载（门户「下载配置」）仍需要这行，导入后客户端才知道从哪更新。
         agent = (request.headers.get("user-agent") or "").lower()
         if "stash" not in agent:
             text = f"#SUBSCRIBED {subscribe_url}\n" + text
-        etag = security.sha256_text(f"{build['id']}:{target['name']}:{token[:10]}")[:32]
+        etag = security.sha256_text(
+            f"{build['id']}:{target['name']}:{token[:10]}:"
+            f"{security.sha256_text(overlay or '')[:16]}")[:32]
         interval = db.get_setting(conn, "profile_update_interval", "12")
         # Content-Disposition 仅允许 ASCII；中文名经 RFC 5987 编码
         ascii_name = device["name"].encode("ascii", "ignore").decode() or "config"

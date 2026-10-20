@@ -90,6 +90,32 @@ def list_audit(limit: int = 100, user=CurrentUser):
     return [db.row_to_dict(r) for r in rows]
 
 
+class AuditDeleteBody(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+    all: bool = False
+
+
+@router.post("/audit/delete")
+def delete_audit(body: AuditDeleteBody, user=CurrentUser):
+    """批量删除审计记录；all=true 时清空全部。
+
+    删除动作本身不会写审计日志（否则每次清理都会再产生一条记录）。
+    """
+    if not body.all and not body.ids:
+        raise HTTPException(400, "请选择要删除的记录")
+    with db.tx() as conn:
+        if body.all:
+            removed = conn.execute("DELETE FROM audit").rowcount
+        else:
+            ids = [int(i) for i in body.ids][:500]
+            if not ids:
+                raise HTTPException(400, "请选择要删除的记录")
+            marks = ",".join("?" * len(ids))
+            removed = conn.execute(
+                f"DELETE FROM audit WHERE id IN ({marks})", ids).rowcount
+    return {"ok": True, "removed": removed}
+
+
 @router.get("/settings")
 def get_settings(user=CurrentUser):
     with db.connect() as conn:

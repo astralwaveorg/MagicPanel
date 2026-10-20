@@ -25,6 +25,7 @@ class GroupBody(BaseModel):
     tolerance: int = Field(default=150, ge=0, le=5000)
     lazy: bool = True
     strategy: str = Field(default="", max_length=32)
+    targets: list[str] = Field(default_factory=list)  # 适用发布目标，空 = 全部
 
 
 class RuleBody(BaseModel):
@@ -34,6 +35,7 @@ class RuleBody(BaseModel):
     enabled: bool = True
     note: str = Field(default="", max_length=256)
     no_resolve: bool = False
+    targets: list[str] = Field(default_factory=list)  # 适用发布目标，空 = 全部
 
 
 def _group_public(row) -> dict:
@@ -43,6 +45,7 @@ def _group_public(row) -> dict:
     data["use_sources"] = json.loads(row["use_sources"] or "[]")
     data["local_nodes"] = json.loads(row["local_nodes"] or "[]")
     data["proxies"] = json.loads(row["proxies"] or "[]")
+    data["targets"] = json.loads(row["targets"] or "[]")
     return data
 
 
@@ -50,6 +53,7 @@ def _rule_public(row) -> dict:
     data = db.row_to_dict(row)
     data["enabled"] = bool(row["enabled"])
     data["no_resolve"] = bool(row["no_resolve"])
+    data["targets"] = json.loads(row["targets"] or "[]")
     return data
 
 
@@ -109,13 +113,14 @@ def create_group(body: GroupBody, user=CurrentUser):
         cur = conn.execute(
             "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
             "local_nodes, proxies, url, interval, timeout, tolerance, lazy, strategy, "
-            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.type, sort, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
              json.dumps(local_ids, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance,
-             int(body.lazy), body.strategy, now, now),
+             int(body.lazy), body.strategy,
+             json.dumps(body.targets, ensure_ascii=False), now, now),
         )
         security.audit(conn, user["username"], "新增策略组", "group", cur.lastrowid,
                        {"name": body.name})
@@ -137,13 +142,14 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
             "local_nodes=?, proxies=?, url=?, interval=?, timeout=?, tolerance=?, "
-            "lazy=?, strategy=?, updated_at=? WHERE id=?",
+            "lazy=?, strategy=?, targets=?, updated_at=? WHERE id=?",
             (body.name, body.type, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
              json.dumps(local_ids, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance, int(body.lazy),
-             body.strategy, db.now(), gid),
+             body.strategy, json.dumps(body.targets, ensure_ascii=False),
+             db.now(), gid),
         )
         security.audit(conn, user["username"], "更新策略组", "group", gid,
                        {"name": body.name})
@@ -217,9 +223,10 @@ def create_rule(body: RuleBody, user=CurrentUser):
         now = db.now()
         cur = conn.execute(
             "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
-            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (sort, body.type, body.value, body.target, int(body.enabled),
-             body.note, int(body.no_resolve), now, now),
+             body.note, int(body.no_resolve),
+             json.dumps(body.targets, ensure_ascii=False), now, now),
         )
         security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
                        {"rule": f"{body.type},{body.value},{body.target}"})
@@ -234,9 +241,10 @@ def update_rule(rid: int, body: RuleBody, user=CurrentUser):
         _get_rule(conn, rid)
         conn.execute(
             "UPDATE rules SET type=?, value=?, target=?, enabled=?, note=?, "
-            "no_resolve=?, updated_at=? WHERE id=?",
+            "no_resolve=?, targets=?, updated_at=? WHERE id=?",
             (body.type, body.value, body.target, int(body.enabled), body.note,
-             int(body.no_resolve), db.now(), rid),
+             int(body.no_resolve), json.dumps(body.targets, ensure_ascii=False),
+             db.now(), rid),
         )
         security.audit(conn, user["username"], "更新分流规则", "rule", rid,
                        {"rule": f"{body.type},{body.value},{body.target}"})

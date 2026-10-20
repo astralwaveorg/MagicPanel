@@ -115,7 +115,8 @@ def apply_personal_config(conn) -> dict:
     result = {}
     now = db.now()
     for engine in bc.ENGINES:
-        row = db.one(conn, "SELECT * FROM base_configs WHERE engine=?", (engine,))
+        row = db.one(conn, "SELECT * FROM base_configs WHERE engine=? AND target=''",
+                     (engine,))
         if row:
             try:
                 doc = bc.parse_content(row["content"])
@@ -127,10 +128,11 @@ def apply_personal_config(conn) -> dict:
         doc[bc.FAKE_IP_FILTER_KEY] = list(FAKE_IP_FILTER)
         text = bc.to_yaml(bc.normalize(doc))
         conn.execute(
-            "INSERT INTO base_configs(engine, content, updated_at) VALUES(?,?,?) "
-            "ON CONFLICT(engine) DO UPDATE SET content=excluded.content, "
+            "INSERT INTO base_configs(engine, target, content, updated_at) "
+            "VALUES(?,?,?,?) "
+            "ON CONFLICT(engine, target) DO UPDATE SET content=excluded.content, "
             "updated_at=excluded.updated_at",
-            (engine, text, now),
+            (engine, "", text, now),
         )
         result[engine] = len(DIRECT_DOMAINS)
     security.audit(conn, "astral", "更新基础配置", "base_config", "personal",
