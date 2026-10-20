@@ -1261,3 +1261,67 @@ def test_panel_direct_rule_can_be_disabled(client):
         f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
     assert "DOMAIN-SUFFIX,{FEED_HOST},DIRECT" not in art2
     assert "_panel_direct_rule" not in art2
+
+
+def test_personal_direct_domains_and_fake_ip_filter(client):
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    content = (
+        "mode: rule\nlog-level: warning\nipv6: false\n"
+        "_direct_domains:\n- magichub.top\n- '*.Jiek.top'\n- jiek.top\n"
+        "- example.com\n"
+        "_fake_ip_filter:\n- '+.lan'\n- 'geosite:private,cn,apple'\n"
+    )
+    assert client.put("/api/v1/base-config?engine=stash", headers=h,
+                      json={"content": content}).status_code == 200
+    assert client.put("/api/v1/base-config?engine=mihomo", headers=h,
+                      json={"content": content}).status_code == 200
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    art_s = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"])
+    art_m = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/mihomo-android").json()["content"])
+
+    # 个人直连域名：归一化后置顶在用户规则之前
+    rules_s = art_s["rules"]
+    assert "DOMAIN-SUFFIX,magichub.top,DIRECT" in rules_s
+    assert "DOMAIN-SUFFIX,jiek.top,DIRECT" in rules_s
+    assert "DOMAIN-SUFFIX,example.com,DIRECT" in rules_s
+    assert rules_s.count("DOMAIN-SUFFIX,jiek.top,DIRECT") == 1
+    assert rules_s.index("DOMAIN-SUFFIX,magichub.top,DIRECT") < rules_s.index(
+        [r for r in rules_s if r.startswith("MATCH")][0])
+    # 伪键不进入产物
+    assert "_direct_domains" not in art_s and "_fake_ip_filter" not in art_s
+
+    # Fake-IP 过滤：Mihomo 用个人列表替换内置列表，Stash 生成 dns 段
+    assert art_m["dns"]["fake-ip-filter"] == ["+.lan", "geosite:private,cn,apple"]
+    assert "localhost.ptlogin2.qq.com" not in art_m["dns"]["fake-ip-filter"]
+    assert art_s["dns"]["fake-ip-filter"] == ["+.lan", "geosite:private,cn,apple"]
+
+
+def test_personal_config_applied_by_production_script(client):
+    """生产修正脚本应把个人直连域名与 Fake-IP 过滤写进两个引擎的基础配置。"""
+    import importlib.util
+    import os
+    from app import db
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    repo_root = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(repo_root, "scripts", "apply_production_fixes.py")
+    spec = importlib.util.spec_from_file_location("apply_production_fixes", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.main()
+
+    with db.connect() as conn:
+        for engine in ("stash", "mihomo"):
+            row = db.one(conn, "SELECT * FROM base_configs WHERE engine=?", (engine,))
+            doc = json.loads(json.dumps(__import__("yaml").safe_load(row["content"])))
+            assert "magichub.top" in doc["_direct_domains"]
+            assert "ghfast.top" in doc["_direct_domains"]
+            assert "geosite:private,cn,apple" in doc["_fake_ip_filter"]
+            assert "+.xboxlive.com" in doc["_fake_ip_filter"]

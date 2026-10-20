@@ -33,6 +33,8 @@ BOOL_KEYS = ("allow-lan", "ipv6")
 
 # 应用级伪键：不写入产物，只控制面板内置行为
 PANEL_DIRECT_KEY = "_panel_direct_rule"
+DIRECT_DOMAINS_KEY = "_direct_domains"      # 个人直连域名 → 置顶 DOMAIN-SUFFIX 规则
+FAKE_IP_FILTER_KEY = "_fake_ip_filter"      # Fake-IP 过滤域名 → dns.fake-ip-filter
 
 # Stash 官方精简：只保留官方有文档的顶层键
 STASH_OFFICIAL = {
@@ -115,6 +117,15 @@ def validate_doc(doc: dict) -> None:
                 raise ValueError(f"{key} 需在 1-65535 之间")
     if PANEL_DIRECT_KEY in doc and not isinstance(doc[PANEL_DIRECT_KEY], bool):
         raise ValueError("面板域名强制直连开关必须是布尔值")
+    for key, label in ((DIRECT_DOMAINS_KEY, "个人直连域名"),
+                       (FAKE_IP_FILTER_KEY, "Fake-IP 过滤域名")):
+        if key in doc:
+            value = doc[key]
+            if value is None:
+                continue
+            if not isinstance(value, list) or any(
+                    not isinstance(item, str) for item in value):
+                raise ValueError(f"{label}必须是字符串列表")
     if "profile" in doc and not isinstance(doc["profile"], dict):
         raise ValueError("profile 必须是键值映射")
     if "dns" in doc and not isinstance(doc["dns"], dict):
@@ -126,6 +137,33 @@ def validate_doc(doc: dict) -> None:
 
 def to_yaml(doc: dict) -> str:
     return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=4096)
+
+
+def normalize_domains(values) -> list[str]:
+    """个人直连域名归一化：去空白、转小写、去掉通配前缀、去重。"""
+    result: list[str] = []
+    for item in values or []:
+        text = str(item).strip().lower()
+        for prefix in ("+.", "*."):
+            if text.startswith(prefix):
+                text = text[len(prefix):]
+        text = text.strip()
+        if not text or "/" in text or ":" in text or " " in text:
+            continue
+        if text not in result:
+            result.append(text)
+    return result
+
+
+def normalize_filter(values) -> list[str]:
+    """Fake-IP 过滤条目归一化：保留 geosite:/rule-set:/通配写法。"""
+    result: list[str] = []
+    for item in values or []:
+        text = str(item).strip()
+        if not text or text in result:
+            continue
+        result.append(text)
+    return result
 
 
 def normalize(doc: dict) -> dict:
@@ -207,6 +245,13 @@ SCHEMA = [
            engines=["mihomo"]),
     _field("dns.fake-ip-filter", "不返回 Fake-IP 的域名（每行一个）", "list",
            group="dns", engines=["stash", "mihomo"]),
+    # 个人配置
+    _field(DIRECT_DOMAINS_KEY, "个人直连域名（每行一个）", "list",
+           group="personal", engines=["stash", "mihomo"],
+           placeholder="例如：example.com"),
+    _field(FAKE_IP_FILTER_KEY, "Fake-IP 过滤域名（每行一个）", "list",
+           group="personal", engines=["stash", "mihomo"],
+           placeholder="例如：+.lan 或 geosite:private"),
 ]
 
 
@@ -218,4 +263,5 @@ GROUP_LABELS = {
     "basic": "基础",
     "profile": "配置文件存储",
     "dns": "DNS",
+    "personal": "个人配置（直连域名 / Fake-IP 过滤）",
 }

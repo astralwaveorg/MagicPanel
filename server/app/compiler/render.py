@@ -177,8 +177,12 @@ def render_target(snapshot: dict, target: dict) -> str:
     # ① 基础配置（按引擎，来自构建快照，保证构建可复现）
     base = base_config_service.normalize(
         (snapshot.get("base") or {}).get(engine) or {})
-    # 应用级伪键：面板域名置顶直连规则（默认开启，不写入产物）
+    # 应用级伪键：不写入产物，只控制面板内置行为
     panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))
+    direct_domains = base_config_service.normalize_domains(
+        base.pop(base_config_service.DIRECT_DOMAINS_KEY, None))
+    fake_ip_filter = base_config_service.normalize_filter(
+        base.pop(base_config_service.FAKE_IP_FILTER_KEY, None))
     cfg: dict = base_config_service.ordered(base)
 
     local_enabled = {
@@ -214,13 +218,23 @@ def render_target(snapshot: dict, target: dict) -> str:
     # 面板自身域名强制直连且置顶：VPN 运行中客户端更新配置不经过代理，
     # 避免节点失效导致配置无法更新（TLS 握手失败）。{FEED_HOST} 分发时替换。
     pinned = ["DOMAIN-SUFFIX,{FEED_HOST},DIRECT"] if panel_direct else []
-    cfg["rules"] = pinned + [_rule_line(r) for r in rules]
+    # 个人直连域名：置顶在用户规则之前，保证一定先生效
+    personal = [f"DOMAIN-SUFFIX,{domain},DIRECT" for domain in direct_domains]
+    cfg["rules"] = pinned + personal + [_rule_line(r) for r in rules]
 
     # Stash 由客户端接管 DNS；Mihomo 需要显式 dns 段。
     # 用户在基础配置里写了 dns 则逐项覆盖默认值（列表以用户为准）。
+    user_dns = base.get("dns") or {}
     if engine == "mihomo":
-        user_dns = base.get("dns") or {}
         cfg["dns"] = _merge_dns(DNS_MIHOOMO, user_dns)
+        if fake_ip_filter:
+            # 个人维护的过滤列表整体替换内置列表
+            cfg["dns"]["fake-ip-filter"] = fake_ip_filter
+    elif fake_ip_filter:
+        # Stash 默认由客户端接管 DNS；只有显式配置了过滤列表才下发 dns 段
+        dns = dict(cfg.get("dns") or {})
+        dns["fake-ip-filter"] = fake_ip_filter
+        cfg["dns"] = dns
 
     # 功能模块按引擎合并，目标扩展最后应用、优先级最高
     for snip in snapshot.get("snippets", []):

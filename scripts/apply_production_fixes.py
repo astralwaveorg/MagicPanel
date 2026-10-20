@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, os.environ.get("MAGICPANEL_APP_PATH", "/app"))
 
 from app import db, security
+from app.services import base_config as bc
 from app.services import local_nodes as ln
 
 # 百度网盘使用到的域名（pan/yun/pcs 为网盘与传输，baidupcs/bcebos 为对象存储）
@@ -27,6 +28,42 @@ BAIDU_DOMAINS = [
     "baiduhstatic.com",
 ]
 GROUP_NAME = "百度网盘"
+
+# 个人直连域名：全部客户端直连
+DIRECT_DOMAINS = [
+    "magichub.top",
+    "jiek.top",
+    "homehub.stream",
+    "eoysky.com",
+    "astralwave.org",
+    "233netcloud.com",
+    "ghfast.top",
+]
+
+# Fake-IP 过滤：这些域名要真实 IP，不能返回 fake-ip
+FAKE_IP_FILTER = [
+    "+.lan",
+    "+.local",
+    "geosite:private,cn,apple",
+    "+.homehub.stream",
+    "+.magichub.top",
+    "+.jiek.top",
+    "+.dnscli.top",
+    "+.eoysky.com",
+    "+.astralwave.org",
+    "+.microsoft.com",
+    "+.microsoftstore.com",
+    "+.s-microsoft.com",
+    "+.windows.com",
+    "+.windows.net",
+    "+.windowsupdate.com",
+    "+.msftauth.net",
+    "+.msauth.net",
+    "+.live.com",
+    "+.msftconnecttest.com",
+    "+.msftncsi.com",
+    "+.xboxlive.com",
+]
 RULE_NOTE = "百度网盘走代理（Stash 对代理流量默认阻断 QUIC，直连不回退）"
 
 
@@ -73,6 +110,35 @@ def insert_baidu_rules(conn) -> int:
     return len(pending)
 
 
+def apply_personal_config(conn) -> dict:
+    """把个人直连域名与 Fake-IP 过滤写进各引擎的基础配置。"""
+    result = {}
+    now = db.now()
+    for engine in bc.ENGINES:
+        row = db.one(conn, "SELECT * FROM base_configs WHERE engine=?", (engine,))
+        if row:
+            try:
+                doc = bc.parse_content(row["content"])
+            except ValueError:
+                doc = bc.default_doc(engine)
+        else:
+            doc = bc.default_doc(engine)
+        doc[bc.DIRECT_DOMAINS_KEY] = list(DIRECT_DOMAINS)
+        doc[bc.FAKE_IP_FILTER_KEY] = list(FAKE_IP_FILTER)
+        text = bc.to_yaml(bc.normalize(doc))
+        conn.execute(
+            "INSERT INTO base_configs(engine, content, updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(engine) DO UPDATE SET content=excluded.content, "
+            "updated_at=excluded.updated_at",
+            (engine, text, now),
+        )
+        result[engine] = len(DIRECT_DOMAINS)
+    security.audit(conn, "astral", "更新基础配置", "base_config", "personal",
+                   {"direct_domains": len(DIRECT_DOMAINS),
+                    "fake_ip_filter": len(FAKE_IP_FILTER)})
+    return result
+
+
 def main() -> None:
     with db.tx() as conn:
         group_id = ensure_group(conn)
@@ -84,6 +150,7 @@ def main() -> None:
                 "WHERE name=? AND behavior='classical'", (now, name))
         conn.execute("UPDATE sources SET client_interval=3600, updated_at=?", (now,))
         conn.execute("UPDATE rule_providers SET client_interval=3600, updated_at=?", (now,))
+        personal = apply_personal_config(conn)
         # 本地节点带宽字段规范化为整数 Mbps（Stash 用 down-speed，Mihomo 用 down）
         for row in db.all_(conn, "SELECT id, params_enc FROM local_nodes "
                                  "WHERE protocol='hysteria2'"):
@@ -104,6 +171,7 @@ def main() -> None:
         "group_id": group_id,
         "baidu_rules_added": added,
         "client_interval": 3600,
+        "personal_config": personal,
     }, ensure_ascii=False))
 
 
