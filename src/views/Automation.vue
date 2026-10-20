@@ -280,8 +280,11 @@ async function runNow() {
     ElMessage.success('已开始强制执行，正在等待运行结果…')
     let seenRunning = false
     let finished = false
-    for (let i = 0; i < 200; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+    // 抓取 + 测速 + 核心校验可能要几分钟，最多等 10 分钟；
+    // 期间页面显示"运行中"，不再让用户对着一根转圈猜。
+    const started = Date.now()
+    while (Date.now() - started < 10 * 60 * 1000) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
       await refreshStatus()
       if (status.value.running) seenRunning = true
       if (!status.value.running && status.value.last_tick_at
@@ -289,7 +292,7 @@ async function runNow() {
         finished = true
         break
       }
-      if (!status.value.running && !seenRunning && i >= 3) break
+      if (!status.value.running && !seenRunning) break
     }
     if (finished) {
       ElMessage.success('自动任务执行完成')
