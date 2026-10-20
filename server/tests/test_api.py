@@ -2041,3 +2041,25 @@ def test_fallback_rule_is_moved_to_end_of_artifact(client):
     first_final = next(i for i, r in enumerate(rules)
                        if r.split(",")[0] in ("MATCH", "FINAL"))
     assert all(r.split(",")[0] in ("MATCH", "FINAL") for r in rules[first_final + 1:])
+
+
+def test_guard_proxy_is_last_member_of_auto_groups(client):
+    """「空组保护」占位节点必须排在组末尾：它是 127.0.0.1:1 的死节点，
+    排在前面会被不做健康检查的客户端选成首选。"""
+    import yaml as _yaml
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    cfg = _yaml.safe_load(art)
+    auto = [g for g in cfg["proxy-groups"]
+            if g.get("type") in ("url-test", "fallback", "load-balance")]
+    assert auto, "产物里应至少有一个自动组"
+    for g in auto:
+        members = g.get("proxies") or []
+        if "空组保护" in members:
+            assert members[-1] == "空组保护", (g["name"], members)

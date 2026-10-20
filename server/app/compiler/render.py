@@ -112,7 +112,11 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None)
     use = list(group.get("use_sources") or [])
     if group["type"] in ("url-test", "fallback", "load-balance") \
             and config.GUARD_PROXY not in proxies:
-        proxies.insert(0, config.GUARD_PROXY)
+        # 放在末尾而不是开头：占位节点永远连不通（127.0.0.1:1），
+        # 它的作用只是让组非空，防止客户端把空组隐式改写成 DIRECT。
+        # 放末尾可保证任何客户端（哪怕不做健康检查直接取第一个成员）
+        # 拿到的都是真实节点，而不是这个占位。
+        proxies.append(config.GUARD_PROXY)
     if proxies:
         entry["proxies"] = proxies
     if use:
