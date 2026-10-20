@@ -196,9 +196,18 @@ def scope_layers(engine: str, platform: str = "", device_id: int = 0,
     返回的列表**包含当前作用域自己那一层**，因此：
     - layers[:-1] 是当前层的"继承值"（上层合并结果）；
     - layers 是完整链路，合并结果即"生效值"。
+
+    内置默认本身也可以被覆盖：用户改的是"出厂值之上的差异"，
+    差异存在 (engine, "", 0) 这条记录里；不覆盖时就是源码里的出厂值，
+    随时可以删掉这条记录恢复出厂。
     """
     docs = docs or {}
-    layers: list[tuple[str, dict]] = [("内置默认", deepcopy(default_doc(engine)))]
+    # 出厂值 = 源码内置内容 + 用户对出厂值的覆盖（存 (engine, "", 0)）
+    base = deepcopy(default_doc(engine))
+    override = docs.get((engine, "", 0))
+    if override:
+        base = merge_docs(base, override)
+    layers: list[tuple[str, dict]] = [("内置默认", base)]
     if platform:
         # 当前作用域自己那一层始终参与（没有覆盖时为空层），
         # 这样 layers[:-1] 才是"继承自上层的值"。

@@ -2,7 +2,7 @@
   <div class="mp-artifact">
     <h2 class="mp-page-title">产物配置</h2>
     <p class="mp-page-desc">
-      配置按层级生效：<strong>内置默认</strong>（只读）→ <strong>通用配置</strong>（按引擎 + 平台）→
+      配置按层级生效：<strong>内置默认</strong>（出厂值，可直接改）→ <strong>通用配置</strong>（按引擎 + 平台）→
       <strong>设备专属</strong>（按设备）。
       合并规则是<b>键级并集</b>：同一个键以下层为准，字典逐层递归合并、列表整体替换；
       每一层只保存"与上层不同"的差异，没改过的键会跟随上层。
@@ -60,7 +60,10 @@
                 <el-option value="stable" label="稳定通道" />
                 <el-option value="candidate" label="候选通道" />
               </el-select>
-              <el-button v-if="!readonly" @click="reset">恢复本层</el-button>
+              <el-button v-if="!readonly" @click="openSource">源码编辑</el-button>
+              <el-button v-if="isBuiltin ? builtinOverridden : !readonly" @click="reset">
+                {{ isBuiltin ? '恢复出厂' : '恢复本层' }}
+              </el-button>
               <el-button @click="preview">预览产物</el-button>
               <el-button v-if="!readonly" type="primary" :loading="saving" @click="save">
                 保存
@@ -71,10 +74,11 @@
             </div>
           </div>
 
-          <el-alert v-if="readonly" type="info" :closable="false" show-icon
+          <el-alert v-if="isBuiltin" type="warning" :closable="false" show-icon
                     style="margin-bottom:12px">
-            内置默认是程序的出厂配置，只读不可改。要调整它，请切到「{{ current?.engine }} 通用配置」
-            或更细的层级修改——上层没改过的键会自动跟随。
+            <strong>内置默认是整条链路的最底层</strong>：这里改的是所有配置项的出厂值，
+            通用配置与设备专属都会继承它。改动会以"与出厂值的差异"单独保存，
+            随时可以「恢复出厂」一键还原。改之前请确认你清楚影响范围。
           </el-alert>
           <el-alert v-else-if="state && !state.overlay" type="info" :closable="false" show-icon
                     style="margin-bottom:12px">
@@ -232,8 +236,13 @@
           </template>
 
           <template v-else>
-            <h3 class="mp-section-title">内置内容（只读）</h3>
-            <el-input :model-value="raw" type="textarea" :rows="12" readonly class="mono" />
+            <h3 class="mp-section-title">出厂内容（可直接修改）</h3>
+            <el-input v-model="raw" type="textarea" :rows="14" class="mono" />
+            <div class="mp-form-hint">
+              这里是内置默认的完整出厂配置。保存时服务端只把
+              <strong>与源码出厂值不同的部分</strong>记下来，其余保持出厂原样；
+              改动会影响该引擎下所有通用配置与设备专属配置。点「恢复出厂」即可还原。
+            </div>
           </template>
         </div>
       </section>
@@ -261,6 +270,19 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="sourceVisible" title="源码编辑" width="min(760px, 94vw)">
+      <p class="mp-dialog-desc">
+        直接编辑本层的 YAML 源码。语法必须是合法 YAML；键的层级用缩进表达。
+        应用后会回到编辑器，确认无误再点「保存」；保存时仍会做键级校验
+        （不能包含 proxies / proxy-providers / proxy-groups / rule-providers / rules）。
+      </p>
+      <el-input v-model="sourceText" type="textarea" :rows="20" class="mono" />
+      <template #footer>
+        <el-button @click="sourceVisible = false">取消</el-button>
+        <el-button type="primary" @click="applySource">应用到编辑器</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="previewVisible" title="产物预览" width="min(920px, 94vw)">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <el-select v-model="previewPlatform" size="small" style="width:200px" @change="doPreview">
@@ -280,6 +302,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dump, load as yamlLoad } from 'js-yaml'
+import yaml from 'js-yaml'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
@@ -320,13 +343,51 @@ const scopeGroups = computed(() => {
     byKind[s.kind].push(s)
   }
   return [
-    { kind: 'builtin', title: '内置默认', hint: '只读', items: byKind.builtin },
+    { kind: 'builtin', title: '内置默认', hint: '出厂值·可改', items: byKind.builtin },
     { kind: 'general', title: '通用配置', hint: '按引擎 + 平台', items: byKind.general },
     { kind: 'device', title: '设备专属', hint: '按设备', items: byKind.device },
   ].filter((g) => g.items.length)
 })
 
-const readonly = computed(() => current.value?.kind === 'builtin')
+// ---- 源码编辑 ----
+const sourceVisible = ref(false)
+const sourceText = ref('')
+
+function openSource() {
+  sourceText.value = raw.value || ''
+  sourceVisible.value = true
+}
+
+function applySource() {
+  try {
+    const parsed = yaml.load(sourceText.value || '') || {}
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      ElMessage.error('源码必须是 YAML 对象（键值对）')
+      return
+    }
+  } catch (e) {
+    ElMessage.error(`YAML 语法有误：${e.message || e}`)
+    return
+  }
+  raw.value = sourceText.value
+  sourceVisible.value = false
+  ElMessage.success('已应用到编辑器，点「保存」生效')
+}
+
+// 内置默认是整条链路最底层，改动前必须明确告知影响范围
+async function confirmBuiltinChange() {
+  return confirmBox(
+    '内置默认是配置链路的最底层：这里的改动会被该引擎下所有「通用配置」和'
+    + '「设备专属」继承，影响面是全部客户端。确定要修改吗？',
+    '确认修改内置默认',
+    { type: 'warning', confirmButtonText: '我已了解，继续修改' })
+}
+
+// 内置默认现在也可以改：改的是"出厂值之上的差异"，可一键恢复出厂
+const readonly = computed(() => false)
+const isBuiltin = computed(() => current.value?.kind === 'builtin')
+const builtinOverridden = computed(() =>
+  isBuiltin.value && Object.keys(state.value?.overlay || {}).length > 0)
 const layerLabel = computed(() => {
   if (!current.value) return ''
   if (current.value.kind === 'builtin') return '内置默认'
@@ -577,7 +638,7 @@ async function loadSchema(engine) {
 // 手机上下拉切换作用域
 watch(scopePicker, (key) => {
   if (!key) return
-  const target = scopes.value.flatMap((g) => g.items).find((s) => scopeKey(s) === key)
+  const target = scopes.value.find((s) => scopeKey(s) === key)
   if (target && (!current.value || scopeKey(current.value) !== key)) select(target)
 })
 
@@ -626,6 +687,7 @@ function scopeQuery() {
 
 async function save() {
   if (!current.value) return
+  if (isBuiltin.value && !(await confirmBuiltinChange())) return
   saving.value = true
   try {
     const r = await api(`/api/v1/base-config?${scopeQuery()}`, {
@@ -647,7 +709,12 @@ async function save() {
 
 async function reset() {
   if (!current.value) return
-  if (!await confirmBox('清空本层覆盖，回到继承上层？', '恢复本层',
+  if (isBuiltin.value) {
+    const ok = await confirmBox(
+      '恢复出厂会丢弃对内置默认的所有修改，出厂值回到源码里的原始内容。确定继续？',
+      '恢复出厂', { type: 'warning', confirmButtonText: '恢复出厂' })
+    if (!ok) return
+  } else if (!await confirmBox('清空本层覆盖，回到继承上层？', '恢复本层',
                         { type: 'warning' })) return
   try {
     const r = await api(`/api/v1/base-config/reset?${scopeQuery()}`, { method: 'POST' })
@@ -667,6 +734,7 @@ async function reset() {
 
 async function apply() {
   if (!current.value) return
+  if (isBuiltin.value && !(await confirmBuiltinChange())) return
   applying.value = true
   try {
     const s = current.value

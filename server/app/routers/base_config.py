@@ -57,12 +57,11 @@ def _check_scope(conn, engine: str, platform: str, device_id: int,
                  for_write: bool = False) -> tuple[str, int]:
     """校验作用域：平台与设备必须存在且与引擎一致。
 
-    不带平台也不带设备时表示"内置默认"——只允许查看，不允许写入。
+    不带平台也不带设备时表示"内置默认"——可以写入：改的是"出厂值之上的差异"，
+    差异单独存着，随时能删掉恢复出厂。
     """
     plat = platform
     if not device_id and not platform:
-        if for_write:
-            raise HTTPException(400, "请选择引擎平台（引擎 + 平台）或具体设备")
         return "", 0
     if device_id:
         dev = db.one(conn, "SELECT * FROM devices WHERE id=?", (device_id,))
@@ -156,8 +155,8 @@ def list_scopes(user=CurrentUser):
         scopes.append({
             "kind": "builtin", "engine": engine, "platform": "", "device_id": 0,
             "label": f"{ENGINE_LABELS.get(engine, engine)} 内置",
-            "detail": "程序内置，只读；作为该引擎全部配置的起点",
-            "customized": False,
+            "detail": "出厂值（源码内置）；可直接修改，改动以差异形式保存，可一键恢复出厂",
+            "customized": bool(docs.get((engine, "", 0))),
         })
     # 通用配置：按「引擎 + 平台」，与引擎平台一一对应
     # 顺序 = 引擎平台页的顺序；名称：该「引擎 + 平台」只有一个引擎平台时
@@ -216,7 +215,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         "engine": engine,
         "platform": plat,
         "device_id": dev_id,
-        "readonly": not plat and not dev_id,
+        "readonly": False,   # 内置默认也可改（存的是与出厂值的差异）
         "inherited": inherited,
         "overlay": overlay,
         "effective": effective,
@@ -246,8 +245,12 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-        inherited, _ = (base_config_service.cascade(layers[:-1])
-                        if len(layers) > 1 else ({}, {}))
+        if not plat and not dev_id:
+            # 内置默认：与"源码出厂值"求差异，只把改动过的键存下来
+            inherited = base_config_service.default_doc(engine)
+        else:
+            inherited, _ = (base_config_service.cascade(layers[:-1])
+                            if len(layers) > 1 else ({}, {}))
         overlay = base_config_service.diff_overlay(inherited, effective)
         base_config_service.validate_doc(overlay, device_scope=bool(dev_id))
         _save_scope(conn, engine, plat, dev_id,
@@ -280,6 +283,24 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
     with db.tx() as conn:
         plat, dev_id = _check_scope(conn, engine, platform, device_id, for_write=True)
         _, overlay, _ = _load_scope(conn, engine, plat, dev_id)
+        if not plat and not dev_id:
+            # 内置默认：删掉覆盖记录即恢复出厂（出厂值来自源码，不需要保留任何键）
+            conn.execute(
+                "DELETE FROM base_configs WHERE engine=? AND platform='' AND device_id=0",
+                (engine,))
+            overlay = {}
+            docs = _all_docs(conn)
+            layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
+            effective, sources = base_config_service.cascade(layers)
+            security.audit(conn, user["username"], "恢复内置默认（出厂值）",
+                           "base_config", f"{engine}:内置", {})
+            return {
+                "ok": True, "engine": engine, "platform": plat, "device_id": dev_id,
+                "overlay": overlay, "effective": effective, "sources": sources,
+                "leaf_sources": base_config_service.leaf_sources(layers),
+                "content": base_config_service.to_yaml(effective),
+                "updated_at": "", "is_default": True,
+            }
         # 个人直连域名与 Fake-IP 过滤属于「配置」而非「默认值」，恢复默认时保留
         keep = {key: overlay[key] for key in
                 (base_config_service.DIRECT_DOMAINS_KEY,
