@@ -1239,3 +1239,25 @@ def test_build_does_not_hold_write_lock_during_core_check(client, monkeypatch):
     monkeypatch.setattr(tester, "validate_config", probe)
     build = client.post("/api/v1/builds", headers=h, json={}).json()
     assert build["status"] == "success", build
+
+
+def test_panel_direct_rule_can_be_disabled(client):
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    # 默认置顶面板域名直连规则
+    assert "DOMAIN-SUFFIX,{FEED_HOST},DIRECT" in art
+    # 应用级伪键不进入产物
+    assert "_panel_direct_rule" not in art
+
+    client.put("/api/v1/base-config?engine=stash", headers=h, json={
+        "content": "mode: rule\nlog-level: warning\nipv6: false\n"
+                   "_panel_direct_rule: false\n"})
+    build2 = client.post("/api/v1/builds", headers=h, json={}).json()
+    art2 = client.get(
+        f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
+    assert "DOMAIN-SUFFIX,{FEED_HOST},DIRECT" not in art2
+    assert "_panel_direct_rule" not in art2

@@ -177,6 +177,8 @@ def render_target(snapshot: dict, target: dict) -> str:
     # ① 基础配置（按引擎，来自构建快照，保证构建可复现）
     base = base_config_service.normalize(
         (snapshot.get("base") or {}).get(engine) or {})
+    # 应用级伪键：面板域名置顶直连规则（默认开启，不写入产物）
+    panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))
     cfg: dict = base_config_service.ordered(base)
 
     local_enabled = {
@@ -211,7 +213,8 @@ def render_target(snapshot: dict, target: dict) -> str:
     rules = [r for r in snapshot["rules"] if r.get("enabled", True)]
     # 面板自身域名强制直连且置顶：VPN 运行中客户端更新配置不经过代理，
     # 避免节点失效导致配置无法更新（TLS 握手失败）。{FEED_HOST} 分发时替换。
-    cfg["rules"] = ["DOMAIN-SUFFIX,{FEED_HOST},DIRECT"] + [_rule_line(r) for r in rules]
+    pinned = ["DOMAIN-SUFFIX,{FEED_HOST},DIRECT"] if panel_direct else []
+    cfg["rules"] = pinned + [_rule_line(r) for r in rules]
 
     # Stash 由客户端接管 DNS；Mihomo 需要显式 dns 段。
     # 用户在基础配置里写了 dns 则逐项覆盖默认值（列表以用户为准）。

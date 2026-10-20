@@ -31,11 +31,15 @@ LOG_LEVELS = ("silent", "error", "warning", "info", "debug")
 PORT_KEYS = ("mixed-port", "socks-port", "redir-port", "tproxy-port", "port")
 BOOL_KEYS = ("allow-lan", "ipv6")
 
+# 应用级伪键：不写入产物，只控制面板内置行为
+PANEL_DIRECT_KEY = "_panel_direct_rule"
+
 # Stash 官方精简：只保留官方有文档的顶层键
 STASH_OFFICIAL = {
     "mode": "rule",
     "log-level": "warning",
     "ipv6": False,
+    PANEL_DIRECT_KEY: True,
 }
 
 # 兼容现状（含 Clash 端口与 profile 段）
@@ -46,6 +50,7 @@ COMPAT = {
     "log-level": "warning",
     "ipv6": False,
     "profile": {"store-selected": True, "store-fake-ip": True},
+    PANEL_DIRECT_KEY: True,
 }
 
 PRESETS = {
@@ -59,6 +64,7 @@ PRESETS = {
             "mode": "rule",
             "log-level": "warning",
             "ipv6": False,
+            PANEL_DIRECT_KEY: True,
         }),
     },
 }
@@ -107,6 +113,8 @@ def validate_doc(doc: dict) -> None:
                 raise ValueError(f"{key} 必须是整数端口")
             if not 1 <= value <= 65535:
                 raise ValueError(f"{key} 需在 1-65535 之间")
+    if PANEL_DIRECT_KEY in doc and not isinstance(doc[PANEL_DIRECT_KEY], bool):
+        raise ValueError("面板域名强制直连开关必须是布尔值")
     if "profile" in doc and not isinstance(doc["profile"], dict):
         raise ValueError("profile 必须是键值映射")
     if "dns" in doc and not isinstance(doc["dns"], dict):
@@ -148,6 +156,8 @@ def _field(key, label, kind="text", **kwargs):
 
 
 SCHEMA = [
+    _field(PANEL_DIRECT_KEY, "面板域名强制直连（置顶规则）", "switch", group="basic",
+           default=True, engines=["stash", "mihomo"]),
     _field("mode", "运行模式", "select", group="basic",
            options=[{"value": v, "label": v} for v in MODE_VALUES],
            default="rule", engines=["stash", "mihomo"]),
