@@ -2,7 +2,14 @@
 # 数据持久化在 ./data（数据库、密钥、构建产物、测速核心），请纳入备份。
 services:
   magicpanel:
-    build: .
+    build:
+      context: .
+      # 构建期代理：NAS 刚重启时外网可能未就绪，npm/pip 拉包需要走代理。
+      # 只影响镜像构建，不会进入运行时环境。
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
     container_name: magicpanel
     restart: unless-stopped
     # 以宿主机属主运行，保证 bind 挂载的 ./data 可写（NAS 上 1000:1001 为首位用户）
