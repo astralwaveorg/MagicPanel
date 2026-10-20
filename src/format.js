@@ -11,6 +11,9 @@ export function shortSha(sha) {
   return sha ? sha.slice(0, 12) : '—'
 }
 
+// 专有名词展示（大小写必须规范）
+export const ENGINE_LABELS = { stash: 'Stash', mihomo: 'Mihomo' }
+
 export const PLATFORM_LABELS = {
   ios: 'iOS', macos: 'macOS', tvos: 'tvOS', windows: 'Windows', android: 'Android',
   linux: 'Linux',

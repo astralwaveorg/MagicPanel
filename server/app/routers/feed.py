@@ -11,7 +11,7 @@ import urllib.parse
 
 from .. import db, security
 from ..services import base_config as base_config_service
-from ..compiler import render
+from ..compiler import render, validate
 from ..services import tester
 from .builds import artifact_path
 
@@ -88,7 +88,8 @@ def _device_build(conn, device):
 
 @router.api_route("/{token}/config.yaml", methods=["GET", "HEAD"])
 def device_config(token: str, request: Request):
-    with db.tx() as conn:
+    # 读用只读连接：设备拉取是高频请求，不能每次都抢 SQLite 的写锁
+    with db.connect() as conn:
         device = _resolve_device(conn, token)
         if not device:
             return Response("not found", status_code=404)
@@ -107,6 +108,14 @@ def device_config(token: str, request: Request):
                 raw = render.apply_device_overlay(raw, overlay)
             except ValueError as exc:
                 return Response(str(exc), status_code=500)
+            # 设备覆盖从未参与构建期校验：下发前再校验一次，
+            # 坏配置不能因为"只影响一台设备"就悄悄下发。
+            problems = validate.validate_rendered(raw, target["engine"])
+            if problems:
+                return Response(
+                    "设备专属配置导致产物校验失败：" + "；".join(problems),
+                    status_code=500,
+                )
         text = render.substitute_feed(raw, feed_base)
         subscribe_url = f"{feed_base}/config.yaml"
         # Stash 保存订阅时会自己补一行 #SUBSCRIBED，服务端再补一行就会重复；
@@ -114,9 +123,9 @@ def device_config(token: str, request: Request):
         agent = (request.headers.get("user-agent") or "").lower()
         if "stash" not in agent:
             text = f"#SUBSCRIBED {subscribe_url}\n" + text
-        etag = security.sha256_text(
-            f"{build['id']}:{target['name']}:{token[:10]}:"
-            f"{security.sha256_text(overlay or '')[:16]}")[:32]
+        # ETag 必须覆盖最终正文：正文会随 base_url、User-Agent、
+        # 设备覆盖变化，只用 build_id 会让客户端拿到 304 却仍是旧内容。
+        etag = security.sha256_text(text)[:32]
         interval = db.get_setting(conn, "profile_update_interval", "12")
         # Content-Disposition 仅允许 ASCII；中文名经 RFC 5987 编码
         ascii_name = device["name"].encode("ascii", "ignore").decode() or "config"
@@ -129,21 +138,20 @@ def device_config(token: str, request: Request):
         }
 
         def record():
-            conn.execute(
-                "UPDATE devices SET last_pull_at=?, last_pull_ip=?, "
-                "pull_count=pull_count+1 WHERE id=?",
-                (db.now(), request.client.host if request.client else "", device["id"]),
-            )
-            security.audit(conn, device["note"] or device["name"],
-                           "设备下载完整配置", "device", device["id"],
-                           {"build_id": build["id"], "filename": device["name"]})
+            # 计数与审计放在独立短事务里，避免长时间占着写锁
+            with db.tx() as wconn:
+                wconn.execute(
+                    "UPDATE devices SET last_pull_at=?, last_pull_ip=?, "
+                    "pull_count=pull_count+1 WHERE id=?",
+                    (db.now(), request.client.host if request.client else "", device["id"]),
+                )
 
         return _respond(request, text, etag, extra, record=record)
 
 
 @router.api_route("/{token}/res/provider/{name}", methods=["GET", "HEAD"])
 def provider_resource(token: str, name: str, request: Request):
-    with db.tx() as conn:
+    with db.connect() as conn:
         device = _resolve_device(conn, token)
         if not device:
             return Response("not found", status_code=404)
@@ -169,17 +177,18 @@ def provider_resource(token: str, name: str, request: Request):
         etag = security.sha256_text(etag_src or text)[:32]
 
         def record():
-            conn.execute(
-                "UPDATE devices SET last_pull_at=?, last_pull_ip=? WHERE id=?",
-                (db.now(), request.client.host if request.client else "", device["id"]),
-            )
+            with db.tx() as wconn:
+                wconn.execute(
+                    "UPDATE devices SET last_pull_at=?, last_pull_ip=? WHERE id=?",
+                    (db.now(), request.client.host if request.client else "", device["id"]),
+                )
 
         return _respond(request, text, etag, record=record)
 
 
 @router.api_route("/{token}/res/rule/{name}", methods=["GET", "HEAD"])
 def rule_resource(token: str, name: str, request: Request):
-    with db.tx() as conn:
+    with db.connect() as conn:
         device = _resolve_device(conn, token)
         if not device:
             return Response("not found", status_code=404)

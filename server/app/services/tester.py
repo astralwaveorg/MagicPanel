@@ -208,9 +208,11 @@ def install_core_from_upload(blob: bytes) -> dict:
     return _verify_and_replace(_extract_upload(blob))
 
 
-# 核心校验使用固定工作目录：Geo 数据一旦下载成功即可长期复用，
-# 不会每次校验都重新下载（重复下载既慢又可能因网络不可达而挂起）。
-VALIDATE_WORKDIR = config.DATA_DIR / "core-work"
+# Geo 数据目录：一旦下载成功即可长期复用，不会每次校验都重新下载
+# （重复下载既慢又可能因网络不可达而挂起）。
+GEO_WORKDIR = config.DATA_DIR / "core-work"
+# 兼容旧名字
+VALIDATE_WORKDIR = GEO_WORKDIR
 
 # 配置里出现这些引用时，核心需要对应的 Geo 数据文件
 GEO_FILES = (
@@ -222,8 +224,7 @@ GEO_FILES = (
 
 def missing_geo_file(text: str) -> str:
     """返回配置所需但本地缺失的 Geo 数据文件名；都不缺时返回空串。"""
-    workdir = VALIDATE_WORKDIR
-    existing = {p.name.lower() for p in workdir.iterdir()} if workdir.exists() else set()
+    existing = {p.name.lower() for p in GEO_WORKDIR.iterdir()} if GEO_WORKDIR.exists() else set()
     for marker, filename, label in GEO_FILES:
         if marker in text and filename.lower() not in existing:
             return label
@@ -246,13 +247,24 @@ def validate_config(text: str, feed_placeholder: str = "https://127.0.0.1") -> t
         return True, (f"核心校验缺少 {missing}（配置里用到了 geosite:/geoip: 等引用），"
                       "请把该数据文件放到 data/core-work/ 后重试，"
                       "或把这些引用改成显式域名")
-    VALIDATE_WORKDIR.mkdir(parents=True, exist_ok=True)
-    cfg = VALIDATE_WORKDIR / "config.yaml"
+    # 每次校验用独立临时目录：并发构建（手动 + 自动）共用一个固定
+    # config.yaml 时会互相覆盖，坏产物可能被误判为"核心校验通过"。
+    # 每次校验用独立临时目录（Geo 数据目录只读共享）：
+    # 并发构建共用固定 config.yaml 会互相覆盖，坏产物会被误判为通过。
+    GEO_WORKDIR.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix="mp-validate-", dir=str(GEO_WORKDIR)))
+    for item in GEO_WORKDIR.iterdir():
+        if item.suffix.lower() in (".dat", ".mmdb"):
+            try:
+                (workdir / item.name).symlink_to(item)
+            except OSError:
+                pass
+    cfg = workdir / "config.yaml"
     try:
         cfg.write_text(text.replace("{FEED}", feed_placeholder), encoding="utf-8")
         try:
             out = subprocess.run(
-                [str(core_path()), "-d", str(VALIDATE_WORKDIR), "-t", "-f", str(cfg)],
+                [str(core_path()), "-d", str(workdir), "-t", "-f", str(cfg)],
                 capture_output=True, text=True, timeout=30,
             )
         except subprocess.TimeoutExpired:
@@ -262,10 +274,7 @@ def validate_config(text: str, feed_placeholder: str = "https://127.0.0.1") -> t
             return True, "核心校验未通过：" + (tail[-1] if tail else "未知错误")
         return True, ""
     finally:
-        try:
-            cfg.unlink(missing_ok=True)
-        except OSError:
-            pass
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 def _free_port() -> int:

@@ -53,11 +53,17 @@ def _engine(engine: str) -> str:
     return engine
 
 
-def _check_scope(conn, engine: str, platform: str, device_id: int) -> tuple[str, int]:
-    """校验作用域：平台与设备必须存在且与引擎一致。"""
+def _check_scope(conn, engine: str, platform: str, device_id: int,
+                 for_write: bool = False) -> tuple[str, int]:
+    """校验作用域：平台与设备必须存在且与引擎一致。
+
+    不带平台也不带设备时表示"内置默认"——只允许查看，不允许写入。
+    """
     plat = platform
     if not device_id and not platform:
-        raise HTTPException(400, "请选择引擎平台（引擎 + 平台）或具体设备")
+        if for_write:
+            raise HTTPException(400, "请选择引擎平台（引擎 + 平台）或具体设备")
+        return "", 0
     if device_id:
         dev = db.one(conn, "SELECT * FROM devices WHERE id=?", (device_id,))
         if not dev:
@@ -200,6 +206,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         "engine": engine,
         "platform": plat,
         "device_id": dev_id,
+        "readonly": not plat and not dev_id,
         "inherited": inherited,
         "overlay": overlay,
         "effective": effective,
@@ -217,21 +224,21 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
     """保存本层覆盖：提交的是"本层编辑后的生效值"，服务端自动与上层求差异。"""
     engine = _engine(engine)
     with db.tx() as conn:
-        plat, dev_id = _check_scope(conn, engine, platform, device_id)
+        plat, dev_id = _check_scope(conn, engine, platform, device_id, for_write=True)
         docs = _all_docs(conn)
         _, _, updated_at = _load_scope(conn, engine, plat, dev_id)
         if body.updated_at and updated_at and body.updated_at != updated_at:
             raise HTTPException(409, "基础配置已被其他维护者修改，请刷新后再保存")
         try:
             effective = base_config_service.parse_content(body.content)
-            base_config_service.validate_doc(effective)
+            base_config_service.validate_doc(effective, device_scope=bool(dev_id))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
         inherited, _ = (base_config_service.cascade(layers[:-1])
                         if len(layers) > 1 else ({}, {}))
         overlay = base_config_service.diff_overlay(inherited, effective)
-        base_config_service.validate_doc(overlay)
+        base_config_service.validate_doc(overlay, device_scope=bool(dev_id))
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])
@@ -259,7 +266,7 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
     """恢复默认：清空本层覆盖，回到继承上层（内置默认 → 通用配置）。"""
     engine = _engine(engine)
     with db.tx() as conn:
-        plat, dev_id = _check_scope(conn, engine, platform, device_id)
+        plat, dev_id = _check_scope(conn, engine, platform, device_id, for_write=True)
         _, overlay, _ = _load_scope(conn, engine, plat, dev_id)
         # 个人直连域名与 Fake-IP 过滤属于「配置」而非「默认值」，恢复默认时保留
         keep = {key: overlay[key] for key in
@@ -270,6 +277,7 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
         if keep:
             _save_scope(conn, engine, plat, dev_id,
                         base_config_service.to_yaml(keep), user["username"])
+            overlay = keep
         else:
             conn.execute(
                 "DELETE FROM base_configs WHERE engine=? AND platform=? AND device_id=?",
@@ -282,7 +290,7 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
         "engine": engine,
         "platform": plat,
         "device_id": dev_id,
-        "overlay": {},
+        "overlay": overlay,
         "effective": effective,
         "sources": sources,
         "content": base_config_service.to_yaml(effective),
@@ -348,14 +356,14 @@ def apply(body: ApplyBody, user=CurrentUser):
         docs = _all_docs(conn)
         try:
             effective = base_config_service.parse_content(body.content)
-            base_config_service.validate_doc(effective)
+            base_config_service.validate_doc(effective, device_scope=bool(dev_id))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
         inherited, _ = (base_config_service.cascade(layers[:-1])
                         if len(layers) > 1 else ({}, {}))
         overlay = base_config_service.diff_overlay(inherited, effective)
-        base_config_service.validate_doc(overlay)
+        base_config_service.validate_doc(overlay, device_scope=bool(dev_id))
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])

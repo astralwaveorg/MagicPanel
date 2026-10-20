@@ -10,6 +10,9 @@
       <el-button type="primary" @click="openEdit()">添加策略组</el-button>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!rows.length"
       reason="还没有策略组。"
@@ -125,12 +128,12 @@
         </el-form-item>
         <template v-if="hasHealthCheck">
           <el-form-item :label="form.type === 'relay' ? '测速地址（Stash 目标渲染为 benchmark-url）' : '测速地址'">
-            <el-input v-model="form.url" class="mono" />
+            <el-input v-model="form.url" class="mono" maxlength="512" />
           </el-form-item>
           <el-row :gutter="12">
             <el-col :span="8">
               <el-form-item label="间隔（秒）">
-                <el-input-number v-model="form.interval" :min="30" style="width:100%" />
+                <el-input-number v-model="form.interval" :min="30" :max="86400" style="width:100%" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
@@ -167,12 +170,14 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 
 const rows = ref([])
 const sources = ref([])
 const localNodes = ref([])
 const targets = ref([])
 const loading = ref(false)
+const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
@@ -182,6 +187,7 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
     await api('/api/v1/groups/reorder', { method: 'POST', body: ids })
     ElMessage.success('顺序已更新')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   }
   await load()
@@ -191,7 +197,7 @@ const emptyForm = () => ({
   name: '', type: 'select', hidden: false, filter: '', use_sources: [],
   local_nodes: [], proxies: [],
   url: 'https://www.gstatic.com/generate_204', interval: 600, timeout: 8000,
-  tolerance: 150, lazy: true, strategy: 'consistent-hashing', targets: [],
+  tolerance: 150, lazy: true, strategy: '', targets: [],
 })
 const form = reactive(emptyForm())
 
@@ -212,6 +218,7 @@ function localNodeNames(ids) {
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     const [groups, srcs, nodes, targetList] = await Promise.all([
       api('/api/v1/groups'), api('/api/v1/sources'), api('/api/v1/local-nodes'),
@@ -222,6 +229,7 @@ async function load() {
     localNodes.value = nodes
     targets.value = targetList
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false
@@ -239,7 +247,7 @@ function openEdit(row) {
     use_sources: [...row.use_sources], local_nodes: [...(row.local_nodes || [])],
     proxies: [...row.proxies],
     url: row.url, interval: row.interval, timeout: row.timeout,
-    tolerance: row.tolerance, lazy: row.lazy, strategy: row.strategy || 'consistent-hashing',
+    tolerance: row.tolerance, lazy: row.lazy, strategy: row.strategy || '',
     targets: [...(row.targets || [])],
   } : {})
   dialog.value = true
@@ -249,10 +257,12 @@ async function save() {
   if (!form.name) return ElMessage.warning('请填写名称')
   saving.value = true
   try {
+    // 分配策略只对 load-balance 有意义，其余类型必须清空，否则后端直接拒绝
+    const body = { ...form, strategy: form.type === 'load-balance' ? form.strategy : '' }
     if (editing.value) {
-      await api(`/api/v1/groups/${editing.value.id}`, { method: 'PUT', body: form })
+      await api(`/api/v1/groups/${editing.value.id}`, { method: 'PUT', body })
     } else {
-      await api('/api/v1/groups', { method: 'POST', body: form })
+      await api('/api/v1/groups', { method: 'POST', body })
     }
     dialog.value = false
     ElMessage.success('已保存')

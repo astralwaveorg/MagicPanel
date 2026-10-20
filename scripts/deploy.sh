@@ -32,8 +32,21 @@ if [ -n "$BAD" ]; then
   exit 1
 fi
 
+echo "== 数据目录预检 =="
+# 容器以 1000:1001 运行，data 目录必须对该身份可写，
+# 否则容器启动即 PermissionError（并被 restart 策略反复拉起）。
+DATA_CHECK=$(ssh -o BatchMode=yes "$NAS_HOST" \
+  "cd '$NAS_DIR' && (mkdir -p data && test -w data && echo writable || echo 'not-writable')" || true)
+if [ "$DATA_CHECK" != "writable" ]; then
+  echo "data 目录对运行身份不可写：$DATA_CHECK" >&2
+  echo "修复：ssh $NAS_HOST 'chown -R 1000:1001 $NAS_DIR/data'" >&2
+  exit 1
+fi
+
 echo "== 同步代码到 $NAS_HOST:$NAS_DIR =="
 # data 目录是线上持久化数据，排除且 --delete 不会触及
+# --delete 会删掉 NAS 侧独有的文件（1Panel 生成的 override、.env 里的代理配置等），
+# 这些文件不在仓库里，一旦被删下次构建就会拉包失败——必须排除。
 rsync -az --delete \
   --exclude '.git' \
   --exclude 'node_modules' \
@@ -44,9 +57,17 @@ rsync -az --delete \
   --exclude '*.pyc' \
   --exclude '.DS_Store' \
   --exclude 'Stash 真实配置文件示例' \
+  --exclude '.env' \
+  --exclude '.env.*' \
+  --exclude 'docker-compose.override.yml' \
+  --exclude 'docker-compose.override.yaml' \
+  --exclude '*.bak' \
   ./ "$NAS_HOST:$NAS_DIR/"
 
 echo "== 重建并重启容器 =="
+# 记录当前镜像，失败时回滚到它
+PREV_IMAGE=$(ssh -o BatchMode=yes "$NAS_HOST" \
+  "docker inspect --format '{{.Image}}' magicpanel 2>/dev/null || echo ''" || true)
 # 刚重启时 NAS 的外网可能还没恢复，npm/pip 拉包会失败；
 # 需要时用 DEPLOY_PROXY=http://host:port 走局域网代理。
 if [ -n "${DEPLOY_PROXY:-}" ]; then
@@ -69,12 +90,22 @@ done
 echo "容器状态：$STATUS"
 if [ "$STATUS" != "healthy" ]; then
   echo "健康检查未通过，查看日志：ssh $NAS_HOST 'docker logs magicpanel --tail 50'" >&2
+  # 回滚到上一个镜像，避免一次坏发布把面板长时间打挂
+  if [ -n "$PREV_IMAGE" ]; then
+    echo "尝试回滚到上一镜像 $PREV_IMAGE" >&2
+    ssh -o BatchMode=yes "$NAS_HOST" \
+      "cd '$NAS_DIR' && docker compose down && \
+       IMAGE_TAG=\"$PREV_IMAGE\" docker compose up -d" || true
+    echo "已尝试回滚，请检查 docker ps 与日志" >&2
+  fi
   exit 1
 fi
 
 echo "== 域名验证 =="
 FAIL=0
-for path in / /admin/login; do
+# 走 /api/v1/setup/status 而不是 SPA 页面：SPA 兜底对任何路径都返回 200，
+# 反代没把 /api 转发过去时也看不出问题。
+for path in /api/v1/setup/status / /admin/login; do
   CODE=$(curl -s -o /dev/null -w '%{http_code}' --noproxy '*' --max-time 10 "$DOMAIN$path" || echo 000)
   echo "$CODE $DOMAIN$path"
   [ "$CODE" = "200" ] || FAIL=1

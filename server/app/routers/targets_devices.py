@@ -26,7 +26,6 @@ class TargetBody(BaseModel):
     platform: str
     description: str = Field(default="", max_length=256)
     extra_yaml: str = Field(default="", max_length=200_000)
-    update_interval: int = Field(default=12, ge=1, le=168)
 
 
 class DeviceBody(BaseModel):
@@ -35,8 +34,8 @@ class DeviceBody(BaseModel):
     target_id: int
     channel: str = "stable"
     note: str = Field(default="", max_length=256)
-    # 设备级个性化：分发时叠加在该设备目标产物之上（结构键不允许覆盖）
-    extra_yaml: str = Field(default="", max_length=200_000)
+    # 设备级个性化统一走「产物配置 → 设备专属」作用域，
+    # 这里的 extra_yaml 曾是另一条从未接通的通道（写了不生效），已移除。
 
 
 def _check_target(body: TargetBody) -> None:
@@ -75,7 +74,6 @@ def _device_public(row, base_url: str = "") -> dict:
         "last_pull_at": row["last_pull_at"],
         "last_pull_ip": row["last_pull_ip"],
         "pull_count": row["pull_count"],
-        "extra_yaml": row["extra_yaml"] or "",
     }
 
 
@@ -154,9 +152,9 @@ def create_target(body: TargetBody, user=CurrentUser):
         sort = db.one(conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM targets")["n"]
         cur = conn.execute(
             "INSERT INTO targets(name, engine, platform, description, extra_yaml, "
-            "update_interval, sort, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            "sort, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
             (body.name, body.engine, body.platform, body.description,
-             body.extra_yaml, body.update_interval, sort, now, now),
+             body.extra_yaml, sort, now, now),
         )
         security.audit(conn, user["username"], "新增引擎平台", "target", cur.lastrowid,
                        {"name": body.name})
@@ -189,9 +187,9 @@ def update_target(tid: int, body: TargetBody, user=CurrentUser):
         old = _get_target(conn, tid)
         conn.execute(
             "UPDATE targets SET name=?, engine=?, platform=?, description=?, "
-            "extra_yaml=?, update_interval=?, updated_at=? WHERE id=?",
+            "extra_yaml=?, updated_at=? WHERE id=?",
             (body.name, body.engine, body.platform, body.description,
-             body.extra_yaml, body.update_interval, db.now(), tid),
+             body.extra_yaml, db.now(), tid),
         )
         remapped = 0
         if old["name"] != body.name:
@@ -247,11 +245,11 @@ def create_device(body: DeviceBody, request: Request, user=CurrentUser):
             raise HTTPException(409, "同名设备已存在")
         cur = conn.execute(
             "INSERT INTO devices(name, platform, target_id, channel, token_hash, "
-            "token_hint, token_enc, note, extra_yaml, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "token_hint, token_enc, note, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
             (body.name, body.platform, body.target_id, body.channel,
              security.sha256_text(token), token[:10], security.encrypt_text(token),
-             body.note, body.extra_yaml, db.now()),
+             body.note, db.now()),
         )
         security.audit(conn, user["username"], "新增设备", "device", cur.lastrowid,
                        {"name": body.name})
@@ -278,10 +276,9 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名设备已存在")
         conn.execute(
-            "UPDATE devices SET name=?, platform=?, target_id=?, channel=?, note=?, "
-            "extra_yaml=? WHERE id=?",
-            (body.name, body.platform, body.target_id, body.channel, body.note,
-             body.extra_yaml, did),
+            "UPDATE devices SET name=?, platform=?, target_id=?, channel=?, note=? "
+            "WHERE id=?",
+            (body.name, body.platform, body.target_id, body.channel, body.note, did),
         )
         security.audit(conn, user["username"], "更新设备", "device", did,
                        {"name": body.name})
@@ -325,6 +322,8 @@ def delete_device(did: int, user=CurrentUser):
     with db.tx() as conn:
         row = _get_device(conn, did)
         conn.execute("DELETE FROM devices WHERE id=?", (did,))
+        # 设备专属基础配置一并清理，否则会成为孤儿行进入构建快照
+        conn.execute("DELETE FROM base_configs WHERE device_id=?", (did,))
         security.audit(conn, user["username"], "删除设备（令牌同时失效）", "device",
                        did, {"name": row["name"]})
     return {"ok": True}

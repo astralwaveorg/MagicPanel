@@ -5,7 +5,7 @@
       <div class="pt-gate-card" :class="{ shake: shaking }">
         <img class="pt-gate-logo" src="/logo.svg" alt="MagicPanel">
         <div class="pt-logo">MagicPanel</div>
-        <p class="pt-gate-desc">输入 4 位 PIN 查看订阅与资源</p>
+        <p class="pt-gate-desc">输入 PIN（6 位，历史 4 位仍可用）查看订阅与资源</p>
         <input
           ref="pinInput"
           v-model="pin"
@@ -13,7 +13,7 @@
           type="password"
           inputmode="numeric"
           pattern="\d{4}"
-          maxlength="4"
+          maxlength="6"
           autocomplete="off"
           placeholder="····"
           :disabled="locked"
@@ -198,7 +198,7 @@ import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { api } from '../api'
 
-const GATE_TITLE = 'MagicHub - 欢迎访问订阅配置服务中心'
+const GATE_TITLE = 'MagicPanel - 订阅配置服务中心'
 const CONTENT_TITLE = '订阅中心 · MagicPanel'
 
 const router = useRouter()
@@ -226,8 +226,9 @@ const CATEGORY_LABELS = {
 }
 const PLATFORM_LABELS = {
   ios: 'iOS', macos: 'macOS', tvos: 'tvOS', windows: 'Windows', android: 'Android',
+  linux: 'Linux',
 }
-const ENGINE_LABELS = { stash: 'Stash', mihomo: 'Mihomo / Clash' }
+const ENGINE_LABELS = { stash: 'Stash', mihomo: 'Mihomo' }
 
 const norm = (s) => (s || '').toLowerCase()
 const hit = (...fields) => !query.value
@@ -380,8 +381,9 @@ async function fetchData() {
 }
 
 function onPinInput() {
-  pin.value = pin.value.replace(/\D/g, '').slice(0, 4)
-  if (pin.value.length === 4) fetchData()
+  pin.value = pin.value.replace(/\D/g, '').slice(0, 6)
+  // 4 位是历史 PIN，6 位是新规范
+  if (pin.value.length === 4 || pin.value.length === 6) fetchData()
 }
 
 function exitPortal() {

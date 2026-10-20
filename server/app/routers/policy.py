@@ -107,6 +107,7 @@ def create_group(body: GroupBody, user=CurrentUser):
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (body.name,)):
             raise HTTPException(409, "同名策略组已存在")
+        _check_group_refs(conn, body)
         local_ids = _check_local_ids(conn, body.local_nodes)
         sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups"))["s"]
         now = db.now()
@@ -132,13 +133,18 @@ def create_group(body: GroupBody, user=CurrentUser):
 def update_group(gid: int, body: GroupBody, user=CurrentUser):
     _check_group(body)
     with db.tx() as conn:
-        _get_group(conn, gid)
+        current = _get_group(conn, gid)
         clash = db.one(
             conn, "SELECT id FROM proxy_groups WHERE name=? AND id!=?", (body.name, gid)
         )
         if clash:
             raise HTTPException(409, "同名策略组已存在")
+        _check_group_refs(conn, body)
         local_ids = _check_local_ids(conn, body.local_nodes)
+        # 改名时同步改写引用（规则目标 + 其它组的成员列表），
+        # 否则引用会指向不存在的组，构建全线失败且无法发布。
+        if current["name"] != body.name:
+            _remap_group_refs(conn, current["name"], body.name)
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
             "local_nodes=?, proxies=?, url=?, interval=?, timeout=?, tolerance=?, "
@@ -208,6 +214,48 @@ def _check_rule(body: RuleBody) -> None:
         raise HTTPException(400, "no-resolve 仅适用于 IP 类规则（IP-CIDR / GEOIP / RULE-SET 等）")
 
 
+def _remap_group_refs(conn, old_name: str, new_name: str) -> int:
+    """策略组改名后，同步更新规则目标与其它组的成员列表。"""
+    changed = 0
+    for row in db.all_(conn, "SELECT id, target FROM rules WHERE target=?", (old_name,)):
+        conn.execute("UPDATE rules SET target=? WHERE id=?", (new_name, row["id"]))
+        changed += 1
+    for row in db.all_(conn, "SELECT id, proxies FROM proxy_groups WHERE proxies IS NOT NULL"):
+        try:
+            members = json.loads(row["proxies"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(members, list) or old_name not in members:
+            continue
+        members = [new_name if m == old_name else m for m in members]
+        conn.execute("UPDATE proxy_groups SET proxies=? WHERE id=?",
+                     (json.dumps(members, ensure_ascii=False), row["id"]))
+        changed += 1
+    return changed
+
+
+def _check_target_names(conn, names: list[str]) -> None:
+    """写时校验"适用引擎平台"必须真实存在。
+
+    这一项必须硬校验：平台名写错时，策略组与规则会被**所有产物静默剔除**，
+    界面与构建日志都看不出任何异常。
+    策略组之间的相互引用不在这里校验——建组顺序本来就是任意的，
+    引用写错由构建期给出明确报错（"引用了不存在的策略组"）。
+    """
+    for name in names or []:
+        row = db.one(conn, "SELECT id FROM targets WHERE name=?", (name,))
+        if not row:
+            raise HTTPException(400, f"引擎平台“{name}”不存在")
+
+
+def _check_rule_refs(conn, body: RuleBody) -> None:
+    _check_target_names(conn, body.targets)
+
+
+def _check_group_refs(conn, body: GroupBody) -> None:
+    _check_target_names(conn, body.targets)
+
+
 @router.get("/rules")
 def list_rules(user=CurrentUser):
     with db.connect() as conn:
@@ -219,6 +267,7 @@ def list_rules(user=CurrentUser):
 def create_rule(body: RuleBody, user=CurrentUser):
     _check_rule(body)
     with db.tx() as conn:
+        _check_rule_refs(conn, body)
         sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
         now = db.now()
         cur = conn.execute(
@@ -238,6 +287,7 @@ def create_rule(body: RuleBody, user=CurrentUser):
 def update_rule(rid: int, body: RuleBody, user=CurrentUser):
     _check_rule(body)
     with db.tx() as conn:
+        _check_rule_refs(conn, body)
         _get_rule(conn, rid)
         conn.execute(
             "UPDATE rules SET type=?, value=?, target=?, enabled=?, note=?, "

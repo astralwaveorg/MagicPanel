@@ -48,6 +48,9 @@
       </div>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!rows.length"
       reason="还没有候选构建。"
@@ -197,6 +200,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
 
@@ -204,6 +208,7 @@ const rows = ref([])
 const channels = ref({ stable: null, candidate: null })
 const releases = ref([])
 const loading = ref(false)
+const error = ref('')
 const building = ref(false)
 const detail = ref(null)
 const detailVisible = ref(false)
@@ -221,6 +226,7 @@ const deletedCount = ref(0)
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     const [builds, ch, rel] = await Promise.all([
       api('/api/v1/builds'), api('/api/v1/channels'), api('/api/v1/releases'),
@@ -229,6 +235,7 @@ async function load() {
     channels.value = ch
     releases.value = rel
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false
@@ -257,6 +264,7 @@ async function createBuild() {
     }
     openDetail(build)
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     building.value = false

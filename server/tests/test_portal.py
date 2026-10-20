@@ -37,14 +37,14 @@ def test_portal_pin_flow(client):
 
     # 设置 PIN 后：错误 PIN 403，错误次数累计到上限后锁定
     assert client.post("/api/v1/portal/my-pin", headers=h,
-                       json={"pin": "2468"}).status_code == 201
+                       json={"pin": "246810"}).status_code == 201
     assert client.get("/api/v1/portal/status").json() == {"enabled": True}
     assert client.get("/api/v1/auth/me").json()["has_portal_pin"] is True
     _anonymous(client)
     for _ in range(5):
         assert client.post("/api/v1/portal/data",
                            json={"pin": "0000"}).status_code == 403
-    assert client.post("/api/v1/portal/data", json={"pin": "2468"}).status_code == 429
+    assert client.post("/api/v1/portal/data", json={"pin": "246810"}).status_code == 429
 
     # 撤销本人 PIN 后门户关闭（无其他 PIN 时）
     r = client.post("/api/v1/auth/login",
@@ -53,7 +53,7 @@ def test_portal_pin_flow(client):
     assert client.delete("/api/v1/portal/my-pin", headers=h).status_code == 200
     assert client.get("/api/v1/auth/me").json()["has_portal_pin"] is False
     _anonymous(client)
-    assert client.post("/api/v1/portal/data", json={"pin": "2468"}).status_code == 404
+    assert client.post("/api/v1/portal/data", json={"pin": "246810"}).status_code == 404
 
 
 def test_portal_pin_bound_to_user(client):
@@ -62,17 +62,17 @@ def test_portal_pin_bound_to_user(client):
     h = auth_headers(csrf)
     client.post("/api/v1/users", headers=h, json={
         "username": "second", "password": "second-pass-1", "display_name": "二号"})
-    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "1111"})
+    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "111111"})
 
     r = client.post("/api/v1/auth/login",
                     json={"username": "second", "password": "second-pass-1"})
     csrf2 = r.json()["csrf_token"]
     h2 = auth_headers(csrf2)
-    client.post("/api/v1/portal/my-pin", headers=h2, json={"pin": "2222"})
+    client.post("/api/v1/portal/my-pin", headers=h2, json={"pin": "222222"})
 
     _anonymous(client)
-    assert client.post("/api/v1/portal/data", json={"pin": "1111"}).status_code == 200
-    assert client.post("/api/v1/portal/data", json={"pin": "2222"}).status_code == 200
+    assert client.post("/api/v1/portal/data", json={"pin": "111111"}).status_code == 200
+    assert client.post("/api/v1/portal/data", json={"pin": "222222"}).status_code == 200
 
     # 用户列表只暴露是否设置，不暴露 PIN 本身
     client.post("/api/v1/auth/login",
@@ -87,8 +87,8 @@ def test_portal_pin_bound_to_user(client):
     h2 = auth_headers(r.json()["csrf_token"])
     client.delete("/api/v1/portal/my-pin", headers=h2)
     _anonymous(client)
-    assert client.post("/api/v1/portal/data", json={"pin": "2222"}).status_code == 403
-    assert client.post("/api/v1/portal/data", json={"pin": "1111"}).status_code == 200
+    assert client.post("/api/v1/portal/data", json={"pin": "222222"}).status_code == 403
+    assert client.post("/api/v1/portal/data", json={"pin": "111111"}).status_code == 200
 
 
 def test_portal_data_content(client):
@@ -101,10 +101,10 @@ def test_portal_data_content(client):
     client.post("/api/v1/rules", headers=h, json={
         "type": "RULE-SET", "value": "https://example.com/list.yaml",
         "target": "PROXY"})
-    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "1357"})
+    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "135700"})
 
     _anonymous(client)
-    r = client.post("/api/v1/portal/data", json={"pin": "1357"})
+    r = client.post("/api/v1/portal/data", json={"pin": "135700"})
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["devices"][0]["subscription_url"] == dev["subscription_url"]
@@ -124,5 +124,5 @@ def test_portal_data_content(client):
     assert r.status_code == 200
     assert r.json()["subscription_url"] == new_url
     _anonymous(client)
-    data = client.post("/api/v1/portal/data", json={"pin": "1357"}).json()
+    data = client.post("/api/v1/portal/data", json={"pin": "135700"}).json()
     assert data["devices"][0]["subscription_url"] == new_url

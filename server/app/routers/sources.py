@@ -13,7 +13,9 @@ router = APIRouter(prefix="/api/v1/sources", tags=["sources"])
 
 
 class SourceBody(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
+    # 名称会进入 provider 的订阅 URL（/res/provider/<name>），
+    # 允许空格或斜杠会让 URL 失效、客户端拿不到节点。
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[^\s/?#%&]+$")
     url: str | None = Field(default=None, max_length=1024)  # 更新时留空表示不变
     enabled: bool = True
     filter: str = Field(default="", max_length=512)

@@ -146,12 +146,27 @@ def validate_rendered(text: str, engine: str = "") -> list[str]:
             errors.append(f"产物缺少字段：{key}")
     if data.get("mode") not in ("rule", "global", "direct"):
         errors.append(f"产物 mode 无效：{data.get('mode')}")
+    # 兜底规则：没有 MATCH/FINAL 时，未命中任何规则的流量会被客户端直接拒绝，
+    # 等于设备断网。规则按"适用引擎平台"过滤后可能整条消失，必须在这里兜住。
+    if data.get("mode") in ("rule",):
+        rules = [r for r in (data.get("rules") or []) if isinstance(r, str)]
+        if not any(r.strip().split(",")[0].strip() in ("MATCH", "FINAL")
+                   for r in rules):
+            errors.append("产物缺少兜底规则（MATCH/FINAL），未命中的流量会被客户端拒绝")
 
     allowed = config.ENGINE_RULE_TYPES.get(engine)
-    groups = {g.get("name") for g in (data.get("proxy-groups") or [])
-              if isinstance(g, dict)}
-    proxies = {p.get("name") for p in (data.get("proxies") or [])
-               if isinstance(p, dict)}
+    group_names = [g.get("name") for g in (data.get("proxy-groups") or [])
+                   if isinstance(g, dict)]
+    proxy_names = [p.get("name") for p in (data.get("proxies") or [])
+                   if isinstance(p, dict)]
+    # 重名会被客户端拒绝加载（同名策略组 / 同名节点）
+    for label, names in (("策略组", group_names), ("节点", proxy_names)):
+        seen = set()
+        dup = {n for n in names if n and (n in seen or seen.add(n))}
+        if dup:
+            errors.append(f"产物存在重名{label}：{'、'.join(sorted(dup))}，客户端会拒绝加载")
+    groups = set(group_names)
+    proxies = set(proxy_names)
     known = groups | proxies | config.BUILTIN_TARGETS
     for line in (data.get("rules") or []):
         if not isinstance(line, str):

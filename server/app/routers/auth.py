@@ -1,4 +1,6 @@
 """认证与维护者账号。多维护者共享同一份数据，账号仅用于访问控制。"""
+import time
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -7,6 +9,55 @@ from .. import config, db, security
 from ..deps import SESSION_COOKIE, CurrentUser, create_session, destroy_session
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
+
+# 登录失败限流：同一来源连续失败过多时短暂拒绝，避免在线爆破。
+# 进程内计数即可——面板是单实例部署，重启后清零也不影响安全底线。
+_LOGIN_MAX_FAIL = 5
+_LOGIN_WINDOW_SEC = 900
+_login_failures: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    """取真实来源 IP。
+
+    反代（OpenResty 的 $proxy_add_x_forwarded_for）是**追加**式：
+    客户端可自带 X-Forwarded-For，真实 IP 落在最后一段。
+    取第一段等于让攻击者随便伪造，限流会被绕过。
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
+    return request.client.host if request.client else ""
+
+
+def _login_blocked(ip: str) -> int:
+    """返回还需等待的秒数；0 表示不限制。"""
+    now = time.time()
+    hits = [t for t in _login_failures.get(ip, []) if now - t < _LOGIN_WINDOW_SEC]
+    if hits:
+        _login_failures[ip] = hits
+    else:
+        _login_failures.pop(ip, None)
+    if len(hits) >= _LOGIN_MAX_FAIL:
+        return int(_LOGIN_WINDOW_SEC - (now - hits[0])) + 1
+    return 0
+
+
+def _record_login_failure(ip: str) -> None:
+    now = time.time()
+    hits = [t for t in _login_failures.get(ip, []) if now - t < _LOGIN_WINDOW_SEC]
+    hits.append(now)
+    _login_failures[ip] = hits
+    # 防止字典无限增长
+    if len(_login_failures) > 512:
+        for key in list(_login_failures)[:256]:
+            _login_failures.pop(key, None)
+
+
+def _clear_login_failures(ip: str) -> None:
+    _login_failures.pop(ip, None)
 
 
 class LoginBody(BaseModel):
@@ -31,10 +82,18 @@ class PasswordBody(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
-def _set_cookie(response: Response, token: str, ttl_hours: int) -> None:
+def _is_https(request: Request) -> bool:
+    if request.url.scheme == "https":
+        return True
+    return request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+
+
+def _set_cookie(response: Response, token: str, ttl_hours: int,
+                secure: bool = False) -> None:
+    """会话 Cookie：HttpOnly + SameSite；HTTPS 下附加 Secure，禁止明文传输。"""
     response.set_cookie(
         SESSION_COOKIE, token,
-        max_age=ttl_hours * 3600, httponly=True, samesite="lax",
+        max_age=ttl_hours * 3600, httponly=True, samesite="lax", secure=secure,
     )
 
 
@@ -62,27 +121,36 @@ def setup(body: SetupBody, request: Request, response: Response):
             request.headers.get("user-agent", ""),
         )
         security.audit(conn, body.username, "初始化系统", "user", cur.lastrowid)
-    _set_cookie(response, token, ttl)
+    _set_cookie(response, token, ttl, secure=_is_https(request))
     return {"username": body.username, "csrf_token": csrf}
 
 
 @router.post("/auth/login")
 def login(body: LoginBody, request: Request, response: Response):
+    ip = _client_ip(request)
+    wait = _login_blocked(ip)
+    if wait:
+        raise HTTPException(
+            429, f"登录失败次数过多，请在 {wait} 秒后重试", headers={"Retry-After": str(wait)})
     with db.tx() as conn:
         row = db.one(conn, "SELECT * FROM users WHERE username=?", (body.username,))
         if not row or not security.verify_password(
             body.password, row["password_hash"], row["salt"]
         ):
+            _record_login_failure(ip)
+            security.audit(conn, ip, "登录失败", "user",
+                           body.username[:64], {"reason": "用户名或口令错误"})
             raise HTTPException(401, "用户名或密码不正确")
         token, csrf, ttl = create_session(
-            conn, row["id"], request.client.host if request.client else "",
+            conn, row["id"], ip,
             request.headers.get("user-agent", ""),
         )
         conn.execute(
             "UPDATE users SET last_login_at=? WHERE id=?", (db.now(), row["id"])
         )
         security.audit(conn, row["username"], "登录", "user", row["id"])
-    _set_cookie(response, token, ttl)
+    _clear_login_failures(ip)
+    _set_cookie(response, token, ttl, secure=_is_https(request))
     return {
         "username": row["username"],
         "display_name": row["display_name"],

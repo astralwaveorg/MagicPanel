@@ -18,6 +18,9 @@
       <el-button type="primary" @click="openEdit()">添加模块</el-button>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!rows.length"
       reason="还没有功能模块。"
@@ -31,7 +34,7 @@
             <template #default="{ row }">{{ CATEGORY_LABELS[row.category] || row.category }}</template>
           </el-table-column>
           <el-table-column label="适用引擎" width="100">
-            <template #default="{ row }">{{ ENGINE_LABELS[row.engine] }}</template>
+            <template #default="{ row }">{{ ENGINE_LABELS[row.engine] || row.engine }}</template>
           </el-table-column>
           <el-table-column label="启用" width="70">
             <template #default="{ row }">
@@ -120,6 +123,7 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 import { fmtTime } from '../format'
 
 const CATEGORY_LABELS = {
@@ -129,6 +133,7 @@ const ENGINE_LABELS = { stash: '仅 Stash', mihomo: '仅 Mihomo', all: '全部�
 
 const rows = ref([])
 const loading = ref(false)
+const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
@@ -150,9 +155,11 @@ const filtered = computed(() =>
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     rows.value = await api('/api/v1/snippets')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false
@@ -183,6 +190,7 @@ async function save() {
     ElMessage.success('已保存，下次构建时生效')
     await load()
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     saving.value = false

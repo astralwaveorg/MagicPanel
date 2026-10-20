@@ -221,22 +221,30 @@ def create_candidate(operator: str, note: str = "",
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
         # Mihomo 目标在核心可用时追加官方配置检查（mihomo -t）
+        core_checked = False
         if not errors and target["engine"] == "mihomo":
             checked, core_error = tester.validate_config(text)
             if checked:
+                core_checked = True
                 if core_error:
                     errors.append(core_error)
                 else:
                     verification = "核心校验通过（mihomo -t），实机行为待验收"
         if not errors and not verification.startswith("核心"):
             # Stash 无官方无头校验工具；核心缺失时 Mihomo 也只有静态校验
-            verification = "静态通过，实机待验收" if not errors else "未通过"
+            verification = ("静态通过（未做核心校验），实机待验收"
+                            if target["engine"] == "mihomo" and not core_checked
+                            else "静态通过，实机待验收")
         if errors:
             overall = "failed"
             verification = "未通过"
         else:
             path = artifact_path(build_id, target["name"])
             path.write_text(text, encoding="utf-8")
+            try:
+                path.chmod(0o600)   # 产物含明文节点凭据
+            except OSError:
+                pass
         results[target["name"]] = {
             "ok": not errors,
             "engine": target["engine"],
@@ -246,6 +254,7 @@ def create_candidate(operator: str, note: str = "",
             "sha256": security.sha256_text(text) if text else "",
             "size": len(text.encode()),
             "verification": verification,
+            "core_checked": core_checked,
         }
     with db.tx() as conn:
         conn.execute(

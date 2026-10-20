@@ -31,6 +31,17 @@ PROTECTED_KEYS = {
     "rules": "分流规则由“分流规则”页维护",
 }
 
+# 设备专属作用域额外禁止的键：控制面相关。
+# 设备层只用于"这台设备的个性化"，写上对外控制端口等于
+# 把管理接口暴露到局域网，客户端侧也没有对应的鉴权配置。
+DEVICE_FORBIDDEN_KEYS = {
+    "external-controller": "设备专属配置不能开启对外控制端口",
+    "external-ui": "设备专属配置不能指定外部控制器界面",
+    "secret": "设备专属配置不能设置控制端口密钥",
+    "listeners": "设备专属配置不能新增监听器",
+    "tun": "设备专属配置不能开启 TUN",
+}
+
 # 产物中固定出现的顶层键（顺序固定，保证产物排版稳定）
 CORE_KEYS = (
     "mixed-port", "socks-port", "redir-port", "tproxy-port", "port",
@@ -190,11 +201,13 @@ def parse_content(content: str) -> dict:
     return data
 
 
-def validate_doc(doc: dict) -> None:
+def validate_doc(doc: dict, device_scope: bool = False) -> None:
     """校验基础配置；不合法时抛 ValueError（中文提示）。"""
     for key in doc:
         if key in PROTECTED_KEYS:
             raise ValueError(f"基础配置不能包含“{key}”：{PROTECTED_KEYS[key]}")
+        if device_scope and key in DEVICE_FORBIDDEN_KEYS:
+            raise ValueError(DEVICE_FORBIDDEN_KEYS[key])
         if not isinstance(key, str) or not key.strip():
             raise ValueError("基础配置的键名非法")
     if "mode" in doc and doc["mode"] not in MODE_VALUES:

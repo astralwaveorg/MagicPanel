@@ -58,6 +58,9 @@ SESSION_TTL_HOURS = 168
 SCHEDULER_AUTOSTART = os.environ.get("MAGICPANEL_SCHEDULER", "1") != "0"
 SCHEDULER_TICK_SECONDS = max(10, int(os.environ.get("MAGICPANEL_SCHEDULER_TICK", "30")))
 RELEASE_HISTORY_LIMIT = 10       # 发布历史只保留最近 10 条（每日两次约 5 天）
+# 磁盘留存策略：构建产物与审计日志都会随时间增长，NAS 磁盘有限，必须有上限。
+BUILD_ARTIFACT_KEEP = 30        # 保留最近 30 个构建的产物目录
+AUDIT_LOG_KEEP = 20000          # 审计日志最多保留 2 万行
 
 SETTINGS_DEFAULTS = {
     "base_url": "",                 # 对外基础地址，如 https://panel.example.com
@@ -77,5 +80,20 @@ SETTINGS_DEFAULTS = {
 
 
 def ensure_dirs() -> None:
-    for p in (DATA_DIR, BUILDS_DIR):
-        p.mkdir(parents=True, exist_ok=True)
+    """准备数据目录，并把权限收紧。
+
+    构建产物里含明文节点凭据，数据库里有口令散列与设备令牌密文，
+    默认的 0644/0755 会让同机其它用户可读。
+    """
+    for path in (DATA_DIR, BUILDS_DIR):
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            path.chmod(0o700)
+        except OSError:
+            pass
+    for path in (DB_PATH,):
+        if path.exists():
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass

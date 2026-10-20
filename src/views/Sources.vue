@@ -64,6 +64,9 @@
       </div>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!rows.length"
       reason="还没有订阅来源。"
@@ -388,6 +391,7 @@ import { api } from '../api'
 import { uploadCore } from '../core'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
@@ -401,6 +405,7 @@ const INTERVAL_PRESETS = [
 
 const rows = ref([])
 const loading = ref(false)
+const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
@@ -489,6 +494,7 @@ function onLocalProtocolChange(protocol) {
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     const [sources, coreStatus, nodes, schema] = await Promise.all([
       api('/api/v1/sources'), api('/api/v1/core/status'),
@@ -504,6 +510,7 @@ async function load() {
       applyLocalDefaults(first, true)
     }
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false
@@ -518,6 +525,7 @@ async function installCore() {
     ElMessage.success(`核心已安装：${result.version}`)
     core.value = await api('/api/v1/core/status')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     installingCore.value = false

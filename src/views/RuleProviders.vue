@@ -33,6 +33,9 @@
       <el-button type="primary" @click="openEdit()">添加规则来源</el-button>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!rows.length"
       reason="还没有规则来源。"
@@ -217,6 +220,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
@@ -230,6 +234,7 @@ const INTERVAL_PRESETS = [
 
 const rows = ref([])
 const loading = ref(false)
+const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
@@ -289,9 +294,11 @@ const form = reactive(emptyForm())
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     rows.value = await api('/api/v1/rule-providers')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false
@@ -344,6 +351,7 @@ async function save() {
     ElMessage.success('已保存')
     await load()
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     saving.value = false

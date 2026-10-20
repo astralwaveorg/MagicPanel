@@ -9,6 +9,9 @@ import yaml
 
 from .. import db, security
 from ..deps import CurrentUser
+from ..services import base_config as base_config_service
+
+PROTECTED_KEYS = base_config_service.PROTECTED_KEYS
 
 router = APIRouter(prefix="/api/v1/snippets", tags=["snippets"])
 
@@ -37,6 +40,11 @@ def _check(body: SnippetBody) -> None:
         raise HTTPException(400, f"内容不是合法 YAML：{exc}")
     if not isinstance(fragment, dict) or not fragment:
         raise HTTPException(400, "内容必须是非空的 YAML 映射（键值结构）")
+    # 功能模块的列表是"追加"语义，写结构键会造出重名节点/组、
+    # 或把规则追加到兜底规则之后（永不生效）。
+    for key, reason in PROTECTED_KEYS.items():
+        if key in fragment:
+            raise HTTPException(400, f"功能模块不能包含“{key}”：{reason}")
 
 
 def _get(conn, sid: int):

@@ -1,5 +1,6 @@
 """概览、审计、设置、核心与备份。"""
 import json
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -40,17 +41,22 @@ def overview(user=CurrentUser):
                     "policy_sha": build["policy_sha"],
                     "results": json.loads(build["results"] or "{}"),
                 }
-        sources = [
-            {"id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
-             "last_status": r["last_status"], "last_error": r["last_error"],
-             "last_fetched_at": r["last_fetched_at"], "node_count": r["node_count"],
-             "tested_at": r["tested_at"],
-             "filter_unavailable": bool(r["filter_unavailable"]),
-             "tested_ok": sum(1 for v in json.loads(r["test_results"] or "{}").values() if v >= 0),
-             "tested_failed": sum(1 for v in json.loads(r["test_results"] or "{}").values() if v < 0),
-             }
-            for r in db.all_(conn, "SELECT * FROM sources ORDER BY id")
-        ]
+        # 可用率口径与「节点来源」页一致：以当前节点列表为准，
+        # 测速结果里已消失的节点不计入（否则两边数字对不上）。
+        sources = []
+        for r in db.all_(conn, "SELECT * FROM sources ORDER BY id"):
+            results = json.loads(r["test_results"] or "{}")
+            names = [n.get("name") for n in json.loads(r["nodes_meta"] or "[]")]
+            ok = sum(1 for n in names if results.get(n, -1) >= 0)
+            failed = sum(1 for n in names if results.get(n, -1) < 0)
+            sources.append({
+                "id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
+                "last_status": r["last_status"], "last_error": r["last_error"],
+                "last_fetched_at": r["last_fetched_at"], "node_count": r["node_count"],
+                "tested_at": r["tested_at"],
+                "filter_unavailable": bool(r["filter_unavailable"]),
+                "tested_ok": ok, "tested_failed": failed,
+            })
         rule_providers = [
             {"id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
              "last_status": r["last_status"], "last_error": r["last_error"],
@@ -81,13 +87,35 @@ def overview(user=CurrentUser):
 
 
 @router.get("/audit")
-def list_audit(limit: int = 100, user=CurrentUser):
+def list_audit(limit: int = 100, offset: int = 0, keyword: str = "",
+               user=CurrentUser):
+    """审计日志分页查询。
+
+    之前只返回前 N 条且没有翻页，记录多了就再也翻不到更早的内容；
+    这里补上 offset 与关键字过滤，前端用常规分页组件即可。
+    """
     limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
+    keyword = (keyword or "").strip()
+    where = ""
+    args: list = []
+    if keyword:
+        where = "WHERE action LIKE ? OR actor LIKE ? OR object_type LIKE ? OR detail LIKE ?"
+        like = f"%{keyword}%"
+        args = [like, like, like, like]
     with db.connect() as conn:
+        total = db.one(conn, f"SELECT COUNT(*) AS c FROM audit {where}", args)["c"]
         rows = db.all_(
-            conn, "SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,)
+            conn,
+            f"SELECT * FROM audit {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+            args + [limit, offset],
         )
-    return [db.row_to_dict(r) for r in rows]
+    return {
+        "items": [db.row_to_dict(r) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 class AuditDeleteBody(BaseModel):
@@ -133,8 +161,15 @@ def put_settings(body: SettingsBody, user=CurrentUser):
         if key not in EDITABLE_SETTINGS:
             raise HTTPException(400, f"不支持的设置项：{key}")
     base_url = body.values.get("base_url", "")
-    if base_url and not base_url.startswith(("https://", "http://")):
-        raise HTTPException(400, "对外基础地址必须以 http(s):// 开头")
+    if base_url:
+        if not base_url.startswith(("https://", "http://")):
+            raise HTTPException(400, "对外基础地址必须以 http(s):// 开头")
+        # 只允许常规 URL 字符：引号、反斜杠等会把下发配置写坏，
+        # 也可能被用来往产物里注入内容。
+        if not re.fullmatch(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+", base_url):
+            raise HTTPException(400, "对外基础地址含有不允许的字符")
+        if "'" in base_url or "\\" in base_url or '"' in base_url:
+            raise HTTPException(400, "对外基础地址含有不允许的字符")
     for key, value in body.values.items():
         if key in BOOL_SETTINGS and value not in ("0", "1"):
             raise HTTPException(400, f"{key} 只能是 0 或 1")
@@ -151,16 +186,23 @@ def put_settings(body: SettingsBody, user=CurrentUser):
         for key, value in body.values.items():
             db.set_setting(conn, key, value.strip())
         security.audit(conn, user["username"], "更新设置", "settings", "",
-                       {k: ("***" if "token" in k else v)
+                       {k: security.mask_secret_value(k, v)
                         for k, v in body.values.items()})
     return {"ok": True}
 
 
+# 备份表清单。顺序即"依赖正序"：父表在前，恢复时先插父表再插子表；
+# 清空时按倒序删除，否则会触发外键约束失败（devices → targets、
+# releases → builds 都有外键）。
 BACKUP_TABLES = [
     "users", "sources", "rule_providers", "local_nodes", "proxy_groups", "rules",
     "targets", "snippets", "devices", "builds", "releases", "pointers", "settings",
     "base_configs",
 ]
+# 恢复时允许写入的列白名单：只接受表结构里真实存在的列，
+# 避免备份文件里的任意列名拼进 SQL。
+def _table_columns(conn, table: str) -> list[str]:
+    return [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
 
 
 @router.get("/core/status")
@@ -233,15 +275,25 @@ def backup_restore(body: RestoreBody, user=CurrentUser):
     if unknown:
         raise HTTPException(400, f"备份包含未知数据表：{'、'.join(sorted(unknown))}")
     with db.tx() as conn:
-        for table in BACKUP_TABLES:
+        # 先按依赖倒序清空（子表先删），再按依赖正序插入（父表先插）
+        for table in reversed(BACKUP_TABLES):
             conn.execute(f"DELETE FROM {table}")
-        for table, rows in tables.items():
+        for table in BACKUP_TABLES:
+            rows = tables.get(table)
+            if not rows:
+                continue
+            allowed = _table_columns(conn, table)
             for row in rows:
-                columns = ",".join(row.keys())
-                marks = ",".join("?" for _ in row)
+                if not isinstance(row, dict):
+                    continue
+                columns = [c for c in row.keys() if c in allowed]
+                if not columns:
+                    continue
+                marks = ",".join("?" for _ in columns)
+                values = [row[c] for c in columns]
                 conn.execute(
-                    f"INSERT INTO {table}({columns}) VALUES({marks})",
-                    tuple(row.values()),
+                    f"INSERT INTO {table}({','.join(columns)}) VALUES({marks})",
+                    tuple(values),
                 )
         security.audit(conn, user["username"], "恢复备份", "backup", "")
     return {"ok": True}

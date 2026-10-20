@@ -1,0 +1,3 @@
+# 开发/测试依赖（生产镜像不安装；本机 .venv 里已装好）
+-r requirements.txt
+pytest==9.1.1

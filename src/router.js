@@ -4,7 +4,7 @@ import { store } from './store'
 
 // “/” 为门户展示页（PIN 门禁，无需登录）；管理端统一挂在 /admin 下。
 const routes = [
-  { path: '/', component: () => import('./views/Portal.vue'), meta: { title: 'MagicHub - 欢迎访问订阅配置服务中心', standalone: true } },
+  { path: '/', component: () => import('./views/Portal.vue'), meta: { title: 'MagicPanel - 订阅配置服务中心', standalone: true } },
   { path: '/admin/setup', component: () => import('./views/Setup.vue'), meta: { title: '初始化' } },
   { path: '/admin/login', component: () => import('./views/Login.vue'), meta: { title: '登录' } },
   { path: '/admin', component: () => import('./views/Overview.vue'), meta: { title: '概览' } },

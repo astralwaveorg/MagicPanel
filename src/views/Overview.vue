@@ -5,6 +5,8 @@
       下载成功仅代表客户端取回了文件，不代表配置已加载、VPN 已启动或规则已生效。
     </p>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
     <div class="mp-card">
       <h3>发布通道</h3>
       <el-row :gutter="12">
@@ -138,9 +140,11 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 import { fmtTime, shortSha, sourceStatus, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
 
 const data = ref({})
+const error = ref('')
 
 const testedSources = computed(() =>
   (data.value.sources || []).filter((s) => s.tested_at))
@@ -150,13 +154,17 @@ function availRate(s) {
   return total ? Math.round((s.tested_ok / total) * 100) : 0
 }
 
-onMounted(async () => {
+async function load() {
+  error.value = ''
   try {
     data.value = await api('/api/v1/overview')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   }
-})
+}
+
+onMounted(load)
 </script>
 
 <style scoped>

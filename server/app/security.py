@@ -3,13 +3,15 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 
 from . import config, db
 
-_PBKDF2_ROUNDS = 260_000
+_PBKDF2_ROUNDS = 600_000   # OWASP 对 PBKDF2-HMAC-SHA256 的建议值
 
 
 def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
@@ -37,22 +39,47 @@ def new_device_token() -> str:
     return config.TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
+_fernet_cache: dict = {}
+
+
 def _fernet() -> Fernet:
+    """取主密钥。已加载则复用（避免每次加解密都读盘）。"""
+    if "fernet" in _fernet_cache:
+        return _fernet_cache["fernet"]
     config.ensure_dirs()
     path = config.SECRET_KEY_PATH
     if not path.exists():
         key = Fernet.generate_key()
         path.write_bytes(key)
+    # 无论新建还是从备份还原，都强制 600，避免同机其它用户读取密钥
+    try:
         path.chmod(0o600)
-    return Fernet(path.read_bytes().strip())
+    except OSError:
+        pass
+    material = path.read_bytes().strip()
+    if not material:
+        raise DecryptError("主密钥 data/secret.key 为空，无法解密任何密文")
+    fernet = Fernet(material)
+    _fernet_cache["fernet"] = fernet
+    return fernet
 
 
 def encrypt_text(plain: str) -> str:
     return _fernet().encrypt(plain.encode()).decode()
 
 
+class DecryptError(RuntimeError):
+    """解密失败：通常是密钥（data/secret.key）丢失或被替换。"""
+
+
 def decrypt_text(token: str) -> str:
-    return _fernet().decrypt(token.encode()).decode()
+    try:
+        return _fernet().decrypt(token.encode()).decode()
+    except Exception as exc:  # InvalidToken 等
+        raise DecryptError(
+            "解密失败：主密钥 data/secret.key 缺失或已更换，"
+            "该条密文内容无法恢复（请从备份还原密钥）"
+        ) from exc
 
 
 PAYLOAD_PREFIX = "enc:v1:"
@@ -75,15 +102,44 @@ def decrypt_payload(payload: str) -> str:
 
 
 def mask_url(url: str) -> str:
-    """凭据类 URL 的展示形态：协议 + 主机 + 长度提示，不含路径与查询串。"""
+    """凭据类 URL 的展示形态：协议 + 主机 + 长度提示。
+
+    必须剔除 userinfo（user:password@）——否则每次打开面板
+    都会把订阅地址里的口令明文送到浏览器，抵消掉加密存储的意义。
+    """
     if not url:
         return ""
-    head, _, rest = url.partition("://")
-    host = rest.split("/", 1)[0]
-    tail = rest[len(host):]
+    parsed = urlparse(url)
+    scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
+    host = parsed.hostname or ""
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None      # 非法端口号：只展示主机部分
+    if port:
+        host = f"{host}:{port}"
+    tail = parsed.path or ""
+    if parsed.query:
+        tail += "?" + parsed.query
     hint = f"…({len(tail)} 字符)" if tail else ""
-    scheme = head if head in ("http", "https") else "https"
     return f"{scheme}://{host}/{hint}"
+
+
+_SECRET_KEY_HINTS = ("token", "password", "passwd", "secret", "proxy", "url",
+                      "key", "pin", "credential")
+_URL_USERINFO = re.compile(r"(?<=://)[^/@\s]+(?=@)")
+
+
+def mask_secret_value(key: str, value: str) -> str:
+    """设置项写入审计前的统一打码。
+
+    凭据类键名直接打码；任何含 userinfo 的 URL 也把口令部分去掉。
+    """
+    text = "" if value is None else str(value)
+    lowered = (key or "").lower()
+    if any(hint in lowered for hint in _SECRET_KEY_HINTS):
+        return "***"
+    return _URL_USERINFO.sub("***", text)
 
 
 def audit(conn, actor: str, action: str, object_type: str = "",

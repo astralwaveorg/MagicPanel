@@ -11,6 +11,9 @@
       <el-button type="primary" @click="openEdit()">添加引擎平台</el-button>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!rows.length"
       reason="还没有引擎平台。"
@@ -31,7 +34,9 @@
           <el-table-column prop="name" label="名称" min-width="130">
             <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
           </el-table-column>
-          <el-table-column prop="engine" label="引擎" width="90" />
+          <el-table-column label="引擎" width="100">
+            <template #default="{ row }">{{ ENGINE_LABELS[row.engine] || row.engine }}</template>
+          </el-table-column>
           <el-table-column label="平台" width="90">
             <template #default="{ row }">{{ PLATFORM_LABELS[row.platform] || row.platform }}</template>
           </el-table-column>
@@ -112,7 +117,8 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
-import { PLATFORM_LABELS } from '../format'
+import ErrorState from '../components/ErrorState.vue'
+import { PLATFORM_LABELS, ENGINE_LABELS } from '../format'
 
 // 引擎差异以官方文档为准：
 // Stash 特有顶层键 http / cron / script-providers（stash.wiki/configuration/example-config）
@@ -150,6 +156,7 @@ const TEMPLATES = {
 
 const rows = ref([])
 const loading = ref(false)
+const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
@@ -159,6 +166,7 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
     await api('/api/v1/targets/reorder', { method: 'POST', body: ids })
     ElMessage.success('顺序已更新')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   }
   await load()
@@ -181,9 +189,11 @@ function insertTemplate(content) {
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     rows.value = await api('/api/v1/targets')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false

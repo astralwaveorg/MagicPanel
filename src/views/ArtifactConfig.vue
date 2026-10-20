@@ -339,18 +339,25 @@ async function loadSchema(engine) {
 }
 
 async function select(scope) {
+  const previous = current.value
   current.value = scope
-  await loadSchema(scope.engine)
-  const params = new URLSearchParams({ engine: scope.engine })
-  if (scope.platform) params.set('platform', scope.platform)
-  if (scope.device_id) params.set('device_id', String(scope.device_id))
-  const data = await api(`/api/v1/base-config?${params.toString()}`)
-  state.value = data
-  Object.keys(doc).forEach((key) => delete doc[key])
-  Object.assign(doc, data.effective || {})
-  raw.value = data.content || ''
-  syncing.value = true
-  nextTick(() => { syncing.value = false })
+  try {
+    await loadSchema(scope.engine)
+    const params = new URLSearchParams({ engine: scope.engine })
+    if (scope.platform) params.set('platform', scope.platform)
+    if (scope.device_id) params.set('device_id', String(scope.device_id))
+    const data = await api(`/api/v1/base-config?${params.toString()}`)
+    state.value = data
+    Object.keys(doc).forEach((key) => delete doc[key])
+    Object.assign(doc, data.effective || {})
+    raw.value = data.content || ''
+    syncing.value = true
+    nextTick(() => { syncing.value = false })
+  } catch (e) {
+    // 切换失败时回滚到上一个作用域，避免标题与内容对不上
+    current.value = previous
+    ElMessage.error(e.message)
+  }
 }
 
 function applyPreset(key) {
@@ -379,7 +386,7 @@ async function save() {
   try {
     const r = await api(`/api/v1/base-config?${scopeQuery()}`, {
       method: 'PUT',
-      body: { content: raw.value },
+      body: { content: raw.value, updated_at: state.value?.updated_at || '' },
     })
     state.value = r
     Object.keys(doc).forEach((key) => delete doc[key])
@@ -401,11 +408,14 @@ async function reset() {
   try {
     const r = await api(`/api/v1/base-config/reset?${scopeQuery()}`, { method: 'POST' })
     state.value = r
+    const kept = Object.keys(r.overlay || {}).length
+    ElMessage.success(kept
+      ? `已恢复为继承上层（保留个人直连域名与 Fake-IP 过滤 ${kept} 项）`
+      : '已恢复为继承上层')
     Object.keys(doc).forEach((key) => delete doc[key])
     Object.assign(doc, r.effective || {})
     raw.value = r.content || ''
     await loadScopes()
-    ElMessage.success('已恢复为继承上层')
   } catch (e) {
     ElMessage.error(e.message)
   }

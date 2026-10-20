@@ -1,7 +1,7 @@
 """SQLite 数据层：连接、事务与建表。单实例单写入，WAL 模式。"""
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import config
 
@@ -217,6 +217,12 @@ CREATE TABLE IF NOT EXISTS settings (
 
 def now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def now_offset_hours(hours: float) -> str:
+    """当前时间加减若干小时后的 ISO 字符串（用于"早于某时刻"的比较）。"""
+    moment = datetime.now(timezone.utc).astimezone() + timedelta(hours=hours)
+    return moment.isoformat(timespec="seconds")
 
 
 class _Conn(sqlite3.Connection):

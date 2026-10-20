@@ -20,15 +20,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server/app ./app
 COPY --from=web /build/server/app/static ./app/static
 
-RUN groupadd -r magicpanel && useradd -r -g magicpanel -u 10001 magicpanel \
-    && mkdir -p /app/data && chown -R magicpanel:magicpanel /app/data
-USER magicpanel
+# 运行身份由 docker-compose.yml 的 user 指定（NAS 上是 1000:1001，
+# 与 data 目录的属主一致）。镜像内不再另建用户，避免两套 uid 打架。
+RUN mkdir -p /app/data
 
 EXPOSE 8000
 VOLUME ["/app/data"]
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/setup/status', timeout=4)" || exit 1
+# 健康检查要覆盖真实依赖：接口可用、数据目录可写、磁盘还有余量。
+# 只探一个接口的话，磁盘写满时面板依然"健康"，但构建与订阅会先后失败。
+HEALTHCHECK --interval=30s --timeout=8s --start-period=20s --retries=3 \
+  CMD python -c "import os,shutil,urllib.request; \
+urllib.request.urlopen('http://127.0.0.1:8000/api/v1/setup/status', timeout=4).read(); \
+p='/app/data'; open(p+'/.healthcheck','w').close(); os.remove(p+'/.healthcheck'); \
+free=shutil.disk_usage(p).free; \
+assert free > 200*1024*1024, 'disk low: %d' % free" || exit 1
 
 # --proxy-headers：信任 1Panel 反向代理的 X-Forwarded-*，使订阅地址按域名生成
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

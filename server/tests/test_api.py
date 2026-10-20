@@ -1,5 +1,10 @@
 """认证、策略维护、构建发布与分发的端到端用例。"""
+import httpx
+import urllib.parse
+import pytest
+
 from conftest import auth_headers, setup_admin
+from app import db
 
 
 def make_policy(client, csrf):
@@ -94,7 +99,8 @@ def test_build_release_feed_flow(client):
     bid = build["id"]
     # 产物：mihomo 含 dns，stash 不含；provider 使用 {FEED} 占位
     art = client.get(f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"]
-    assert "{FEED}/res/provider/测试机场" in art
+    # 来源名会进入 URL 路径，做百分号转义
+    assert "{FEED}/res/provider/" + urllib.parse.quote("测试机场") in art
     assert "dns:" not in art
     art_m = client.get(f"/api/v1/builds/{bid}/artifact/mihomo-android").json()["content"]
     assert "enhanced-mode: fake-ip" in art_m
@@ -486,7 +492,7 @@ def test_source_refresh_failure_is_persisted(client, monkeypatch):
     assert row["fail_count"] == 1
     assert "上游超时" in row["last_error"]
     assert row["last_attempt_at"]
-    audit = client.get("/api/v1/audit").json()
+    audit = client.get("/api/v1/audit").json()["items"]
     assert any("刷新节点来源失败" in a["action"] for a in audit)
 
 
@@ -552,6 +558,10 @@ def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
     monkeypatch.setattr(updater, "refresh_source", fake_refresh)
     monkeypatch.setattr(updater, "test_source", fake_test)
     monkeypatch.setattr(scheduler, "_core_available", lambda: True)
+    # 模拟核心校验通过：没有核心时 Mihomo 目标只能静态校验，
+    # 自动发布到稳定通道会被拦下。
+    from app.services import tester
+    monkeypatch.setattr(tester, "validate_config", lambda text, *a, **k: (True, ""))
 
     summary = scheduler.run_once(force=True)
     assert calls.count("fetch") == 1
@@ -794,7 +804,7 @@ def test_manual_run_records_history_and_audit(client):
     assert runs[0]["trigger"] == "manual"
     assert runs[0]["summary"]["trigger"] == "manual"
     assert runs[0]["summary"]["actor"] == "admin"
-    audit = client.get("/api/v1/audit").json()
+    audit = client.get("/api/v1/audit").json()["items"]
     assert any(a["action"] == "手动自动任务运行完成" and "manual" in a["detail"]
                for a in audit)
 
@@ -1573,18 +1583,18 @@ def test_audit_batch_delete_and_clear(client):
         "name": "机场", "url": "https://airport.example.com/sub"})
     client.post("/api/v1/groups", headers=h, json={
         "name": "组", "type": "select", "proxies": ["DIRECT"]})
-    rows = client.get("/api/v1/audit?limit=50", headers=h).json()
+    rows = client.get("/api/v1/audit?limit=50", headers=h).json()["items"]
     assert len(rows) >= 2
     ids = [r["id"] for r in rows[:2]]
     r = client.post("/api/v1/audit/delete", headers=h, json={"ids": ids})
     assert r.status_code == 200, r.text
     assert r.json()["removed"] == 2
-    after = client.get("/api/v1/audit?limit=50", headers=h).json()
+    after = client.get("/api/v1/audit?limit=50", headers=h).json()["items"]
     assert not [x for x in after if x["id"] in ids]
     # 清空全部
     r = client.post("/api/v1/audit/delete", headers=h, json={"all": True})
     assert r.status_code == 200, r.text
-    assert client.get("/api/v1/audit?limit=50", headers=h).json() == []
+    assert client.get("/api/v1/audit?limit=50", headers=h).json()["items"] == []
     # 空选择应被拒绝
     r = client.post("/api/v1/audit/delete", headers=h, json={})
     assert r.status_code == 400
@@ -1722,3 +1732,185 @@ def test_base_config_cascade_sources():
     assert sources["mode"] == "设备专属"
     assert sources["log-level"] == "通用配置"
     assert sources["ipv6"] == "内置默认"
+
+
+def test_target_rename_keeps_group_and_rule_references(client):
+    """引擎平台改名后，策略组与规则的"适用平台"引用要跟着改。
+
+    否则引用指向不存在的引擎平台，对应的组与规则会在构建时被静默剔除。
+    """
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    t = client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-old", "engine": "stash", "platform": "ios"}).json()
+    g = client.post("/api/v1/groups", headers=h, json={
+        "name": "手动组", "type": "select", "proxies": ["节点选择"],
+        "targets": ["stash-old"]}).json()
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "renamed.example.com", "target": "手动组",
+        "targets": ["stash-old"]})
+    assert r.status_code == 201, r.text
+    rule_id = r.json()["id"]
+
+    # 改名
+    r = client.put(f"/api/v1/targets/{t['id']}", headers=h, json={
+        "name": "Stash-iOS", "engine": "stash", "platform": "ios"})
+    assert r.status_code == 200, r.text
+
+    groups = client.get("/api/v1/groups", headers=h).json()
+    hit = next(g for g in groups if g["name"] == "手动组")
+    assert hit["targets"] == ["Stash-iOS"]
+    rules = client.get("/api/v1/rules", headers=h).json()
+    hit = next(r for r in rules if r["id"] == rule_id)
+    assert hit["targets"] == ["Stash-iOS"]
+
+    # 改名后产物里该组仍要出现
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/Stash-iOS").json()["content"]
+    assert "手动组" in art
+
+
+def test_target_delete_cleans_references(client):
+    """删除引擎平台时，引用它的策略组与规则要清理掉失效引用。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    t = client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-temp", "engine": "stash", "platform": "ios"}).json()
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "临时组", "type": "select", "proxies": ["节点选择"],
+        "targets": ["stash-temp"]})
+    r = client.delete(f"/api/v1/targets/{t['id']}", headers=h)
+    assert r.status_code == 200, r.text
+    groups = client.get("/api/v1/groups", headers=h).json()
+    hit = next(g for g in groups if g["name"] == "临时组")
+    assert hit["targets"] == []
+
+
+def test_login_rate_limit_blocks_brute_force(client):
+    """连续登录失败后应暂时拒绝，避免在线爆破。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    ok = client.post("/api/v1/auth/login",
+                     json={"username": "admin", "password": "admin-pass-1"})
+    assert ok.status_code == 200, ok.text
+
+    for _ in range(6):
+        bad = client.post("/api/v1/auth/login",
+                          json={"username": "admin", "password": "wrong-pass"})
+    assert bad.status_code == 429, bad.text
+    # 正确口令此时也被挡住
+    good = client.post("/api/v1/auth/login",
+                       json={"username": "admin", "password": "admin-pass-1"})
+    assert good.status_code == 429, good.text
+
+
+def test_session_cookie_is_secure_over_https(client):
+    """HTTPS 下的会话 Cookie 必须带 Secure，避免明文传输。"""
+    csrf = setup_admin(client)
+    r = client.post("/api/v1/auth/login",
+                    json={"username": "admin", "password": "admin-pass-1"},
+                    headers={"X-Forwarded-Proto": "https"})
+    assert r.status_code == 200, r.text
+    cookie = r.headers.get("set-cookie", "")
+    assert "Secure" in cookie, cookie
+    assert "HttpOnly" in cookie, cookie
+
+
+def test_retention_prunes_old_artifacts_and_audit(client):
+    """留存清理：过期构建产物目录与超量审计日志要被回收。"""
+    from app import config, db
+    from app.services import retention
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["status"] == "success", build
+
+    with db.tx() as conn:
+        # 造一个很旧的构建产物目录（不在保留窗口内）
+        old_dir = config.BUILDS_DIR / "999999"
+        old_dir.mkdir(parents=True, exist_ok=True)
+        (old_dir / "x.yaml").write_text("x: 1", encoding="utf-8")
+        # 审计日志塞到超过上限
+        conn.execute("INSERT INTO audit(at, actor, action, object_type, object_id, detail) "
+                     "SELECT at, actor, action, object_type, object_id, detail FROM audit")
+        total = db.one(conn, "SELECT COUNT(*) AS c FROM audit")["c"]
+    if total <= config.AUDIT_LOG_KEEP:
+        with db.tx() as conn:
+            for _ in range(config.AUDIT_LOG_KEEP + 10):
+                conn.execute("INSERT INTO audit(at, actor, action, object_type, "
+                             "object_id, detail) VALUES(?,?,?,?,?,?)",
+                             (db.now(), "t", "a", "o", "1", ""))
+
+    result = retention.run_once()
+    assert result["artifacts"] >= 1
+    assert not old_dir.exists()
+    with db.connect() as conn:
+        kept = db.one(conn, "SELECT COUNT(*) AS c FROM audit")["c"]
+    assert kept <= config.AUDIT_LOG_KEEP
+
+
+def test_fetcher_blocks_ssrf_targets():
+    """抓取必须挡住内网/保留地址，包括域名解析到内网的情况。"""
+    from app.services import fetcher
+
+    # 字面内网地址
+    for url in ("http://127.0.0.1:8080/x", "http://169.254.169.254/latest/meta-data/",
+                "http://10.0.0.1/x", "http://[::1]/x"):
+        with pytest.raises(fetcher.FetchError):
+            fetcher._check_url(url, allow_private=False)
+    # 非 http 协议
+    with pytest.raises(fetcher.FetchError):
+        fetcher._check_url("file:///etc/passwd", allow_private=False)
+    with pytest.raises(fetcher.FetchError):
+        fetcher._check_url("gopher://127.0.0.1/", allow_private=False)
+    # 显式允许内网时放行
+    fetcher._check_url("http://127.0.0.1:8080/x", allow_private=True)
+
+
+def test_fetcher_rejects_redirect_to_private_address(monkeypatch):
+    """重定向到内网地址必须被拒绝（防止借跳转绕过内网限制）。"""
+    from app.services import fetcher
+
+    def fake_stream(self, method, url, **kwargs):
+        class Resp:
+            status_code = 302
+            headers = {"location": "http://127.0.0.1:9/secret"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return Resp()
+
+    monkeypatch.setattr(httpx.Client, "stream", fake_stream)
+    with pytest.raises(fetcher.FetchError):
+        fetcher.fetch("http://example.com/x")
+
+
+def test_audit_pagination_and_keyword(client):
+    """审计日志支持分页与关键字搜索（否则记录多了翻不到更早的内容）。"""
+    from app import db
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    with db.tx() as conn:
+        for i in range(30):
+            conn.execute("INSERT INTO audit(at, actor, action, object_type, object_id, detail) "
+                         "VALUES(?,?,?,?,?,?)",
+                         (db.now(), "tester", f"动作{i}", "source", str(i), "细节"))
+    data = client.get("/api/v1/audit?limit=10&offset=0", headers=h).json()
+    assert data["total"] >= 30
+    assert len(data["items"]) == 10
+    assert data["items"][0]["id"] > data["items"][9]["id"]   # 按 id 倒序
+    page2 = client.get("/api/v1/audit?limit=10&offset=10", headers=h).json()
+    assert page2["items"][0]["id"] < data["items"][-1]["id"]
+    hit = client.get("/api/v1/audit?keyword=动作7", headers=h).json()
+    assert hit["total"] >= 1
+    assert all("动作7" in (i["action"] or "") for i in hit["items"])

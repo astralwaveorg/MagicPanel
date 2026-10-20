@@ -8,18 +8,18 @@
         <el-button size="small" :disabled="!selection.length" @click="removeSelected">
           删除选中（{{ selection.length }}）
         </el-button>
-        <el-button size="small" type="danger" plain :disabled="!rows.length" @click="clearAll">
+        <el-button size="small" type="danger" plain :disabled="!total" @click="clearAll">
           清空全部
         </el-button>
       </div>
       <div class="right">
-        <el-button size="small" :disabled="rows.length >= limit" @click="loadMore">
-          加载更早记录
-        </el-button>
+        <el-input v-model="keyword" size="small" placeholder="搜索操作 / 操作人 / 详情"
+                  clearable style="width:240px" @keyup.enter="reload" @clear="reload" />
+        <el-button size="small" @click="reload">搜索</el-button>
       </div>
     </div>
 
-    <EmptyState v-if="!rows.length" reason="暂无审计记录。" />
+    <EmptyState v-if="!loading && !rows.length" reason="暂无审计记录。" />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
         <el-table :data="rows" v-loading="loading" @selection-change="onSelect">
@@ -40,6 +40,17 @@
           </el-table-column>
         </el-table>
       </div>
+      <div style="display:flex;justify-content:flex-end;padding:10px 12px">
+        <el-pagination
+          layout="total, sizes, prev, pager, next, jumper"
+          :total="total"
+          :page-size="limit"
+          :page-sizes="[50, 100, 200, 500]"
+          :current-page="page"
+          @current-change="onPage"
+          @size-change="onSize"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -53,26 +64,46 @@ import EmptyState from '../components/EmptyState.vue'
 import { fmtTime } from '../format'
 
 const rows = ref([])
+const total = ref(0)
 const loading = ref(false)
 const limit = ref(100)
+const page = ref(1)
+const keyword = ref('')
 const selection = ref([])
 
 async function load() {
   loading.value = true
   try {
-    rows.value = await api(`/api/v1/audit?limit=${limit.value}`)
+    const offset = (page.value - 1) * limit.value
+    const q = new URLSearchParams({ limit: String(limit.value), offset: String(offset) })
+    if (keyword.value.trim()) q.set('keyword', keyword.value.trim())
+    const data = await api(`/api/v1/audit?${q.toString()}`)
+    rows.value = data.items
+    total.value = data.total
+    selection.value = []
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
     loading.value = false
   }
 }
-onMounted(load)
 
-function loadMore() {
-  limit.value += 100
+function reload() {
+  page.value = 1
   load()
 }
+
+function onPage(p) {
+  page.value = p
+  load()
+}
+
+function onSize(size) {
+  limit.value = size
+  reload()
+}
+
+onMounted(load)
 
 function onSelect(list) {
   selection.value = list
@@ -86,7 +117,6 @@ async function removeSelected() {
   try {
     const r = await api('/api/v1/audit/delete', { method: 'POST', body: { ids } })
     ElMessage.success(`已删除 ${r.removed} 条记录`)
-    selection.value = []
     await load()
   } catch (e) {
     ElMessage.error(e.message)
@@ -99,7 +129,7 @@ async function clearAll() {
   try {
     const r = await api('/api/v1/audit/delete', { method: 'POST', body: { all: true } })
     ElMessage.success(`已清空 ${r.removed} 条记录`)
-    selection.value = []
+    page.value = 1
     await load()
   } catch (e) {
     ElMessage.error(e.message)

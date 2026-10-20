@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from .. import config, db, security
 from ..routers import builds
-from . import tester, updater
+from . import retention, tester, updater
 
 logger = logging.getLogger("magicpanel.scheduler")
 AUTO_OPERATOR = "系统"
@@ -27,6 +27,7 @@ _state: dict = {
 }
 _lock = threading.Lock()
 _core_cache: dict = {"at": 0.0, "available": False, "status": None}
+_last_retention: str = ""   # 最近一次留存清理的时间（ISO），一天最多一次
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -160,6 +161,7 @@ def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
             "AND (auto_test=0 OR test_interval<=0) ORDER BY id",
         )
     ]
+
     rows = db.all_(
         conn,
         "SELECT name, test_results, tested_at, last_fetched_at FROM sources "
@@ -203,8 +205,6 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
         last_attempt = _setting(conn, "auto_build_last_attempt", "")
         if not force and not _due(last_attempt, interval_hours * 3600, now):
             return
-        latest = db.one(
-            conn, "SELECT * FROM builds WHERE status='success' ORDER BY id DESC LIMIT 1")
         try:
             snapshot, policy_sha = builds.current_policy(conn)
         except Exception as exc:
@@ -214,22 +214,37 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
             # 没有引擎平台时不推进检查时间，添加后可尽快自动构建
             summary["build_error"] = "尚未配置任何引擎平台"
             return
-        if latest and latest["policy_sha"] == policy_sha:
+        publish = _enabled(conn, "auto_publish_enabled", "1")
+        channel = _setting(conn, "auto_publish_channel", "stable")
+        if channel not in ("stable", "candidate"):
+            channel = "stable"
+        # 判定基准是"通道当前指向的构建"，不是"最近一次成功构建"——
+        # 否则构建成功但没发布出去时，后续每轮都会因"策略未变化"被跳过，
+        # 新产物永远上线不了。
+        pointer = db.one(conn, "SELECT build_id FROM pointers WHERE channel=?", (channel,))
+        released = None
+        if pointer and pointer["build_id"]:
+            released = db.one(conn, "SELECT policy_sha FROM builds WHERE id=?",
+                              (pointer["build_id"],))
+        if released and released["policy_sha"] == policy_sha:
             with db.tx() as wconn:
                 db.set_setting(wconn, "auto_build_last_attempt", db.now())
             summary["build"] = "策略未变化，跳过"
             return
-        publish = _enabled(conn, "auto_publish_enabled", "1")
-        channel = _setting(conn, "auto_publish_channel", "stable")
         if publish:
             ready, missing, skipped = _publish_tests_ready(conn)
             if skipped:
                 summary["skipped"] = "未开启测速的来源不参与门禁：" + "、".join(skipped)
             if not ready:
-                # 不推进自动构建时间：测速完成后下一轮立即重试
                 summary["build_error"] = (
                     "自动发布等待测速结果：" + "、".join(missing)
                 )
+                if not _core_available():
+                    # 核心缺失时永远等不到测速结果：退避到下一个周期，
+                    # 不能每 30 秒空转一次。
+                    with db.tx() as wconn:
+                        db.set_setting(wconn, "auto_build_last_attempt", db.now())
+                # 否则不推进自动构建时间：测速完成后下一轮立即重试
                 return
     with db.tx() as conn:
         db.set_setting(conn, "auto_build_last_attempt", db.now())
@@ -248,6 +263,25 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     summary["build"] = {"id": build_id, "status": status}
     if status != "success" or not publish:
         return
+    # 核心缺失时 Mihomo 产物只做了静态校验：自动发布到稳定通道前必须确认
+    # 每个 Mihomo 目标都过了核心校验，否则先降级为候选，等核心就位再发。
+    try:
+        with db.connect() as conn:
+            row = db.one(conn, "SELECT results FROM builds WHERE id=?", (build_id,))
+        results = json.loads(row["results"] or "{}")
+        unchecked = [
+            name for name, item in results.items()
+            if item.get("engine") == "mihomo" and not item.get("core_checked")
+        ] if _core_available() else []
+        if unchecked:
+            summary["build_error"] = (
+                "以下 Mihomo 目标未做核心校验（mihomo -t），已跳过自动发布："
+                + "、".join(unchecked)
+            )
+            return
+    except Exception as exc:
+        summary["build_error"] = f"读取构建结果失败：{exc}"
+        return
     if channel not in ("stable", "candidate"):
         channel = "stable"
     try:
@@ -259,8 +293,28 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     except Exception as exc:
         summary["build_error"] = f"自动发布失败：{exc}"
         logger.exception("自动发布失败")
+        # 不推进 auto_build_last_attempt：发布没成功，下一轮要继续尝试
+        with db.tx() as wconn:
+            db.set_setting(wconn, "auto_build_last_attempt", "")
         return
     summary["published"] = channel
+
+
+def _run_retention(summary: dict) -> None:
+    """磁盘留存清理：构建产物、审计日志、过期会话。最多每天一次。"""
+    global _last_retention
+    now = datetime.now(timezone.utc).astimezone()
+    if _last_retention and _parse_time(_last_retention):
+        if now - _parse_time(_last_retention) < timedelta(days=1):
+            return
+    try:
+        result = retention.run_once()
+        _last_retention = db.now()
+        if result.get("artifacts") or result.get("audit") or result.get("sessions"):
+            summary["retention"] = result
+    except Exception as exc:
+        summary["errors"].append(f"留存清理失败：{exc}")
+        logger.warning("留存清理失败：%s", exc)
 
 
 def _has_activity(summary: dict) -> bool:
@@ -291,6 +345,7 @@ def _record_run(summary: dict, trigger: str, actor: str) -> None:
         "tests_errors": summary["tests_errors"],
         "build": summary.get("build"),
         "published": summary.get("published", ""),
+        "retention": summary.get("retention"),
         "skipped": summary.get("skipped", ""),
         "build_error": summary.get("build_error", ""),
         "errors": summary.get("errors", [])[:10],
@@ -333,6 +388,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
         "tests_errors": 0,
         "build": None,
         "published": "",
+        "retention": None,
         "errors": [],
     }
     try:
@@ -352,6 +408,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             if test_sources:
                 _run_source_test(summary, now, force=force)
             _run_auto_build(summary, now, force=force)
+            _run_retention(summary)
         summary["finished_at"] = db.now()
         _state["last_tick_at"] = summary["finished_at"]
         _state["last_result"] = summary
@@ -391,7 +448,8 @@ def status() -> dict:
                 ("auto_fetch_rules", "1"),
                 ("auto_test_sources", "1"),
                 ("auto_build_enabled", "1"),
-                ("auto_build_interval_hours", "12"),
+                ("auto_build_interval_hours",
+                 str(config.SETTINGS_DEFAULTS.get("auto_build_interval_hours", 1))),
                 ("auto_publish_enabled", "1"),
                 ("auto_publish_channel", "stable"),
             )

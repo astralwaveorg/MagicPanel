@@ -3,6 +3,8 @@
 PIN 为 4 位数字，只保存散列；验证有简单的失败锁定（单进程内存计数）。
 """
 import hashlib
+import hmac
+import secrets
 import time
 
 from fastapi import APIRouter, HTTPException, Request
@@ -59,16 +61,53 @@ IMPORT_GUIDES = [
 ]
 
 
-def _pin_hash(pin: str) -> str:
-    return hashlib.sha256(f"magicpanel-portal:{pin}".encode()).hexdigest()
+def _pin_hash(pin: str, salt: str | None = None) -> str:
+    """门户 PIN 散列：PBKDF2 + 每用户随机盐。
+
+    之前是"无盐单次 SHA-256"，4 位 PIN 只有 10^4 种，
+    拿到库就能瞬间枚举出明文；备份里带着该散列，等同于带着 PIN。
+    """
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", pin.encode(), bytes.fromhex(salt), 200_000
+    ).hex()
+    return f"pbkdf2${salt}${digest}"
+
+
+def _client_ip(request: Request) -> str:
+    """真实来源 IP：反代追加式 XFF 的最后一段才是真实客户端。"""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
+    return request.client.host if request.client else "unknown"
+
+
+def _pin_matches(pin: str, stored: str) -> bool:
+    """校验 PIN；兼容历史的无盐 SHA-256 散列。"""
+    if not stored:
+        return False
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, salt, digest = stored.split("$", 2)
+        except ValueError:
+            return False
+        candidate = hashlib.pbkdf2_hmac(
+            "sha256", pin.encode(), bytes.fromhex(salt), 200_000
+        ).hex()
+        return hmac.compare_digest(candidate, digest)
+    legacy = hashlib.sha256(f"magicpanel-portal:{pin}".encode()).hexdigest()
+    return hmac.compare_digest(legacy, stored)
 
 
 class PinBody(BaseModel):
-    pin: str = Field(default="", pattern=r"^(\d{4})?$")
+    # 兼容历史 4 位 PIN（老散列），新设置的 PIN 一律 6 位
+    pin: str = Field(default="", pattern=r"^(\d{4}|\d{6})?$")
 
 
 class StrictPinBody(BaseModel):
-    pin: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")
+    pin: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 def _session_user(conn, request: Request):
@@ -79,7 +118,7 @@ def _session_user(conn, request: Request):
 
 
 def _check_pin(conn, request: Request, pin: str) -> None:
-    ip = request.client.host if request.client else "unknown"
+    ip = _client_ip(request)
     fails, locked_until = _attempts.get(ip, [0, 0])
     if locked_until > time.time():
         raise HTTPException(429, "尝试次数过多，请 10 分钟后再试")
@@ -87,7 +126,7 @@ def _check_pin(conn, request: Request, pin: str) -> None:
         conn, "SELECT portal_pin_hash FROM users WHERE portal_pin_hash != ''")]
     if not hashes:
         raise HTTPException(404, "门户页未启用，请先在管理后台设置 PIN")
-    if not pin or _pin_hash(pin) not in hashes:
+    if not pin or not any(_pin_matches(pin, h) for h in hashes):
         fails += 1
         _attempts[ip] = [fails, time.time() + _LOCK_SECONDS if fails >= _MAX_FAILS else 0]
         raise HTTPException(403, "PIN 不正确")

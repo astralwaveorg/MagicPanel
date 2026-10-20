@@ -10,6 +10,9 @@
       <el-button type="primary" :disabled="!targets.length" @click="openEdit()">添加设备</el-button>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!targets.length"
       reason="还没有引擎平台，无法添加设备。"
@@ -71,23 +74,15 @@
           <el-input v-model="form.name" placeholder="例如：Stash-Macmini" />
           <div class="mp-form-hint">下载得到的文件名为“输入值.yaml”，同时用于区分设备，需唯一。</div>
         </el-form-item>
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="平台">
-              <el-select v-model="form.platform" style="width:100%">
-                <el-option v-for="(label, key) in PLATFORM_LABELS" :key="key" :value="key" :label="label" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="引擎平台">
-              <el-select v-model="form.target_id" style="width:100%">
-                <el-option v-for="t in targets" :key="t.id" :value="t.id"
-                           :label="`${t.name}（${t.engine} / ${PLATFORM_LABELS[t.platform]}）`" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="引擎平台">
+          <el-select v-model="form.target_id" style="width:100%" @change="onTargetChange">
+            <el-option v-for="t in targets" :key="t.id" :value="t.id"
+                       :label="`${t.name}（${ENGINE_LABELS[t.engine] || t.engine} / ${PLATFORM_LABELS[t.platform] || t.platform}）`" />
+          </el-select>
+          <div class="mp-form-hint">
+            设备平台由所选引擎平台决定（当前：{{ PLATFORM_LABELS[form.platform] || form.platform }}）。
+          </div>
+        </el-form-item>
         <el-form-item label="更新通道">
           <el-radio-group v-model="form.channel">
             <el-radio value="stable">稳定（跟随正式发布）</el-radio>
@@ -98,12 +93,10 @@
           <el-input v-model="form.note" placeholder="例如：客厅 Mac mini" />
           <div class="mp-form-hint">用于后台与门户展示；留空时显示文件名。</div>
         </el-form-item>
-        <el-form-item label="设备专属扩展（YAML，仅这台设备生效）">
-          <el-input v-model="form.extra_yaml" type="textarea" :rows="6" class="mono"
-                    placeholder="例如：&#10;mixed-port: 7891" />
+        <el-form-item label="设备专属配置">
           <div class="mp-form-hint">
-            叠加在该设备所属引擎平台的产物之上（字典递归、列表追加、标量覆盖）。
-            不允许写 proxies / proxy-providers / proxy-groups / rule-providers / rules。
+            这台设备的个性化（端口、DNS、日志等）请到「产物配置 → 设备专属」里改，
+            那里能看到内置默认 → 通用配置 → 设备专属的逐层来源。
           </div>
         </el-form-item>
       </el-form>
@@ -113,7 +106,7 @@
       </template>
     </el-dialog>
 
-    <SecretDialog v-model:visible="secretVisible" />
+    <SecretDialog v-model:visible="secretVisible" :url="secretUrl" />
   </div>
 </template>
 
@@ -123,21 +116,29 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 import SecretDialog from '../components/SecretDialog.vue'
-import { fmtTime, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
+import { fmtTime, PLATFORM_LABELS, CHANNEL_LABELS, ENGINE_LABELS } from '../format'
 
 const rows = ref([])
 const targets = ref([])
 const loading = ref(false)
+const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const secretVisible = ref(false)
+const secretUrl = ref('')
 
 const emptyForm = () => ({
-  name: '', platform: 'ios', target_id: null, channel: 'stable', note: '', extra_yaml: '',
+  name: '', platform: 'ios', target_id: null, channel: 'stable', note: '',
 })
 const form = reactive(emptyForm())
+
+function onTargetChange(id) {
+  const t = targets.value.find((x) => x.id === id)
+  if (t) form.platform = t.platform
+}
 
 function targetName(id) {
   return targets.value.find((t) => t.id === id)?.name || `#${id}`
@@ -145,6 +146,7 @@ function targetName(id) {
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     const [devices, ts] = await Promise.all([
       api('/api/v1/devices'), api('/api/v1/targets'),
@@ -152,6 +154,7 @@ async function load() {
     rows.value = devices
     targets.value = ts
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false
@@ -163,7 +166,7 @@ function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     name: row.name, platform: row.platform, target_id: row.target_id,
-    channel: row.channel, note: row.note, extra_yaml: row.extra_yaml || '',
+    channel: row.channel, note: row.note,
   } : { target_id: targets.value[0]?.id ?? null })
   dialog.value = true
 }
@@ -176,12 +179,14 @@ async function save() {
     if (editing.value) {
       await api(`/api/v1/devices/${editing.value.id}`, { method: 'PUT', body: form })
     } else {
-      await api('/api/v1/devices', { method: 'POST', body: form })
+      const created = await api('/api/v1/devices', { method: 'POST', body: form })
+      secretUrl.value = created.subscription_url || ''
       secretVisible.value = true
     }
     dialog.value = false
     await load()
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     saving.value = false
@@ -209,6 +214,7 @@ async function rotate(row) {
   )) return
   try {
     const resp = await api(`/api/v1/devices/${row.id}/rotate-token`, { method: 'POST' })
+    secretUrl.value = resp.subscription_url || ''
     secretVisible.value = true
     await load()
   } catch (e) {

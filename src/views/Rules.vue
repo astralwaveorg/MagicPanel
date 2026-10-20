@@ -10,6 +10,9 @@
       <el-button type="primary" @click="openEdit()">添加规则</el-button>
     </div>
 
+    <ErrorState v-if="error" :error="error" @retry="load" />
+
+
     <EmptyState
       v-if="!rows.length"
       reason="还没有分流规则。"
@@ -72,7 +75,7 @@
           </el-select>
         </el-form-item>
         <el-form-item v-else-if="!isFinal" label="匹配值">
-          <el-input v-model="form.value" class="mono"
+          <el-input v-model="form.value" class="mono" maxlength="512"
                     :placeholder="form.type === 'IP-CIDR' ? '10.0.1.0/24' : 'example.com'" />
         </el-form-item>
         <el-form-item label="目标（策略组或内置动作）">
@@ -116,10 +119,13 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 
+// 与后端 config.RULE_TYPES 保持一致（少一种就会导致该类型根本建不出来）
 const ruleTypes = [
-  'DOMAIN-SUFFIX', 'DOMAIN', 'DOMAIN-KEYWORD', 'IP-CIDR', 'IP-CIDR6',
-  'GEOIP', 'RULE-SET', 'DST-PORT', 'MATCH',
+  'DOMAIN-SUFFIX', 'DOMAIN', 'DOMAIN-KEYWORD', 'DOMAIN-REGEX',
+  'IP-CIDR', 'IP-CIDR6', 'GEOIP', 'GEOSITE', 'RULE-SET',
+  'SRC-IP-CIDR', 'DST-PORT', 'PROCESS-NAME', 'MATCH',
 ]
 
 const rows = ref([])
@@ -127,6 +133,7 @@ const groups = ref([])
 const ruleProviders = ref([])
 const targets = ref([])
 const loading = ref(false)
+const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
@@ -136,6 +143,7 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
     await api('/api/v1/rules/reorder', { method: 'POST', body: ids })
     ElMessage.success('顺序已更新')
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   }
   await load()
@@ -153,6 +161,7 @@ const canNoResolve = computed(() => NO_RESOLVE_TYPES.includes(form.type))
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     const [rules, gs, rps, targetList] = await Promise.all([
       api('/api/v1/rules'), api('/api/v1/groups'), api('/api/v1/rule-providers'),
@@ -163,6 +172,7 @@ async function load() {
     ruleProviders.value = rps.filter((p) => p.enabled)
     targets.value = targetList
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false

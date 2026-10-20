@@ -83,7 +83,7 @@ def _provider_entry(src: dict, engine: str) -> dict:
     # Mihomo 鉴权字段为 header，Stash 为 headers，值相同、分别生成。
     entry = {
         "type": "http",
-        "url": f"{{FEED}}/res/provider/{src['name']}",
+        "url": f"{{FEED}}/res/provider/{urllib.parse.quote(src['name'])}",
         "path": f"./providers/{src['name']}.yaml",
         "interval": src.get("client_interval") or src["interval"],
     }
@@ -350,9 +350,39 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None) ->
 
 
 def substitute_feed(text: str, feed_base: str) -> str:
+    """把 {FEED} / {FEED_HOST} 占位符替换成真实地址。
+
+    走结构化替换（解析 YAML → 改字段 → 重新序列化），
+    不用裸字符串替换：裸替换遇到带引号或特殊字符的地址会把 YAML 写坏，
+    客户端直接加载失败。
+    """
     host = urllib.parse.urlsplit(feed_base).hostname or ""
-    text = text.replace("{FEED}", feed_base).replace("{FEED_HOST}", host)
-    return dedupe_rules(text)
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        # 产物不是合法 YAML 时退回文本替换，至少不丢失占位符
+        return dedupe_rules(text.replace("{FEED}", feed_base)
+                            .replace("{FEED_HOST}", host))
+    if not isinstance(data, dict):
+        return dedupe_rules(text.replace("{FEED}", feed_base)
+                            .replace("{FEED_HOST}", host))
+    for section in ("proxy-providers", "rule-providers"):
+        entries = data.get(section)
+        if isinstance(entries, dict):
+            for entry in entries.values():
+                if isinstance(entry, dict) and isinstance(entry.get("url"), str):
+                    entry["url"] = entry["url"].replace("{FEED}", feed_base)
+    rules = data.get("rules")
+    if isinstance(rules, list):
+        fixed = []
+        for line in rules:
+            if isinstance(line, str) and "{FEED_HOST}" in line:
+                line = line.replace("{FEED_HOST}", host)
+            fixed.append(line)
+        data["rules"] = fixed
+    out = yaml.safe_dump(data, allow_unicode=True, sort_keys=False,
+                         default_flow_style=False, width=4096)
+    return dedupe_rules(out)
 
 
 def dedupe_rules(text: str) -> str:
