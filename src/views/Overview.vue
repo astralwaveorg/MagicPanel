@@ -28,6 +28,27 @@
       </el-row>
     </div>
 
+    <div v-if="data.health" class="mp-card">
+      <h3>运行状态</h3>
+      <div v-if="data.health.ok" class="mp-health-ok">
+        <StatusDot kind="ok" text="一切正常" />
+        <span class="mp-health-note">
+          数据盘剩余 {{ data.health.disk_free_mb }} MB ·
+          最近备份 {{ data.health.last_backup_at ? fmtTime(data.health.last_backup_at) : '—' }} ·
+          测速核心 {{ data.health.core_available ? data.health.core_version : '未安装' }}
+        </span>
+      </div>
+      <div v-else class="mp-health-issues">
+        <div v-for="(issue, i) in data.health.issues" :key="i" class="mp-health-issue">
+          <StatusDot kind="warn" :text="issue" />
+        </div>
+        <div class="mp-health-note">
+          数据盘剩余 {{ data.health.disk_free_mb }} MB ·
+          最近备份 {{ data.health.last_backup_at ? fmtTime(data.health.last_backup_at) : '—' }}
+        </div>
+      </div>
+    </div>
+
     <div class="mp-card">
       <h3>节点来源</h3>
       <EmptyState
@@ -168,6 +189,8 @@ onMounted(load)
 </script>
 
 <style scoped>
+.mp-health-ok, .mp-health-issues { display: flex; flex-direction: column; gap: 8px; }
+.mp-health-note { font-size: 12.5px; color: var(--mp-text-secondary); }
 .avail-list { display: flex; flex-direction: column; gap: 12px; }
 .avail-row { display: flex; align-items: center; gap: 14px; }
 .avail-name {

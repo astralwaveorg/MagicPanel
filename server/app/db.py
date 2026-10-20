@@ -208,6 +208,11 @@ CREATE TABLE IF NOT EXISTS base_configs (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (engine, platform, device_id)
 );
+CREATE TABLE IF NOT EXISTS schema_version (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''
@@ -319,12 +324,23 @@ def init_db() -> None:
 
 
 def _migrate_settings(conn) -> None:
-    """把旧的默认间隔（12 小时）迁移到 1 小时；仅改仍等于旧默认的行。"""
+    """把旧的默认间隔（12 小时）迁移到 1 小时。
+
+    只在**首次升级时**执行一次：每次启动都改的话，用户后来特意设回
+    12 小时会被无声改回 1 小时。版本记录在 schema_version 表里。
+    """
+    done = one(conn, "SELECT value FROM schema_version WHERE key='settings_v1'")
+    if done:
+        return
     for key in ("profile_update_interval", "auto_build_interval_hours"):
         conn.execute(
             "UPDATE settings SET value=? WHERE key=? AND value='12'",
             (config.SETTINGS_DEFAULTS[key], key),
         )
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_version(key, value) VALUES('settings_v1', ?)",
+        (now(),),
+    )
 
 
 def _migrate_base_configs_scope(conn) -> None:
@@ -431,6 +447,23 @@ def one(conn: sqlite3.Connection, sql: str, args=()):
 
 def all_(conn: sqlite3.Connection, sql: str, args=()):
     return conn.execute(sql, args).fetchall()
+
+
+class UniqueViolation(Exception):
+    """唯一约束冲突（并发下"先查后插"会同时通过检查）。"""
+
+
+def insert_unique(conn, sql: str, args=(), message: str = "记录已存在"):
+    """插入并把唯一约束冲突转成可读异常。
+
+    "先 SELECT 查重再 INSERT"在并发下并不安全：两个请求都能通过检查，
+    后一个 INSERT 会抛 IntegrityError，客户端收到 500（语义错误）。
+    """
+    try:
+        cur = conn.execute(sql, args)
+        return cur
+    except sqlite3.IntegrityError as exc:
+        raise UniqueViolation(message) from exc
 
 
 def row_to_dict(row) -> dict:

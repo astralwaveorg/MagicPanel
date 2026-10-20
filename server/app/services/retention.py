@@ -87,10 +87,12 @@ def mark_stale_builds_failed(conn) -> int:
 def run_once() -> dict:
     """执行一轮清理，返回各项目删除数量。"""
     with db.tx() as conn:
+        stale = mark_stale_builds_failed(conn)
         artifacts = prune_build_artifacts(conn)
         audits = prune_audit_log(conn)
         sessions = prune_sessions(conn)
-    if artifacts or audits or sessions:
-        logger.info("留存清理：构建产物 %s，审计 %s，会话 %s",
-                    artifacts, audits, sessions)
-    return {"artifacts": artifacts, "audit": audits, "sessions": sessions}
+    if artifacts or audits or sessions or stale:
+        logger.info("留存清理：构建产物 %s，审计 %s，会话 %s，僵尸构建 %s",
+                    artifacts, audits, sessions, stale)
+    return {"artifacts": artifacts, "audit": audits, "sessions": sessions,
+            "stale_builds": stale}

@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .. import db, security
+from .. import config, db, security
 from ..deps import CurrentUser
 from ..services import tester
 
@@ -82,7 +82,78 @@ def overview(user=CurrentUser):
         "rule_providers": rule_providers,
         "devices": devices,
         "recent_audit": recent_audit,
+        "health": _health_snapshot(conn, devices),
         "note": "下载成功仅代表客户端取回了文件，不代表已加载或已生效。",
+    }
+
+
+def _health_snapshot(conn, devices: list) -> dict:
+    """运行状态自检：把"系统是否健康"一次性算清楚。
+
+    概览页直接展示这些结论，不必让用户自己比对磁盘、备份、
+    设备拉取时间与核心状态。
+    """
+    import shutil
+    from datetime import datetime, timedelta, timezone
+
+    issues: list[str] = []
+    data_dir = config.DATA_DIR
+    disk_free = 0
+    disk_total = 0
+    try:
+        usage = shutil.disk_usage(data_dir)
+        disk_free, disk_total = usage.free, usage.total
+        if disk_free < 512 * 1024 * 1024:
+            issues.append("数据盘剩余空间不足 512 MB，构建与备份可能失败")
+    except OSError:
+        issues.append("无法读取数据盘信息")
+
+    # 最近一次备份
+    last_backup = ""
+    backup_dir = data_dir / "backup"
+    snapshots = sorted(backup_dir.glob("magicpanel-*.db")) if backup_dir.is_dir() else []
+    if snapshots:
+        last_backup = snapshots[-1].stat().st_mtime
+        age_hours = (datetime.now(timezone.utc).timestamp() - last_backup) / 3600
+        if age_hours > 48:
+            issues.append(f"最近一次备份已是 {int(age_hours)} 小时前")
+    else:
+        issues.append("还没有任何备份快照")
+
+    # 长时间未拉取的设备
+    stale_devices = []
+    now = datetime.now(timezone.utc)
+    for d in devices:
+        last = d.get("last_pull_at") or ""
+        if not last:
+            stale_devices.append(d["name"])
+            continue
+        try:
+            pulled = datetime.fromisoformat(last)
+        except ValueError:
+            continue
+        if pulled.tzinfo is None:
+            pulled = pulled.replace(tzinfo=timezone.utc)
+        if (now - pulled) > timedelta(hours=48):
+            stale_devices.append(d["name"])
+    if stale_devices:
+        issues.append("以下设备超过 48 小时未拉取：" + "、".join(stale_devices))
+
+    core = tester.core_status()
+    if not core.get("available"):
+        issues.append("测速核心未安装，节点测速与 Mihomo 核心校验不可用")
+
+    return {
+        "ok": not issues,
+        "issues": issues,
+        "disk_free_mb": round(disk_free / 1024 / 1024),
+        "disk_total_mb": round(disk_total / 1024 / 1024),
+        "last_backup_at": (datetime.fromtimestamp(last_backup, timezone.utc)
+                           .astimezone().isoformat(timespec="seconds")
+                           if last_backup else ""),
+        "stale_devices": stale_devices,
+        "core_available": bool(core.get("available")),
+        "core_version": core.get("version", ""),
     }
 
 

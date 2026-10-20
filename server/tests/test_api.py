@@ -1914,3 +1914,17 @@ def test_audit_pagination_and_keyword(client):
     hit = client.get("/api/v1/audit?keyword=动作7", headers=h).json()
     assert hit["total"] >= 1
     assert all("动作7" in (i["action"] or "") for i in hit["items"])
+
+
+def test_overview_reports_health_snapshot(client):
+    """概览要给出运行状态自检：磁盘、备份、未拉取设备、核心。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    data = client.get("/api/v1/overview", headers=h).json()
+    health = data["health"]
+    assert "ok" in health and "issues" in health
+    assert isinstance(health["issues"], list)
+    assert health["disk_free_mb"] >= 0
+    assert "core_available" in health
+    # 没有任何备份时应该被点出来
+    assert any("备份" in i for i in health["issues"]) or health["last_backup_at"]

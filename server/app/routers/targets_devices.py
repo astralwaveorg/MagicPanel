@@ -145,20 +145,24 @@ def list_targets(user=CurrentUser):
 @router.post("/targets", status_code=201)
 def create_target(body: TargetBody, user=CurrentUser):
     _check_target(body)
-    with db.tx() as conn:
-        if db.one(conn, "SELECT id FROM targets WHERE name=?", (body.name,)):
-            raise HTTPException(409, "同名引擎平台已存在")
-        now = db.now()
-        sort = db.one(conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM targets")["n"]
-        cur = conn.execute(
-            "INSERT INTO targets(name, engine, platform, description, extra_yaml, "
-            "sort, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
-            (body.name, body.engine, body.platform, body.description,
-             body.extra_yaml, sort, now, now),
-        )
-        security.audit(conn, user["username"], "新增引擎平台", "target", cur.lastrowid,
-                       {"name": body.name})
-        row = _get_target(conn, cur.lastrowid)
+    try:
+        with db.tx() as conn:
+            if db.one(conn, "SELECT id FROM targets WHERE name=?", (body.name,)):
+                raise HTTPException(409, "同名引擎平台已存在")
+            now = db.now()
+            sort = db.one(conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM targets")["n"]
+            cur = db.insert_unique(conn,
+                "INSERT INTO targets(name, engine, platform, description, extra_yaml, "
+                "sort, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (body.name, body.engine, body.platform, body.description,
+                 body.extra_yaml, sort, now, now),
+            )
+            security.audit(conn, user["username"], "新增引擎平台", "target", cur.lastrowid,
+                           {"name": body.name})
+            row = _get_target(conn, cur.lastrowid)
+    except db.UniqueViolation:
+        raise HTTPException(409, "同名引擎平台已存在")
+
     return _target_public(row)
 
 

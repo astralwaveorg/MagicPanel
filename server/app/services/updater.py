@@ -26,12 +26,23 @@ _locks_guard = threading.Lock()
 
 
 def _lock_for(key: str) -> threading.Lock:
+    """按 key 取互斥锁。
+
+    锁表会随 key 数量单调增长（长跑实例下缓慢泄漏），
+    这里在没有其它持有者时顺手回收，避免无限增长。
+    """
     with _locks_guard:
         lock = _locks.get(key)
         if lock is None:
             lock = threading.Lock()
             _locks[key] = lock
         return lock
+
+
+def _release_lock(key: str, lock: threading.Lock) -> None:
+    with _locks_guard:
+        if _locks.get(key) is lock and not lock.locked():
+            _locks.pop(key, None)
 
 
 def _source_row(conn, source_id: int):
@@ -60,7 +71,8 @@ def _error_text(exc: Exception) -> str:
 
 def refresh_source(source_id: int, operator: str, automatic: bool = False):
     """抓取节点来源并留存快照；失败时保留最近一次成功快照。"""
-    lock = _lock_for(f"source:{source_id}")
+    key = f"source:{source_id}"
+    lock = _lock_for(key)
     if not lock.acquire(blocking=False):
         raise InvalidOperation("该来源正在抓取中，请稍候再试")
     try:
@@ -126,11 +138,13 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
             return _source_row(conn, source_id)
     finally:
         lock.release()
+        _release_lock(key, lock)
 
 
 def test_source(source_id: int, operator: str, automatic: bool = False):
     """用本地 Mihomo 核心测速；结果只反映服务器侧网络的连通性。"""
-    lock = _lock_for(f"source:{source_id}")
+    key = f"source:{source_id}"
+    lock = _lock_for(key)
     if not lock.acquire(blocking=False):
         raise InvalidOperation("该来源正在测速中，请稍候再试")
     try:
@@ -186,11 +200,13 @@ def test_source(source_id: int, operator: str, automatic: bool = False):
             return _source_row(conn, source_id)
     finally:
         lock.release()
+        _release_lock(key, lock)
 
 
 def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
     """抓取远程规则来源并留存快照；内联来源不参与抓取。"""
-    lock = _lock_for(f"provider:{rp_id}")
+    key = f"provider:{rp_id}"
+    lock = _lock_for(key)
     if not lock.acquire(blocking=False):
         raise InvalidOperation("该规则来源正在抓取中，请稍候再试")
     try:
@@ -248,3 +264,4 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
             return _provider_row(conn, rp_id)
     finally:
         lock.release()
+        _release_lock(key, lock)

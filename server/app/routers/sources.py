@@ -134,23 +134,27 @@ def create_source(body: SourceBody, user=CurrentUser):
     if not body.url:
         raise HTTPException(400, "订阅地址不能为空")
     _check_filter(body.filter)
-    with db.tx() as conn:
-        if db.one(conn, "SELECT id FROM sources WHERE name=?", (body.name,)):
-            raise HTTPException(409, "同名节点来源已存在")
-        now = db.now()
-        cur = conn.execute(
-            "INSERT INTO sources(name, url_enc, enabled, filter, ua, interval, "
-            "client_interval, test_interval, auto_fetch, auto_test, allow_private, "
-            "filter_unavailable, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (body.name, security.encrypt_text(body.url), int(body.enabled),
-             body.filter, body.ua, body.interval, body.client_interval,
-             body.test_interval, int(body.auto_fetch), int(body.auto_test),
-             int(body.allow_private), int(body.filter_unavailable), now, now),
-        )
-        security.audit(conn, user["username"], "新增节点来源", "source", cur.lastrowid,
-                       {"name": body.name})
-        row = _get_or_404(conn, cur.lastrowid)
+    try:
+        with db.tx() as conn:
+            if db.one(conn, "SELECT id FROM sources WHERE name=?", (body.name,)):
+                raise HTTPException(409, "同名节点来源已存在")
+            now = db.now()
+            cur = db.insert_unique(conn,
+                "INSERT INTO sources(name, url_enc, enabled, filter, ua, interval, "
+                "client_interval, test_interval, auto_fetch, auto_test, allow_private, "
+                "filter_unavailable, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (body.name, security.encrypt_text(body.url), int(body.enabled),
+                 body.filter, body.ua, body.interval, body.client_interval,
+                 body.test_interval, int(body.auto_fetch), int(body.auto_test),
+                 int(body.allow_private), int(body.filter_unavailable), now, now),
+            )
+            security.audit(conn, user["username"], "新增节点来源", "source", cur.lastrowid,
+                           {"name": body.name})
+            row = _get_or_404(conn, cur.lastrowid)
+    except db.UniqueViolation:
+        raise HTTPException(409, "同名节点来源已存在")
+
     return _public(row)
 
 

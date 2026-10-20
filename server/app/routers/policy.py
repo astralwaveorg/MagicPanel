@@ -104,28 +104,32 @@ def list_groups(user=CurrentUser):
 @router.post("/groups", status_code=201)
 def create_group(body: GroupBody, user=CurrentUser):
     _check_group(body)
-    with db.tx() as conn:
-        if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (body.name,)):
-            raise HTTPException(409, "同名策略组已存在")
-        _check_group_refs(conn, body)
-        local_ids = _check_local_ids(conn, body.local_nodes)
-        sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups"))["s"]
-        now = db.now()
-        cur = conn.execute(
-            "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
-            "local_nodes, proxies, url, interval, timeout, tolerance, lazy, strategy, "
-            "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (body.name, body.type, sort, int(body.hidden), body.filter,
-             json.dumps(body.use_sources, ensure_ascii=False),
-             json.dumps(local_ids, ensure_ascii=False),
-             json.dumps(body.proxies, ensure_ascii=False),
-             body.url, body.interval, body.timeout, body.tolerance,
-             int(body.lazy), body.strategy,
-             json.dumps(body.targets, ensure_ascii=False), now, now),
-        )
-        security.audit(conn, user["username"], "新增策略组", "group", cur.lastrowid,
-                       {"name": body.name})
-        row = _get_group(conn, cur.lastrowid)
+    try:
+        with db.tx() as conn:
+            if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (body.name,)):
+                raise HTTPException(409, "同名策略组已存在")
+            _check_group_refs(conn, body)
+            local_ids = _check_local_ids(conn, body.local_nodes)
+            sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups"))["s"]
+            now = db.now()
+            cur = db.insert_unique(conn,
+                "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
+                "local_nodes, proxies, url, interval, timeout, tolerance, lazy, strategy, "
+                "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (body.name, body.type, sort, int(body.hidden), body.filter,
+                 json.dumps(body.use_sources, ensure_ascii=False),
+                 json.dumps(local_ids, ensure_ascii=False),
+                 json.dumps(body.proxies, ensure_ascii=False),
+                 body.url, body.interval, body.timeout, body.tolerance,
+                 int(body.lazy), body.strategy,
+                 json.dumps(body.targets, ensure_ascii=False), now, now),
+            )
+            security.audit(conn, user["username"], "新增策略组", "group", cur.lastrowid,
+                           {"name": body.name})
+            row = _get_group(conn, cur.lastrowid)
+    except db.UniqueViolation:
+        raise HTTPException(409, "同名策略组已存在")
+
     return _group_public(row)
 
 
@@ -266,20 +270,24 @@ def list_rules(user=CurrentUser):
 @router.post("/rules", status_code=201)
 def create_rule(body: RuleBody, user=CurrentUser):
     _check_rule(body)
-    with db.tx() as conn:
-        _check_rule_refs(conn, body)
-        sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
-        now = db.now()
-        cur = conn.execute(
-            "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
-            "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (sort, body.type, body.value, body.target, int(body.enabled),
-             body.note, int(body.no_resolve),
-             json.dumps(body.targets, ensure_ascii=False), now, now),
-        )
-        security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
-                       {"rule": f"{body.type},{body.value},{body.target}"})
-        row = _get_rule(conn, cur.lastrowid)
+    try:
+        with db.tx() as conn:
+            _check_rule_refs(conn, body)
+            sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
+            now = db.now()
+            cur = db.insert_unique(conn,
+                "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
+                "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (sort, body.type, body.value, body.target, int(body.enabled),
+                 body.note, int(body.no_resolve),
+                 json.dumps(body.targets, ensure_ascii=False), now, now),
+            )
+            security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
+                           {"rule": f"{body.type},{body.value},{body.target}"})
+            row = _get_rule(conn, cur.lastrowid)
+    except db.UniqueViolation:
+        raise HTTPException(409, "同名规则已存在")
+
     return _rule_public(row)
 
 
