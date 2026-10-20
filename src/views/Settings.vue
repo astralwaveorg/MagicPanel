@@ -23,6 +23,73 @@
     </div>
 
     <div class="mp-card">
+      <h3>WebDAV 远程备份</h3>
+      <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
+        把数据库快照与主密钥备份到远端 WebDAV（NAS、坚果云、Nextcloud 等）。
+        容器内的本地备份与数据在同一块磁盘上，磁盘故障会一起丢；
+        远端副本是跨故障的最后一道保险。备份可自动定时执行，也可随时手动触发。
+      </p>
+      <el-form label-position="top" style="max-width:560px">
+        <el-form-item label="启用自动备份">
+          <el-switch v-model="webdav.enabled" />
+          <div class="mp-form-hint">
+            关闭后仍可手动上传备份；定时任务与调度器总开关无关。
+          </div>
+        </el-form-item>
+        <el-form-item label="WebDAV 地址">
+          <el-input v-model="webdav.url" class="mono"
+                    placeholder="https://dav.example.com/remote.php/dav/files/mypanel" />
+        </el-form-item>
+        <el-form-item label="备份目录（相对地址根目录）">
+          <el-input v-model="webdav.directory" class="mono" placeholder="magicpanel" />
+        </el-form-item>
+        <el-form-item label="用户名">
+          <el-input v-model="webdav.username" class="mono" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="口令">
+          <el-input v-model="webdav.password" type="password" show-password
+                    autocomplete="new-password"
+                    :placeholder="webdav.password_set ? '已配置（留空表示不修改）' : '未设置'" />
+          <div class="mp-form-hint">口令加密存储，界面与接口都不会回显明文。</div>
+        </el-form-item>
+        <el-form-item label="自动备份间隔（小时）">
+          <el-input-number v-model="webdav.interval_hours" :min="1" :max="720" />
+        </el-form-item>
+        <el-form-item label="远端保留份数">
+          <el-input-number v-model="webdav.keep" :min="1" :max="100" />
+          <div class="mp-form-hint">超出后自动删除最旧的快照与其主密钥。</div>
+        </el-form-item>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <el-button type="primary" :loading="webdavSaving" @click="saveWebdav">保存配置</el-button>
+          <el-button :loading="webdavTesting" @click="testWebdav">测试连接</el-button>
+          <el-button :loading="webdavUploading" @click="uploadWebdav">立即备份到 WebDAV</el-button>
+          <el-button @click="loadWebdavFiles">查看远端备份</el-button>
+        </div>
+      </el-form>
+      <div v-if="webdavInfo" style="margin-top:12px;font-size:12.5px;color:var(--mp-text-secondary)">
+        上次备份：{{ webdavInfo.last_backup_at ? fmtTime(webdavInfo.last_backup_at) : '—' }}
+        <span v-if="webdavInfo.last_status">（{{ webdavInfo.last_status }}）</span>
+        <div v-if="webdavInfo.last_error" style="color:var(--mp-danger, #f56c6c)">
+          {{ webdavInfo.last_error }}
+        </div>
+      </div>
+      <el-table v-if="webdavFiles.length" :data="webdavFiles" size="small"
+                style="margin-top:12px">
+        <el-table-column prop="name" label="远端文件" min-width="220" class="mono" />
+        <el-table-column label="大小" width="110" align="right">
+          <template #default="{ row }">{{ (row.size / 1024 / 1024).toFixed(1) }} MB</template>
+        </el-table-column>
+        <el-table-column prop="modified" label="修改时间" min-width="180" />
+        <el-table-column label="操作" width="120" align="right">
+          <template #default="{ row }">
+            <el-button v-if="row.name.endsWith('.db')" size="small" type="warning" plain
+                       @click="restoreWebdav(row)">恢复</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <div class="mp-card">
       <h3>测速核心</h3>
       <div v-if="core" style="display:flex;flex-direction:column;gap:10px;max-width:640px">
         <StatusDot :kind="core.available ? 'ok' : 'muted'"
@@ -185,6 +252,15 @@ import UserAvatar from '../components/UserAvatar.vue'
 import StatusDot from '../components/StatusDot.vue'
 
 const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '' })
+const webdav = reactive({
+  enabled: false, url: '', directory: 'magicpanel', username: '',
+  password: '', password_set: false, interval_hours: 12, keep: 7,
+})
+const webdavInfo = ref(null)
+const webdavFiles = ref([])
+const webdavSaving = ref(false)
+const webdavTesting = ref(false)
+const webdavUploading = ref(false)
 const savingSettings = ref(false)
 const users = ref([])
 const userDialog = ref(false)
@@ -227,7 +303,10 @@ async function load() {
     ElMessage.error(e.message)
   }
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  loadWebdav()
+})
 
 async function installCoreOnline() {
   coreBusy.value = true
@@ -303,6 +382,98 @@ async function saveSettings() {
     ElMessage.error(e.message)
   } finally {
     savingSettings.value = false
+  }
+}
+
+async function loadWebdav() {
+  try {
+    const data = await api('/api/v1/backup/webdav')
+    webdav.enabled = data.enabled
+    webdav.url = data.url
+    webdav.directory = data.directory
+    webdav.username = data.username
+    webdav.password_set = data.password_set
+    webdav.interval_hours = Number(data.interval_hours) || 12
+    webdav.keep = Number(data.keep) || 7
+    webdavInfo.value = data
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function saveWebdav() {
+  webdavSaving.value = true
+  try {
+    const values = {
+      enabled: webdav.enabled ? '1' : '0',
+      url: webdav.url,
+      directory: webdav.directory,
+      username: webdav.username,
+      interval_hours: String(webdav.interval_hours),
+      keep: String(webdav.keep),
+    }
+    // 留空表示不修改口令
+    if (webdav.password) values.password = webdav.password
+    await api('/api/v1/backup/webdav', { method: 'PUT', body: { values } })
+    webdav.password = ''
+    ElMessage.success('已保存 WebDAV 配置')
+    await loadWebdav()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    webdavSaving.value = false
+  }
+}
+
+async function testWebdav() {
+  webdavTesting.value = true
+  try {
+    const r = await api('/api/v1/backup/webdav/test', { method: 'POST' })
+    ElMessage.success(`连接正常：${r.detail}`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    webdavTesting.value = false
+  }
+}
+
+async function uploadWebdav() {
+  webdavUploading.value = true
+  try {
+    const r = await api('/api/v1/backup/webdav/upload', { method: 'POST' })
+    ElMessage.success(`已备份 ${r.files.length} 个文件到 WebDAV`)
+    await loadWebdav()
+    await loadWebdavFiles()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    webdavUploading.value = false
+  }
+}
+
+async function loadWebdavFiles() {
+  try {
+    const r = await api('/api/v1/backup/webdav/files')
+    webdavFiles.value = r.files
+    if (!r.files.length) ElMessage.info('远端还没有备份文件')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function restoreWebdav(row) {
+  if (!await confirmBox(
+    `确定用远端快照 “${row.name}” 覆盖当前全部数据？该操作不可撤销。`,
+    '从 WebDAV 恢复', { type: 'warning' })) return
+  try {
+    const r = await api('/api/v1/backup/webdav/restore', {
+      method: 'POST', body: { confirm: true, data: { file: row.name } },
+    })
+    ElMessage.success(r.key_restored
+      ? '已恢复数据库与主密钥；主密钥已更换，请重启容器使密文可解密'
+      : '已恢复数据库')
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 

@@ -3,7 +3,7 @@
     <h2 class="mp-page-title">引擎平台</h2>
     <p class="mp-page-desc">
       一个目标对应一类客户端（引擎 + 平台）。同一策略按目标编译为对应方言；目标扩展用于平台差异，整键覆盖。
-      按住左侧手柄可拖动排序。
+      按住左侧手柄可拖动排序（分页时按当前页内的顺序重排）。
     </p>
 
     <div class="mp-toolbar">
@@ -54,6 +54,7 @@
           </el-table-column>
         </el-table>
       </div>
+      <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑引擎平台' : '添加引擎平台'"
@@ -117,6 +118,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import { PLATFORM_LABELS, ENGINE_LABELS } from '../format'
 
@@ -155,6 +157,9 @@ const TEMPLATES = {
 }
 
 const rows = ref([])
+const total = ref(0)
+const page = ref(1)
+const limit = ref(50)
 const loading = ref(false)
 const error = ref('')
 const dialog = ref(false)
@@ -187,11 +192,19 @@ function insertTemplate(content) {
     : content
 }
 
+function onPageChange({ page: p, limit: l }) {
+  page.value = p
+  limit.value = l
+  load()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    rows.value = await api('/api/v1/targets')
+    const paged = await api(`/api/v1/targets/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`)
+    rows.value = paged.items
+    total.value = paged.total
   } catch (e) {
     error.value = e.message
     ElMessage.error(e.message)

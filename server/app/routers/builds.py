@@ -277,6 +277,15 @@ def create_build(body: BuildBody, user=CurrentUser):
     return _build_public(row, with_results=True)
 
 
+@router.get("/builds/page")
+def list_builds_paged(limit: int = 20, offset: int = 0, user=CurrentUser):
+    """构建历史分页列表。"""
+    with db.connect() as conn:
+        data = db.paged(conn, "builds", "", [], "id DESC", limit, offset)
+    data["items"] = [_build_public(r) for r in data["items"]]
+    return data
+
+
 @router.get("/builds")
 def list_builds(user=CurrentUser):
     with db.connect() as conn:

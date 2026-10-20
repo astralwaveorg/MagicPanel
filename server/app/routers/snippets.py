@@ -54,6 +54,20 @@ def _get(conn, sid: int):
     return row
 
 
+@router.get("/page")
+def list_snippets_paged(limit: int = 50, offset: int = 0, keyword: str = "",
+                        user=CurrentUser):
+    """功能模块分页列表。"""
+    with db.connect() as conn:
+        where, args = "", []
+        if keyword:
+            where = "WHERE name LIKE ?"
+            args = [f"%{keyword}%"]
+        data = db.paged(conn, "snippets", where, args, "sort, id", limit, offset)
+    data["items"] = [_public(r) for r in data["items"]]
+    return data
+
+
 @router.get("")
 def list_snippets(user=CurrentUser):
     with db.connect() as conn:

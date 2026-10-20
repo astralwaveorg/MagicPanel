@@ -96,6 +96,20 @@ def _delete_one(conn, row, operator: str) -> None:
                    {"name": row["name"]})
 
 
+@router.get("/page")
+def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
+                         user=CurrentUser):
+    """规则来源分页列表。"""
+    with db.connect() as conn:
+        where, args = "", []
+        if keyword:
+            where = "WHERE name LIKE ?"
+            args = [f"%{keyword}%"]
+        data = db.paged(conn, "rule_providers", where, args, "id", limit, offset)
+    data["items"] = [_public(r) for r in data["items"]]
+    return data
+
+
 @router.get("")
 def list_providers(user=CurrentUser):
     with db.connect() as conn:

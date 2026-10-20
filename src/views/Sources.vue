@@ -150,6 +150,7 @@
           </el-table-column>
         </el-table>
       </div>
+      <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
     <div class="mp-card">
@@ -391,6 +392,7 @@ import { api } from '../api'
 import { uploadCore } from '../core'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
@@ -404,6 +406,9 @@ const INTERVAL_PRESETS = [
 ]
 
 const rows = ref([])
+const total = ref(0)
+const page = ref(1)
+const limit = ref(50)
 const loading = ref(false)
 const error = ref('')
 const dialog = ref(false)
@@ -492,15 +497,23 @@ function onLocalProtocolChange(protocol) {
   applyLocalDefaults(protocol, true)
 }
 
+function onPageChange({ page: p, limit: l }) {
+  page.value = p
+  limit.value = l
+  load()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [sources, coreStatus, nodes, schema] = await Promise.all([
-      api('/api/v1/sources'), api('/api/v1/core/status'),
+    const [paged, coreStatus, nodes, schema] = await Promise.all([
+      api(`/api/v1/sources/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api('/api/v1/core/status'),
       api('/api/v1/local-nodes'), api('/api/v1/local-nodes/schema'),
     ])
-    rows.value = sources
+    rows.value = paged.items
+    total.value = paged.total
     core.value = coreStatus
     localNodes.value = nodes
     localSchema.value = schema

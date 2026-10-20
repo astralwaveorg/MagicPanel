@@ -110,6 +110,7 @@
           </el-table-column>
         </el-table>
       </div>
+      <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
     <div class="mp-card">
@@ -200,11 +201,15 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
 
 const rows = ref([])
+const total = ref(0)
+const page = ref(1)
+const limit = ref(50)
 const channels = ref({ stable: null, candidate: null })
 const releases = ref([])
 const loading = ref(false)
@@ -224,6 +229,12 @@ const blockedVisible = ref(false)
 const blockedItems = ref([])
 const deletedCount = ref(0)
 
+function onPageChange({ page: p, limit: l }) {
+  page.value = p
+  limit.value = l
+  load()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -231,7 +242,9 @@ async function load() {
     const [builds, ch, rel] = await Promise.all([
       api('/api/v1/builds'), api('/api/v1/channels'), api('/api/v1/releases'),
     ])
-    rows.value = builds
+    const paged = await api(`/api/v1/builds/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`)
+    rows.value = paged.items
+    total.value = paged.total
     channels.value = ch
     releases.value = rel
   } catch (e) {

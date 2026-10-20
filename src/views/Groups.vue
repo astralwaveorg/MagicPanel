@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      顺序即声明顺序；按住左侧手柄可拖动排序。地区筛选为空的组保留 <strong>空组保护</strong> 占位，避免被客户端隐式改写为直连。
+      顺序即声明顺序；按住左侧手柄可拖动排序（分页时按当前页内的顺序重排）。地区筛选为空的组保留 <strong>空组保护</strong> 占位，避免被客户端隐式改写为直连。
     </p>
 
     <div class="mp-toolbar">
@@ -60,6 +60,7 @@
           </el-table-column>
         </el-table>
       </div>
+      <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑策略组' : '添加策略组'"
@@ -170,9 +171,13 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 
 const rows = ref([])
+const total = ref(0)
+const page = ref(1)
+const limit = ref(50)
 const sources = ref([])
 const localNodes = ref([])
 const targets = ref([])
@@ -216,15 +221,23 @@ function localNodeNames(ids) {
     .join('、')
 }
 
+function onPageChange({ page: p, limit: l }) {
+  page.value = p
+  limit.value = l
+  load()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
     const [groups, srcs, nodes, targetList] = await Promise.all([
-      api('/api/v1/groups'), api('/api/v1/sources'), api('/api/v1/local-nodes'),
+      api(`/api/v1/groups/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api('/api/v1/sources'), api('/api/v1/local-nodes'),
       api('/api/v1/targets'),
     ])
-    rows.value = groups
+    rows.value = groups.items
+    total.value = groups.total
     sources.value = srcs.filter((s) => s.enabled)
     localNodes.value = nodes
     targets.value = targetList

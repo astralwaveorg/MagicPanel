@@ -466,6 +466,51 @@ def insert_unique(conn, sql: str, args=(), message: str = "记录已存在"):
         raise UniqueViolation(message) from exc
 
 
+def reorder_subset(conn, table: str, ids: list[int]) -> int:
+    """按给定顺序重排这些行，其它行保持原位。
+
+    列表分页后，界面只拿得到当前页的 id；此时"整表顺序"的语义不成立，
+    但"这几项之间按拖动的顺序排"是明确的——按它们现有的 sort 值
+    重新分配即可，不影响其它行。
+    """
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    rows = all_(conn, f"SELECT id, sort FROM {table} WHERE id IN ({marks})",
+                list(ids))
+    if len(rows) != len(set(ids)):
+        return 0
+    values = sorted(r["sort"] for r in rows)
+    for index, rid in enumerate(ids):
+        conn.execute(f"UPDATE {table} SET sort=? WHERE id=?", (values[index], rid))
+    return len(ids)
+
+
+def paged(conn, table: str, where: str = "", args=(), order: str = "id",
+          limit: int = 50, offset: int = 0, columns: str = "*") -> dict:
+    """分页查询（order 传排序字段，如 "sort, id" 或 "id DESC"）。"""
+    """分页查询：返回 {items, total, limit, offset}。
+
+    列表接口一律带上分页：几百条规则/组全量返回会让面板打开变慢，
+    也让"翻到第 200 条"这种操作根本做不到。
+    """
+    limit = min(max(int(limit), 1), 500)
+    offset = max(int(offset), 0)
+    total = one(conn, f"SELECT COUNT(*) AS c FROM {table} {where}", args)["c"]
+    order_sql = f"ORDER BY {order}" if order else ""
+    rows = all_(
+        conn,
+        f"SELECT {columns} FROM {table} {where} {order_sql} LIMIT ? OFFSET ?",
+        list(args) + [limit, offset],
+    )
+    return {
+        "items": [row_to_dict(r) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 def row_to_dict(row) -> dict:
     return {k: row[k] for k in row.keys()}
 

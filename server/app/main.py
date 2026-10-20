@@ -13,7 +13,7 @@ from . import config, db
 from .routers import (auth, automation, base_config, builds, feed, local_nodes,
                       misc, policy, portal, rule_providers, snippets, sources,
                       targets_devices)
-from .services import retention, scheduler
+from .services import retention, scheduler, webdav
 
 
 async def _retention_loop() -> None:
@@ -28,14 +28,60 @@ async def _retention_loop() -> None:
         await asyncio.sleep(6 * 3600)
 
 
+async def _webdav_backup_loop() -> None:
+    """定时把数据库快照与主密钥推到 WebDAV。
+
+    与调度器总开关无关：备份是"最后一道保险"，
+    关掉自动抓取/测速不应该连带停掉备份。
+    """
+    import asyncio
+    await asyncio.sleep(300)
+    while True:
+        try:
+            with db.connect() as conn:
+                enabled = db.get_setting(conn, webdav.SET_ENABLED, "0") == "1"
+                configured = webdav.is_configured(conn)
+                try:
+                    hours = max(1, int(db.get_setting(conn, webdav.SET_INTERVAL, "12")))
+                except ValueError:
+                    hours = 12
+                last = db.get_setting(conn, webdav.SET_LAST_AT, "")
+            if enabled and configured:
+                due = True
+                if last:
+                    try:
+                        from datetime import datetime, timezone
+                        moment = datetime.fromisoformat(last)
+                        if moment.tzinfo is None:
+                            moment = moment.replace(tzinfo=timezone.utc)
+                        due = (datetime.now(timezone.utc) - moment).total_seconds() >= hours * 3600
+                    except ValueError:
+                        due = True
+                if due:
+                    await asyncio.to_thread(_webdav_backup_once)
+        except Exception:
+            pass
+        await asyncio.sleep(600)
+
+
+def _webdav_backup_once() -> None:
+    with db.connect() as conn:
+        try:
+            webdav.run_backup(conn, operator="系统", trigger="auto")
+        except Exception as exc:
+            logging.getLogger("magicpanel.webdav").warning("定时 WebDAV 备份失败：%s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = scheduler.start_loop() if config.SCHEDULER_AUTOSTART else None
     retention_task = asyncio.create_task(_retention_loop())
+    webdav_task = asyncio.create_task(_webdav_backup_loop())
     try:
         yield
     finally:
         retention_task.cancel()
+        webdav_task.cancel()
         if task:
             await scheduler.stop_loop(task)
 

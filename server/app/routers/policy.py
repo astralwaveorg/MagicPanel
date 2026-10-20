@@ -94,6 +94,20 @@ def _get_group(conn, gid: int):
     return row
 
 
+@router.get("/groups/page")
+def list_groups_paged(limit: int = 50, offset: int = 0, keyword: str = "",
+                      user=CurrentUser):
+    """策略组分页列表（keyword 匹配名称）。"""
+    with db.connect() as conn:
+        where, args = "", []
+        if keyword:
+            where = "WHERE name LIKE ?"
+            args = [f"%{keyword}%"]
+        data = db.paged(conn, "proxy_groups", where, args, "sort, id", limit, offset)
+    data["items"] = [_group_public(r) for r in data["items"]]
+    return data
+
+
 @router.get("/groups")
 def list_groups(user=CurrentUser):
     with db.connect() as conn:
@@ -190,12 +204,15 @@ def delete_group(gid: int, user=CurrentUser):
 
 @router.post("/groups/reorder")
 def reorder_groups(ids: list[int], user=CurrentUser):
+    """列表已分页：按提交的这些 id 重排（它们之间按新顺序，其余记录不动）。"""
     with db.tx() as conn:
-        existing = {r["id"] for r in db.all_(conn, "SELECT id FROM proxy_groups")}
-        if set(ids) != existing:
-            raise HTTPException(400, "排序列表与现有策略组不一致")
-        for index, gid in enumerate(ids, start=1):
-            conn.execute("UPDATE proxy_groups SET sort=? WHERE id=?", (index, gid))
+        if len(set(ids)) != len(ids):
+            raise HTTPException(400, "排序列表里有重复项")
+        known = {r["id"] for r in db.all_(conn, "SELECT id FROM proxy_groups")}
+        if any(i not in known for i in ids):
+            raise HTTPException(400, "排序列表包含不存在的记录")
+        if not db.reorder_subset(conn, "proxy_groups", ids):
+            raise HTTPException(400, "排序未生效")
         security.audit(conn, user["username"], "调整策略组顺序", "group", "")
     return {"ok": True}
 
@@ -260,6 +277,20 @@ def _check_group_refs(conn, body: GroupBody) -> None:
     _check_target_names(conn, body.targets)
 
 
+@router.get("/rules/page")
+def list_rules_paged(limit: int = 50, offset: int = 0, keyword: str = "",
+                     user=CurrentUser):
+    """分流规则分页列表（keyword 匹配匹配值或目标）。"""
+    with db.connect() as conn:
+        where, args = "", []
+        if keyword:
+            where = "WHERE value LIKE ? OR target LIKE ?"
+            args = [f"%{keyword}%", f"%{keyword}%"]
+        data = db.paged(conn, "rules", where, args, "sort, id", limit, offset)
+    data["items"] = [_rule_public(r) for r in data["items"]]
+    return data
+
+
 @router.get("/rules")
 def list_rules(user=CurrentUser):
     with db.connect() as conn:
@@ -322,11 +353,14 @@ def delete_rule(rid: int, user=CurrentUser):
 
 @router.post("/rules/reorder")
 def reorder_rules(ids: list[int], user=CurrentUser):
+    """列表已分页：按提交的这些 id 重排（它们之间按新顺序，其余记录不动）。"""
     with db.tx() as conn:
-        existing = {r["id"] for r in db.all_(conn, "SELECT id FROM rules")}
-        if set(ids) != existing:
-            raise HTTPException(400, "排序列表与现有规则不一致")
-        for index, rid in enumerate(ids, start=1):
-            conn.execute("UPDATE rules SET sort=? WHERE id=?", (index, rid))
+        if len(set(ids)) != len(ids):
+            raise HTTPException(400, "排序列表里有重复项")
+        known = {r["id"] for r in db.all_(conn, "SELECT id FROM rules")}
+        if any(i not in known for i in ids):
+            raise HTTPException(400, "排序列表包含不存在的记录")
+        if not db.reorder_subset(conn, "rules", ids):
+            raise HTTPException(400, "排序未生效")
         security.audit(conn, user["username"], "调整分流规则顺序", "rule", "")
     return {"ok": True}

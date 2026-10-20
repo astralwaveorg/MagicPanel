@@ -58,6 +58,7 @@
           </el-table-column>
         </el-table>
       </div>
+      <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑模块' : '添加模块'"
@@ -123,6 +124,7 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import { fmtTime } from '../format'
 
@@ -132,6 +134,9 @@ const CATEGORY_LABELS = {
 const ENGINE_LABELS = { stash: '仅 Stash', mihomo: '仅 Mihomo', all: '全部引擎' }
 
 const rows = ref([])
+const total = ref(0)
+const page = ref(1)
+const limit = ref(50)
 const loading = ref(false)
 const error = ref('')
 const dialog = ref(false)
@@ -153,11 +158,19 @@ const filtered = computed(() =>
     ? rows.value.filter((r) => r.category === categoryFilter.value)
     : rows.value)
 
+function onPageChange({ page: p, limit: l }) {
+  page.value = p
+  limit.value = l
+  load()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    rows.value = await api('/api/v1/snippets')
+    const paged = await api(`/api/v1/snippets/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`)
+    rows.value = paged.items
+    total.value = paged.total
   } catch (e) {
     error.value = e.message
     ElMessage.error(e.message)

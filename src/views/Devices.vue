@@ -66,6 +66,7 @@
           </el-table-column>
         </el-table>
       </div>
+      <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑设备' : '添加设备'" width="min(560px, 94vw)">
@@ -116,11 +117,15 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import SecretDialog from '../components/SecretDialog.vue'
 import { fmtTime, PLATFORM_LABELS, CHANNEL_LABELS, ENGINE_LABELS } from '../format'
 
 const rows = ref([])
+const total = ref(0)
+const page = ref(1)
+const limit = ref(50)
 const targets = ref([])
 const loading = ref(false)
 const error = ref('')
@@ -144,14 +149,22 @@ function targetName(id) {
   return targets.value.find((t) => t.id === id)?.name || `#${id}`
 }
 
+function onPageChange({ page: p, limit: l }) {
+  page.value = p
+  limit.value = l
+  load()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [devices, ts] = await Promise.all([
-      api('/api/v1/devices'), api('/api/v1/targets'),
+    const [paged, ts] = await Promise.all([
+      api(`/api/v1/devices/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api('/api/v1/targets'),
     ])
-    rows.value = devices
+    rows.value = paged.items
+    total.value = paged.total
     targets.value = ts
   } catch (e) {
     error.value = e.message

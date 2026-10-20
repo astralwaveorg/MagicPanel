@@ -135,6 +135,20 @@ def _get_device(conn, did: int):
     return row
 
 
+@router.get("/targets/page")
+def list_targets_paged(limit: int = 50, offset: int = 0, keyword: str = "",
+                       user=CurrentUser):
+    """引擎平台分页列表。"""
+    with db.connect() as conn:
+        where, args = "", []
+        if keyword:
+            where = "WHERE name LIKE ?"
+            args = [f"%{keyword}%"]
+        data = db.paged(conn, "targets", where, args, "sort, id", limit, offset)
+    data["items"] = [_target_public(r) for r in data["items"]]
+    return data
+
+
 @router.get("/targets")
 def list_targets(user=CurrentUser):
     with db.connect() as conn:
@@ -168,12 +182,15 @@ def create_target(body: TargetBody, user=CurrentUser):
 
 @router.post("/targets/reorder")
 def reorder_targets(ids: list[int], user=CurrentUser):
+    """列表已分页：按提交的这些 id 重排（它们之间按新顺序，其余记录不动）。"""
     with db.tx() as conn:
-        existing = {r["id"] for r in db.all_(conn, "SELECT id FROM targets")}
-        if set(ids) != existing:
-            raise HTTPException(400, "排序列表与现有引擎平台不一致")
-        for index, tid in enumerate(ids, start=1):
-            conn.execute("UPDATE targets SET sort=? WHERE id=?", (index, tid))
+        if len(set(ids)) != len(ids):
+            raise HTTPException(400, "排序列表里有重复项")
+        known = {r["id"] for r in db.all_(conn, "SELECT id FROM targets")}
+        if any(i not in known for i in ids):
+            raise HTTPException(400, "排序列表包含不存在的记录")
+        if not db.reorder_subset(conn, "targets", ids):
+            raise HTTPException(400, "排序未生效")
         security.audit(conn, user["username"], "调整引擎平台顺序", "target", "")
     return {"ok": True}
 
@@ -227,6 +244,20 @@ def subscription_url(request: Request, conn, token: str) -> str:
     if not base:
         base = str(request.base_url).rstrip("/")
     return f"{base}/feed/{token}/config.yaml"
+
+
+@router.get("/devices/page")
+def list_devices_paged(limit: int = 50, offset: int = 0, keyword: str = "",
+                       user=CurrentUser):
+    """设备分页列表。"""
+    with db.connect() as conn:
+        where, args = "", []
+        if keyword:
+            where = "WHERE name LIKE ? OR note LIKE ?"
+            args = [f"%{keyword}%", f"%{keyword}%"]
+        data = db.paged(conn, "devices", where, args, "id", limit, offset)
+    data["items"] = [_device_public(r) for r in data["items"]]
+    return data
 
 
 @router.get("/devices")

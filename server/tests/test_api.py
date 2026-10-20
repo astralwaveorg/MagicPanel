@@ -647,9 +647,14 @@ def test_target_reorder(client):
     r = client.post("/api/v1/targets/reorder", headers=h, json=list(reversed(ids)))
     assert r.status_code == 200, r.text
     assert [t["id"] for t in client.get("/api/v1/targets").json()] == list(reversed(ids))
-    # 排序列表必须覆盖全部目标
+    # 列表已分页：只提交部分 id 时，按这些 id 之间的新顺序重排，其余不动
+    r = client.post("/api/v1/targets/reorder", headers=h, json=ids[:-1])
+    assert r.status_code == 200, r.text
+    # 重复 id 与不存在的 id 都要拒绝
     assert client.post("/api/v1/targets/reorder", headers=h,
-                       json=ids[:-1]).status_code == 400
+                       json=[ids[0], ids[0]]).status_code == 400
+    assert client.post("/api/v1/targets/reorder", headers=h,
+                       json=[999999]).status_code == 400
 
 
 def test_auto_publish_waits_for_filtered_speed_test(client, monkeypatch):
@@ -1953,3 +1958,37 @@ def test_retention_prunes_builds_with_release_rows(client):
                               "LEFT JOIN builds b ON b.id = r.build_id "
                               "WHERE b.id IS NULL")["c"]
         assert broken == 0
+
+
+def test_paged_list_endpoints(client):
+    """列表接口分页：超过一页时能翻页，且总数正确。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    for i in range(25):
+        r = client.post("/api/v1/groups", headers=h, json={
+            "name": f"分页组{i:02d}", "type": "select", "proxies": ["DIRECT"]})
+        assert r.status_code == 201, r.text
+
+    data = client.get("/api/v1/groups/page?limit=10&offset=0", headers=h).json()
+    assert data["total"] == 25
+    assert len(data["items"]) == 10
+    assert data["limit"] == 10 and data["offset"] == 0
+    first_page = [g["id"] for g in data["items"]]
+
+    data2 = client.get("/api/v1/groups/page?limit=10&offset=10", headers=h).json()
+    assert len(data2["items"]) == 10
+    assert not set(first_page) & {g["id"] for g in data2["items"]}
+    data3 = client.get("/api/v1/groups/page?limit=10&offset=20", headers=h).json()
+    assert len(data3["items"]) == 5
+    # 关键字过滤
+    hit = client.get("/api/v1/groups/page?keyword=分页组0", headers=h).json()
+    assert hit["total"] >= 1
+    # 其它列表端点同样可用
+    for path in ("/api/v1/rules/page", "/api/v1/sources/page",
+                 "/api/v1/rule-providers/page", "/api/v1/targets/page",
+                 "/api/v1/devices/page", "/api/v1/snippets/page",
+                 "/api/v1/builds/page"):
+        r = client.get(path + "?limit=5&offset=0", headers=h)
+        assert r.status_code == 200, (path, r.text)
+        body = r.json()
+        assert "items" in body and "total" in body

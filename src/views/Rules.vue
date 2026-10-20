@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">分流规则</h2>
     <p class="mp-page-desc">
-      按声明顺序从上到下首次匹配；最后一条必须是 MATCH 兜底。按住左侧手柄可拖动排序，调整顺序后立即生效于下一次构建。
+      按声明顺序从上到下首次匹配；最后一条必须是 MATCH 兜底。按住左侧手柄可拖动排序（分页时按当前页内的顺序重排），调整顺序后立即生效于下一次构建。
     </p>
 
     <div class="mp-toolbar">
@@ -60,6 +60,7 @@
           </el-table-column>
         </el-table>
       </div>
+      <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑规则' : '添加规则'" width="min(560px, 94vw)">
@@ -119,6 +120,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 
 // 与后端 config.RULE_TYPES 保持一致（少一种就会导致该类型根本建不出来）
@@ -129,6 +131,9 @@ const ruleTypes = [
 ]
 
 const rows = ref([])
+const total = ref(0)
+const page = ref(1)
+const limit = ref(50)
 const groups = ref([])
 const ruleProviders = ref([])
 const targets = ref([])
@@ -159,15 +164,23 @@ const form = reactive(emptyForm())
 const isFinal = computed(() => ['MATCH', 'FINAL'].includes(form.type))
 const canNoResolve = computed(() => NO_RESOLVE_TYPES.includes(form.type))
 
+function onPageChange({ page: p, limit: l }) {
+  page.value = p
+  limit.value = l
+  load()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [rules, gs, rps, targetList] = await Promise.all([
-      api('/api/v1/rules'), api('/api/v1/groups'), api('/api/v1/rule-providers'),
+    const [paged, gs, rps, targetList] = await Promise.all([
+      api(`/api/v1/rules/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api('/api/v1/groups'), api('/api/v1/rule-providers'),
       api('/api/v1/targets'),
     ])
-    rows.value = rules
+    rows.value = paged.items
+    total.value = paged.total
     groups.value = gs
     ruleProviders.value = rps.filter((p) => p.enabled)
     targets.value = targetList

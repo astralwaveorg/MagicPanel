@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
-from ..services import tester
+from ..services import tester, webdav
 
 router = APIRouter(prefix="/api/v1", tags=["misc"])
 
@@ -270,6 +270,10 @@ BACKUP_TABLES = [
     "targets", "snippets", "devices", "builds", "releases", "pointers", "settings",
     "base_configs",
 ]
+# 恢复范围比导出多一张表：sessions。
+# users 被删除时 sessions.user_id 是 ON DELETE CASCADE，会话会一起消失，
+# 恢复完把管理员踢下线；把会话一起还原才不会。
+RESTORE_TABLES = BACKUP_TABLES + ["sessions"]
 # 恢复时允许写入的列白名单：只接受表结构里真实存在的列，
 # 避免备份文件里的任意列名拼进 SQL。
 def _table_columns(conn, table: str) -> list[str]:
@@ -314,6 +318,98 @@ async def core_upload(request: Request, user=CurrentUser):
     return result
 
 
+class RestoreBody(BaseModel):
+    confirm: bool = False
+    data: dict
+
+
+class WebDavSettingsBody(BaseModel):
+    values: dict = Field(default_factory=dict)
+
+
+@router.get("/backup/webdav")
+def webdav_status(user=CurrentUser):
+    """WebDAV 备份配置与状态（不回显口令）。"""
+    with db.connect() as conn:
+        return webdav.status(conn)
+
+
+@router.put("/backup/webdav")
+def webdav_save(body: WebDavSettingsBody, user=CurrentUser):
+    """保存 WebDAV 配置。口令加密存储；password 为空表示不修改，null 表示清除。"""
+    values = dict(body.values or {})
+    if "interval_hours" in values:
+        try:
+            hours = int(values["interval_hours"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "备份间隔必须是整数小时")
+        if not 1 <= hours <= 720:
+            raise HTTPException(400, "备份间隔需在 1–720 小时之间")
+        values["interval_hours"] = str(hours)
+    if "keep" in values:
+        try:
+            keep = int(values["keep"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "保留份数必须是整数")
+        if not 1 <= keep <= 100:
+            raise HTTPException(400, "保留份数需在 1–100 之间")
+        values["keep"] = str(keep)
+    if values.get("url") and not str(values["url"]).startswith(("http://", "https://")):
+        raise HTTPException(400, "WebDAV 地址必须以 http(s):// 开头")
+    with db.tx() as conn:
+        webdav.save_settings(conn, values)
+        security.audit(conn, user["username"], "更新 WebDAV 备份配置", "backup", "",
+                       {k: ("***" if k == "password" else v) for k, v in values.items()})
+    with db.connect() as conn:
+        return webdav.status(conn)
+
+
+@router.post("/backup/webdav/test")
+def webdav_test(user=CurrentUser):
+    """测试 WebDAV 连接与鉴权。"""
+    with db.connect() as conn:
+        try:
+            detail = webdav.test_connection(conn)
+        except webdav.WebDavError as exc:
+            raise HTTPException(400, str(exc))
+    return {"ok": True, "detail": detail}
+
+
+@router.post("/backup/webdav/upload")
+def webdav_upload(user=CurrentUser):
+    """立即执行一次 WebDAV 备份。"""
+    with db.connect() as conn:
+        try:
+            result = webdav.run_backup(conn, operator=user["username"], trigger="manual")
+        except webdav.WebDavError as exc:
+            raise HTTPException(400, str(exc))
+    return {"ok": True, **result}
+
+
+@router.get("/backup/webdav/files")
+def webdav_files(user=CurrentUser):
+    """列出远端备份。"""
+    with db.connect() as conn:
+        try:
+            return {"files": webdav.list_backups(conn)}
+        except webdav.WebDavError as exc:
+            raise HTTPException(400, str(exc))
+
+
+@router.post("/backup/webdav/restore")
+def webdav_restore(body: RestoreBody, user=CurrentUser):
+    """从远端快照恢复（会覆盖当前数据，必须显式确认）。"""
+    if not body.confirm:
+        raise HTTPException(400, "恢复会覆盖当前全部数据，请设置 confirm=true 确认")
+    name = (body.data or {}).get("file", "")
+    with db.connect() as conn:
+        try:
+            result = webdav.restore_from_remote(conn, name, user["username"])
+        except webdav.WebDavError as exc:
+            raise HTTPException(400, str(exc))
+    return {"ok": True, **result}
+
+
 @router.get("/backup/export")
 def backup_export(user=CurrentUser):
     """导出全部策略与运行数据。
@@ -330,11 +426,6 @@ def backup_export(user=CurrentUser):
     return {"version": 1, "exported_at": db.now(), "tables": tables}
 
 
-class RestoreBody(BaseModel):
-    confirm: bool = False
-    data: dict
-
-
 @router.post("/backup/restore")
 def backup_restore(body: RestoreBody, user=CurrentUser):
     if not body.confirm:
@@ -347,9 +438,9 @@ def backup_restore(body: RestoreBody, user=CurrentUser):
         raise HTTPException(400, f"备份包含未知数据表：{'、'.join(sorted(unknown))}")
     with db.tx() as conn:
         # 先按依赖倒序清空（子表先删），再按依赖正序插入（父表先插）
-        for table in reversed(BACKUP_TABLES):
+        for table in reversed(RESTORE_TABLES):
             conn.execute(f"DELETE FROM {table}")
-        for table in BACKUP_TABLES:
+        for table in RESTORE_TABLES:
             rows = tables.get(table)
             if not rows:
                 continue

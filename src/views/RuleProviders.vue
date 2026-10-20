@@ -233,6 +233,7 @@ const INTERVAL_PRESETS = [
 ]
 
 const rows = ref([])
+const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const dialog = ref(false)
