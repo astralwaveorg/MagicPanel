@@ -148,8 +148,9 @@ def list_scopes(user=CurrentUser):
     """列出全部作用域（内置默认 / 通用配置 / 目标通用 / 设备专属）。"""
     with db.connect() as conn:
         docs = _all_docs(conn)
-        targets = db.all_(conn, "SELECT * FROM targets ORDER BY id")
-        devices = db.all_(conn, "SELECT * FROM devices ORDER BY id")
+        # 顺序跟着各自页面走：引擎平台页按 sort，设备管理页按 sort
+        targets = db.all_(conn, "SELECT * FROM targets ORDER BY sort, id")
+        devices = db.all_(conn, "SELECT * FROM devices ORDER BY sort, id")
     scopes = []
     for engine in base_config_service.ENGINES:
         scopes.append({
@@ -159,6 +160,11 @@ def list_scopes(user=CurrentUser):
             "customized": False,
         })
     # 通用配置：按「引擎 + 平台」，与引擎平台一一对应
+    # 顺序 = 引擎平台页的顺序；名称：该「引擎 + 平台」只有一个引擎平台时
+    # 直接用它的名字（与引擎平台页一致），有多个时退回「引擎 · 平台」
+    pair_names: dict[tuple, list] = {}
+    for row in targets:
+        pair_names.setdefault((row["engine"], row["platform"]), []).append(row["name"])
     seen_pairs = []
     for row in targets:
         pair = (row["engine"], row["platform"])
@@ -166,11 +172,15 @@ def list_scopes(user=CurrentUser):
             continue
         seen_pairs.append(pair)
         platform = PLATFORM_LABELS.get(row["platform"], row["platform"])
+        names = pair_names.get(pair) or []
+        label = (names[0] if len(names) == 1
+                 else f"{ENGINE_LABELS.get(row['engine'], row['engine'])} · {platform}")
         scopes.append({
             "kind": "general", "engine": row["engine"], "platform": row["platform"],
             "device_id": 0,
-            "label": f"{ENGINE_LABELS.get(row['engine'], row['engine'])} · {platform}",
-            "detail": "覆盖内置默认；作用于该引擎与平台的全部设备",
+            "label": label,
+            "detail": "覆盖内置默认；作用于该引擎与平台的全部设备"
+                      + (f"（对应引擎平台：{'、'.join(names)}）" if len(names) > 1 else ""),
             "customized": bool(docs.get((row["engine"], row["platform"], 0))),
         })
     for dev in devices:
@@ -182,7 +192,7 @@ def list_scopes(user=CurrentUser):
         scopes.append({
             "kind": "device", "engine": target["engine"],
             "platform": target["platform"], "device_id": int(dev["id"]),
-            "label": f"{dev['note'] or dev['name']}（设备专属）",
+            "label": f"{dev['name']}（设备专属）",
             "detail": f"{ENGINE_LABELS.get(target['engine'], target['engine'])} · "
                       f"{platform}；只影响这台设备",
             "customized": bool(docs.get(key)),
@@ -211,6 +221,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         "overlay": overlay,
         "effective": effective,
         "sources": sources,
+        "leaf_sources": base_config_service.leaf_sources(layers),
         "layers": [{"label": label, "keys": sorted(doc.keys())} for label, doc in layers],
         "content": base_config_service.to_yaml(effective),
         "updated_at": updated_at,
@@ -254,6 +265,7 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         "overlay": stored,
         "effective": effective,
         "sources": sources,
+        "leaf_sources": base_config_service.leaf_sources(layers),
         "content": content,
         "updated_at": updated_at,
         "is_default": not stored,

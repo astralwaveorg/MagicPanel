@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS devices (
   last_pull_at TEXT,
   last_pull_ip TEXT,
   pull_count INTEGER NOT NULL DEFAULT 0,
-  extra_yaml TEXT NOT NULL DEFAULT ''
+  extra_yaml TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS builds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,10 +248,13 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
-def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+def _ensure_column(conn, table: str, column: str, ddl: str) -> bool:
+    """补列；返回 True 表示这次真的加了列（用于一次性初始化）。"""
     cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+        return True
+    return False
 
 
 def init_db() -> None:
@@ -308,6 +312,10 @@ def init_db() -> None:
         # 差异配置：策略组与规则可限定适用目标（空 = 全部目标）
         _ensure_column(conn, "proxy_groups", "local_first",
                        "local_first INTEGER NOT NULL DEFAULT 0")
+        if _ensure_column(conn, "devices", "sort", "sort INTEGER NOT NULL DEFAULT 0"):
+            # 首次加列时按 id 初始化顺序：全为 0 的排序值没有区分度，
+            # 拖拽排序会"排了但没生效"。
+            conn.execute("UPDATE devices SET sort = id WHERE sort = 0")
         _ensure_column(conn, "proxy_groups", "targets",
                        "targets TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(conn, "rules", "targets",

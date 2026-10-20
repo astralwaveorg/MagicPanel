@@ -68,15 +68,39 @@
             本层已覆盖 {{ Object.keys(state.overlay || {}).length }} 个键，其余继承上层。
           </el-alert>
 
-          <!-- 生效配置：值 + 来源 -->
+          <!-- 生效配置：可点击编辑 -->
           <h3 class="mp-section-title">生效配置</h3>
-          <el-table :data="effectiveRows" size="small" class="mp-effective-table">
-            <el-table-column label="键" min-width="150">
-              <template #default="{ row }"><span class="mono">{{ row.key }}</span></template>
-            </el-table-column>
-            <el-table-column label="值" min-width="260">
+          <div class="mp-effective-toolbar">
+            <el-button v-if="!readonly" size="small" @click="openAddParam">新增参数</el-button>
+            <span class="mp-toolbar-hint">
+              点击"值"即可就地编辑；改动只影响当前作用域，保存时自动只记录与上层不同的部分。
+            </span>
+          </div>
+          <el-table :data="effectiveRows" size="small" class="mp-effective-table"
+                    row-key="path">
+            <el-table-column label="键" min-width="210">
               <template #default="{ row }">
-                <span class="mono">{{ row.value }}</span>
+                <span class="mono mp-effective-key"
+                      :style="{ paddingLeft: (row.depth * 16) + 'px' }">
+                  <span v-if="row.depth" class="mp-effective-branch">└</span>{{ row.key }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="值" min-width="320">
+              <template #default="{ row }">
+                <template v-if="editingPath === row.path">
+                  <el-input v-if="row.simple" v-model="editText" size="small" class="mono"
+                            @keyup.enter="commitEdit" @keyup.esc="cancelEdit" />
+                  <el-input v-else v-model="editText" type="textarea" :rows="3" size="small"
+                            class="mono" @keyup.esc="cancelEdit" />
+                  <div class="mp-effective-actions">
+                    <el-button size="small" type="primary" text @click="commitEdit">确定</el-button>
+                    <el-button size="small" text @click="cancelEdit">取消</el-button>
+                  </div>
+                </template>
+                <span v-else class="mono mp-effective-value"
+                      :class="{ editable: !readonly && !row.isDict }"
+                      @click="startEdit(row)">{{ row.display }}</span>
               </template>
             </el-table-column>
             <el-table-column label="来源" width="110" align="right">
@@ -85,7 +109,29 @@
                         effect="plain">{{ row.source }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column v-if="!readonly" label="" width="90" align="right">
+              <template #default="{ row }">
+                <el-button v-if="!row.isDict && row.overridden" size="small" text
+                           @click="revertKey(row)">恢复继承</el-button>
+              </template>
+            </el-table-column>
           </el-table>
+
+          <!-- 本层覆盖：这一层改掉了哪些键 -->
+          <template v-if="!readonly">
+            <h3 class="mp-section-title">本层覆盖</h3>
+            <div v-if="!overlayRows.length" class="mp-form-hint">
+              本层没有覆盖任何键，全部继承上层。
+            </div>
+            <div v-else class="mp-overlay-list">
+              <div v-for="row in overlayRows" :key="row.path" class="mp-overlay-item">
+                <span class="mono mp-effective-key"
+                      :style="{ paddingLeft: (row.depth * 16) + 'px' }">{{ row.path }}</span>
+                <span class="mono mp-overlay-value">{{ row.display }}</span>
+                <el-button size="small" text @click="revertKey(row)">恢复继承</el-button>
+              </div>
+            </div>
+          </template>
 
           <!-- 本层编辑 -->
           <template v-if="!readonly">
@@ -150,6 +196,28 @@
       </section>
     </div>
 
+    <el-dialog v-model="addDialog" title="新增参数" width="min(560px, 94vw)">
+      <p class="mp-dialog-desc">
+        在配置的任意节点下新增一个参数。路径用点号分隔（<span class="mono">dns.nameserver</span>
+        表示 dns 下的 nameserver），顶层参数直接写名字（<span class="mono">sniffer</span>）。
+        值按 YAML 解析：<span class="mono">true</span>、<span class="mono">123</span>、
+        <span class="mono">["1.1.1.1","8.8.8.8"]</span> 或一段 YAML 映射。
+      </p>
+      <el-form :model="addForm" label-position="top">
+        <el-form-item label="参数路径">
+          <el-input v-model="addForm.path" class="mono" placeholder="例如 dns.nameserver 或 sniffer" />
+        </el-form-item>
+        <el-form-item label="参数值（YAML）">
+          <el-input v-model="addForm.value" type="textarea" :rows="5" class="mono"
+                    placeholder='例如：&#10;- "1.1.1.1"&#10;- "8.8.8.8"' />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmAddParam">新增</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="previewVisible" title="产物预览" width="min(920px, 94vw)">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <el-select v-model="previewPlatform" size="small" style="width:200px" @change="doPreview">
@@ -192,6 +260,10 @@ const previewNote = ref('')
 const previewWarnings = ref([])
 const presetKey = ref('')
 const syncing = ref(false)
+const editingPath = ref('')
+const editText = ref('')
+const addDialog = ref(false)
+const addForm = reactive({ path: '', value: '' })
 
 const groupOrder = computed(() => Object.keys(groups.value))
 
@@ -224,15 +296,57 @@ const currentHint = computed(() => {
   return `覆盖通用配置，只影响这台设备（${s.detail}）`
 })
 
+// 生效配置展开成"点号路径"的扁平行：字典行是分组标题，叶子行可编辑。
+// 这样既能直接改某个叶子参数（如 dns.nameserver），也不会让人误以为
+// 顶层键是一整块不可分割的东西。
+function flattenDoc(obj, prefix = '', depth = 0, out = []) {
+  for (const [k, v] of Object.entries(obj || {})) {
+    const path = prefix ? `${prefix}.${k}` : k
+    const isDict = !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0
+    out.push({ path, key: k, depth, value: v, isDict })
+    if (isDict) flattenDoc(v, path, depth + 1, out)
+  }
+  return out
+}
+
 const effectiveRows = computed(() => {
   const eff = state.value?.effective || {}
-  const sources = state.value?.sources || {}
-  return Object.keys(eff).map((key) => ({
-    key,
-    value: formatValue(eff[key]),
-    source: sources[key] || '内置默认',
+  const leafSrc = state.value?.leaf_sources || {}
+  const topSrc = state.value?.sources || {}
+  return flattenDoc(eff).map((row) => ({
+    ...row,
+    simple: row.value === null || typeof row.value !== 'object',
+    display: row.isDict ? `{ ${Object.keys(row.value).length} 项 }` : formatValue(row.value),
+    source: leafSrc[row.path] || topSrc[row.key] || '内置默认',
+    overridden: isOverridden(row.path),
   }))
 })
+
+// 本层覆盖：这一层实际改掉的键（存下来的差异）
+const overlayRows = computed(() => {
+  const ov = state.value?.overlay || {}
+  return flattenDoc(ov).map((row) => ({
+    ...row,
+    display: row.isDict ? '{ … }' : formatValue(row.value),
+  }))
+})
+
+function isOverridden(path) {
+  const cur = getPath(doc, path)
+  if (cur === undefined) return false
+  const inherited = getPath(state.value?.inherited || {}, path)
+  return JSON.stringify(cur) !== JSON.stringify(inherited)
+}
+
+function deletePath(obj, path) {
+  const keys = path.split('.')
+  let cur = obj
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    if (!cur || typeof cur !== 'object') return
+    cur = cur[keys[i]]
+  }
+  if (cur && typeof cur === 'object') delete cur[keys[keys.length - 1]]
+}
 
 function formatValue(value) {
   if (value === null || value === undefined) return '—'
@@ -241,6 +355,82 @@ function formatValue(value) {
     return text.length > 120 ? `${text.slice(0, 120)}…` : text
   }
   return String(value)
+}
+
+function startEdit(row) {
+  if (readonly.value || row.isDict) return
+  editingPath.value = row.path
+  editText.value = row.simple ? String(row.value ?? '') : toYaml(row.value)
+}
+
+function cancelEdit() {
+  editingPath.value = ''
+  editText.value = ''
+}
+
+function commitEdit() {
+  const path = editingPath.value
+  if (!path) return
+  let value
+  if (effectiveRows.value.find((r) => r.path === path)?.simple) {
+    value = coerceScalar(editText.value)
+  } else {
+    try {
+      value = yamlLoad(editText.value)
+    } catch (e) {
+      ElMessage.error(`值格式不正确：${e.message}`)
+      return
+    }
+  }
+  setPath(doc, path, value)
+  syncRaw()
+  cancelEdit()
+}
+
+// 标量按 YAML 习惯转成布尔 / 数字，其余按字符串
+function coerceScalar(text) {
+  const t = String(text).trim()
+  if (t === 'true') return true
+  if (t === 'false') return false
+  if (t === 'null' || t === '') return null
+  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t)
+  return text
+}
+
+function revertKey(row) {
+  deletePath(doc, row.path)
+  syncRaw()
+  ElMessage.success(`已把 ${row.path} 恢复为继承上层，保存后生效`)
+}
+
+function openAddParam() {
+  addForm.path = ''
+  addForm.value = ''
+  addDialog.value = true
+}
+
+function confirmAddParam() {
+  const path = addForm.path.trim()
+  if (!path) {
+    ElMessage.warning('请填写参数路径')
+    return
+  }
+  let value
+  const text = addForm.value.trim()
+  if (text) {
+    try {
+      value = yamlLoad(text)
+    } catch (e) {
+      ElMessage.error(`值不是合法的 YAML：${e.message}`)
+      return
+    }
+  } else {
+    value = ''
+  }
+  setPath(doc, path, value)
+  syncRaw()
+  addDialog.value = false
+  ElMessage.success(`已在 ${path} 新增参数，保存后生效`)
 }
 
 function scopeKey(s) {
@@ -546,4 +736,56 @@ onMounted(async () => {
 .mp-section-title { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .mp-subsection { font-size: 12px; color: var(--mp-text-secondary); margin-bottom: 8px; }
 .mp-effective-table { margin-bottom: 4px; }
+.mp-effective-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.mp-effective-key {
+  white-space: nowrap;
+}
+.mp-effective-branch {
+  color: var(--mp-text-dim, #888);
+  margin-right: 4px;
+}
+.mp-effective-value {
+  cursor: default;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.mp-effective-value.editable {
+  cursor: text;
+  border-bottom: 1px dashed rgba(64, 158, 255, 0.45);
+}
+.mp-effective-value.editable:hover {
+  color: var(--el-color-primary);
+}
+.mp-effective-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.mp-overlay-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mp-overlay-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border: 1px solid var(--el-border-color-lighter, #eee);
+  border-radius: 4px;
+}
+.mp-overlay-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mp-text-dim, #888);
+}
 </style>

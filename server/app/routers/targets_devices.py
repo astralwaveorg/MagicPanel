@@ -255,7 +255,7 @@ def list_devices_paged(limit: int = 50, offset: int = 0, keyword: str = "",
         if keyword:
             where = "WHERE name LIKE ? OR note LIKE ?"
             args = [f"%{keyword}%", f"%{keyword}%"]
-        data = db.paged(conn, "devices", where, args, "id", limit, offset)
+        data = db.paged(conn, "devices", where, args, "sort, id", limit, offset)
     data["items"] = [_device_public(r) for r in data["items"]]
     return data
 
@@ -263,7 +263,7 @@ def list_devices_paged(limit: int = 50, offset: int = 0, keyword: str = "",
 @router.get("/devices")
 def list_devices(user=CurrentUser):
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM devices ORDER BY id")
+        rows = db.all_(conn, "SELECT * FROM devices ORDER BY sort, id")
     return [_device_public(r) for r in rows]
 
 
@@ -278,13 +278,14 @@ def create_device(body: DeviceBody, request: Request, user=CurrentUser):
         _get_target(conn, body.target_id)
         if db.one(conn, "SELECT id FROM devices WHERE name=?", (body.name,)):
             raise HTTPException(409, "同名设备已存在")
+        sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM devices"))["s"]
         cur = conn.execute(
             "INSERT INTO devices(name, platform, target_id, channel, token_hash, "
-            "token_hint, token_enc, note, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
+            "token_hint, token_enc, note, created_at, sort) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.platform, body.target_id, body.channel,
              security.sha256_text(token), token[:10], security.encrypt_text(token),
-             body.note, db.now()),
+             body.note, db.now(), sort),
         )
         security.audit(conn, user["username"], "新增设备", "device", cur.lastrowid,
                        {"name": body.name})
@@ -319,6 +320,112 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
                        {"name": body.name})
         row = _get_device(conn, did)
     return _device_public(row)
+
+
+# ---- 设备的批量操作与排序 ----
+
+class BatchDeviceIds(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+class BatchDevicePatch(BaseModel):
+    """批量修改设备。字段为 null 表示不修改；空字符串表示清空。"""
+    ids: list[int] = Field(default_factory=list)
+    target_id: int | None = None
+    channel: str | None = None
+    note: str | None = None
+
+
+@router.post("/devices/reorder")
+def reorder_devices(ids: list[int], user=CurrentUser):
+    """设备排序：列表已分页时按提交的这些 id 重排，其余记录不动。"""
+    with db.tx() as conn:
+        if len(set(ids)) != len(ids):
+            raise HTTPException(400, "排序列表里有重复项")
+        known = {r["id"] for r in db.all_(conn, "SELECT id FROM devices")}
+        if any(i not in known for i in ids):
+            raise HTTPException(400, "排序列表包含不存在的记录")
+        if not db.reorder_subset(conn, "devices", ids):
+            raise HTTPException(400, "排序未生效")
+        security.audit(conn, user["username"], "调整设备顺序", "device",
+                       ",".join(str(i) for i in ids))
+    return {"ok": True}
+
+
+@router.patch("/devices/batch")
+def batch_update_devices(body: BatchDevicePatch, user=CurrentUser):
+    """批量修改设备的共性配置（引擎平台、通道、备注）。
+
+    换引擎平台时平台的取值随目标一起改，避免与目标不一致。
+    """
+    ids = list(dict.fromkeys(body.ids))
+    if not ids:
+        raise HTTPException(400, "请先选择要修改的设备")
+    if body.target_id is None and body.channel is None and body.note is None:
+        raise HTTPException(400, "请至少选择一个要修改的字段")
+    if body.channel is not None and body.channel not in CHANNELS:
+        raise HTTPException(400, "通道仅支持 stable / candidate")
+    updated = 0
+    skipped: list[dict] = []
+    missing: list[int] = []
+    with db.tx() as conn:
+        target = None
+        if body.target_id is not None:
+            target = _get_target(conn, body.target_id)
+        for did in ids:
+            row = db.one(conn, "SELECT * FROM devices WHERE id=?", (did,))
+            if not row:
+                missing.append(did)
+                continue
+            fields: list[str] = []
+            args: list = []
+            notes: list[str] = []
+            if body.target_id is not None:
+                fields.append("target_id=?")
+                args.append(body.target_id)
+                # 平台跟随目标，避免出现"目标是 Stash-iOS、平台却是 macOS"
+                fields.append("platform=?")
+                args.append(target["platform"])
+            if body.channel is not None:
+                fields.append("channel=?")
+                args.append(body.channel)
+            if body.note is not None:
+                fields.append("note=?")
+                args.append(body.note)
+            if not fields:
+                continue
+            conn.execute(
+                f"UPDATE devices SET {', '.join(fields)} WHERE id=?",
+                (*args, did))
+            updated += 1
+            if notes:
+                skipped.append({"id": did, "name": row["name"],
+                                "reason": "；".join(notes)})
+        security.audit(conn, user["username"], "批量修改设备", "device",
+                       ",".join(str(i) for i in ids),
+                       {"target_id": body.target_id, "channel": body.channel,
+                        "note": body.note})
+    return {"ok": True, "updated": updated, "missing": missing, "skipped": skipped}
+
+
+@router.post("/devices/batch/delete")
+def batch_delete_devices(body: BatchDeviceIds, user=CurrentUser):
+    """批量删除设备：设备专属配置一并清理，令牌同时失效。"""
+    deleted: list[int] = []
+    missing: list[int] = []
+    with db.tx() as conn:
+        for did in dict.fromkeys(body.ids):
+            row = db.one(conn, "SELECT * FROM devices WHERE id=?", (did,))
+            if not row:
+                missing.append(did)
+                continue
+            conn.execute("DELETE FROM devices WHERE id=?", (did,))
+            # 设备专属基础配置一并清理，否则会成为孤儿行进入构建快照
+            conn.execute("DELETE FROM base_configs WHERE device_id=?", (did,))
+            deleted.append(did)
+            security.audit(conn, user["username"], "批量删除设备（令牌同时失效）",
+                           "device", did, {"name": row["name"]})
+    return {"ok": True, "deleted": deleted, "missing": missing}
 
 
 @router.post("/devices/{did}/rotate-token")

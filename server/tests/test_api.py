@@ -2165,3 +2165,91 @@ def test_batch_group_update_drops_self_reference(client):
     members = next(x for x in g if x["name"] == "自环组")["proxies"]
     assert "自环组" not in members
     assert "DIRECT" in members
+
+
+def test_device_reorder_and_batch(client):
+    """设备排序、批量修改、批量删除。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    t1 = client.post("/api/v1/targets", headers=h, json={
+        "name": "t-one", "engine": "stash", "platform": "ios"}).json()
+    t2 = client.post("/api/v1/targets", headers=h, json={
+        "name": "t-two", "engine": "stash", "platform": "macos"}).json()
+    ids = []
+    for i in range(3):
+        r = client.post("/api/v1/devices", headers=h, json={
+            "name": f"dev{i}", "platform": "ios", "target_id": t1["id"],
+            "channel": "stable", "note": f"note{i}"})
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+    # 排序
+    r = client.post("/api/v1/devices/reorder", headers=h, json=list(reversed(ids)))
+    assert r.status_code == 200, r.text
+    rows = client.get("/api/v1/devices", headers=h).json()
+    assert [d["id"] for d in rows] == list(reversed(ids))
+    # 批量修改：换目标（平台应跟随目标）、换通道、改备注
+    r = client.patch("/api/v1/devices/batch", headers=h, json={
+        "ids": ids[:2], "target_id": t2["id"], "channel": "candidate", "note": "批量"})
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 2
+    rows = client.get("/api/v1/devices", headers=h).json()
+    by_id = {d["id"]: d for d in rows}
+    assert by_id[ids[0]]["target_id"] == t2["id"]
+    assert by_id[ids[0]]["platform"] == "macos"     # 平台跟随目标
+    assert by_id[ids[0]]["channel"] == "candidate"
+    assert by_id[ids[0]]["note"] == "批量"
+    assert by_id[ids[2]]["note"] == "note2"          # 未选中的不动
+    # 空字段 → 400
+    assert client.patch("/api/v1/devices/batch", headers=h, json={
+        "ids": ids[:1]}).status_code == 400
+    # 批量删除：设备专属配置一并清理
+    r = client.post("/api/v1/devices/batch/delete", headers=h, json={"ids": ids[:2]})
+    assert r.status_code == 200, r.text
+    assert set(r.json()["deleted"]) == set(ids[:2])
+    assert len(client.get("/api/v1/devices", headers=h).json()) == 1
+
+
+def test_base_config_scopes_follow_target_and_device_order(client):
+    """产物配置页的作用域顺序跟着引擎平台页、设备管理页走，名称也一致。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    t1 = client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-iOS", "engine": "stash", "platform": "ios"}).json()
+    t2 = client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-macOS", "engine": "stash", "platform": "macos"}).json()
+    # 把 macOS 排到前面
+    assert client.post("/api/v1/targets/reorder", headers=h,
+                       json=[t2["id"], t1["id"]]).status_code == 200
+    d1 = client.post("/api/v1/devices", headers=h, json={
+        "name": "MacBook", "platform": "macos", "target_id": t2["id"]}).json()
+    d2 = client.post("/api/v1/devices", headers=h, json={
+        "name": "iPhone", "platform": "ios", "target_id": t1["id"]}).json()
+    assert client.post("/api/v1/devices/reorder", headers=h,
+                       json=[d2["id"], d1["id"]]).status_code == 200
+    scopes = client.get("/api/v1/base-config/scopes", headers=h).json()["scopes"]
+    general = [s for s in scopes if s["kind"] == "general"]
+    assert [s["label"] for s in general][:2] == ["Stash-macOS", "Stash-iOS"]
+    device = [s for s in scopes if s["kind"] == "device"]
+    assert [s["label"] for s in device] == ["iPhone（设备专属）", "MacBook（设备专属）"]
+
+
+def test_base_config_leaf_sources(client):
+    """叶子级来源：dns.nameserver 与 dns.enable 可以来自不同层级。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-iOS", "engine": "stash", "platform": "ios"})
+    content = (
+        "mode: rule\n"
+        "dns:\n"
+        "  enable: true\n"
+        "  nameserver:\n"
+        "    - 1.1.1.1\n"
+    )
+    r = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h,
+                   json={"content": content, "updated_at": ""})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    leaf = body["leaf_sources"]
+    assert leaf["dns.nameserver"] == "通用配置"
+    assert leaf["mode"] == "内置默认"

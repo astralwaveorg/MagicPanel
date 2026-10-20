@@ -167,6 +167,28 @@ def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
     return effective, sources
 
 
+def leaf_sources(layers: list[tuple[str, dict]]) -> dict[str, str]:
+    """每个叶子路径的来源层级（点号路径，如 "dns.nameserver"）。
+
+    顶层来源不足以说明"dns 里的 nameserver 来自哪一层"——通用配置改了
+    dns.nameserver、内置默认改了 dns.enable，两者来源不同。界面按叶子
+    展示来源，这里给出对应的点号路径映射。
+    """
+    sources: dict[str, str] = {}
+
+    def mark(path: str, value, label: str) -> None:
+        if isinstance(value, dict) and value:
+            for k, v in value.items():
+                mark(f"{path}.{k}", v, label)
+        else:
+            sources[path] = label
+
+    for label, doc in layers:
+        for key, value in (doc or {}).items():
+            mark(key, value, label)
+    return sources
+
+
 def scope_layers(engine: str, platform: str = "", device_id: int = 0,
                  docs: dict | None = None) -> list[tuple[str, dict]]:
     """按作用域取出各层文档（从低到高：内置默认 → 通用配置 → 设备专属）。

@@ -6,7 +6,14 @@
     </p>
 
     <div class="mp-toolbar">
-      <div class="left"></div>
+      <div class="left">
+        <template v-if="selected.length">
+          <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
+          <el-button @click="openBatch">批量修改</el-button>
+          <el-button type="danger" plain @click="removeSelected">批量删除</el-button>
+          <el-button link @click="clearSelection">取消选择</el-button>
+        </template>
+      </div>
       <el-button type="primary" :disabled="!targets.length" @click="openEdit()">添加设备</el-button>
     </div>
 
@@ -25,7 +32,20 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table :data="rows" v-loading="loading">
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+                  @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="44" fixed />
+          <el-table-column label="顺序" width="96" align="center">
+            <template #default="{ row, $index }">
+              <div class="order-cell">
+                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+                <el-button text size="small" :disabled="$index === 0"
+                           @click="move($index, -1)">↑</el-button>
+                <el-button text size="small" :disabled="$index === rows.length - 1"
+                           @click="move($index, 1)">↓</el-button>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="文件名" min-width="130" fixed>
             <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
           </el-table-column>
@@ -107,6 +127,41 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="batchDialog" title="批量修改设备" width="min(560px, 94vw)">
+      <p class="mp-dialog-desc">
+        将选中的 {{ selected.length }} 台设备按下面的设置统一修改。
+        只勾选的项会生效：勾上但内容为空 = 清空该项；不勾 = 保持原样。
+        换引擎平台时，设备的平台取值会跟着目标一起改。
+      </p>
+      <el-form :model="batch" label-position="top">
+        <el-form-item>
+          <el-checkbox v-model="batch.useTarget">修改引擎平台</el-checkbox>
+        </el-form-item>
+        <el-select v-if="batch.useTarget" v-model="batch.target_id" filterable style="width:100%"
+                   placeholder="选择统一的引擎平台">
+          <el-option v-for="t in targets" :key="t.id" :value="t.id"
+                     :label="`${t.name}（${t.engine}/${t.platform}）`" />
+        </el-select>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useChannel">修改通道</el-checkbox>
+        </el-form-item>
+        <el-radio-group v-if="batch.useChannel" v-model="batch.channel">
+          <el-radio value="stable">稳定通道</el-radio>
+          <el-radio value="candidate">候选通道</el-radio>
+        </el-radio-group>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useNote">修改设备名（备注）</el-checkbox>
+        </el-form-item>
+        <el-input v-if="batch.useNote" v-model="batch.note" placeholder="留空即清空" />
+      </el-form>
+      <template #footer>
+        <el-button @click="batchDialog = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" @click="saveBatch">应用</el-button>
+      </template>
+    </el-dialog>
+
     <SecretDialog v-model:visible="secretVisible" :url="secretUrl" />
   </div>
 </template>
@@ -116,6 +171,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
@@ -134,6 +190,26 @@ const saving = ref(false)
 const editing = ref(null)
 const secretVisible = ref(false)
 const secretUrl = ref('')
+const selected = ref([])
+const batchDialog = ref(false)
+const batchSaving = ref(false)
+const tableRef = ref(null)
+const batch = reactive({
+  useTarget: false, target_id: null,
+  useChannel: false, channel: 'stable',
+  useNote: false, note: '',
+})
+
+const sorter = useRowSortable(tableRef, rows, async (ids) => {
+  try {
+    await api('/api/v1/devices/reorder', { method: 'POST', body: ids })
+    ElMessage.success('顺序已更新')
+  } catch (e) {
+    error.value = e.message
+    ElMessage.error(e.message)
+  }
+  await load()
+})
 
 const emptyForm = () => ({
   name: '', platform: 'ios', target_id: null, channel: 'stable', note: '',
@@ -174,6 +250,83 @@ async function load() {
   }
 }
 onMounted(load)
+
+function onSelectionChange(selection) {
+  selected.value = selection
+}
+
+function clearSelection() {
+  selected.value = []
+  tableRef.value?.clearSelection()
+}
+
+async function move(index, delta) {
+  const next = index + delta
+  if (next < 0 || next >= rows.value.length) return
+  const list = [...rows.value]
+  const [item] = list.splice(index, 1)
+  list.splice(next, 0, item)
+  try {
+    await api('/api/v1/devices/reorder', { method: 'POST', body: list.map((r) => r.id) })
+    ElMessage.success('顺序已更新')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+function openBatch() {
+  if (!selected.value.length) return
+  batch.useTarget = false; batch.target_id = null
+  batch.useChannel = false; batch.channel = 'stable'
+  batch.useNote = false; batch.note = ''
+  batchDialog.value = true
+}
+
+async function saveBatch() {
+  if (!selected.value.length) return
+  const payload = { ids: selected.value.map((r) => r.id) }
+  if (batch.useTarget) payload.target_id = batch.target_id
+  if (batch.useChannel) payload.channel = batch.channel
+  if (batch.useNote) payload.note = batch.note
+  const keys = Object.keys(payload).filter((k) => k !== 'ids')
+  if (!keys.length) {
+    ElMessage.warning('请至少勾选一项要修改的内容')
+    return
+  }
+  batchSaving.value = true
+  try {
+    const resp = await api('/api/v1/devices/batch', { method: 'PATCH', body: payload })
+    batchDialog.value = false
+    ElMessage.success(`已更新 ${resp.updated} 台设备`)
+    clearSelection()
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    batchSaving.value = false
+  }
+}
+
+async function removeSelected() {
+  if (!selected.value.length) return
+  const ids = selected.value.map((r) => r.id)
+  const ok = await confirmBox(
+    `删除选中的 ${ids.length} 台设备？订阅地址会立即失效，设备专属配置一并删除。`,
+    '批量删除设备', { type: 'warning', confirmButtonText: '删除' })
+  if (!ok) return
+  try {
+    const resp = await api('/api/v1/devices/batch/delete', {
+      method: 'POST', body: { ids },
+    })
+    ElMessage.success(`已删除 ${resp.deleted.length} 台设备`
+      + (resp.missing?.length ? `，${resp.missing.length} 台已不存在` : ''))
+    clearSelection()
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
 
 function openEdit(row) {
   editing.value = row || null
