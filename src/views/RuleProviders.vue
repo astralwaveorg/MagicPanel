@@ -93,17 +93,8 @@
           </el-table-column>
         </el-table>
       </div>
-      <div class="mp-pagination">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="filteredRows.length"
-          layout="total, sizes, prev, pager, next, jumper"
-          background
-          small
-        />
-      </div>
+      <Pager :page="page" :limit="pageSize" :total="filteredRows.length"
+             :sizes="[10, 20, 50, 100]" @change="onPagerChange" />
     </div>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑规则来源' : '添加规则来源'"
@@ -221,6 +212,7 @@ import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
+import Pager from '../components/Pager.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
@@ -259,6 +251,17 @@ const deletedCount = ref(0)
 const query = ref('')
 const page = ref(1)
 const pageSize = ref(20)
+
+function onPagerChange({ page: p, limit: l }) {
+  if (l && l !== pageSize.value) {
+    pageSize.value = l
+    page.value = 1
+    clearSelection()
+    return
+  }
+  page.value = p
+  clearSelection()
+}
 
 const remoteRows = computed(() => rows.value.filter((r) => r.kind === 'remote'))
 const filteredRows = computed(() => {

@@ -40,17 +40,8 @@
           </el-table-column>
         </el-table>
       </div>
-      <div style="display:flex;justify-content:flex-end;padding:10px 12px">
-        <el-pagination
-          layout="total, sizes, prev, pager, next, jumper"
-          :total="total"
-          :page-size="limit"
-          :page-sizes="[50, 100, 200, 500]"
-          :current-page="page"
-          @current-change="onPage"
-          @size-change="onSize"
-        />
-      </div>
+      <Pager :page="page" :limit="limit" :total="total" :sizes="[50, 100, 200, 500]"
+             @change="onPagerChange" />
     </div>
   </div>
 </template>
@@ -61,6 +52,7 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 import { fmtTime } from '../format'
 
 const rows = ref([])
@@ -91,6 +83,15 @@ async function load() {
 function reload() {
   page.value = 1
   load()
+}
+
+function onPagerChange({ page: p, limit: l }) {
+  if (l && l !== limit.value) {
+    limit.value = l
+    onSize(l)
+    return
+  }
+  onPage(p)
 }
 
 function onPage(p) {
