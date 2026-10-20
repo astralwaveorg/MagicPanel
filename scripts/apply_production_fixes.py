@@ -111,30 +111,32 @@ def insert_baidu_rules(conn) -> int:
 
 
 def apply_personal_config(conn) -> dict:
-    """把个人直连域名与 Fake-IP 过滤写进各引擎的基础配置。"""
+    """把个人直连域名与 Fake-IP 过滤写进各（引擎 + 平台）通用配置。"""
     result = {}
     now = db.now()
-    for engine in bc.ENGINES:
+    pairs = [(r["engine"], r["platform"]) for r in db.all_(
+        conn, "SELECT DISTINCT engine, platform FROM targets ORDER BY engine, platform")]
+    for engine, platform in pairs:
         row = db.one(conn, "SELECT * FROM base_configs "
-                           "WHERE engine=? AND target='' AND device_id=0", (engine,))
+                           "WHERE engine=? AND platform=? AND device_id=0",
+                     (engine, platform))
+        doc = {}
         if row:
             try:
                 doc = bc.parse_content(row["content"])
             except ValueError:
-                doc = bc.default_doc(engine)
-        else:
-            doc = bc.default_doc(engine)
+                doc = {}
         doc[bc.DIRECT_DOMAINS_KEY] = list(DIRECT_DOMAINS)
         doc[bc.FAKE_IP_FILTER_KEY] = list(FAKE_IP_FILTER)
         text = bc.to_yaml(bc.normalize(doc))
         conn.execute(
-            "INSERT INTO base_configs(engine, target, device_id, content, updated_at) "
+            "INSERT INTO base_configs(engine, platform, device_id, content, updated_at) "
             "VALUES(?,?,?,?,?) "
-            "ON CONFLICT(engine, target, device_id) DO UPDATE SET "
+            "ON CONFLICT(engine, platform, device_id) DO UPDATE SET "
             "content=excluded.content, updated_at=excluded.updated_at",
-            (engine, "", 0, text, now),
+            (engine, platform, 0, text, now),
         )
-        result[engine] = len(DIRECT_DOMAINS)
+        result[f"{engine}|{platform}"] = len(DIRECT_DOMAINS)
     security.audit(conn, "astral", "更新基础配置", "base_config", "personal",
                    {"direct_domains": len(DIRECT_DOMAINS),
                     "fake_ip_filter": len(FAKE_IP_FILTER)})
@@ -144,8 +146,9 @@ def apply_personal_config(conn) -> dict:
 def normalize_overlays(conn) -> int:
     """把各作用域里"整份文档"收敛为"只存与上层不同的差异"。"""
     changed = 0
-    for row in db.all_(conn, "SELECT engine, target, device_id, content FROM base_configs"):
-        engine, target, device_id = row["engine"], row["target"] or "", int(row["device_id"] or 0)
+    for row in db.all_(conn, "SELECT engine, platform, device_id, content FROM base_configs"):
+        engine, platform = row["engine"], row["platform"] or ""
+        device_id = int(row["device_id"] or 0)
         try:
             stored = bc.parse_content(row["content"])
         except ValueError:
@@ -153,21 +156,21 @@ def normalize_overlays(conn) -> int:
         if not stored:
             continue
         docs = {}
-        for r in db.all_(conn, "SELECT engine, target, device_id, content FROM base_configs"):
+        for r in db.all_(conn, "SELECT engine, platform, device_id, content FROM base_configs"):
             try:
-                docs[(r["engine"], r["target"] or "", int(r["device_id"] or 0))] = \
+                docs[(r["engine"], r["platform"] or "", int(r["device_id"] or 0))] = \
                     bc.parse_content(r["content"])
             except ValueError:
                 continue
-        layers = bc.scope_layers(engine, target, device_id, docs)
+        layers = bc.scope_layers(engine, platform, device_id, docs)
         inherited, _ = (bc.cascade(layers[:-1]) if len(layers) > 1 else ({}, {}))
         overlay = bc.diff_overlay(inherited, stored)
         if overlay != stored:
             conn.execute(
                 "UPDATE base_configs SET content=?, updated_at=? "
-                "WHERE engine=? AND target=? AND device_id=?",
+                "WHERE engine=? AND platform=? AND device_id=?",
                 (bc.to_yaml(bc.normalize(overlay)), db.now(),
-                 engine, target, device_id))
+                 engine, platform, device_id))
             changed += 1
     return changed
 

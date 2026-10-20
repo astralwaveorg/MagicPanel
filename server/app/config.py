@@ -11,6 +11,13 @@ DB_PATH = DATA_DIR / "magicpanel.db"
 SECRET_KEY_PATH = DATA_DIR / "secret.key"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# 专有名词展示（大小写必须规范）
+ENGINE_LABELS = {"stash": "Stash", "mihomo": "Mihomo"}
+PLATFORM_LABELS = {
+    "ios": "iOS", "macos": "macOS", "tvos": "tvOS", "windows": "Windows",
+    "android": "Android", "linux": "Linux",
+}
+
 GUARD_PROXY = "空组保护"           # 永远无法出站的占位节点，防止空策略组被客户端隐式改写
 BUILTIN_TARGETS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL"}
 GROUP_TYPES = {"select", "url-test", "fallback", "load-balance", "relay"}

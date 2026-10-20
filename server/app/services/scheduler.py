@@ -211,8 +211,8 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
             summary["build_error"] = f"读取策略失败：{exc}"
             return
         if not snapshot["targets"]:
-            # 没有发布目标时不推进检查时间，添加目标后可尽快自动构建
-            summary["build_error"] = "尚未配置任何发布目标"
+            # 没有引擎平台时不推进检查时间，添加后可尽快自动构建
+            summary["build_error"] = "尚未配置任何引擎平台"
             return
         if latest and latest["policy_sha"] == policy_sha:
             with db.tx() as wconn:

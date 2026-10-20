@@ -202,11 +202,11 @@ CREATE TABLE IF NOT EXISTS snippets (
 );
 CREATE TABLE IF NOT EXISTS base_configs (
   engine TEXT NOT NULL DEFAULT 'stash',
-  target TEXT NOT NULL DEFAULT '',
+  platform TEXT NOT NULL DEFAULT '',
   device_id INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (engine, target, device_id)
+  PRIMARY KEY (engine, platform, device_id)
 );
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -267,7 +267,7 @@ def init_db() -> None:
                        "client_interval INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "rule_providers", "client_interval",
                        "client_interval INTEGER NOT NULL DEFAULT 0")
-        # 发布目标支持拖动排序
+        # 引擎平台支持拖动排序
         _ensure_column(conn, "targets", "sort", "sort INTEGER NOT NULL DEFAULT 0")
         # 通道指针记录最近一次发布/回滚的来源，供界面展示“当前版本由谁、何时发布”
         _ensure_column(conn, "pointers", "released_at", "released_at TEXT")
@@ -322,10 +322,10 @@ def _migrate_settings(conn) -> None:
 
 
 def _migrate_base_configs_scope(conn) -> None:
-    """base_configs 主键演进：engine → (engine, target) → (engine, target, device_id)。
+    """base_configs 主键演进：engine → (engine, target) → (engine, platform, device_id)。
 
-    每一级作用域都要能并存多份配置，旧主键放不下，需要重建表；
-    只在检测到旧结构时执行一次，存量内容按作用域原样搬过去。
+    作用域最终落在「引擎 + 平台」与「设备」两级；旧的 target 级通过 targets 表
+    映射成 platform，找不到对应目标的行直接丢弃（该作用域已不存在）。
     """
     info = list(conn.execute("PRAGMA table_info(base_configs)"))
     if not info:
@@ -340,20 +340,38 @@ def _migrate_base_configs_scope(conn) -> None:
         info = list(conn.execute("PRAGMA table_info(base_configs)"))
     pk_cols = [r["name"] for r in sorted(
         (x for x in info if x["pk"]), key=lambda x: x["pk"])]
-    if pk_cols == ["engine", "target", "device_id"]:
+    if pk_cols == ["engine", "platform", "device_id"]:
         return
+
+    target_platform = {
+        r["name"]: r["platform"] for r in conn.execute(
+            "SELECT name, platform FROM targets")}
+    device_platform = {}
+    for r in conn.execute("SELECT d.id AS id, t.platform AS platform FROM devices d "
+                          "JOIN targets t ON t.id = d.target_id"):
+        device_platform[int(r["id"])] = r["platform"]
+
     conn.execute("DROP TABLE IF EXISTS base_configs_scope_new")
     conn.execute("""CREATE TABLE base_configs_scope_new (
         engine TEXT NOT NULL DEFAULT 'stash',
-        target TEXT NOT NULL DEFAULT '',
+        platform TEXT NOT NULL DEFAULT '',
         device_id INTEGER NOT NULL DEFAULT 0,
         content TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL,
-        PRIMARY KEY (engine, target, device_id))""")
-    conn.execute(
-        "INSERT OR REPLACE INTO base_configs_scope_new"
-        "(engine, target, device_id, content, updated_at) "
-        "SELECT engine, target, 0, content, updated_at FROM base_configs")
+        PRIMARY KEY (engine, platform, device_id))""")
+    for row in conn.execute("SELECT engine, target, device_id, content, updated_at "
+                             "FROM base_configs"):
+        device_id = int(row["device_id"] or 0)
+        if device_id:
+            platform = device_platform.get(device_id, "")
+        else:
+            platform = target_platform.get(row["target"] or "", "")
+        if not platform:
+            continue
+        conn.execute(
+            "INSERT OR REPLACE INTO base_configs_scope_new"
+            "(engine, platform, device_id, content, updated_at) VALUES(?,?,?,?,?)",
+            (row["engine"], platform, device_id, row["content"], row["updated_at"]))
     conn.execute("DROP TABLE base_configs")
     conn.execute("ALTER TABLE base_configs_scope_new RENAME TO base_configs")
 
@@ -366,7 +384,7 @@ def _migrate_base_configs(conn) -> None:
     for engine in base_config_service.ENGINES:
         conn.execute(
             "INSERT OR IGNORE INTO base_configs"
-            "(engine, target, device_id, content, updated_at) "
+            "(engine, platform, device_id, content, updated_at) "
             "VALUES(?,?,?,?,?)",
             (engine, "", 0, base_config_service.to_yaml({}), now()),
         )

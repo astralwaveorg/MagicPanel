@@ -95,19 +95,19 @@ function onToggleTheme() {
 const isAuthPage = computed(() =>
   route.meta.standalone || ['/admin/login', '/admin/setup'].includes(route.path))
 
-// 侧边栏顺序按使用频率：日常改动（来源/策略组/规则）→ 取订阅地址 → 构建发布，
-// 其后是低频的配置与运维页，设置永远在最后。
+// 侧边栏按依赖顺序排列：上游内容 → 引用它们 → 产物形态 → 配置 → 设备 → 构建发布 → 运维。
+// 高频页面同时尽量靠上，日常改策略的路径最短。
 const menu = [
   { path: '/admin', title: '概览', icon: Odometer },
   { path: '/admin/sources', title: '节点来源', icon: Connection },
+  { path: '/admin/rule-providers', title: '规则来源', icon: Collection },
   { path: '/admin/groups', title: '策略组', icon: SetUp },
   { path: '/admin/rules', title: '分流规则', icon: Filter },
+  { path: '/admin/targets', title: '引擎平台', icon: Monitor },
+  { path: '/admin/artifact', title: '产物配置', icon: Operation },
+  { path: '/admin/snippets', title: '功能模块', icon: MagicStick },
   { path: '/admin/devices', title: '设备管理', icon: Iphone },
   { path: '/admin/builds', title: '构建发布', icon: Promotion },
-  { path: '/admin/artifact', title: '产物配置', icon: Operation },
-  { path: '/admin/targets', title: '发布目标', icon: Monitor },
-  { path: '/admin/rule-providers', title: '规则来源', icon: Collection },
-  { path: '/admin/snippets', title: '功能模块', icon: MagicStick },
   { path: '/admin/automation', title: '自动发布', icon: Timer },
   { path: '/admin/audit', title: '审计日志', icon: Document },
   { path: '/admin/settings', title: '设置', icon: Tools },

@@ -108,13 +108,18 @@ def scope_rules(conn) -> int:
 
 
 def server_base_config(conn) -> bool:
-    """Mac mini（常驻服务）：更安静的日志 + 内网域名走系统解析。"""
-    row = db.one(conn, "SELECT * FROM base_configs "
-                       "WHERE engine='stash' AND target='stash-macos-server'")
+    """Mac mini（常驻服务）：内网域名走系统解析——放在设备专属层。
+
+    只这台设备需要；通用配置与其它设备不受影响。
+    """
+    dev = db.one(conn, "SELECT * FROM devices WHERE name='Stash-Macmini' "
+                       "OR note LIKE 'Mac mini%' OR note LIKE 'Macmini%' LIMIT 1")
+    if not dev:
+        return False
+    target = db.one(conn, "SELECT * FROM targets WHERE id=?", (dev["target_id"],))
+    if not target:
+        return False
     doc = {
-        "mode": "rule",
-        "log-level": "warning",
-        "ipv6": False,
         "dns": {
             # 自带解析链，不依赖客户端兜底；内网域名走系统解析
             "nameserver": [
@@ -130,20 +135,58 @@ def server_base_config(conn) -> bool:
         },
     }
     text = bc.to_yaml(bc.normalize(doc))
+    row = db.one(conn, "SELECT content FROM base_configs "
+                       "WHERE engine=? AND platform=? AND device_id=?",
+                 (target["engine"], target["platform"], dev["id"]))
     if row and row["content"] == text:
         return False
     conn.execute(
-        "INSERT INTO base_configs(engine, target, device_id, content, updated_at) "
-        "VALUES(?,?,?,?,?) ON CONFLICT(engine, target, device_id) DO UPDATE SET "
+        "INSERT INTO base_configs(engine, platform, device_id, content, updated_at) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(engine, platform, device_id) DO UPDATE SET "
         "content=excluded.content, updated_at=excluded.updated_at",
-        ("stash", "stash-macos-server", 0, text, db.now()))
+        (target["engine"], target["platform"], dev["id"], text, db.now()))
     return True
+
+
+def drop_stale_target(conn) -> list:
+    """删除遗留的 stash-macos-server 目标，并把设备改挂到 Stash-macOS。"""
+    removed = []
+    stale = db.one(conn, "SELECT * FROM targets WHERE name='stash-macos-server'")
+    if not stale:
+        return removed
+    main = db.one(conn, "SELECT * FROM targets WHERE name='Stash-macOS'")
+    if main:
+        conn.execute("UPDATE devices SET target_id=? WHERE target_id=?",
+                     (main["id"], stale["id"]))
+    conn.execute("DELETE FROM targets WHERE id=?", (stale["id"],))
+    removed.append("stash-macos-server")
+    return removed
+
+
+def fix_device_names(conn) -> list:
+    """专有名词规范：Mac mini。"""
+    changed = []
+    for row in db.all_(conn, "SELECT id, name, note FROM devices"):
+        note = row["note"] or ""
+        if "Macmini" in note or "Mac Mini" in note:
+            new_note = note.replace("Macmini", "Mac mini").replace("Mac Mini", "Mac mini")
+            conn.execute("UPDATE devices SET note=? WHERE id=?", (new_note, row["id"]))
+            changed.append(f"{row['name']}：{note} → {new_note}")
+        name = row["name"] or ""
+        if "Macmini" in name:
+            new_name = name.replace("Macmini", "Mac-mini")
+            if not db.one(conn, "SELECT id FROM devices WHERE name=?", (new_name,)):
+                conn.execute("UPDATE devices SET name=? WHERE id=?", (new_name, row["id"]))
+                changed.append(f"文件名 {name} → {new_name}")
+    return changed
 
 
 def main() -> None:
     with db.tx() as conn:
+        dropped = drop_stale_target(conn)
         renamed_targets = rename_targets(conn)
         renamed_devices = rename_devices(conn)
+        renamed_devices += fix_device_names(conn)
         groups = scope_groups(conn)
         rules = scope_rules(conn)
         server = server_base_config(conn)
@@ -152,6 +195,7 @@ def main() -> None:
                         "groups_scoped": groups, "rules_scoped": rules,
                         "server_base": server})
     print(json.dumps({
+        "dropped_targets": dropped,
         "renamed_targets": renamed_targets,
         "renamed_devices": renamed_devices,
         "groups_scoped": groups,

@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2 class="mp-page-title">发布目标</h2>
+    <h2 class="mp-page-title">引擎平台</h2>
     <p class="mp-page-desc">
       一个目标对应一类客户端（引擎 + 平台）。同一策略按目标编译为对应方言；目标扩展用于平台差异，整键覆盖。
       按住左侧手柄可拖动排序。
@@ -8,13 +8,13 @@
 
     <div class="mp-toolbar">
       <div class="left"></div>
-      <el-button type="primary" @click="openEdit()">添加发布目标</el-button>
+      <el-button type="primary" @click="openEdit()">添加引擎平台</el-button>
     </div>
 
     <EmptyState
       v-if="!rows.length"
-      reason="还没有发布目标。"
-      next="点击“添加发布目标”，例如 stash / ios 与 mihomo / android 各建一个。"
+      reason="还没有引擎平台。"
+      next="点击“添加引擎平台”，例如 Stash · macOS 与 Mihomo · Windows 各建一个。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -38,7 +38,7 @@
           <el-table-column prop="description" label="说明" min-width="160">
             <template #default="{ row }">{{ row.description || '—' }}</template>
           </el-table-column>
-          <el-table-column label="目标扩展" min-width="120">
+          <el-table-column label="平台扩展" min-width="120">
             <template #default="{ row }">{{ row.extra_yaml ? '有（字典递归 / 列表追加）' : '—' }}</template>
           </el-table-column>
           <el-table-column label="操作" width="150">
@@ -51,7 +51,7 @@
       </div>
     </div>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑发布目标' : '添加发布目标'"
+    <el-dialog v-model="dialog" :title="editing ? '编辑引擎平台' : '添加引擎平台'"
                width="min(620px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-row :gutter="12">
@@ -234,7 +234,7 @@ async function save() {
 }
 
 async function remove(row) {
-  if (!await confirmBox(`删除发布目标 “${row.name}”？`, '删除发布目标')) return
+  if (!await confirmBox(`删除引擎平台 “${row.name}”？`, '删除引擎平台')) return
   try {
     await api(`/api/v1/targets/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

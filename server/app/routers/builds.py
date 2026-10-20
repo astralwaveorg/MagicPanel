@@ -64,10 +64,9 @@ def collect_snapshot(conn) -> dict:
          "extra_yaml": r["extra_yaml"]}
         for r in db.all_(conn, "SELECT * FROM targets ORDER BY id")
     ]
-    base_docs: dict[str, dict] = {}      # 引擎通用配置：engine → 覆盖文档
-    base_targets: dict[str, dict] = {}   # 目标通用配置：目标名 → 覆盖文档
+    base_docs: dict[str, dict] = {}      # 通用配置：引擎+平台 → 覆盖文档
     base_devices: dict[str, dict] = {}   # 设备专属配置：设备 id → 覆盖文档
-    for row in db.all_(conn, "SELECT engine, target, device_id, content "
+    for row in db.all_(conn, "SELECT engine, platform, device_id, content "
                              "FROM base_configs"):
         try:
             doc = base_config_service.normalize(
@@ -75,12 +74,11 @@ def collect_snapshot(conn) -> dict:
         except ValueError:
             continue
         device_id = int(row["device_id"] or 0)
+        platform = row["platform"] or ""
         if device_id:
             base_devices[str(device_id)] = doc
-        elif row["target"]:
-            base_targets[row["target"]] = doc
-        else:
-            base_docs[row["engine"]] = doc
+        elif platform:
+            base_docs[f"{row['engine']}|{platform}"] = doc
     snippets = [
         {"name": r["name"], "category": r["category"], "engine": r["engine"],
          "content": r["content"]}
@@ -91,7 +89,7 @@ def collect_snapshot(conn) -> dict:
         "sources": sources, "rule_providers": rule_providers,
         "local_nodes": local_nodes, "groups": groups, "rules": rules,
         "targets": targets, "snippets": snippets, "base": base_docs,
-        "base_targets": base_targets, "base_devices": base_devices,
+        "base_devices": base_devices,
     }
 
 
@@ -186,14 +184,14 @@ def create_candidate(operator: str, note: str = "",
                      policy_sha: str | None = None) -> tuple[int, str]:
     """创建候选构建，返回 (build_id, status)。
 
-    定时任务与手动创建共用；没有发布目标时抛 BuildError。
+    定时任务与手动创建共用；没有引擎平台时抛 BuildError。
     写事务只用于落库，渲染与核心校验在事务之外执行，
     避免慢校验长期占用 SQLite 写锁（设备拉取配置会被阻塞）。
     """
     with db.connect() as conn:
         snapshot = collect_snapshot(conn) if snapshot is None else snapshot
     if not snapshot["targets"]:
-        raise BuildError("尚未配置任何发布目标，请先在“发布目标”中添加")
+        raise BuildError("尚未配置任何引擎平台，请先在“引擎平台”中添加")
     if policy_sha is None:
         policy_sha = security.sha256_text(
             json.dumps(snapshot, ensure_ascii=False, sort_keys=True)

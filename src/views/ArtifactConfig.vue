@@ -2,8 +2,8 @@
   <div class="mp-artifact">
     <h2 class="mp-page-title">产物配置</h2>
     <p class="mp-page-desc">
-      配置按层级生效：<strong>内置默认</strong>（只读）→ <strong>通用配置</strong>（按引擎）→
-      <strong>目标通用</strong>（按发布目标）→ <strong>设备专属</strong>（按设备）。
+      配置按层级生效：<strong>内置默认</strong>（只读）→ <strong>通用配置</strong>（按引擎 + 平台）→
+      <strong>设备专属</strong>（按设备）。
       合并规则是<b>键级并集</b>：同一个键以下层为准，字典逐层递归合并、列表整体替换；
       每一层只保存"与上层不同"的差异，没改过的键会跟随上层。
     </p>
@@ -152,8 +152,8 @@
 
     <el-dialog v-model="previewVisible" title="产物预览" width="min(920px, 94vw)">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-        <el-select v-model="previewTarget" size="small" style="width:200px" @change="doPreview">
-          <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
+        <el-select v-model="previewPlatform" size="small" style="width:200px" @change="doPreview">
+          <el-option v-for="p in platforms" :key="p.value" :value="p.value" :label="p.label" />
         </el-select>
         <span class="mp-toolbar-hint">{{ previewNote }}</span>
       </div>
@@ -171,9 +171,10 @@ import { ElMessage } from 'element-plus'
 import { dump, load as yamlLoad } from 'js-yaml'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
+import { PLATFORM_LABELS } from '../format'
 
 const scopes = ref([])
-const targets = ref([])
+const platforms = ref([])
 const current = ref(null)
 const state = ref(null)
 const fields = ref([])
@@ -186,7 +187,7 @@ const saving = ref(false)
 const applying = ref(false)
 const previewVisible = ref(false)
 const previewText = ref('')
-const previewTarget = ref('')
+const previewPlatform = ref('')
 const previewNote = ref('')
 const previewWarnings = ref([])
 const presetKey = ref('')
@@ -195,15 +196,14 @@ const syncing = ref(false)
 const groupOrder = computed(() => Object.keys(groups.value))
 
 const scopeGroups = computed(() => {
-  const byKind = { builtin: [], engine: [], target: [], device: [] }
+  const byKind = { builtin: [], general: [], device: [] }
   for (const s of scopes.value) {
     if (!byKind[s.kind]) byKind[s.kind] = []
     byKind[s.kind].push(s)
   }
   return [
     { kind: 'builtin', title: '内置默认', hint: '只读', items: byKind.builtin },
-    { kind: 'engine', title: '通用配置', hint: '按引擎', items: byKind.engine },
-    { kind: 'target', title: '目标通用', hint: '按发布目标', items: byKind.target },
+    { kind: 'general', title: '通用配置', hint: '按引擎 + 平台', items: byKind.general },
     { kind: 'device', title: '设备专属', hint: '按设备', items: byKind.device },
   ].filter((g) => g.items.length)
 })
@@ -212,8 +212,7 @@ const readonly = computed(() => current.value?.kind === 'builtin')
 const layerLabel = computed(() => {
   if (!current.value) return ''
   if (current.value.kind === 'builtin') return '内置默认'
-  if (current.value.kind === 'engine') return '通用配置'
-  if (current.value.kind === 'target') return '目标通用'
+  if (current.value.kind === 'general') return '通用配置'
   return '设备专属'
 })
 
@@ -221,9 +220,8 @@ const currentHint = computed(() => {
   if (!current.value) return ''
   const s = current.value
   if (s.kind === 'builtin') return '程序出厂配置，作为该引擎全部配置的起点'
-  if (s.kind === 'engine') return '覆盖内置默认，作用于该引擎的全部目标与设备'
-  if (s.kind === 'target') return `覆盖通用配置，作用于目标 ${s.target}`
-  return `覆盖通用配置与目标通用，只影响这台设备（目标 ${s.target}）`
+  if (s.kind === 'general') return '覆盖内置默认，作用于该引擎与平台的全部设备'
+  return `覆盖通用配置，只影响这台设备（${s.detail}）`
 })
 
 const effectiveRows = computed(() => {
@@ -251,8 +249,7 @@ function scopeKey(s) {
 
 function scopeTag(s) {
   if (s.kind === 'builtin') return '只读'
-  if (s.kind === 'engine') return '引擎'
-  if (s.kind === 'target') return '目标'
+  if (s.kind === 'general') return '通用'
   return '设备'
 }
 
@@ -345,7 +342,7 @@ async function select(scope) {
   current.value = scope
   await loadSchema(scope.engine)
   const params = new URLSearchParams({ engine: scope.engine })
-  if (scope.target) params.set('target', scope.target)
+  if (scope.platform) params.set('platform', scope.platform)
   if (scope.device_id) params.set('device_id', String(scope.device_id))
   const data = await api(`/api/v1/base-config?${params.toString()}`)
   state.value = data
@@ -371,7 +368,7 @@ function scopeQuery() {
   const s = current.value
   if (!s) return ''
   const params = new URLSearchParams({ engine: s.engine })
-  if (s.target) params.set('target', s.target)
+  if (s.platform) params.set('platform', s.platform)
   if (s.device_id) params.set('device_id', String(s.device_id))
   return params.toString()
 }
@@ -422,7 +419,7 @@ async function apply() {
     const r = await api('/api/v1/base-config/apply', {
       method: 'POST',
       body: {
-        engine: s.engine, target: s.target, device_id: s.device_id,
+        engine: s.engine, platform: s.platform, device_id: s.device_id,
         content: raw.value, channel: channel.value, note: '更新基础配置',
       },
     })
@@ -438,20 +435,20 @@ async function apply() {
 
 async function preview() {
   previewVisible.value = true
-  if (!previewTarget.value && current.value?.target) {
-    previewTarget.value = current.value.target
+  if (!previewPlatform.value && current.value?.platform) {
+    previewPlatform.value = current.value.platform
   }
   await doPreview()
 }
 
 async function doPreview() {
-  if (!previewTarget.value) return
+  if (!previewPlatform.value) return
   try {
     const r = await api('/api/v1/base-config/preview', {
       method: 'POST',
       body: {
         engine: current.value?.engine || 'stash',
-        target: previewTarget.value,
+        platform: previewPlatform.value,
         device_id: current.value?.device_id || 0,
       },
     })
@@ -465,13 +462,17 @@ async function doPreview() {
 
 onMounted(async () => {
   try {
-    const list = await api('/api/v1/targets')
-    targets.value = list
     await loadScopes()
-    const first = scopes.value.find((s) => s.kind === 'engine') || scopes.value[0]
+    const first = scopes.value.find((s) => s.kind === 'general') || scopes.value[0]
     if (first) await select(first)
-    const firstTarget = list.find((t) => t.engine === 'stash') || list[0]
-    previewTarget.value = firstTarget ? firstTarget.name : ''
+    const seen = new Set()
+    for (const s of scopes.value) {
+      if (s.kind === 'general' && !seen.has(s.platform)) {
+        seen.add(s.platform)
+        platforms.value.push({ value: s.platform, label: PLATFORM_LABELS[s.platform] || s.platform })
+      }
+    }
+    previewPlatform.value = current.value?.platform || platforms.value[0]?.value || ''
   } catch (e) {
     ElMessage.error(e.message)
   }

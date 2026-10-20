@@ -1,10 +1,12 @@
-"""发布目标（客户端模板）与设备管理。
+"""引擎平台（引擎 + 平台，对应一类客户端）与设备管理。
 
 设备令牌只在创建／轮换时返回一次；服务器只保存摘要。
 泄露后的处置：轮换或撤销令牌，已下发的节点凭据需联系机场重置。
 """
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+import json
+
 import yaml
 
 from .. import db, security
@@ -80,8 +82,52 @@ def _device_public(row, base_url: str = "") -> dict:
 def _get_target(conn, tid: int):
     row = db.one(conn, "SELECT * FROM targets WHERE id=?", (tid,))
     if not row:
-        raise HTTPException(404, "发布目标不存在")
+        raise HTTPException(404, "引擎平台不存在")
     return row
+
+
+def _remap_target_refs(conn, old_name: str, new_name: str) -> int:
+    """引擎平台改名后，同步更新策略组与规则里的"适用目标"引用。
+
+    不这样做的话，改名会让引用指向不存在的引擎平台，
+    对应的策略组与规则会在构建时被静默剔除（产物少了一大片却没有任何提示）。
+    """
+    changed = 0
+    for table in ("proxy_groups", "rules"):
+        for row in db.all_(conn, f"SELECT id, targets FROM {table} "
+                                 "WHERE targets IS NOT NULL AND targets <> '' "
+                                 "AND targets <> '[]'"):
+            try:
+                names = json.loads(row["targets"])
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(names, list) or old_name not in names:
+                continue
+            names = [new_name if n == old_name else n for n in names]
+            conn.execute(f"UPDATE {table} SET targets=? WHERE id=?",
+                         (json.dumps(names, ensure_ascii=False), row["id"]))
+            changed += 1
+    return changed
+
+
+def _clean_target_refs(conn, name: str) -> int:
+    """删除引擎平台后，清理策略组与规则里指向它的引用。"""
+    changed = 0
+    for table in ("proxy_groups", "rules"):
+        for row in db.all_(conn, f"SELECT id, targets FROM {table} "
+                                 "WHERE targets IS NOT NULL AND targets <> '' "
+                                 "AND targets <> '[]'"):
+            try:
+                names = json.loads(row["targets"])
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(names, list) or name not in names:
+                continue
+            names = [n for n in names if n != name]
+            conn.execute(f"UPDATE {table} SET targets=? WHERE id=?",
+                         (json.dumps(names, ensure_ascii=False), row["id"]))
+            changed += 1
+    return changed
 
 
 def _get_device(conn, did: int):
@@ -103,7 +149,7 @@ def create_target(body: TargetBody, user=CurrentUser):
     _check_target(body)
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM targets WHERE name=?", (body.name,)):
-            raise HTTPException(409, "同名发布目标已存在")
+            raise HTTPException(409, "同名引擎平台已存在")
         now = db.now()
         sort = db.one(conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM targets")["n"]
         cur = conn.execute(
@@ -112,7 +158,7 @@ def create_target(body: TargetBody, user=CurrentUser):
             (body.name, body.engine, body.platform, body.description,
              body.extra_yaml, body.update_interval, sort, now, now),
         )
-        security.audit(conn, user["username"], "新增发布目标", "target", cur.lastrowid,
+        security.audit(conn, user["username"], "新增引擎平台", "target", cur.lastrowid,
                        {"name": body.name})
         row = _get_target(conn, cur.lastrowid)
     return _target_public(row)
@@ -123,10 +169,10 @@ def reorder_targets(ids: list[int], user=CurrentUser):
     with db.tx() as conn:
         existing = {r["id"] for r in db.all_(conn, "SELECT id FROM targets")}
         if set(ids) != existing:
-            raise HTTPException(400, "排序列表与现有发布目标不一致")
+            raise HTTPException(400, "排序列表与现有引擎平台不一致")
         for index, tid in enumerate(ids, start=1):
             conn.execute("UPDATE targets SET sort=? WHERE id=?", (index, tid))
-        security.audit(conn, user["username"], "调整发布目标顺序", "target", "")
+        security.audit(conn, user["username"], "调整引擎平台顺序", "target", "")
     return {"ok": True}
 
 
@@ -139,15 +185,19 @@ def update_target(tid: int, body: TargetBody, user=CurrentUser):
             conn, "SELECT id FROM targets WHERE name=? AND id!=?", (body.name, tid)
         )
         if clash:
-            raise HTTPException(409, "同名发布目标已存在")
+            raise HTTPException(409, "同名引擎平台已存在")
+        old = _get_target(conn, tid)
         conn.execute(
             "UPDATE targets SET name=?, engine=?, platform=?, description=?, "
             "extra_yaml=?, update_interval=?, updated_at=? WHERE id=?",
             (body.name, body.engine, body.platform, body.description,
              body.extra_yaml, body.update_interval, db.now(), tid),
         )
-        security.audit(conn, user["username"], "更新发布目标", "target", tid,
-                       {"name": body.name})
+        remapped = 0
+        if old["name"] != body.name:
+            remapped = _remap_target_refs(conn, old["name"], body.name)
+        security.audit(conn, user["username"], "更新引擎平台", "target", tid,
+                       {"name": body.name, "remapped_refs": remapped})
         row = _get_target(conn, tid)
     return _target_public(row)
 
@@ -160,9 +210,10 @@ def delete_target(tid: int, user=CurrentUser):
             conn, "SELECT COUNT(*) AS c FROM devices WHERE target_id=?", (tid,)
         )["c"]
         if used:
-            raise HTTPException(400, f"仍有 {used} 台设备使用该发布目标")
+            raise HTTPException(400, f"仍有 {used} 台设备使用该引擎平台")
+        cleaned = _clean_target_refs(conn, row["name"])
         conn.execute("DELETE FROM targets WHERE id=?", (tid,))
-        security.audit(conn, user["username"], "删除发布目标", "target", tid,
+        security.audit(conn, user["username"], "删除引擎平台", "target", tid,
                        {"name": row["name"]})
     return {"ok": True}
 

@@ -1,10 +1,9 @@
 """产物基础配置：多级联动的顶层键文档。
 
 层级（后者覆盖前者）：
-① 内置默认：随程序发布，只读可见；
-② 通用配置：按引擎（Stash / Mihomo）维护，作用���该引擎的全部目标；
-③ 目标通用：按发布目标维护，可选中间层；
-④ 设备专属：按设备维护，只对该设备的最终配置生效。
+① 内置默认：随程序发布，只读可见（按引擎）；
+② 通用配置：按「引擎 + 平台」维护（与"引擎平台"一一对应，如 Stash · macOS）；
+③ 设备专属：按设备维护，只对该设备的最终配置生效。
 
 每层只存"与上层不同"的差异（overlay），因此上层默认值变化时，
 没有被显式改过的键会自动跟随；"恢复默认"= 清空本层差异。
@@ -157,9 +156,9 @@ def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
     return effective, sources
 
 
-def scope_layers(engine: str, target: str = "", device_id: int = 0,
+def scope_layers(engine: str, platform: str = "", device_id: int = 0,
                  docs: dict | None = None) -> list[tuple[str, dict]]:
-    """按作用域取出各层文档（从低到高：内置默认 → 通用配置 → 目标通用 → 设备专属）。
+    """按作用域取出各层文档（从低到高：内置默认 → 通用配置 → 设备专属）。
 
     返回的列表**包含当前作用域自己那一层**，因此：
     - layers[:-1] 是当前层的"继承值"（上层合并结果）；
@@ -167,17 +166,12 @@ def scope_layers(engine: str, target: str = "", device_id: int = 0,
     """
     docs = docs or {}
     layers: list[tuple[str, dict]] = [("内置默认", deepcopy(default_doc(engine)))]
-    engine_doc = docs.get((engine, "", 0))
-    if engine_doc is not None:
-        layers.append(("通用配置", deepcopy(engine_doc)))
-    if target:
-        target_doc = docs.get((engine, target, 0))
-        if target_doc is not None:
-            layers.append(("目标通用", deepcopy(target_doc)))
-        if device_id:
-            device_doc = docs.get((engine, "", int(device_id)))
-            if device_doc is not None:
-                layers.append(("设备专属", deepcopy(device_doc)))
+    if platform:
+        # 当前作用域自己那一层始终参与（没有覆盖时为空层），
+        # 这样 layers[:-1] 才是"继承自上层的值"。
+        layers.append(("通用配置", deepcopy(docs.get((engine, platform, 0)) or {})))
+    if device_id:
+        layers.append(("设备专属", deepcopy(docs.get((engine, platform, int(device_id))) or {})))
     return layers
 
 

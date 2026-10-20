@@ -270,14 +270,12 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
 def render_target(snapshot: dict, target: dict, warnings: list | None = None) -> str:
     """渲染单个目标的完整配置文本。"""
     engine = target["engine"]
-    # ① 基础配置：内置默认 → 引擎通用 → 目标通用（设备专属在分发时叠加）
+    # ① 基础配置：内置默认 → 通用配置（引擎+平台）；设备专属在分发时叠加
     layers = [("内置默认", base_config_service.default_doc(engine))]
-    engine_base = (snapshot.get("base") or {}).get(engine)
-    if engine_base:
-        layers.append(("通用配置", base_config_service.normalize(engine_base)))
-    target_base = (snapshot.get("base_targets") or {}).get(target.get("name") or "")
-    if target_base:
-        layers.append(("目标通用", base_config_service.normalize(target_base)))
+    platform = target.get("platform") or ""
+    general_base = (snapshot.get("base") or {}).get(f"{engine}|{platform}")
+    if general_base:
+        layers.append(("通用配置", base_config_service.normalize(general_base)))
     base, _sources = base_config_service.cascade(layers)
     # 应用级伪键：不写入产物，只控制面板内置行为
     panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))

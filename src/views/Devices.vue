@@ -12,8 +12,8 @@
 
     <EmptyState
       v-if="!targets.length"
-      reason="还没有发布目标，无法添加设备。"
-      next="先在“发布目标”中添加目标（引擎 + 平台）。"
+      reason="还没有引擎平台，无法添加设备。"
+      next="先在“引擎平台”中添加（引擎 + 平台）。"
     />
     <EmptyState
       v-else-if="!rows.length"
@@ -32,7 +32,7 @@
           <el-table-column label="平台" width="90">
             <template #default="{ row }">{{ PLATFORM_LABELS[row.platform] || row.platform }}</template>
           </el-table-column>
-          <el-table-column label="发布目标" min-width="130">
+          <el-table-column label="引擎平台" min-width="130">
             <template #default="{ row }">
               <span class="mono">{{ targetName(row.target_id) }}</span>
             </template>
@@ -43,9 +43,6 @@
                 {{ CHANNEL_LABELS[row.channel] || row.channel }}
               </el-tag>
             </template>
-          </el-table-column>
-          <el-table-column label="令牌指纹" min-width="110">
-            <template #default="{ row }"><span class="mono">{{ row.token_hint }}…</span></template>
           </el-table-column>
           <el-table-column label="最近下载" min-width="130">
             <template #default="{ row }">{{ fmtTime(row.last_pull_at) }}</template>
@@ -83,7 +80,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="发布目标">
+            <el-form-item label="引擎平台">
               <el-select v-model="form.target_id" style="width:100%">
                 <el-option v-for="t in targets" :key="t.id" :value="t.id"
                            :label="`${t.name}（${t.engine} / ${PLATFORM_LABELS[t.platform]}）`" />
@@ -105,7 +102,7 @@
           <el-input v-model="form.extra_yaml" type="textarea" :rows="6" class="mono"
                     placeholder="例如：&#10;mixed-port: 7891" />
           <div class="mp-form-hint">
-            叠加在该设备所属发布目标的产物之上（字典递归、列表追加、标量覆盖）。
+            叠加在该设备所属引擎平台的产物之上（字典递归、列表追加、标量覆盖）。
             不允许写 proxies / proxy-providers / proxy-groups / rule-providers / rules。
           </div>
         </el-form-item>
@@ -173,7 +170,7 @@ function openEdit(row) {
 
 async function save() {
   if (!form.name) return ElMessage.warning('请填写文件名')
-  if (!form.target_id) return ElMessage.warning('请选择发布目标')
+  if (!form.target_id) return ElMessage.warning('请选择引擎平台')
   saving.value = true
   try {
     if (editing.value) {

@@ -34,7 +34,7 @@
             <template #default="{ row }"><span class="mono">{{ row.value || '—' }}</span></template>
           </el-table-column>
           <el-table-column prop="target" label="目标" min-width="110" />
-          <el-table-column label="适用目标" min-width="150">
+          <el-table-column label="适用平台" min-width="150">
             <template #default="{ row }">
               <span v-if="!row.targets || !row.targets.length">全部</span>
               <span v-else>{{ row.targets.join('、') }}</span>
@@ -82,13 +82,13 @@
             <el-option value="REJECT" label="REJECT（拒绝）" />
           </el-select>
         </el-form-item>
-        <el-form-item label="适用发布目标（不选 = 全部目标）">
+        <el-form-item label="适用引擎平台（不选 = 全部）">
           <el-select v-model="form.targets" multiple style="width:100%"
                      placeholder="不选表示适用于全部目标">
             <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
           </el-select>
           <div class="mp-form-hint">
-            只在选中的发布目标里生效；若该规则指向的策略组不适用于同一目标，规则会被自动剔除。
+            只在选中的引擎平台里生效；若该规则指向的策略组不适用于同一平台，规则会被自动剔除。
           </div>
         </el-form-item>
         <el-form-item label="备注（可选）">

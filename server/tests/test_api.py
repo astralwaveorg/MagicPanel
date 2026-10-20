@@ -883,17 +883,17 @@ def test_base_config_defaults_and_crud(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
 
-    stash = client.get("/api/v1/base-config?engine=stash", headers=h).json()
+    stash = client.get("/api/v1/base-config?engine=stash&platform=ios", headers=h).json()
     assert stash["is_default"] is True
     assert stash["effective"]["mode"] == "rule"
     # Stash 官方精简：不含端口与 profile
     assert "mixed-port" not in stash["effective"] and "profile" not in stash["effective"]
-    mihomo = client.get("/api/v1/base-config?engine=mihomo", headers=h).json()
+    mihomo = client.get("/api/v1/base-config?engine=mihomo&platform=android", headers=h).json()
     assert mihomo["effective"]["mixed-port"] == 7890
     assert mihomo["effective"]["profile"]["store-selected"] is True
 
     # 只改一个键：服务端只把这个键的差异存进本层，其余继续跟随上层
-    saved = client.put("/api/v1/base-config?engine=stash", headers=h, json={
+    saved = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
         "content": "mode: global\nlog-level: warning\nipv6: false\n"})
     assert saved.status_code == 200, saved.text
     assert saved.json()["effective"]["mode"] == "global"
@@ -904,11 +904,11 @@ def test_base_config_defaults_and_crud(client):
     assert saved.json()["sources"]["log-level"] == "内置默认"
 
     # 乐观锁：版本不一致时拒绝
-    stale = client.put("/api/v1/base-config?engine=stash", headers=h, json={
+    stale = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
         "content": "mode: rule\n", "updated_at": "2000-01-01T00:00:00+08:00"})
     assert stale.status_code == 409
 
-    reset = client.post("/api/v1/base-config/reset?engine=stash", headers=h)
+    reset = client.post("/api/v1/base-config/reset?engine=stash&platform=ios", headers=h)
     assert reset.status_code == 200 and reset.json()["is_default"] is True
 
     schema = client.get("/api/v1/base-config/schema?engine=stash", headers=h).json()
@@ -923,7 +923,7 @@ def test_base_config_validation_and_protected_keys(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     for content in ("rules:\n- MATCH,DIRECT\n", "proxy-groups:\n- name: x\n"):
-        r = client.put("/api/v1/base-config?engine=stash", headers=h,
+        r = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h,
                        json={"content": content})
         assert r.status_code == 400, content
     bad_inputs = [
@@ -947,7 +947,7 @@ def test_base_config_render_preview_and_policy_sha(client):
     make_policy(client, csrf)
     h = auth_headers(csrf)
     content = "mode: rule\nlog-level: info\nipv6: false\nsocks-port: 7892\n"
-    assert client.put("/api/v1/base-config?engine=stash", headers=h,
+    assert client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h,
                       json={"content": content}).status_code == 200
 
     before = len(client.get("/api/v1/builds", headers=h).json())
@@ -965,7 +965,7 @@ def test_base_config_render_preview_and_policy_sha(client):
     assert art == text
     sha1 = build["policy_sha"]
 
-    client.put("/api/v1/base-config?engine=stash", headers=h,
+    client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h,
                json={"content": "mode: rule\nlog-level: debug\n"})
     build2 = client.post("/api/v1/builds", headers=h, json={}).json()
     assert build2["policy_sha"] != sha1
@@ -976,7 +976,8 @@ def test_base_config_apply_builds_and_publishes(client):
     make_policy(client, csrf)
     h = auth_headers(csrf)
     r = client.post("/api/v1/base-config/apply", headers=h, json={
-        "engine": "stash", "content": "mode: rule\nlog-level: info\n",
+        "engine": "stash", "platform": "ios",
+        "content": "mode: rule\nlog-level: info\n",
         "channel": "stable", "note": "基础配置发布"})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "success"
@@ -1055,7 +1056,8 @@ def test_build_snapshot_is_encrypted(client):
         row = db.one(conn, "SELECT snapshot FROM builds WHERE id=?", (build["id"],))
     assert row["snapshot"].startswith("enc:v1:")
     detail = client.get(f"/api/v1/builds/{build['id']}", headers=h).json()
-    assert detail["snapshot"]["groups"] and detail["snapshot"]["base"]
+    assert detail["snapshot"]["groups"]
+    assert "base" in detail["snapshot"]
 
 
 def test_provider_etag_follows_test_results(client):
@@ -1258,7 +1260,7 @@ def test_panel_direct_rule_can_be_disabled(client):
     # 应用级伪键不进入产物
     assert "_panel_direct_rule" not in art
 
-    client.put("/api/v1/base-config?engine=stash", headers=h, json={
+    client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
         "content": "mode: rule\nlog-level: warning\nipv6: false\n"
                    "_panel_direct_rule: false\n"})
     build2 = client.post("/api/v1/builds", headers=h, json={}).json()
@@ -1278,9 +1280,9 @@ def test_personal_direct_domains_and_fake_ip_filter(client):
         "- example.com\n"
         "_fake_ip_filter:\n- '+.lan'\n- 'geosite:private,cn,apple'\n"
     )
-    assert client.put("/api/v1/base-config?engine=stash", headers=h,
+    assert client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h,
                       json={"content": content}).status_code == 200
-    assert client.put("/api/v1/base-config?engine=mihomo", headers=h,
+    assert client.put("/api/v1/base-config?engine=mihomo&platform=android", headers=h,
                       json={"content": content}).status_code == 200
     build = client.post("/api/v1/builds", headers=h, json={}).json()
     assert build["status"] == "success", build
@@ -1314,6 +1316,9 @@ def test_personal_config_applied_by_production_script(client):
 
     csrf = setup_admin(client)
     h = auth_headers(csrf)
+    # 通用配置按「引擎 + 平台」，需要先有引擎平台
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-ios", "engine": "stash", "platform": "ios"})
     repo_root = os.path.dirname(os.path.dirname(
         os.path.dirname(os.path.abspath(__file__))))
     path = os.path.join(repo_root, "scripts", "apply_production_fixes.py")
@@ -1323,8 +1328,10 @@ def test_personal_config_applied_by_production_script(client):
     module.main()
 
     with db.connect() as conn:
-        for engine in ("stash", "mihomo"):
-            row = db.one(conn, "SELECT * FROM base_configs WHERE engine=?", (engine,))
+        rows = db.all_(conn, "SELECT * FROM base_configs "
+                            "WHERE device_id=0 AND platform<>''")
+        assert rows
+        for row in rows:
             doc = json.loads(json.dumps(__import__("yaml").safe_load(row["content"])))
             assert "magichub.top" in doc["_direct_domains"]
             assert "ghfast.top" in doc["_direct_domains"]
@@ -1337,7 +1344,7 @@ def test_feed_marker_and_duplicate_rules(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
-    client.put("/api/v1/base-config?engine=stash", headers=h, json={
+    client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
         "content": "mode: rule\nlog-level: warning\nipv6: false\n"
                    "_direct_domains:\n- testserver\n- example.com\n"})
     client.post("/api/v1/builds", headers=h, json={})
@@ -1367,38 +1374,38 @@ def test_feed_marker_and_duplicate_rules(client):
     assert "DOMAIN-SUFFIX,example.com,DIRECT" in rules
 
 
-def test_target_scoped_base_config_differs_per_target(client):
-    """目标级基础配置：同一引擎的不同目标可以产出不同产物。"""
+def test_platform_scoped_base_config_differs_per_platform(client):
+    """通用配置按「引擎 + 平台」：同一引擎的不同平台可以产出不同产物。"""
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
     r = client.post("/api/v1/targets", headers=h, json={
-        "name": "stash-desktop", "engine": "stash", "platform": "macos"})
+        "name": "stash-mac", "engine": "stash", "platform": "macos"})
     assert r.status_code == 201, r.text
     r = client.post("/api/v1/targets", headers=h, json={
-        "name": "stash-server", "engine": "stash", "platform": "macos"})
+        "name": "stash-android", "engine": "stash", "platform": "android"})
     assert r.status_code == 201, r.text
 
-    # 引擎默认：给全部 Stash 目标
-    client.put("/api/v1/base-config?engine=stash", headers=h, json={
-        "content": "mode: rule\nlog-level: warning\nipv6: false\nmixed-port: 7890\n"})
-    # 目标级：只给 server 覆盖端口
-    r = client.put("/api/v1/base-config?engine=stash&target=stash-server", headers=h, json={
-        "content": "mode: rule\nlog-level: warning\nipv6: false\nmixed-port: 7891\n"})
+    # iOS 通用配置
+    client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
+        "content": "mode: rule\nlog-level: warning\nipv6: false\nlog-level: info\n"})
+    # macOS 通用配置
+    r = client.put("/api/v1/base-config?engine=stash&platform=macos", headers=h, json={
+        "content": "mode: rule\nlog-level: warning\nipv6: false\nlog-level: debug\n"})
     assert r.status_code == 200, r.text
 
     build = client.post("/api/v1/builds", headers=h, json={}).json()
     assert build["status"] == "success", build
-    desktop = yaml.safe_load(client.get(
-        f"/api/v1/builds/{build['id']}/artifact/stash-desktop").json()["content"])
-    server = yaml.safe_load(client.get(
-        f"/api/v1/builds/{build['id']}/artifact/stash-server").json()["content"])
-    assert desktop["mixed-port"] == 7890
-    assert server["mixed-port"] == 7891
-    # 目标级配置不写进其它目标
-    other = yaml.safe_load(client.get(
+    mac = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-mac").json()["content"])
+    ios = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"])
-    assert other["mixed-port"] == 7890
+    assert mac["log-level"] == "debug"
+    assert ios["log-level"] == "info"
+    # 平台级配置不写进其它平台
+    other = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-android").json()["content"])
+    assert other["log-level"] == "warning"
 
 
 def test_group_and_rule_target_scope_filters_output(client):
@@ -1590,9 +1597,10 @@ def test_reset_base_config_keeps_personal_config(client):
     content = ("mode: rule\nlog-level: warning\nipv6: false\n"
                "_direct_domains:\n- example.com\n"
                "_fake_ip_filter:\n- '+.lan'\n")
-    r = client.put("/api/v1/base-config?engine=stash", headers=h, json={"content": content})
+    r = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h,
+                   json={"content": content})
     assert r.status_code == 200, r.text
-    r = client.post("/api/v1/base-config/reset?engine=stash", headers=h)
+    r = client.post("/api/v1/base-config/reset?engine=stash&platform=ios", headers=h)
     assert r.status_code == 200, r.text
     doc = r.json()["effective"]
     assert doc["_direct_domains"] == ["example.com"]
@@ -1704,10 +1712,10 @@ def test_base_config_cascade_sources():
     """多级联动：生效值来自最高优先级的那一层。"""
     from app.services import base_config as bc
     docs = {
-        ("stash", "", 0): {"mode": "global", "log-level": "info"},
-        ("stash", "", 7): {"mode": "rule"},
+        ("stash", "ios", 0): {"mode": "global", "log-level": "info"},
+        ("stash", "ios", 7): {"mode": "rule"},
     }
-    layers = bc.scope_layers("stash", "stash-ios", 7, docs)
+    layers = bc.scope_layers("stash", "ios", 7, docs)
     effective, sources = bc.cascade(layers)
     assert effective["mode"] == "rule"          # 设备专属覆盖通用配置
     assert effective["log-level"] == "info"     # 通用配置覆盖内置默认

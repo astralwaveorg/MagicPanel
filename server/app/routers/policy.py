@@ -25,7 +25,7 @@ class GroupBody(BaseModel):
     tolerance: int = Field(default=150, ge=0, le=5000)
     lazy: bool = True
     strategy: str = Field(default="", max_length=32)
-    targets: list[str] = Field(default_factory=list)  # 适用发布目标，空 = 全部
+    targets: list[str] = Field(default_factory=list)  # 适用引擎平台，空 = 全部
 
 
 class RuleBody(BaseModel):
@@ -35,7 +35,7 @@ class RuleBody(BaseModel):
     enabled: bool = True
     note: str = Field(default="", max_length=256)
     no_resolve: bool = False
-    targets: list[str] = Field(default_factory=list)  # 适用发布目标，空 = 全部
+    targets: list[str] = Field(default_factory=list)  # 适用引擎平台，空 = 全部
 
 
 def _group_public(row) -> dict:
