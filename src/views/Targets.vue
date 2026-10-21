@@ -287,14 +287,14 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    if (e.status === 409 && e.data?.code === 'target_in_use') {
-      const choices = (e.data.candidates || []).map((c) => ({
+    if (e.status === 409 && e.detail?.code === 'target_in_use') {
+      const choices = (e.detail.candidates || []).map((c) => ({
         id: c.id, label: `${c.name}（${c.platform}）`,
       }))
       openRefDialog({
         title: `删除引擎平台“${row.name}”`,
-        message: e.data.message,
-        references: e.data.references,
+        message: e.message,
+        references: e.detail.references,
         hint: '删除前需要把这些设备迁移到另一个引擎平台；迁移后它们的配置会按新平台生成。',
         choices,
         choiceLabel: '把这些设备迁移到：',

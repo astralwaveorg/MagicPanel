@@ -439,11 +439,11 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    if (e.status === 409 && e.data?.code === 'group_in_use') {
+    if (e.status === 409 && e.detail?.code === 'group_in_use') {
       openRefDialog({
         title: `删除策略组“${row.name}”`,
-        message: e.data.message,
-        references: e.data.references,
+        message: e.message,
+        references: e.detail.references,
         hint: '删除时会自动把其它策略组里的成员引用摘掉，并删除指向它的分流规则。',
         action: () => forceDeleteGroup(row),
       })

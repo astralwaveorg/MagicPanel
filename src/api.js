@@ -1,11 +1,12 @@
 import { store } from './store'
 
 export class ApiError extends Error {
-  constructor(status, message, data = null) {
+  constructor(status, message, detail = null) {
     super(message)
     this.status = status
-    // 后端返回的结构化错误体（如"仍被引用"的引用明细），交给调用方判断
-    this.data = data
+    // 后端返回的结构化错误体（如"仍被引用"的引用明细 {code, message, references}），
+    // 交给调用方判断；普通字符串错误这里是 null
+    this.detail = detail
   }
 }
 
@@ -41,7 +42,11 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
         return String(text).replace(/^Value error,\s*/, '')
       }).join('；')
     }
-    throw new ApiError(resp.status, String(msg), data)
+    const detail = (data && typeof data === 'object' && !Array.isArray(data)
+      && data.detail && typeof data.detail === 'object' && !Array.isArray(data.detail))
+      ? data.detail
+      : null
+    throw new ApiError(resp.status, String(msg), detail)
   }
   return data
 }

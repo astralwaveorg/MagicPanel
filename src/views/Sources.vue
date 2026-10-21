@@ -715,12 +715,12 @@ async function save() {
     ElMessage.success('已保存')
     await load()
   } catch (e) {
-    if (e.status === 409 && e.data?.code === 'source_in_use' && e.data?.rename_to) {
+    if (e.status === 409 && e.detail?.code === 'source_in_use' && e.detail?.rename_to) {
       openRefDialog({
-        title: `重命名节点来源“${e.data.source.name}”`,
-        message: e.data.message,
-        references: e.data.references,
-        hint: `改名后，上面这些策略组会自动改为引用新名字“${e.data.rename_to}”。`,
+        title: `重命名节点来源“${e.detail.source.name}”`,
+        message: e.message,
+        references: e.detail.references,
+        hint: `改名后，上面这些策略组会自动改为引用新名字“${e.detail.rename_to}”。`,
         confirmText: '改名并同步引用',
         action: () => forceRenameSource(editing.value, form),
       })
@@ -848,11 +848,11 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    if (e.status === 409 && e.data?.code === 'source_in_use') {
+    if (e.status === 409 && e.detail?.code === 'source_in_use') {
       openRefDialog({
         title: `删除节点来源“${row.name}”`,
-        message: e.data.message,
-        references: e.data.references,
+        message: e.message,
+        references: e.detail.references,
         hint: '删除时会自动从上面这些策略组中移除该来源；之后需要重新为它们选择节点来源。',
         action: () => forceDeleteSource(row),
       })
@@ -1069,11 +1069,11 @@ async function removeLocal(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    if (e.status === 409 && e.data?.code === 'local_node_in_use') {
+    if (e.status === 409 && e.detail?.code === 'local_node_in_use') {
       openRefDialog({
         title: `删除本地节点“${row.display_name}”`,
-        message: e.data.message,
-        references: e.data.references,
+        message: e.message,
+        references: e.detail.references,
         hint: '删除时会自动从上面这些策略组中移除该本地节点；之后需要重新为它们选择成员。',
         action: () => forceDeleteLocal(row),
       })

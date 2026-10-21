@@ -378,12 +378,12 @@ async function save() {
     ElMessage.success('已保存')
     await load()
   } catch (e) {
-    if (e.status === 409 && e.data?.code === 'rule_provider_in_use' && e.data?.rename_to) {
+    if (e.status === 409 && e.detail?.code === 'rule_provider_in_use' && e.detail?.rename_to) {
       openRefDialog({
-        title: `重命名规则来源“${e.data.provider.name}”`,
-        message: e.data.message,
-        references: e.data.references,
-        hint: `改名后，上面这些分流规则会自动改为引用新名字“${e.data.rename_to}”。`,
+        title: `重命名规则来源“${e.detail.provider.name}”`,
+        message: e.message,
+        references: e.detail.references,
+        hint: `改名后，上面这些分流规则会自动改为引用新名字“${e.detail.rename_to}”。`,
         confirmText: '改名并同步引用',
         action: () => forceRenameProvider(editing.value, body),
       })
@@ -513,11 +513,11 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    if (e.status === 409 && e.data?.code === 'rule_provider_in_use') {
+    if (e.status === 409 && e.detail?.code === 'rule_provider_in_use') {
       openRefDialog({
         title: `删除规则来源“${row.name}”`,
-        message: e.data.message,
-        references: e.data.references,
+        message: e.message,
+        references: e.detail.references,
         hint: '删除时会一并删除上面这些引用该规则集的分流规则。',
         action: () => forceDeleteProvider(row),
       })
