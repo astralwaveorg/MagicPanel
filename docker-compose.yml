@@ -16,6 +16,16 @@ services:
     user: "1000:1001"
     environment:
       TZ: Asia/Shanghai
+      # 面板是测速工具：测速必须走本机直连，不能经过任何代理。
+      # Docker daemon 会把宿主机的代理变量注入所有容器（见
+      # docs/network/测速必须直连.md），这里显式置空把它挡在容器外；
+      # 需要走代理的只有"下载测速核心"，在「设置 → 核心下载代理」单独填。
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      ALL_PROXY: ""
     volumes:
       - ./data:/app/data
     ports:
@@ -39,6 +49,13 @@ services:
       TZ: Asia/Shanghai
       MAGICPANEL_DATA_DIR: /app/data
       BACKUP_KEEP: "14"
+      # 备份是纯本地快照，不出网；同样挡掉 daemon 注入的代理变量
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      ALL_PROXY: ""
     volumes:
       - ./data:/app/data
       - ./scripts:/scripts:ro

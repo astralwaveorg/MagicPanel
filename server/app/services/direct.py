@@ -46,9 +46,16 @@ def direct_env(base: dict | None = None) -> dict:
     return env
 
 
+# 真正指向代理的变量；NO_PROXY 是"绕过清单"，不配置代理时不算代理
+PROXY_ENDPOINT_KEYS = (
+    "http_proxy", "https_proxy", "all_proxy", "ftp_proxy",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY",
+)
+
+
 def env_proxies() -> dict:
-    """当前进程里的代理环境变量（面板自身会忽略它们，仅用于展示）。"""
-    return {k: v for k, v in os.environ.items() if k in PROXY_ENV_KEYS and v}
+    """当前进程里指向代理的环境变量（面板自身会忽略它们，仅用于展示）。"""
+    return {k: v for k, v in os.environ.items() if k in PROXY_ENDPOINT_KEYS and v}
 
 
 def _fetch_egress() -> dict:

@@ -3,12 +3,12 @@
 # 用法：scripts/release.sh [版本号]
 #   版本号省略时在上一个标签基础上递增补丁位（首个标签为 v1.0.0）
 # 配置 GITHUB_TOKEN 后自动创建 Release 并上传产物；否则推送标签后给出创建链接。
-# GitHub API 访问不通时自动尝试 GH_PROXY（默认 http://10.0.1.8:6152）。
+# GitHub API 访问不通时自动尝试 GH_PROXY（默认 http://10.0.1.8:7890）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REPO="astralwaveorg/MagicPanel"
-GH_PROXY="${GH_PROXY:-http://10.0.1.8:6152}"
+GH_PROXY="${GH_PROXY:-http://10.0.1.8:7890}"
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "工作区有未提交改动，请先提交再发布。" >&2

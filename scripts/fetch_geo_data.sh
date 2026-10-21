@@ -6,12 +6,12 @@
 #
 # 用法：
 #   scripts/fetch_geo_data.sh                # 默认版本（与已安装核心一致）+ 默认代理
-#   PROXY=http://10.0.1.8:6152 scripts/fetch_geo_data.sh
+#   PROXY=http://10.0.1.8:7890 scripts/fetch_geo_data.sh
 set -euo pipefail
 
 NAS_HOST="${NAS_HOST:-archon@10.0.1.2}"
 NAS_DIR="${NAS_DIR:-/opt/magicpanel}"
-PROXY="${PROXY:-http://10.0.1.8:6152}"
+PROXY="${PROXY:-http://10.0.1.8:7890}"
 BASE="https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest"
 FILES=(geosite.dat geoip.dat country.mmdb)
 TMP="$(mktemp -d)"
