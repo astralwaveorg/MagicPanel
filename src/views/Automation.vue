@@ -37,9 +37,10 @@
       </el-form>
     </div>
 
-    <el-row :gutter="16">
+    <!-- 宽屏两卡片等高，窄屏按内容自然高度 -->
+    <el-row :gutter="16" class="mp-equal-row">
       <el-col :xs="24" :md="12">
-        <div class="mp-card">
+        <div class="mp-card mp-equal-card">
           <h3>抓取与测速</h3>
           <el-form label-position="top">
             <el-form-item label="自动抓取节点来源">
@@ -62,7 +63,7 @@
         </div>
       </el-col>
       <el-col :xs="24" :md="12">
-        <div class="mp-card">
+        <div class="mp-card mp-equal-card">
           <h3>自动构建与发布</h3>
           <el-form label-position="top">
             <el-form-item label="策略变化时自动创建构建">

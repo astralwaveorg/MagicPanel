@@ -22,6 +22,14 @@ if [ "$SKIP_TESTS" = "0" ]; then
   (cd server && ../.venv/bin/python -m pytest tests -q)
 fi
 
+echo "== 凭据自检 =="
+# 面板的用户数据（节点密码、订阅令牌、备份）不该进仓库；
+# 这里在发布前再扫一遍，避免把数据带到 NAS 源码树里。
+if ! python3 scripts/check_secrets.py; then
+  echo "凭据自检未通过，已中止发布" >&2
+  exit 1
+fi
+
 echo "== 权限自检 =="
 # 容器以非 root 运行，镜像内文件必须对其他用户可读，否则启动即 PermissionError
 BAD=$(find server/app scripts -type f ! -perm -004 | grep -v __pycache__ || true)

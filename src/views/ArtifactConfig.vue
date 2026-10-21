@@ -55,7 +55,8 @@
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <el-select v-model="env" size="small" style="width:110px">
+              <!-- 与旁边的按钮同高：小尺寸的下拉会比按钮矮一截，看着不协调 -->
+              <el-select v-model="env" style="width:120px">
                 <el-option value="production" label="生产环境" />
                 <el-option value="testing" label="测试环境" />
               </el-select>
@@ -90,7 +91,7 @@
           <!-- 生效配置：可点击编辑 -->
           <h3 class="mp-section-title">生效配置</h3>
           <div class="mp-effective-toolbar">
-            <el-button v-if="!readonly" size="small" @click="openAddParam">新增参数</el-button>
+            <el-button v-if="!readonly" type="primary" size="small" @click="openAddParam">新增参数</el-button>
             <span class="mp-toolbar-hint">
               点击「值」即可编辑。修改仅对当前层级生效，保存时仅记录改动项。
             </span>

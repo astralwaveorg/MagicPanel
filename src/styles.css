@@ -326,3 +326,12 @@ html, body, #app {
 
 .mp-field-hint { color: var(--mp-text-secondary); font-size: 12px; margin-left: 8px; font-weight: 400; }
 .mp-template-bar { margin: -6px 0 6px; }
+
+/* 一行放输入框与操作按钮：窄屏自动换行，避免按钮各占一行 */
+.mp-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mp-pin-input { width: 160px; }

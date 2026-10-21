@@ -95,10 +95,10 @@
           <el-table-column label="策略摘要" min-width="110">
             <template #default="{ row }"><span class="mono">{{ shortSha(row.policy_sha) }}</span></template>
           </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="120">
+          <el-table-column prop="note" label="备注" min-width="240">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="300" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="240" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="openDetail(row)">详情</el-button>

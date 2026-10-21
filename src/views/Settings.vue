@@ -123,21 +123,23 @@
         PIN 与账号绑定，一人一 PIN，任一有效即可进入，撤销某人的不影响其他人。
         PIN 只是查看门槛，链接安全由地址中的高熵令牌承担；连续输错 5 次锁定 10 分钟。
       </p>
-      <el-form label-position="top" style="max-width:420px">
-        <el-form-item :label="store.user?.has_portal_pin ? '更换我的 PIN（4 位数字）' : '设置我的 PIN（4 位数字）'">
-          <el-input v-model="portalPin" maxlength="4" placeholder="4 位数字"
-                    style="max-width:200px" class="mono" />
-        </el-form-item>
+      <!-- 输入框与按钮同一行；窄屏再换行 -->
+      <div class="mp-row-actions">
+        <el-input v-model="portalPin" maxlength="4" placeholder="4 位数字"
+                  class="mono mp-pin-input" />
         <el-button type="primary" :loading="savingPin" @click="savePin">
           {{ store.user?.has_portal_pin ? '更换 PIN' : '设置 PIN' }}
         </el-button>
         <el-button v-if="store.user?.has_portal_pin" type="danger" plain :loading="savingPin"
                    @click="clearPin">撤销我的 PIN</el-button>
-        <span style="margin-left:12px;font-size:12.5px"
-              :style="{ color: portalEnabled ? 'var(--mp-ok)' : 'var(--mp-text-secondary)' }">
-          Magic Panel 首页{{ portalEnabled ? '已开启' : '未开启（至少一人设置 PIN 后开启）' }}
-        </span>
-      </el-form>
+      </div>
+      <p class="mp-form-hint" style="margin:8px 0 0">
+        {{ store.user?.has_portal_pin ? '更换我的 PIN（4 位数字）' : '设置我的 PIN（4 位数字）' }}
+      </p>
+      <span style="font-size:12.5px;margin-top:8px;display:block"
+            :style="{ color: portalEnabled ? 'var(--mp-ok)' : 'var(--mp-text-secondary)' }">
+        Magic Panel 首页{{ portalEnabled ? '已开启' : '未开启（至少一人设置 PIN 后开启）' }}
+      </span>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:14px 0 0">
         已设置 PIN 的维护者：{{ pinUsersText }}
       </p>
@@ -215,10 +217,12 @@
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
         备份含加密后的订阅地址与令牌摘要，需与服务端 data/secret.key 分开保管；恢复会覆盖全部数据。
       </p>
-      <el-button @click="exportBackup">导出备份（JSON）</el-button>
-      <el-upload :auto-upload="false" :show-file-list="false" accept=".json" :on-change="importBackup">
-        <el-button type="warning" plain>从备份恢复</el-button>
-      </el-upload>
+      <div class="mp-row-actions">
+        <el-button @click="exportBackup">导出备份（JSON）</el-button>
+        <el-upload :auto-upload="false" :show-file-list="false" accept=".json" :on-change="importBackup">
+          <el-button type="warning" plain>从备份恢复</el-button>
+        </el-upload>
+      </div>
     </div>
 
     <el-dialog v-model="userDialog" title="添加维护者" width="min(480px, 94vw)">
