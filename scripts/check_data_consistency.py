@@ -98,7 +98,7 @@ def main() -> int:
 
     # ---- 2. 策略组与规则 ----
     groups = rows("SELECT id, name, proxies, use_sources, targets, devices, "
-                  "local_nodes FROM proxy_groups")
+                  "local_nodes FROM proxy_groups ORDER BY sort, id")
     group_names = {g["name"] for g in groups}
     devices = rows("SELECT id, name, target_id FROM devices")
     device_names = {d["name"] for d in devices}
@@ -125,7 +125,9 @@ def main() -> int:
         if bad_name(g["name"]):
             problems.append(f"策略组名称「{g['name']}」命名不规范")
 
-    rules = rows("SELECT id, type, value, target, targets, devices FROM rules")
+    # 规则按实际生效顺序取（sort 就是产物里的先后顺序）
+    rules = rows("SELECT id, type, value, target, targets, devices FROM rules "
+                 "ORDER BY sort, id")
     for r in rules:
         for name in json.loads(r["targets"] or "[]"):
             if name not in target_names:
@@ -144,6 +146,8 @@ def main() -> int:
         if bad_name(d["name"]):
             problems.append(f"设备文件名「{d['name']}」命名不规范")
 
+    target_by_id = {t["id"]: t for t in targets}
+
     # ---- 4. 基础配置各层 ----
     docs = {}
     for row in rows("SELECT engine, platform, device_id, content FROM base_configs"):
@@ -159,7 +163,6 @@ def main() -> int:
         for k in STRUCT_KEYS:
             if k in docs[key]:
                 problems.append(f"基础配置 {key} 含结构键 {k}")
-    target_by_id = {t["id"]: t for t in targets}
     for d in devices:
         target = target_by_id.get(d["target_id"])
         if not target:
@@ -182,6 +185,120 @@ def main() -> int:
                 notes.append(
                     f"基础配置 {engine}/{platform or '默认'}/设备{device_id} 里的 {key} "
                     "与上层完全相同，可清掉（属于冗余覆盖）")
+
+    # ---- 4b. 规则的覆盖逻辑 ----
+    providers = {r["name"]: r for r in rows(
+        "SELECT name, enabled FROM rule_providers")}
+    used_providers: set[str] = set()
+    for r in rules:
+        if r["type"] != "RULE-SET":
+            continue
+        used_providers.add(r["value"])
+        prov = providers.get(r["value"])
+        if prov is None:
+            problems.append(f"规则「{r['type']},{r['value']}」引用了不存在的规则集合")
+        elif not prov["enabled"]:
+            problems.append(
+                f"规则「{r['type']},{r['value']}」引用了已停用的规则集合"
+                f"（{r['value']}）——这条规则在产物里会被丢弃")
+    for name, prov in providers.items():
+        if prov["enabled"] and name not in used_providers:
+            notes.append(f"规则集合「{name}」已启用但没有任何规则引用它（白拿流量）")
+        elif not prov["enabled"] and name not in used_providers:
+            notes.append(f"规则集合「{name}」已停用且无人引用，可清理")
+    # 兜底规则之后还有规则 = 永远不生效
+    for i, r in enumerate(rules):
+        if r["type"] in ("MATCH", "FINAL"):
+            after = rules[i + 1:]
+            if after:
+                problems.append(
+                    f"兜底规则之后还有 {len(after)} 条规则，永远不会命中："
+                    + "、".join(f"{x['type']},{x['value'][:16]}" for x in after[:3]))
+            break
+    # 范围交集为空 = 这条规则在哪儿都不生效
+    device_target = {}
+    for d in devices:
+        target = target_by_id.get(d["target_id"])
+        if target:
+            device_target[d["name"]] = target["name"]
+    for r in rules:
+        ts = set(json.loads(r["targets"] or "[]"))
+        ds = set(json.loads(r["devices"] or "[]"))
+        if not ts and not ds:
+            continue
+        if ds and ts:
+            bad = [d for d in ds if d in device_target and device_target[d] not in ts]
+            if bad:
+                problems.append(
+                    f"规则「{r['type']},{r['value']}」的设备 {bad} "
+                    f"不在它的引擎平台范围 {sorted(ts)} 内 —— 不会生效")
+        elif ds:
+            missing = [d for d in ds if d not in device_target]
+            if missing:
+                problems.append(f"规则「{r['type']},{r['value']}」适用了不存在的设备 {missing}")
+        elif ts and not (ts & target_names):
+            problems.append(
+                f"规则「{r['type']},{r['value']}」的引擎平台范围 {sorted(ts)} "
+                "与现有引擎平台没有交集 —— 不会生效")
+    # 规则的目标组与规则本身的适用范围必须相交
+    group_scope = {g["name"]: (set(json.loads(g["targets"] or "[]")),
+                              set(json.loads(g["devices"] or "[]"))) for g in groups}
+    for r in rules:
+        gscope = group_scope.get(r["target"])
+        if not gscope:
+            continue
+        gts, gds = gscope
+        rts = set(json.loads(r["targets"] or "[]"))
+        rds = set(json.loads(r["devices"] or "[]"))
+        if gds and rds and not (gds & rds):
+            problems.append(
+                f"规则「{r['type']},{r['value']}」与目标组「{r['target']}」"
+                "的适用设备没有交集 —— 规则会被自动剔除")
+        elif gts and rts and not (gts & rts):
+            problems.append(
+                f"规则「{r['type']},{r['value']}」与目标组「{r['target']}」"
+                "的适用引擎平台没有交集 —— 规则会被自动剔除")
+    # 被更早的同类型规则完全遮蔽（后缀按标签边界判定，域名的后缀匹配同理）
+    def suffix_covers(broad: str, narrow: str) -> bool:
+        return narrow == broad or narrow.endswith("." + broad)
+
+    for i, r in enumerate(rules):
+        if r["type"] != "DOMAIN-SUFFIX" or not (r["value"] or "").strip():
+            continue
+        narrow = r["value"].strip().lower()
+        rts = set(json.loads(r["targets"] or "[]"))
+        rds = set(json.loads(r["devices"] or "[]"))
+        for j in range(i):
+            p_rule = rules[j]
+            if p_rule["type"] != "DOMAIN-SUFFIX" or not (p_rule["value"] or "").strip():
+                continue
+            broad = p_rule["value"].strip().lower()
+            if broad == narrow or not suffix_covers(broad, narrow):
+                continue
+            pts = set(json.loads(p_rule["targets"] or "[]"))
+            pds = set(json.loads(p_rule["devices"] or "[]"))
+            if rds and pds and not (pds & rds):
+                continue
+            if rts and pts and not (pts & rts):
+                continue
+            if rds and not pds and not pts:
+                continue
+            if p_rule["target"] == r["target"]:
+                notes.append(
+                    f"规则「DOMAIN-SUFFIX,{r['value']}」被更早的"
+                    f"「DOMAIN-SUFFIX,{p_rule['value']}」覆盖（目标相同，行为一致）")
+            else:
+                notes.append(
+                    f"规则「DOMAIN-SUFFIX,{r['value']}」被更早的"
+                    f"「DOMAIN-SUFFIX,{p_rule['value']}」遮蔽（目标不同，可能不生效）")
+            break
+
+    # 空策略组：没有任何成员
+    for g in groups:
+        if not (json.loads(g["proxies"] or "[]")
+                or json.loads(g["use_sources"] or "[]")
+                or json.loads(g["local_nodes"] or "[]")):
+            problems.append(f"策略组「{g['name']}」没有任何成员")
 
     # ---- 5. 功能模块 ----
     for s in rows("SELECT id, name, engine, enabled, content FROM snippets"):

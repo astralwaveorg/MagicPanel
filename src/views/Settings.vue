@@ -198,6 +198,10 @@
     <div class="mp-card">
       <h3>修改我的密码</h3>
       <el-form label-position="top" style="max-width:420px">
+        <!-- 隐藏的用户名：密码表单带上用户名，浏览器与密码管理器才能正确关联 -->
+        <input type="text" name="username" :value="store.user?.username || ''"
+               autocomplete="username" tabindex="-1" aria-hidden="true"
+               style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
         <el-form-item label="原密码">
           <el-input v-model="pwd.old_password" type="password" show-password autocomplete="current-password" />
         </el-form-item>
