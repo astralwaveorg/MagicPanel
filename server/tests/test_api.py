@@ -1026,7 +1026,7 @@ def test_base_config_defaults_and_crud(client):
     assert saved.json()["effective"]["mode"] == "global"
     assert saved.json()["is_default"] is False
     assert saved.json()["overlay"] == {"mode": "global"}
-    # 来源标注：被本层改写的键来源是「通用配置」，其余仍是「系统默认」
+    # 来源标注：被本层改写的键来源是「引擎平台配置」，其余仍是「引擎默认配置」
     assert saved.json()["sources"]["mode"] == "引擎平台配置"
     assert saved.json()["sources"]["log-level"] == "引擎默认配置"
 
@@ -1444,7 +1444,7 @@ def test_personal_config_applied_by_production_script(client):
 
     csrf = setup_admin(client)
     h = auth_headers(csrf)
-    # 通用配置按「引擎 + 平台」，需要先有引擎平台
+    # 引擎平台配置按「引擎 + 平台」，需要先有引擎平台
     client.post("/api/v1/targets", headers=h, json={
         "name": "stash-ios", "engine": "stash", "platform": "ios"})
     repo_root = os.path.dirname(os.path.dirname(
@@ -1502,7 +1502,7 @@ def test_feed_marker_and_duplicate_rules(client):
 
 
 def test_platform_scoped_base_config_differs_per_platform(client):
-    """通用配置按「引擎 + 平台」：同一引擎的不同平台可以产出不同产物。"""
+    """引擎平台配置按「引擎 + 平台」：同一引擎的不同平台可以产出不同产物。"""
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
@@ -1513,10 +1513,10 @@ def test_platform_scoped_base_config_differs_per_platform(client):
         "name": "stash-android", "engine": "stash", "platform": "android"})
     assert r.status_code == 201, r.text
 
-    # iOS 通用配置
+    # iOS 引擎平台配置
     client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
         "content": "mode: rule\nlog-level: warning\nipv6: false\nlog-level: info\n"})
-    # macOS 通用配置
+    # macOS 引擎平台配置
     r = client.put("/api/v1/base-config?engine=stash&platform=macos", headers=h, json={
         "content": "mode: rule\nlog-level: warning\nipv6: false\nlog-level: debug\n"})
     assert r.status_code == 200, r.text
@@ -1844,8 +1844,8 @@ def test_base_config_cascade_sources():
     }
     layers = bc.scope_layers("stash", "ios", 7, docs)
     effective, sources = bc.cascade(layers)
-    assert effective["mode"] == "rule"          # 设备配置覆盖通用配置
-    assert effective["log-level"] == "info"     # 通用配置覆盖系统默认
+    assert effective["mode"] == "rule"          # 设备独立配置覆盖引擎平台配置
+    assert effective["log-level"] == "info"     # 引擎平台配置覆盖引擎默认配置
     assert sources["mode"] == "设备独立配置"
     assert sources["log-level"] == "引擎平台配置"
     assert sources["ipv6"] == "引擎默认配置"
@@ -2383,7 +2383,7 @@ def test_device_reorder_and_batch(client):
     # 空字段 → 400
     assert client.patch("/api/v1/devices/batch", headers=h, json={
         "ids": ids[:1]}).status_code == 400
-    # 批量删除：设备配置一并清理
+    # 批量删除：设备独立配置一并清理
     r = client.post("/api/v1/devices/batch/delete", headers=h, json={"ids": ids[:2]})
     assert r.status_code == 200, r.text
     assert set(r.json()["deleted"]) == set(ids[:2])
@@ -2556,3 +2556,97 @@ def test_device_scope_produces_per_device_artifact(client):
     # 设备 B 没有专属条目，仍用共享产物
     assert "设备B" not in build["results"]
     assert dev_b["id"] and dev_a["id"]
+
+
+def test_device_config_layer_appends_lists_like_the_other_layers(client):
+    """设备独立配置是"个性化"语义：列表追加，界面看到的就是下发的。
+
+    引擎默认配置 / 引擎平台配置是"这一层的完整配置"语义：列表整体替换；
+    设备独立配置只表达"这台设备额外要的"，因此列表记新增项并追加。
+    """
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    target = client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-macOS", "engine": "stash", "platform": "macos"}).json()
+    dev = client.post("/api/v1/devices", headers=h, json={
+        "name": "我的Mac", "platform": "macos", "target_id": target["id"]}).json()
+
+    # 引擎平台配置：一份带过滤列表的 DNS
+    r = client.put("/api/v1/base-config", headers=h, json={
+        "content": "dns:\n  fake-ip-filter:\n  - +.lan\n  - +.local\n"},
+        params={"engine": "stash", "platform": "macos"})
+    assert r.status_code == 200, r.text
+    # 设备独立配置：把过滤列表换成自己的一份
+    r = client.put("/api/v1/base-config", headers=h, json={
+        "content": "dns:\n  fake-ip-filter:\n  - +.lan\n  - +.local\n  - my.example\n"},
+        params={"engine": "stash", "platform": "macos", "device_id": dev["id"]})
+    assert r.status_code == 200, r.text
+    # 差异里只保存新增的那一条
+    assert r.json()["overlay"]["dns"]["fake-ip-filter"] == ["my.example"]
+    # 界面里的生效值 = 上层 + 新增
+    assert r.json()["effective"]["dns"]["fake-ip-filter"] == [
+        "+.lan", "+.local", "my.example"]
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["verify_status"] == "success", build
+    art = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/Stash-macOS").json()["content"]
+    shared = yaml.safe_load(art)
+    # 平台产物里是平台层那份（设备层在分发时叠加，不进产物）
+    assert shared["dns"]["fake-ip-filter"] == ["+.lan", "+.local"]
+
+
+def test_device_config_follows_its_target(client):
+    """设备独立配置必须跟着设备所在的引擎平台走（换键而不是静默失效）。
+
+    设备迁移到别的引擎平台、或引擎平台改了引擎/平台之后，
+    旧键下的配置既不下发也不显示，属于静默失效——必须自动换键。
+    """
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    t1 = client.post("/api/v1/targets", headers=h, json={
+        "name": "Mihomo-Windows", "engine": "mihomo", "platform": "windows"}).json()
+    t2 = client.post("/api/v1/targets", headers=h, json={
+        "name": "Mihomo-macOS", "engine": "mihomo", "platform": "macos"}).json()
+    dev = client.post("/api/v1/devices", headers=h, json={
+        "name": "我的电脑", "platform": "windows", "target_id": t1["id"]}).json()
+    r = client.put("/api/v1/base-config", headers=h, json={
+        "content": "log-level: info\n"},
+        params={"engine": "mihomo", "platform": "windows", "device_id": dev["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["overlay"] == {"log-level": "info"}
+
+    # 设备迁移到别的引擎平台：这一层要跟着走
+    r = client.put(f"/api/v1/devices/{dev['id']}", headers=h, json={
+        "name": "我的电脑", "platform": "macos", "target_id": t2["id"]})
+    assert r.status_code == 200, r.text
+    r = client.get("/api/v1/base-config", headers=h, params={
+        "engine": "mihomo", "platform": "macos", "device_id": dev["id"]})
+    assert r.json()["overlay"] == {"log-level": "info"}, r.json()["overlay"]
+    # 设备作用域只有一个（按设备定位），换键后这里仍能读到，且只有一份
+    r = client.get("/api/v1/base-config", headers=h, params={
+        "engine": "mihomo", "platform": "macos", "device_id": dev["id"]})
+    assert r.json()["overlay"] == {"log-level": "info"}
+    assert r.json()["is_default"] is False
+
+
+def test_target_engine_change_rekeys_device_configs(client):
+    """引擎平台改了引擎/平台，它下面设备的独立配置也要跟着换键。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    t = client.post("/api/v1/targets", headers=h, json={
+        "name": "some-platform", "engine": "mihomo", "platform": "windows"}).json()
+    dev = client.post("/api/v1/devices", headers=h, json={
+        "name": "设备一", "platform": "windows", "target_id": t["id"]}).json()
+    r = client.put("/api/v1/base-config", headers=h, json={
+        "content": "log-level: debug\n"},
+        params={"engine": "mihomo", "platform": "windows", "device_id": dev["id"]})
+    assert r.status_code == 200, r.text
+    # 引擎平台改平台
+    r = client.put(f"/api/v1/targets/{t['id']}", headers=h, json={
+        "name": "some-platform", "engine": "mihomo", "platform": "macos"})
+    assert r.status_code == 200, r.text
+    r = client.get("/api/v1/base-config", headers=h, params={
+        "engine": "mihomo", "platform": "macos", "device_id": dev["id"]})
+    assert r.json()["overlay"] == {"log-level": "debug"}, r.json()["overlay"]

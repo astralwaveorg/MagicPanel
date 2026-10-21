@@ -73,7 +73,7 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT id, name, target_id, env FROM devices "
                                "ORDER BY id")
     ]
-    base_docs: dict[str, dict] = {}      # 通用配置：引擎+平台 → 覆盖文档
+    base_docs: dict[str, dict] = {}      # 引擎平台配置：引擎+平台 → 覆盖文档
     base_devices: dict[str, dict] = {}   # 设备专属配置：设备 id → 覆盖文档
     for row in db.all_(conn, "SELECT engine, platform, device_id, content "
                              "FROM base_configs"):

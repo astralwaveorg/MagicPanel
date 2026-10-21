@@ -5,6 +5,7 @@
 # 可用环境变量覆盖：NAS_HOST NAS_DIR DOMAIN
 set -euo pipefail
 cd "$(dirname "$0")/.."
+REPO_DIR="$PWD"
 
 NAS_HOST="${NAS_HOST:-archon@10.0.1.2}"
 NAS_DIR="${NAS_DIR:-/opt/magicpanel}"
@@ -106,6 +107,18 @@ if [ "$STATUS" != "healthy" ]; then
        IMAGE_TAG=\"$PREV_IMAGE\" docker compose up -d" || true
     echo "已尝试回滚，请检查 docker ps 与日志" >&2
   fi
+  exit 1
+fi
+
+echo "== 数据自检 =="
+# 把自检脚本拷进容器，对运行中的数据库做一致性检查：
+# 引用完整性、命名规范、冗余覆盖、结构键越权——数据层面的问题在这里挡住，
+# 不留给用户在下发配置时才发现。
+scp -q "$REPO_DIR/scripts/check_data_consistency.py" "$NAS_HOST:/tmp/check_data.py" 2>/dev/null || true
+ssh -o BatchMode=yes "$NAS_HOST" "docker cp /tmp/check_data.py magicpanel:/tmp/check_data.py && \
+  docker exec magicpanel python3 /tmp/check_data.py /app/data/magicpanel.db"
+if [ $? -ne 0 ]; then
+  echo "数据自检未通过，请按上面的提示修正数据（面板已发布，但数据需要整理）" >&2
   exit 1
 fi
 

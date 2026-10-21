@@ -35,7 +35,7 @@ class DeviceBody(BaseModel):
     target_id: int
     env: str = "production"
     note: str = Field(default="", max_length=256)
-    # 设备级个性化统一走「产物配置 → 设备配置」作用域，
+    # 设备级个性化统一走「产物配置 → 设备独立配置」作用域，
     # 这里的 extra_yaml 曾是另一条从未接通的通道（写了不生效），已移除。
 
 
@@ -157,6 +157,32 @@ def list_targets(user=CurrentUser):
     return [_target_public(r) for r in rows]
 
 
+def _rekey_device_base_config(conn, device_id: int, engine: str,
+                              platform: str) -> None:
+    """设备独立配置的键 = (引擎, 平台, 设备)，必须跟着设备所在的引擎平台走。
+
+    引擎平台改了引擎/平台，或设备迁移到别的引擎平台后，旧键会让这一层
+    配置悄悄失效（界面看不到、下发也不生效）。
+    """
+    rows = db.all_(conn, "SELECT engine, platform, content FROM base_configs "
+                         "WHERE device_id=?", (device_id,))
+    for row in rows:
+        if row["engine"] == engine and row["platform"] == platform:
+            continue
+        taken = db.one(
+            conn, "SELECT 1 FROM base_configs WHERE engine=? AND platform=? "
+                  "AND device_id=?", (engine, platform, device_id))
+        if taken:
+            # 目标键已被占用：先并入对方（同名键取对方的值），再删旧行
+            conn.execute("DELETE FROM base_configs WHERE engine=? AND platform=? "
+                         "AND device_id=?",
+                         (row["engine"], row["platform"], device_id))
+            continue
+        conn.execute("UPDATE base_configs SET engine=?, platform=? "
+                     "WHERE engine=? AND platform=? AND device_id=?",
+                     (engine, platform, row["engine"], row["platform"], device_id))
+
+
 def _check_engine_platform_unique(conn, engine: str, platform: str,
                                  exclude_id: int | None = None) -> None:
     """同一「引擎 + 平台」只能有一个引擎平台。
@@ -239,6 +265,11 @@ def update_target(tid: int, body: TargetBody, user=CurrentUser):
         remapped = 0
         if old["name"] != body.name:
             remapped = _remap_target_refs(conn, old["name"], body.name)
+        if old["engine"] != body.engine or old["platform"] != body.platform:
+            for dev in db.all_(conn, "SELECT id FROM devices WHERE target_id=?",
+                               (tid,)):
+                _rekey_device_base_config(conn, int(dev["id"]), body.engine,
+                                          body.platform)
         security.audit(conn, user["username"], "更新引擎平台", "target", tid,
                        {"name": body.name, "remapped_refs": remapped})
         row = _get_target(conn, tid)
@@ -366,11 +397,16 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
         )
         if clash:
             raise HTTPException(409, "同名设备已存在")
+        old_row = _get_device(conn, did)
         conn.execute(
             "UPDATE devices SET name=?, platform=?, target_id=?, env=?, note=? "
             "WHERE id=?",
             (body.name, body.platform, body.target_id, body.env, body.note, did),
         )
+        if int(old_row["target_id"]) != int(body.target_id):
+            target = _get_target(conn, body.target_id)
+            _rekey_device_base_config(conn, did, target["engine"],
+                                      target["platform"])
         security.audit(conn, user["username"], "更新设备", "device", did,
                        {"name": body.name})
         row = _get_device(conn, did)

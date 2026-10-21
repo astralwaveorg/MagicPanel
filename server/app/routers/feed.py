@@ -1,4 +1,4 @@
-"""设备配置分发。
+"""设备独立配置分发。
 
 令牌即凭据：任何持有完整订阅地址的人都可下载配置，撤销只影响后续下载。
 HTTP 200 只代表下载成功，不代表客户端已加载或策略已生效。
@@ -118,7 +118,7 @@ def device_config(token: str, request: Request):
             problems = validate.validate_rendered(raw, target["engine"])
             if problems:
                 return Response(
-                    "设备配置导致产物校验失败：" + "；".join(problems),
+                    "设备独立配置导致产物校验失败：" + "；".join(problems),
                     status_code=500,
                 )
         text = render.substitute_feed(raw, feed_base)

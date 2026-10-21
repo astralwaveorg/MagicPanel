@@ -3,7 +3,7 @@
 层级（后者覆盖前者）：
 ① 引擎默认配置：引擎内置的能力基线，随程序发布，可直接改；
 ② 引擎平台配置：按「引擎 + 平台」维护（与"引擎平台"一一对应，如 Stash-macOS）；
-③ 设备配置：按设备维护，只对该设备的最终配置生效。
+③ 设备独立配置：按设备维护，只对该设备的最终配置生效。
 
 每层只存"与上层不同"的差异（overlay），因此上层默认值变化时，
 没有被显式改过的键会自动跟随；"恢复默认"= 清空本层差异。
@@ -171,10 +171,23 @@ COMPAT = {
     PANEL_DIRECT_KEY: True,
 }
 
+# MTProto 代理（Telegram）——Stash 官方文档 https://stash.wiki/features/mtproto
+# 放在「设备独立配置」里：哪台设备要用就给它加一份，不想用了删掉即可。
+# secret 是客户端连接的唯一凭证，{{mtproto_secret}} 由前端在套用时替换成
+# 现场生成的 32 位十六进制密钥（官方建议 openssl rand -hex 16）。
+MTPROTO = {
+    "mtproto": {
+        "port": 5753,
+        "secret": "{{mtproto_secret}}",
+        "ipv6": False,
+    },
+}
+
 PRESETS = {
     "stash": {
         "official": ("Stash 官方完整默认", deepcopy(STASH_OFFICIAL)),
         "compat": ("兼容现状（精简）", deepcopy(COMPAT)),
+        "mtproto": ("MTProto 代理（Telegram）", deepcopy(MTPROTO)),
     },
     "mihomo": {
         "official": ("Mihomo 官方完整默认", deepcopy(MIHOMO_OFFICIAL)),
@@ -194,7 +207,7 @@ def default_doc(engine: str) -> dict:
 
 # 多级联动的合并策略（用成熟库 deepmerge 实现，避免手写合并出纰漏）：
 # - 字典：递归合并（并集，逐键覆盖）
-# - 列表：整体替换（不拼接，避免配置语义含糊）
+# - 列表：默认整体替换（不拼接，避免配置语义含糊）；设备层用"追加"（个性化语义）
 # - 标量 / 类型冲突：后者覆盖前者
 _MERGER = Merger(
     [(list, ListStrategy.ListStrategies.strategy_override),
@@ -203,23 +216,41 @@ _MERGER = Merger(
     TypeConflictStrategy.TypeConflictStrategies.strategy_override,
 )
 
+# 设备独立配置层用追加语义：这一层表达的是"这台设备的个性化"，
+# 典型场景是给 DNS 过滤列表再加一条，而不是重写整份列表。
+_MERGER_APPEND = Merger(
+    [(list, ListStrategy.ListStrategies.strategy_append),
+     (dict, DictStrategy.DictStrategies.strategy_merge)],
+    FallbackStrategy.FallbackStrategies.strategy_override,
+    TypeConflictStrategy.TypeConflictStrategies.strategy_override,
+)
 
-def merge_docs(base: dict, overlay: dict) -> dict:
+# 列表的两种语义
+LIST_REPLACE = "replace"   # 整体替换（引擎默认配置 / 引擎平台配置）
+LIST_APPEND = "append"     # 追加（设备独立配置）
+
+
+def merge_docs(base: dict, overlay: dict, lists: str = LIST_REPLACE) -> dict:
     """合并一层覆盖：键级并集，同键后者覆盖前者。
 
-    字典递归合并、列表整体替换、标量覆盖——语义由 deepmerge 的策略显式声明。
+    字典递归合并、列表按 lists 指定（替换 / 追加）、标量覆盖——
+    语义由 deepmerge 的策略显式声明。
     """
     if not overlay:
         return deepcopy(base or {})
     if not base:
         return deepcopy(overlay)
-    return _MERGER.merge(deepcopy(base), deepcopy(overlay))
+    merger = _MERGER_APPEND if lists == LIST_APPEND else _MERGER
+    return merger.merge(deepcopy(base), deepcopy(overlay))
 
 
-def diff_overlay(base: dict, effective: dict) -> dict:
+def diff_overlay(base: dict, effective: dict, lists: str = LIST_REPLACE) -> dict:
     """比较"上层生效值"与"本层编辑后的值"，得出本层真正需要覆盖的差异。
 
-    字典递归比较，列表整体比较；相同则不写入本层（保持"跟随上层"）。
+    字典递归比较；列表按 lists 指定：
+    * replace —— 列表整体比较，不同就存整份（配合替换语义还原"用户写的那份"）；
+    * append  —— 只存新增的条目（配合追加语义，删除上层条目做不到，
+      要回到上层默认值请用「恢复继承」）。
     """
     overlay: dict = {}
     for key, value in (effective or {}).items():
@@ -228,9 +259,13 @@ def diff_overlay(base: dict, effective: dict) -> dict:
             continue
         old = base[key]
         if isinstance(value, dict) and isinstance(old, dict):
-            sub = diff_overlay(old, value)
+            sub = diff_overlay(old, value, lists)
             if sub:
                 overlay[key] = sub
+        elif isinstance(value, list) and isinstance(old, list) and lists == LIST_APPEND:
+            added = [item for item in value if item not in old]
+            if added:
+                overlay[key] = deepcopy(added)
         elif value != old:
             overlay[key] = deepcopy(value)
     return overlay
@@ -245,9 +280,11 @@ def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
     effective: dict = {}
     sources: dict = {}
     for label, doc in layers:
+        # 设备独立配置层用追加语义（个性化 = 在上层基础上加东西）
+        lists = LIST_APPEND if label == "设备独立配置" else LIST_REPLACE
         for key, value in (doc or {}).items():
             if isinstance(value, dict) and isinstance(effective.get(key), dict):
-                effective[key] = merge_docs(effective[key], value)
+                effective[key] = merge_docs(effective[key], value, lists)
             else:
                 effective[key] = deepcopy(value)
             # 后面的层级优先：来源记录最后一次改写该键的层
@@ -258,8 +295,8 @@ def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
 def leaf_sources(layers: list[tuple[str, dict]]) -> dict[str, str]:
     """每个叶子路径的来源层级（点号路径，如 "dns.nameserver"）。
 
-    顶层来源不足以说明"dns 里的 nameserver 来自哪一层"——通用配置改了
-    dns.nameserver、系统默认改了 dns.enable，两者来源不同。界面按叶子
+    顶层来源不足以说明"dns 里的 nameserver 来自哪一层"——引擎平台配置改了
+    dns.nameserver、引擎默认配置改了 dns.enable，两者来源不同。界面按叶子
     展示来源，这里给出对应的点号路径映射。
     """
     sources: dict[str, str] = {}
@@ -279,13 +316,13 @@ def leaf_sources(layers: list[tuple[str, dict]]) -> dict[str, str]:
 
 def scope_layers(engine: str, platform: str = "", device_id: int = 0,
                  docs: dict | None = None) -> list[tuple[str, dict]]:
-    """按作用域取出各层文档（从低到高：系统默认 → 通用配置 → 设备配置）。
+    """按作用域取出各层文档（从低到高：引擎默认配置 → 引擎平台配置 → 设备独立配置）。
 
     返回的列表**包含当前作用域自己那一层**，因此：
     - layers[:-1] 是当前层的"继承值"（上层合并结果）；
     - layers 是完整链路，合并结果即"生效值"。
 
-    系统默认本身也可以被覆盖：用户改的是"默认值之上的差异"，
+    引擎默认配置本身也可以被覆盖：用户改的是"默认值之上的差异"，
     差异存在 (engine, "", 0) 这条记录里；不覆盖时就是源码里的默认值，
     随时可以删掉这条记录恢复默认。
     """
@@ -473,6 +510,17 @@ SCHEMA = [
            engines=["mihomo"]),
     _field("dns.fake-ip-filter", "不返回 Fake-IP 的域名（每行一个）", "list",
            group="dns", engines=["stash", "mihomo"]),
+    # MTProto 代理（Telegram）——只在设备独立配置里用
+    _field("mtproto.port", "MTProto 监听端口", "number", group="mtproto",
+           default=5753, engines=["stash"]),
+    _field("mtproto.secret", "MTProto 密钥（32 位十六进制）", "text",
+           group="mtproto", engines=["stash"],
+           placeholder="openssl rand -hex 16 生成；客户端填写时要带 dd 前缀"),
+    _field("mtproto.ipv6", "只连接数据中心 IPv6", "switch", group="mtproto",
+           default=False, engines=["stash"]),
+    _field("mtproto.dc-config-url", "数据中心地址表来源（可选）", "text",
+           group="mtproto", engines=["stash"],
+           placeholder="https://example.com/mtproto-dc-config.json"),
     # 个人配置
     _field(DIRECT_DOMAINS_KEY, "个人直连域名（每行一个）", "list",
            group="personal", engines=["stash", "mihomo"],
@@ -491,5 +539,6 @@ GROUP_LABELS = {
     "basic": "基础",
     "profile": "配置文件存储",
     "dns": "DNS",
+    "mtproto": "MTProto 代理（Telegram）",
     "personal": "个人配置（直连域名 / Fake-IP 过滤）",
 }

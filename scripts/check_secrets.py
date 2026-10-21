@@ -51,6 +51,9 @@ SKIP_PATHS = [
     re.compile(r"^docs/"),
     re.compile(r"^\.ref/"),
     re.compile(r"^node_modules/"),
+    # 官方文档原文（Stash / Mihomo 的配置样例）：里面的账号密码是官方示例值，
+    # 不是本项目的凭据；它们是核对引擎默认配置出处的依据，必须留在仓库里。
+    re.compile(r"^official-example/"),
 ]
 
 

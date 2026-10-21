@@ -114,9 +114,9 @@
           <el-input v-model="form.note" placeholder="例如：客厅 Mac mini" />
           <div class="mp-form-hint">用于界面展示；留空时默认使用文件名。</div>
         </el-form-item>
-        <el-form-item label="设备配置">
+        <el-form-item label="设备独立配置">
           <div class="mp-form-hint">
-            端口、DNS、日志等个性化配置，请前往「产物配置 → 设备配置」修改。
+            端口、DNS、日志等个性化配置，请前往「产物配置 → 设备独立配置」修改。
             该页面可查看配置的逐层继承来源。
           </div>
         </el-form-item>
@@ -314,7 +314,7 @@ async function removeSelected() {
   if (!selected.value.length) return
   const ids = selected.value.map((r) => r.id)
   const ok = await confirmBox(
-    `删除选中的 ${ids.length} 台设备？订阅地址会立即失效，设备配置一并删除。`,
+    `删除选中的 ${ids.length} 台设备？订阅地址会立即失效，设备独立配置一并删除。`,
     '批量删除设备', { type: 'warning', confirmButtonText: '删除' })
   if (!ok) return
   try {

@@ -1,4 +1,4 @@
-"""系统默认（默认值）可覆盖、可恢复默认的回归测试。"""
+"""引擎默认配置可覆盖、可恢复默认的回归测试。"""
 import yaml
 
 from conftest import auth_headers, setup_admin
@@ -31,12 +31,12 @@ def test_builtin_default_is_editable_and_resettable(client):
     assert len(saved["overlay"]) == 1, "只应保存与默认值不同的差异"
     assert saved["effective"]["mode"] == doc["mode"]
 
-    # 通用配置继承新的默认值
+    # 引擎平台配置继承新的默认值
     resp = client.get("/api/v1/base-config?engine=stash&platform=ios")
     assert resp.status_code == 200
     assert resp.json()["effective"]["mode"] == doc["mode"]
 
-    # 作用域列表里系统默认项标记为"已自定义"
+    # 作用域列表里引擎默认配置项标记为"已自定义"
     resp = client.get("/api/v1/base-config/scopes")
     builtins = {s["engine"]: s for s in resp.json()["scopes"] if s.get("kind") == "builtin"}
     assert set(builtins) == {"stash", "mihomo"}
@@ -65,7 +65,7 @@ def test_builtin_default_rejects_protected_keys(client):
 
 
 def test_builtin_scope_needs_engine(client):
-    """系统默认是按引擎分层的，engine 必填。"""
+    """引擎默认配置是按引擎分层的，engine 必填。"""
     setup_admin(client)
     resp = client.get("/api/v1/base-config")
     assert resp.status_code == 200

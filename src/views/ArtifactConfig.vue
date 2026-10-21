@@ -53,6 +53,9 @@
               <div class="mp-scope-current">
                 <strong>{{ current ? current.label : '产物配置' }}</strong>
                 <span class="mp-toolbar-hint">{{ currentHint }}</span>
+                <span v-if="inheritChain.length" class="mp-inherit-chain">
+                  继承链：{{ inheritChain.join(' → ') }}
+                </span>
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -228,7 +231,12 @@
                              @change="applyPreset">
                     <el-option v-for="p in presets" :key="p.key" :value="p.key" :label="p.label" />
                   </el-select>
-                  <span class="mp-form-hint">套用后会覆盖当前层级对应的键。</span>
+                  <span class="mp-form-hint">
+                    套用后会覆盖当前层级对应的键。
+                    <template v-if="presetKey === 'mtproto'">
+                      MTProto 请套用到「设备独立配置」：哪台设备要用就加一份，不想用时删掉该层的 mtproto 段即可。
+                    </template>
+                  </span>
                 </div>
               </el-form-item>
             </el-form>
@@ -391,6 +399,15 @@ const layerLabel = computed(() => {
   if (current.value.kind === 'builtin') return '引擎默认配置'
   if (current.value.kind === 'general') return '引擎平台配置'
   return '设备独立配置'
+})
+
+// 继承链：本层继承自哪几层，一眼看清"这个值是从哪儿来的"
+const inheritChain = computed(() => {
+  const layers = state.value?.layers || []
+  if (!layers.length) return []
+  const self = layers[layers.length - 1]
+  if (layers.length === 1) return [`${self.label}（基线，${self.scope}）`]
+  return layers.map((l) => `${l.label} · ${l.scope}`)
 })
 
 const currentHint = computed(() => {
@@ -663,15 +680,28 @@ async function select(scope) {
   }
 }
 
+// 现场生成 32 位十六进制密钥（MTProto 用；官方建议 openssl rand -hex 16）
+function randomSecret() {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 function applyPreset(key) {
   const preset = presets.value.find((p) => p.key === key)
   if (!preset) return
-  raw.value = preset.content
+  const content = preset.content.includes('{{mtproto_secret}}')
+    ? preset.content.replace('{{mtproto_secret}}', randomSecret())
+    : preset.content
+  raw.value = content
   try {
-    const parsed = parseYaml(preset.content)
+    const parsed = parseYaml(content)
     Object.keys(doc).forEach((k) => delete doc[k])
     Object.assign(doc, parsed)
   } catch { /* 预设由服务端保证合法 */ }
+  if (content !== preset.content) {
+    ElMessage.success('已套用预设并生成新的 MTProto 密钥，请复制到 Telegram 客户端')
+  }
 }
 
 function scopeQuery() {
@@ -865,6 +895,12 @@ onMounted(async () => {
 }
 .mp-scope-tag { font-size: 11px; opacity: .55; }
 .mp-scope-current { display: flex; flex-direction: column; gap: 2px; }
+.mp-inherit-chain {
+  font-size: 12px;
+  color: var(--mp-text-secondary);
+  border-left: 2px solid var(--mp-border);
+  padding-left: 8px;
+}
 .mp-section-title { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .mp-subsection { font-size: 12px; color: var(--mp-text-secondary); margin-bottom: 8px; }
 .mp-effective-table { margin-bottom: 4px; }

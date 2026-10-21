@@ -340,6 +340,7 @@ def init_db() -> None:
         _migrate_verification_wording(conn)
         _migrate_base_config_defaults(conn)
         _migrate_device_scope(conn)
+        _migrate_device_base_config_keys(conn)
 
 
 def _migrate_release_state_machine(conn) -> None:
@@ -557,6 +558,49 @@ def _migrate_local_node_test(conn) -> None:
     _ensure_column(conn, "local_nodes", "tested_at", "tested_at TEXT")
     conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
                  "VALUES('local_node_test_v1', ?)", (now(),))
+
+
+def _migrate_device_base_config_keys(conn) -> None:
+    """设备独立配置的键必须与设备所在引擎平台一致。
+
+    键是 (引擎, 平台, 设备)。引擎平台换了引擎/平台、或设备迁移到别的
+    引擎平台之后，旧键下的配置既不会下发、也不会在界面上显示——
+    属于"静默失效"，必须把键修正到设备当前所在的引擎平台上。
+    """
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='device_base_config_keys_v1'")
+    if done:
+        return
+    for dev in all_(conn, "SELECT id, target_id FROM devices"):
+        target = one(conn, "SELECT engine, platform FROM targets WHERE id=?",
+                     (dev["target_id"],))
+        if not target:
+            continue
+        want = (target["engine"], target["platform"])
+        rows = all_(conn, "SELECT engine, platform, content FROM base_configs "
+                          "WHERE device_id=?", (dev["id"],))
+        for row in rows:
+            if (row["engine"], row["platform"]) == want:
+                continue
+            taken = one(conn, "SELECT content FROM base_configs WHERE engine=? "
+                              "AND platform=? AND device_id=?",
+                        (want[0], want[1], dev["id"]))
+            if taken is None:
+                conn.execute("UPDATE base_configs SET engine=?, platform=? "
+                             "WHERE engine=? AND platform=? AND device_id=?",
+                             (want[0], want[1], row["engine"], row["platform"],
+                              dev["id"]))
+            else:
+                # 目标键已有内容（那才是真正在生效的那份），旧键只保留一份
+                if not (taken["content"] or "").strip() and (row["content"] or "").strip():
+                    conn.execute("UPDATE base_configs SET content=? "
+                                 "WHERE engine=? AND platform=? AND device_id=?",
+                                 (row["content"], want[0], want[1], dev["id"]))
+                conn.execute("DELETE FROM base_configs WHERE engine=? AND platform=? "
+                             "AND device_id=?",
+                             (row["engine"], row["platform"], dev["id"]))
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('device_base_config_keys_v1', ?)", (now(),))
 
 
 def _migrate_device_scope(conn) -> None:

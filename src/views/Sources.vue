@@ -243,7 +243,7 @@
                 <template #reference>
                   <span class="mp-info-dot">ⓘ</span>
                 </template>
-                停用后，该节点保留在面板中，但不会写入最终生成的设备配置（YAML）里。
+                停用后，该节点保留在面板中，但不会写入最终生成的客户端配置（YAML）里。
               </el-tooltip>
             </el-form-item>
           </el-col>

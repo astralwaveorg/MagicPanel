@@ -313,12 +313,12 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     传入设备 = 渲染这台设备自己的产物（含只属于它的策略组与规则）。
     """
     engine = target["engine"]
-    # ① 基础配置：系统默认 → 通用配置（引擎+平台）；设备配置在分发时叠加
-    layers = [("系统默认", base_config_service.default_doc(engine))]
+    # ① 基础配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
+    layers = [("引擎默认配置", base_config_service.default_doc(engine))]
     platform = target.get("platform") or ""
     general_base = (snapshot.get("base") or {}).get(f"{engine}|{platform}")
     if general_base:
-        layers.append(("通用配置", base_config_service.normalize(general_base)))
+        layers.append(("引擎平台配置", base_config_service.normalize(general_base)))
     base, _sources = base_config_service.cascade(layers)
     # 应用级伪键：不写入产物，只控制面板内置行为
     panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))
@@ -472,6 +472,10 @@ def dedupe_rules(text: str) -> str:
 def apply_device_overlay(text: str, overlay_yaml: str) -> str:
     """设备级个性化：在目标产物之上叠加该设备自己的扩展 YAML。
 
+    合并语义与「产物配置」的分层完全一致：字典递归、列表**追加**、标量覆盖。
+    设备层是"个性化"语义：保存的是与上层的差异，列表只记新增项，
+    因此这里用追加语义——下发结果 = 平台产物 + 这台设备新增的内容。
+
     结构键（节点 / 策略组 / 规则等）不允许被设备覆盖：
     列表是追加语义，写在兜底规则之后永不生效，还会让客户端加载失败。
     """
@@ -487,5 +491,6 @@ def apply_device_overlay(text: str, overlay_yaml: str) -> str:
     cfg = yaml.safe_load(text) or {}
     if not isinstance(cfg, dict):
         return text
-    _merge(cfg, overlay)
-    return yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False, width=4096)
+    merged = base_config_service.merge_docs(
+        cfg, overlay, base_config_service.LIST_APPEND)
+    return yaml.safe_dump(merged, allow_unicode=True, sort_keys=False, width=4096)

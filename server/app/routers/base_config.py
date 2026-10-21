@@ -79,6 +79,21 @@ def _check_scope(conn, engine: str, platform: str, device_id: int,
     return plat, int(device_id or 0)
 
 
+def _layer_scopes(conn, engine: str, platform: str, device_id: int) -> list[tuple[str, str]]:
+    """各层的「层级名 + 具体作用域名」，用于界面显示继承关系。"""
+    default_name = f"{ENGINE_LABELS.get(engine, engine)} 默认"
+    out: list[tuple[str, str]] = [("引擎默认配置", default_name)]
+    if platform:
+        # 引擎平台配置的作用域名 = 引擎平台的名字（与「引擎平台」页一致）
+        target = db.one(conn, "SELECT name FROM targets WHERE engine=? AND platform=? "
+                              "ORDER BY sort, id LIMIT 1", (engine, platform))
+        out.append(("引擎平台配置", target["name"] if target else platform))
+    if device_id:
+        row = db.one(conn, "SELECT name FROM devices WHERE id=?", (device_id,))
+        out.append(("设备独立配置", row["name"] if row else f"设备 {device_id}"))
+    return out
+
+
 def _all_docs(conn) -> dict:
     """读取全部作用域的覆盖文档，键为 (engine, platform, device_id)。"""
     docs: dict = {}
@@ -212,6 +227,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         plat, dev_id = _check_scope(conn, engine, platform, device_id)
         docs = _all_docs(conn)
         _, overlay, updated_at = _load_scope(conn, engine, plat, dev_id)
+        layer_scopes = _layer_scopes(conn, engine, plat, dev_id)
     layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
     inherited, _ = base_config_service.cascade(layers[:-1]) if len(layers) > 1 else ({}, {})
     effective, sources = base_config_service.cascade(layers)
@@ -225,7 +241,9 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         "effective": effective,
         "sources": sources,
         "leaf_sources": base_config_service.leaf_sources(layers),
-        "layers": [{"label": label, "keys": sorted(doc.keys())} for label, doc in layers],
+        "layers": [{"label": label, "scope": scope_name,
+                    "keys": sorted(doc.keys())}
+                   for (label, scope_name), (_, doc) in zip(layer_scopes, layers)],
         "content": base_config_service.to_yaml(effective),
         "updated_at": updated_at,
         "is_default": not overlay,
@@ -255,7 +273,11 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         else:
             inherited, _ = (base_config_service.cascade(layers[:-1])
                             if len(layers) > 1 else ({}, {}))
-        overlay = base_config_service.diff_overlay(inherited, effective)
+        # 设备独立配置层是"个性化"语义：列表存新增项（追加），
+        # 其余两层是"这一层的完整配置"语义：列表存整份（替换）。
+        lists = (base_config_service.LIST_APPEND if dev_id
+                 else base_config_service.LIST_REPLACE)
+        overlay = base_config_service.diff_overlay(inherited, effective, lists)
         base_config_service.validate_doc(overlay, device_scope=bool(dev_id))
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
