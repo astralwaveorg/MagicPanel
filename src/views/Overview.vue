@@ -65,6 +65,27 @@
     </div>
 
     <div class="mp-card">
+      <h3>测速链路</h3>
+      <div class="mp-direct-head">
+        <StatusDot :kind="directKind" :text="directTitle" />
+        <el-button size="small" :loading="directLoading" @click="loadDirect(true)">重新检测</el-button>
+      </div>
+      <ul v-if="direct.notes?.length" class="mp-direct-notes">
+        <li v-for="(n, i) in direct.notes" :key="i">{{ n }}</li>
+      </ul>
+      <div v-if="direct.egress?.ip" class="mp-health-note" style="margin-top:8px">
+        直连出口 <span class="mono">{{ direct.egress.ip }}</span>
+        · {{ direct.egress.country || direct.egress.country_code || '未知地区' }}
+        · 检测于 {{ direct.checked_at }}
+      </div>
+      <p class="mp-form-hint" style="margin:10px 0 0">
+        测速由面板本机的 Mihomo 核心直接连接节点服务器，不经过任何系统代理；
+        面板自身的抓取、校验请求同样直连。若 NAS 之后启用透明代理或 TUN，
+        需要把面板容器网段与节点服务器地址加入直连规则，否则测速会变成代理出口的延迟。
+      </p>
+    </div>
+
+    <div class="mp-card">
       <h3>节点来源</h3>
       <EmptyState
         v-if="!data.sources?.length"
@@ -181,6 +202,16 @@ import { fmtTime, shortSha, sourceStatus, PLATFORM_LABELS, ENV_LABELS } from '..
 
 const data = ref({})
 const error = ref('')
+const direct = ref({})
+const directLoading = ref(false)
+
+const DIRECT_TITLES = {
+  ok: '测速走本机直连',
+  risk: '测速可能被代理接管',
+  unknown: '无法确认测速链路',
+}
+const directKind = computed(() => (direct.value.state === 'ok' ? 'ok' : 'warn'))
+const directTitle = computed(() => DIRECT_TITLES[direct.value.state] || DIRECT_TITLES.unknown)
 
 const testedSources = computed(() =>
   (data.value.sources || []).filter((s) => s.tested_at))
@@ -211,6 +242,17 @@ function availColor(percent) {
   return AVAIL_COLORS[step]
 }
 
+async function loadDirect(refresh = false) {
+  directLoading.value = true
+  try {
+    direct.value = await api(`/api/v1/direct-check${refresh ? '?refresh=1' : ''}`)
+  } catch (e) {
+    direct.value = { state: 'unknown', notes: [`检测失败：${e.message}`] }
+  } finally {
+    directLoading.value = false
+  }
+}
+
 async function load() {
   error.value = ''
   try {
@@ -219,6 +261,7 @@ async function load() {
     error.value = e.message
     ElMessage.error(e.message)
   }
+  loadDirect()
 }
 
 onMounted(load)
@@ -226,6 +269,8 @@ onMounted(load)
 
 <style scoped>
 .mp-health-ok, .mp-health-issues { display: flex; flex-direction: column; gap: 8px; }
+.mp-direct-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mp-direct-notes { margin: 10px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
 .mp-health-note { font-size: 12.5px; color: var(--mp-text-secondary); }
 .avail-list { display: flex; flex-direction: column; gap: 12px; }
 .avail-row { display: flex; align-items: center; gap: 14px; }

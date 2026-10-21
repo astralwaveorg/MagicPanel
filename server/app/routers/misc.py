@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
-from ..services import releases, tester, webdav
+from ..services import direct, releases, tester, webdav
 
 router = APIRouter(prefix="/api/v1", tags=["misc"])
 
@@ -141,6 +141,12 @@ def _health_snapshot(conn, devices: list) -> dict:
         "core_available": bool(core.get("available")),
         "core_version": core.get("version", ""),
     }
+
+
+@router.get("/direct-check")
+def direct_check(refresh: bool = False, user=CurrentUser):
+    """测速链路直连自检：出口地址、代理环境变量与结论。"""
+    return direct.check(refresh=refresh)
 
 
 @router.get("/audit")

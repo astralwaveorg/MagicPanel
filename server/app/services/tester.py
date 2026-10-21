@@ -22,6 +22,7 @@ import httpx
 import yaml
 
 from .. import config
+from .direct import direct_env
 
 # 兜底版本：无法解析最新发布版本时使用
 MIHOMO_FALLBACK_VERSION = "v1.19.32"
@@ -88,6 +89,9 @@ def _download_with_curl(url: str, proxy: str) -> bytes | None:
     cmd = ["curl", "-fsSL", "--max-time", "120"]
     if proxy:
         cmd += ["-x", proxy]
+    else:
+        # 不指定代理时也不许用环境里的 http_proxy：面板默认直连
+        cmd += ["--noproxy", "*"]
     cmd += ["-o", "-", url]
     try:
         out = subprocess.run(cmd, capture_output=True, timeout=130)
@@ -267,7 +271,7 @@ def validate_config(text: str, feed_placeholder: str = "https://127.0.0.1") -> t
         try:
             out = subprocess.run(
                 [str(core_path()), "-d", str(workdir), "-t", "-f", str(cfg)],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=30, env=direct_env(),
             )
         except subprocess.TimeoutExpired:
             return True, "核心校验超时"
@@ -332,7 +336,7 @@ def test_nodes(snapshot_yaml: str) -> dict:
     )
     proc = subprocess.Popen(
         [str(core_path()), "-d", str(workdir), "-f", str(workdir / "config.yaml")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=direct_env(),
     )
     base = f"http://127.0.0.1:{controller_port}"
     try:
