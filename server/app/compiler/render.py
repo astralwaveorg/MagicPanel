@@ -331,7 +331,9 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None) ->
         cfg["proxy-groups"] = []
         for group in groups:
             names = [
-                local_node_service.marked_name(local_enabled[node_id]["name"])
+                local_node_service.display_name(
+                    local_enabled[node_id]["name"],
+                    local_enabled[node_id].get("node_type") or "")
                 for node_id in (group.get("local_nodes") or [])
                 if node_id in local_enabled
             ]

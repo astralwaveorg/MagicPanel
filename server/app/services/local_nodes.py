@@ -1,6 +1,7 @@
-"""本地单节点：协议字段定义、校验与 Clash/Mihomo 出站渲染。
+"""本地节点：协议字段定义、校验与 Clash/Mihomo 出站渲染。
 
-节点以 `[单] 名称` 写入产物顶层 proxies；策略组通过 local_nodes 字段引用。
+节点以 `名称 (类型)` 写入产物顶层 proxies；策略组通过 local_nodes 字段引用。
+类型后缀用于与远程订阅节点区分，避免同名节点在客户端里撞车。
 协议字段由服务端统一定义，前端据此动态渲染表单。
 """
 import json
@@ -8,7 +9,9 @@ from copy import deepcopy
 
 import yaml
 
-MARK = "[单]"
+# 节点类型：面板内可选的白名单，空串表示不追加类型后缀
+NODE_TYPES = ["本地", "自建", "家宽", "机房", "专线", "中转", "落地"]
+DEFAULT_NODE_TYPE = "本地"
 
 SS_CIPHERS = [
     "aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305",
@@ -236,8 +239,13 @@ def protocol_schema() -> list[dict]:
     return result
 
 
-def marked_name(name: str) -> str:
-    return f"{MARK} {name}"
+def display_name(name: str, node_type: str = "") -> str:
+    """产物里的节点标识：``名称 (类型)``；类型为空时保持原名。"""
+    label = (name or "").strip()
+    kind = (node_type or "").strip()
+    if not kind:
+        return label
+    return f"{label} ({kind})"
 
 
 def default_params(protocol: str) -> dict:
@@ -344,7 +352,7 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
     protocol = node["protocol"]
     stash = engine == "stash"
     entry = {
-        "name": marked_name(node["name"]),
+        "name": display_name(node["name"], node.get("node_type") or ""),
         "type": params.get("proxy_type") if protocol == "custom" else protocol,
         "server": node["server"],
         "port": int(node["port"]),

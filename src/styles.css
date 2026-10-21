@@ -143,6 +143,7 @@ html, body, #app {
 .mp-toolbar-hint { color: var(--mp-text-secondary); font-size: 12.5px; }
 .mp-selected-hint { font-size: 13px; font-weight: 600; }
 .mp-form-hint { color: var(--mp-text-secondary); font-size: 12px; line-height: 1.6; margin-top: 2px; }
+.mp-info-dot { color: var(--mp-text-secondary); cursor: help; margin-left: 6px; font-size: 13px; }
 .mp-dialog-desc { color: var(--mp-text-secondary); font-size: 13px; line-height: 1.7; margin: 0 0 10px; }
 .mp-pagination {
   display: flex;

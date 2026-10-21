@@ -894,7 +894,9 @@ def test_local_node_crud_render_and_group_reference(client):
         "port": 8388,
         "params": {"cipher": "aes-256-gcm", "password": "secret", "udp": True},
     }).json()
-    assert node["marked_name"] == "[单] HK-01"
+    # 节点类型默认「本地」，产物里的标识是「名称 (类型)」
+    assert node["node_type"] == "本地"
+    assert node["display_name"] == "HK-01 (本地)"
 
     custom = client.post("/api/v1/local-nodes", headers=h, json={
         "name": "Custom-01", "protocol": "custom", "server": "custom.example.com",
@@ -917,7 +919,7 @@ def test_local_node_crud_render_and_group_reference(client):
     assert build["verify_status"] == "success", build
     art = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
-    assert "[单] HK-01" in art
+    assert "HK-01 (本地)" in art
     assert "hk.example.com" in art
     assert "aes-256-gcm" in art
 
@@ -937,7 +939,7 @@ def test_local_node_crud_render_and_group_reference(client):
     assert build2["verify_status"] == "success", build2
     art2 = client.get(
         f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
-    assert "[单] HK-01" not in art2
+    assert "HK-01 (本地)" not in art2
 
     # 解除引用后可删除
     body = {**group, "local_nodes": []}
@@ -2111,8 +2113,8 @@ def test_local_first_puts_local_nodes_before_group_members(client):
     group = next(g for g in cfg["proxy-groups"] if g["name"] == "机房优先组")
     members = group["proxies"]
     # 空组保护在前（占位），其后应是本地节点，再往后才是普通成员
-    assert "[单] 本地甲" in members
-    assert members.index("[单] 本地甲") < members.index("DIRECT")
+    assert "本地甲 (本地)" in members
+    assert members.index("本地甲 (本地)") < members.index("DIRECT")
 
 
 def test_fallback_rule_is_moved_to_end_of_artifact(client):

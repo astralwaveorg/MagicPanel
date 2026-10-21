@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api/v1/local-nodes", tags=["local-nodes"])
 
 class LocalNodeBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
+    node_type: str = Field(default=local_nodes.DEFAULT_NODE_TYPE, max_length=16)
     protocol: str = Field(min_length=1, max_length=32)
     server: str = Field(min_length=1, max_length=255)
     port: int = Field(ge=1, le=65535)
@@ -29,7 +30,9 @@ def _public(row) -> dict:
     return {
         "id": row["id"],
         "name": row["name"],
-        "marked_name": local_nodes.marked_name(row["name"]),
+        "node_type": row["node_type"] or "",
+        "display_name": local_nodes.display_name(
+            row["name"], row["node_type"] or ""),
         "protocol": row["protocol"],
         "server": row["server"],
         "port": row["port"],
@@ -54,6 +57,10 @@ def _prepare(body: LocalNodeBody) -> tuple[dict, str]:
         raise HTTPException(400, "名称不能为空")
     if not body.server.strip():
         raise HTTPException(400, "服务器地址不能为空")
+    node_type = (body.node_type or "").strip()
+    if node_type and node_type not in local_nodes.NODE_TYPES:
+        raise HTTPException(
+            400, f"节点类型仅支持：{'、'.join(local_nodes.NODE_TYPES)}")
     try:
         params = local_nodes.normalize_params(body.protocol, body.params)
         local_nodes.parse_extra(body.extra_yaml)
@@ -64,7 +71,11 @@ def _prepare(body: LocalNodeBody) -> tuple[dict, str]:
 
 @router.get("/schema")
 def node_schema(user=CurrentUser):
-    return {"protocols": local_nodes.protocol_schema(), "mark": local_nodes.MARK}
+    return {
+        "protocols": local_nodes.protocol_schema(),
+        "node_types": local_nodes.NODE_TYPES,
+        "default_node_type": local_nodes.DEFAULT_NODE_TYPE,
+    }
 
 
 @router.get("")
@@ -77,20 +88,21 @@ def list_nodes(user=CurrentUser):
 @router.post("", status_code=201)
 def create_node(body: LocalNodeBody, user=CurrentUser):
     params, extra_yaml = _prepare(body)
-    marked = local_nodes.marked_name(body.name.strip())
+    marked = local_nodes.display_name(body.name.strip(), body.node_type)
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM local_nodes WHERE name=?", (body.name.strip(),)):
             raise HTTPException(409, "同名本地节点已存在")
         if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (marked,)):
-            raise HTTPException(409, "本地节点标记名与策略组重名，请换一个名称")
+            raise HTTPException(409, "本地节点名称与策略组重名，请换一个名称")
         now = db.now()
         sort = db.one(
             conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM local_nodes")["n"]
         cur = conn.execute(
-            "INSERT INTO local_nodes(name, protocol, server, port, params_enc, "
-            "extra_yaml_enc, enabled, sort, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (body.name.strip(), body.protocol, body.server.strip(), body.port,
+            "INSERT INTO local_nodes(name, node_type, protocol, server, port, "
+            "params_enc, extra_yaml_enc, enabled, sort, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (body.name.strip(), (body.node_type or "").strip(), body.protocol,
+             body.server.strip(), body.port,
              security.encrypt_text(json.dumps(params, ensure_ascii=False)),
              security.encrypt_text(extra_yaml),
              int(body.enabled), sort, now, now),
@@ -104,7 +116,7 @@ def create_node(body: LocalNodeBody, user=CurrentUser):
 @router.put("/{node_id}")
 def update_node(node_id: int, body: LocalNodeBody, user=CurrentUser):
     params, extra_yaml = _prepare(body)
-    marked = local_nodes.marked_name(body.name.strip())
+    marked = local_nodes.display_name(body.name.strip(), body.node_type)
     with db.tx() as conn:
         row = _get_or_404(conn, node_id)
         clash = db.one(
@@ -114,11 +126,13 @@ def update_node(node_id: int, body: LocalNodeBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名本地节点已存在")
         if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (marked,)):
-            raise HTTPException(409, "本地节点标记名与策略组重名，请换一个名称")
+            raise HTTPException(409, "本地节点名称与策略组重名，请换一个名称")
         conn.execute(
-            "UPDATE local_nodes SET name=?, protocol=?, server=?, port=?, "
-            "params_enc=?, extra_yaml_enc=?, enabled=?, updated_at=? WHERE id=?",
-            (body.name.strip(), body.protocol, body.server.strip(), body.port,
+            "UPDATE local_nodes SET name=?, node_type=?, protocol=?, server=?, "
+            "port=?, params_enc=?, extra_yaml_enc=?, enabled=?, updated_at=? "
+            "WHERE id=?",
+            (body.name.strip(), (body.node_type or "").strip(), body.protocol,
+             body.server.strip(), body.port,
              security.encrypt_text(json.dumps(params, ensure_ascii=False)),
              security.encrypt_text(extra_yaml), int(body.enabled), db.now(),
              node_id),

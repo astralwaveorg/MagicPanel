@@ -61,9 +61,9 @@
 | 产物顶层键 | 内容 | 来源 | 用户可改 | 何时生效 |
 | --- | --- | --- | --- | --- |
 | `mixed-port` / `allow-lan` / `mode` / `log-level` / `ipv6` / `profile` | 7890 / false / rule / warning / false / store-selected、store-fake-ip | **产物基础配置**（系统默认 → 通用配置（引擎+平台）→ 设备配置，三层联动） | ✅ 可改 | 下次构建（设备级在下一次拉取即生效） |
-| `proxies` | ①「空组保护」占位节点（127.0.0.1:1）② **本地单节点**（`[单] 名称`，含地址、端口、协议、凭据；键名按引擎渲染） | 常量 + `local_nodes` 表 | ⚠️ 可改本地节点本身 | 下次构建 |
+| `proxies` | ①「空组保护」占位节点（127.0.0.1:1）② **本地节点**（`名称 (类型)`，含地址、端口、协议、凭据；键名按引擎渲染） | 常量 + `local_nodes` 表 | ⚠️ 可改本地节点本身 | 下次构建 |
 | `proxy-providers` | 每个启用来源的 HTTP provider 条目：url=`{FEED}/res/provider/<名称>`、path、interval、UA、filter；Stash 用 `benchmark-url`/`benchmark-timeout`，Mihomo 用 `health-check` | `sources` 表 | ✅ 可改名称/UA/间隔/客户端间隔/过滤/启用 | 下次构建（条目参数） |
-| `proxy-groups` | 组名、类型、成员（组名 / DIRECT / REJECT / `[单] xxx`）、`use` 来源、filter、interval/tolerance/lazy/hidden；`url`/`timeout` 与 `strategy` 按引擎输出 | `proxy_groups` 表 | ✅ 可改 | 下次构建 |
+| `proxy-groups` | 组名、类型、成员（组名 / DIRECT / REJECT / `xxx (类型)`）、`use` 来源、filter、interval/tolerance/lazy/hidden；`url`/`timeout` 与 `strategy` 按引擎输出 | `proxy_groups` 表 | ✅ 可改 | 下次构建 |
 | `rule-providers` | 每个启用规则来源的条目：url=`{FEED}/res/rule/<名称>`、path、behavior、interval、format | `rule_providers` 表 | ✅ 可改 | 下次构建（条目参数） |
 | `rules` | ①**置顶** `DOMAIN-SUFFIX,{FEED_HOST},DIRECT`（面板域名强制直连，防 VPN 运行中更新配置失败）②**个人直连域名** `DOMAIN-SUFFIX,<域名>,DIRECT`（`_direct_domains`）③用户规则按顺序 | 规则表 + 基础配置伪键 | ✅ 规则可改 / ⚠️ 置顶两条可在「产物配置」里开关与维护 | 下次构建 |
 | `dns` | Mihomo 目标：fake-ip、DNS 服务器、nameserver-policy、fake-ip-filter；Stash 目标仅在配置了 `_fake_ip_filter` 时下发 dns 段 | 基础配置优先，未配置时用内置默认值 | ✅ 可改 | 下次构建 |

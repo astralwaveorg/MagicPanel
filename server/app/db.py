@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS rule_providers (
 CREATE TABLE IF NOT EXISTS local_nodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE NOT NULL,
+  node_type TEXT NOT NULL DEFAULT '本地',
   protocol TEXT NOT NULL,
   server TEXT NOT NULL,
   port INTEGER NOT NULL,
@@ -330,6 +331,7 @@ def init_db() -> None:
         _migrate_build_snapshots(conn)
         _migrate_release_state_machine(conn)
         _migrate_releases_env(conn)
+        _migrate_local_node_type(conn)
 
 
 def _migrate_release_state_machine(conn) -> None:
@@ -497,6 +499,41 @@ def _migrate_releases_env(conn) -> None:
     conn.execute("ALTER TABLE releases_env_new RENAME TO releases")
     conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
                  "VALUES('release_state_v2', ?)", (now(),))
+
+
+# 本地节点历史上用 [单] 前缀标注（只拼在产物里，也可能被手工写进名称）。
+# 类型化之后统一用「名称 (类型)」，名称本身要还原成纯名称。
+_LEGACY_NAME_PREFIXES = ("[单]", "[本地]", "[单节点]", "【单】", "【本地】")
+
+
+def _migrate_local_node_type(conn) -> None:
+    """本地节点：补 node_type 列，并把历史名称里的旧前缀清理掉。"""
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='local_node_type_v1'")
+    if done:
+        return
+    _ensure_column(conn, "local_nodes", "node_type",
+                   "node_type TEXT NOT NULL DEFAULT '本地'")
+    conn.execute("UPDATE local_nodes SET node_type='本地' "
+                 "WHERE node_type IS NULL OR node_type=''")
+    for row in conn.execute("SELECT id, name FROM local_nodes"):
+        name = (row["name"] or "").strip()
+        cleaned = name
+        for prefix in _LEGACY_NAME_PREFIXES:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip()
+                break
+        if cleaned == name or not cleaned:
+            continue
+        # 清理后可能与另一个节点同名：保留原名，不静默丢数据
+        clash = one(conn, "SELECT id FROM local_nodes WHERE name=? AND id!=?",
+                    (cleaned, row["id"]))
+        if clash:
+            continue
+        conn.execute("UPDATE local_nodes SET name=? WHERE id=?",
+                     (cleaned, row["id"]))
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('local_node_type_v1', ?)", (now(),))
 
 
 def _migrate_settings(conn) -> None:

@@ -186,7 +186,7 @@
                width="min(760px, 94vw)">
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin-top:0">
         订阅来源以 <span class="mono">{FEED}</span> 占位，分发时才注入设备专属地址；
-        本地单节点的凭据会直接写入产物，请仅在管理端预览。
+        本地节点的凭据会直接写入产物，请仅在管理端预览。
       </p>
       <el-input :model-value="artifactContent" type="textarea" :rows="20" readonly class="mono" />
     </el-dialog>

@@ -34,7 +34,8 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
     ]
     local_nodes = [
-        {"id": r["id"], "name": r["name"], "protocol": r["protocol"],
+        {"id": r["id"], "name": r["name"], "node_type": r["node_type"] or "",
+         "protocol": r["protocol"],
          "server": r["server"], "port": r["port"],
          "params": json.loads(security.decrypt_text(r["params_enc"]) if r["params_enc"] else "{}"),
          "extra_yaml": security.decrypt_text(r["extra_yaml_enc"]) if r["extra_yaml_enc"] else "",

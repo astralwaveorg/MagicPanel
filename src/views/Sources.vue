@@ -154,8 +154,8 @@
 
     <div class="mp-card">
       <div class="mp-toolbar" style="margin-bottom:12px">
-        <h3 style="margin:0">本地单节点</h3>
-        <span class="mp-toolbar-hint">以 [单] 前缀写入产物，可在策略组中勾选引用</span>
+        <h3 style="margin:0">本地节点</h3>
+        <span class="mp-toolbar-hint">直接保存在面板中的节点，区别于远程订阅拉取</span>
       </div>
       <EmptyState
         v-if="!localNodes.length"
@@ -165,7 +165,10 @@
       <div v-else class="mp-table-wrap">
         <el-table :data="localNodes" size="small">
           <el-table-column label="名称" min-width="180">
-            <template #default="{ row }"><span class="mono">{{ row.marked_name }}</span></template>
+            <template #default="{ row }"><span class="mono">{{ row.display_name }}</span></template>
+          </el-table-column>
+          <el-table-column label="类型" width="90">
+            <template #default="{ row }">{{ row.node_type || '—' }}</template>
           </el-table-column>
           <el-table-column label="协议" width="140">
             <template #default="{ row }">{{ protocolLabel(row.protocol) }}</template>
@@ -195,16 +198,27 @@
           <el-col :xs="24" :sm="12">
             <el-form-item label="名称">
               <el-input v-model="localForm.name" placeholder="例如：香港-01" />
+              <div class="mp-form-hint">
+                最终标识：{{ localForm.name.trim() || '未命名' }}<template v-if="localForm.node_type"> ({{ localForm.node_type }})</template>
+              </div>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="6">
+            <el-form-item label="节点类型">
+              <el-select v-model="localForm.node_type" style="width:100%" filterable
+                         placeholder="选择类型">
+                <el-option v-for="t in nodeTypes" :key="t" :value="t" :label="t" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="3">
             <el-form-item label="协议">
               <el-select v-model="localForm.protocol" style="width:100%" @change="onLocalProtocolChange">
                 <el-option v-for="p in localProtocols" :key="p.value" :value="p.value" :label="p.label" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="6">
+          <el-col :xs="24" :sm="3">
             <el-form-item label="端口">
               <el-input-number v-model="localForm.port" :min="1" :max="65535" style="width:100%" />
             </el-form-item>
@@ -218,7 +232,13 @@
           </el-col>
           <el-col :xs="24" :sm="12">
             <el-form-item label="状态">
-              <el-checkbox v-model="localForm.enabled">启用（停用后不写入产物）</el-checkbox>
+              <el-checkbox v-model="localForm.enabled">启用该节点</el-checkbox>
+              <el-tooltip placement="top">
+                <template #reference>
+                  <span class="mp-info-dot">ⓘ</span>
+                </template>
+                停用后，该节点保留在面板中，但不会写入最终生成的设备配置（YAML）里。
+              </el-tooltip>
             </el-form-item>
           </el-col>
         </el-row>
@@ -416,12 +436,12 @@ const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const localNodes = ref([])
-const localSchema = ref({ protocols: [], mark: '[单]' })
+const localSchema = ref({ protocols: [], node_types: [] })
 const localDialog = ref(false)
 const localSaving = ref(false)
 const localEditing = ref(null)
 const localForm = reactive({
-  name: '', protocol: 'ss', server: '', port: 8388,
+  name: '', node_type: '本地', protocol: 'ss', server: '', port: 8388,
   params: {}, extra_yaml: '', enabled: true,
 })
 const nodesDrawer = ref(false)
@@ -469,6 +489,7 @@ const intervalHint = computed(() => {
 })
 
 const localProtocols = computed(() => localSchema.value.protocols || [])
+const nodeTypes = computed(() => localSchema.value.node_types || [])
 const activeLocalProtocol = computed(() =>
   localProtocols.value.find((p) => p.value === localForm.protocol))
 const visibleLocalFields = computed(() => {
@@ -818,13 +839,15 @@ function openLocalEdit(row) {
   localEditing.value = row || null
   if (row) {
     Object.assign(localForm, {
-      name: row.name, protocol: row.protocol, server: row.server, port: row.port,
+      name: row.name, node_type: row.node_type || '本地',
+      protocol: row.protocol, server: row.server, port: row.port,
       params: { ...row.params }, extra_yaml: row.extra_yaml, enabled: row.enabled,
     })
   } else {
     const first = localProtocols.value[0]?.value || 'ss'
     Object.assign(localForm, {
-      name: '', protocol: first, server: '', port: 0,
+      name: '', node_type: localSchema.value.default_node_type || '本地',
+      protocol: first, server: '', port: 0,
       params: {}, extra_yaml: '', enabled: true,
     })
     applyLocalDefaults(first, true)
@@ -839,6 +862,7 @@ async function saveLocal() {
   try {
     const body = {
       name: localForm.name.trim(),
+      node_type: localForm.node_type || '',
       protocol: localForm.protocol,
       server: localForm.server.trim(),
       port: localForm.port,
@@ -863,7 +887,7 @@ async function saveLocal() {
 
 async function removeLocal(row) {
   if (!await confirmBox(
-    `删除本地节点 “${row.marked_name}”？被策略组引用时不会删除。`,
+    `删除本地节点 “${row.display_name}”？被策略组引用时不会删除。`,
     '删除本地节点', { type: 'warning' },
   )) return
   try {

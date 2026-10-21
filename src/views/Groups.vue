@@ -121,7 +121,7 @@
             <el-select v-model="form.local_nodes" multiple filterable style="width:100%">
               <el-option v-for="n in localNodes" :key="n.id" :value="n.id"
                          :disabled="!n.enabled"
-                         :label="`${n.marked_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
+                         :label="`${n.display_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
             </el-select>
           </MultiSelectClear>
           <div v-if="form.local_nodes.length" class="mp-form-hint">
@@ -228,7 +228,7 @@
                      placeholder="留空即清空">
             <el-option v-for="n in localNodes" :key="n.id" :value="n.id"
                        :disabled="!n.enabled"
-                       :label="`${n.marked_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
+                       :label="`${n.display_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
           </el-select>
         </MultiSelectClear>
 
@@ -331,7 +331,7 @@ const otherGroups = computed(() =>
 
 function localNodeNames(ids) {
   return (ids || [])
-    .map((id) => localNodes.value.find((node) => node.id === id)?.marked_name)
+    .map((id) => localNodes.value.find((node) => node.id === id)?.display_name)
     .filter(Boolean)
     .join('、')
 }
