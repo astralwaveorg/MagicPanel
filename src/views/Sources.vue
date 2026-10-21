@@ -203,7 +203,7 @@
               </div>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="6">
+          <el-col :xs="24" :sm="4">
             <el-form-item label="节点类型">
               <el-select v-model="localForm.node_type" style="width:100%" filterable
                          placeholder="选择类型">
@@ -211,7 +211,7 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="3">
+          <el-col :xs="24" :sm="5">
             <el-form-item label="协议">
               <el-select v-model="localForm.protocol" style="width:100%" @change="onLocalProtocolChange">
                 <el-option v-for="p in localProtocols" :key="p.value" :value="p.value" :label="p.label" />
