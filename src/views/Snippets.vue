@@ -15,7 +15,7 @@
           </el-radio-button>
         </el-radio-group>
       </div>
-      <el-button type="primary" @click="openEdit()">添加模块</el-button>
+      <el-button @click="openEdit()" type="primary">添加模块</el-button>
     </div>
 
     <ErrorState v-if="error" :error="error" @retry="load" />
@@ -51,9 +51,9 @@
           </el-table-column>
           <el-table-column label="操作" width="210" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <el-button size="small" @click="preview(row)">内容</el-button>
+              <el-button size="small" @click="preview(row)" type="info" plain>内容</el-button>
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+              <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -72,7 +72,7 @@
                 <el-option v-for="p in items" :key="p.key" :label="p.name" :value="p.key" />
               </el-option-group>
             </el-select>
-            <el-button :disabled="!presetKey" @click="applyPreset">填入</el-button>
+            <el-button :disabled="!presetKey" @click="applyPreset" type="primary">填入</el-button>
           </div>
         </el-form-item>
         <el-row :gutter="12">
@@ -118,7 +118,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button :loading="saving" @click="save" type="primary">保存</el-button>
       </template>
     </el-dialog>
 

@@ -200,8 +200,8 @@ def test_group_delete_force_warns_when_relay_loses_member(client):
 def test_target_delete_requires_migration_for_devices(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
-    t1 = _target(client, h, "ios-a")
-    t2 = _target(client, h, "ios-b")
+    t1 = _target(client, h, "ios-a", platform="ios")
+    t2 = _target(client, h, "ios-b", platform="macos")
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "iPhone", "platform": "ios", "target_id": t1["id"]}).json()
 

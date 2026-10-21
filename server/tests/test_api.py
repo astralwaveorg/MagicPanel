@@ -114,11 +114,13 @@ def test_build_release_feed_flow(client):
         assert result["ok"] and result["sha256"] and result["size"] > 0
 
     bid = build["id"]
-    # 产物：mihomo 含 dns，stash 不含；provider 使用 {FEED} 占位
+    # 产物：两个引擎都带 dns 段（引擎默认配置里已含官方 DNS 基线）；
+    # provider 使用 {FEED} 占位
     art = client.get(f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"]
     # 来源名会进入 URL 路径，做百分号转义
     assert "{FEED}/res/provider/" + urllib.parse.quote("测试机场") in art
-    assert "dns:" not in art
+    assert "fake-ip-range: 198.18.0.1/16" in art   # 引擎默认配置里的 DNS 基线
+    assert "enhanced-mode" not in art              # enhanced-mode 是 Mihomo 专有键
     art_m = client.get(f"/api/v1/builds/{bid}/artifact/mihomo-android").json()["content"]
     assert "enhanced-mode: fake-ip" in art_m
     assert "header:" in art_m and "headers:" not in art_m
@@ -716,10 +718,11 @@ def test_target_reorder(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     ids = []
-    for name in ("stash-ios", "mihomo-android", "stash-macos"):
+    for name, engine, platform in (("stash-ios", "stash", "ios"),
+                                   ("mihomo-android", "mihomo", "android"),
+                                   ("stash-macos", "stash", "macos")):
         r = client.post("/api/v1/targets", headers=h, json={
-            "name": name, "engine": "stash" if name.startswith("stash") else "mihomo",
-            "platform": "ios" if name == "stash-ios" else "android",
+            "name": name, "engine": engine, "platform": platform,
         })
         assert r.status_code == 201, r.text
         ids.append(r.json()["id"])
@@ -1024,8 +1027,8 @@ def test_base_config_defaults_and_crud(client):
     assert saved.json()["is_default"] is False
     assert saved.json()["overlay"] == {"mode": "global"}
     # 来源标注：被本层改写的键来源是「通用配置」，其余仍是「系统默认」
-    assert saved.json()["sources"]["mode"] == "通用配置"
-    assert saved.json()["sources"]["log-level"] == "系统默认"
+    assert saved.json()["sources"]["mode"] == "引擎平台配置"
+    assert saved.json()["sources"]["log-level"] == "引擎默认配置"
 
     # 乐观锁：版本不一致时拒绝
     stale = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
@@ -1162,11 +1165,11 @@ def test_target_extra_yaml_rejects_structural_keys(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     r = client.post("/api/v1/targets", headers=h, json={
-        "name": "bad-target", "engine": "stash", "platform": "ios",
+        "name": "bad-target", "engine": "stash", "platform": "tvos",
         "extra_yaml": "rules:\n- MATCH,DIRECT\n"})
     assert r.status_code == 400
     ok = client.post("/api/v1/targets", headers=h, json={
-        "name": "ok-target", "engine": "stash", "platform": "ios",
+        "name": "ok-target", "engine": "stash", "platform": "macos",
         "extra_yaml": "log-level: info\n"})
     assert ok.status_code == 201, ok.text
 
@@ -1537,9 +1540,9 @@ def test_group_and_rule_target_scope_filters_output(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
-    for name in ("stash-a", "stash-b"):
+    for name, platform in (("stash-a", "macos"), ("stash-b", "tvos")):
         client.post("/api/v1/targets", headers=h, json={
-            "name": name, "engine": "stash", "platform": "ios"})
+            "name": name, "engine": "stash", "platform": platform})
     # 桌面专用组与规则
     r = client.post("/api/v1/groups", headers=h, json={
         "name": "桌面专用", "type": "select", "proxies": ["DIRECT"],
@@ -1567,9 +1570,9 @@ def test_rule_pointing_to_absent_group_is_dropped(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
-    for name in ("stash-a", "stash-b"):
+    for name, platform in (("stash-a", "macos"), ("stash-b", "tvos")):
         client.post("/api/v1/targets", headers=h, json={
-            "name": name, "engine": "stash", "platform": "ios"})
+            "name": name, "engine": "stash", "platform": platform})
     client.post("/api/v1/groups", headers=h, json={
         "name": "仅A", "type": "select", "proxies": ["DIRECT"], "targets": ["stash-a"]})
     client.post("/api/v1/rules", headers=h, json={
@@ -1589,9 +1592,9 @@ def test_final_rule_group_is_always_kept(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
-    for name in ("stash-a", "stash-b"):
+    for name, platform in (("stash-a", "macos"), ("stash-b", "tvos")):
         client.post("/api/v1/targets", headers=h, json={
-            "name": name, "engine": "stash", "platform": "ios"})
+            "name": name, "engine": "stash", "platform": platform})
     client.post("/api/v1/groups", headers=h, json={
         "name": "兜底组", "type": "select", "proxies": ["DIRECT"],
         "targets": ["stash-a"]})
@@ -1645,7 +1648,7 @@ def test_device_level_override_only_affects_that_device(client):
                                               "ipv6: false\n"})
     assert r.status_code == 200, r.text
     assert r.json()["overlay"]["log-level"] == "debug"
-    assert r.json()["sources"]["log-level"] == "设备配置"
+    assert r.json()["sources"]["log-level"] == "设备独立配置"
     a = client.get(f"/feed/{dev['token']}/config.yaml").text
     b = client.get(f"/feed/{other['token']}/config.yaml").text
     assert "log-level: debug" in a
@@ -1843,9 +1846,9 @@ def test_base_config_cascade_sources():
     effective, sources = bc.cascade(layers)
     assert effective["mode"] == "rule"          # 设备配置覆盖通用配置
     assert effective["log-level"] == "info"     # 通用配置覆盖系统默认
-    assert sources["mode"] == "设备配置"
-    assert sources["log-level"] == "通用配置"
-    assert sources["ipv6"] == "系统默认"
+    assert sources["mode"] == "设备独立配置"
+    assert sources["log-level"] == "引擎平台配置"
+    assert sources["ipv6"] == "引擎默认配置"
 
 
 def test_target_rename_keeps_group_and_rule_references(client):
@@ -1857,7 +1860,7 @@ def test_target_rename_keeps_group_and_rule_references(client):
     h = auth_headers(csrf)
     make_policy(client, csrf)
     t = client.post("/api/v1/targets", headers=h, json={
-        "name": "stash-old", "engine": "stash", "platform": "ios"}).json()
+        "name": "stash-old", "engine": "stash", "platform": "macos"}).json()
     g = client.post("/api/v1/groups", headers=h, json={
         "name": "手动组", "type": "select", "proxies": ["节点选择"],
         "targets": ["stash-old"]}).json()
@@ -1869,21 +1872,21 @@ def test_target_rename_keeps_group_and_rule_references(client):
 
     # 改名
     r = client.put(f"/api/v1/targets/{t['id']}", headers=h, json={
-        "name": "Stash-iOS", "engine": "stash", "platform": "ios"})
+        "name": "Stash-macOS", "engine": "stash", "platform": "macos"})
     assert r.status_code == 200, r.text
 
     groups = client.get("/api/v1/groups", headers=h).json()
     hit = next(g for g in groups if g["name"] == "手动组")
-    assert hit["targets"] == ["Stash-iOS"]
+    assert hit["targets"] == ["Stash-macOS"]
     rules = client.get("/api/v1/rules", headers=h).json()
     hit = next(r for r in rules if r["id"] == rule_id)
-    assert hit["targets"] == ["Stash-iOS"]
+    assert hit["targets"] == ["Stash-macOS"]
 
     # 改名后产物里该组仍要出现
     build = client.post("/api/v1/builds", headers=h, json={}).json()
     assert build["verify_status"] == "success", build
     art = client.get(
-        f"/api/v1/builds/{build['id']}/artifact/Stash-iOS").json()["content"]
+        f"/api/v1/builds/{build['id']}/artifact/Stash-macOS").json()["content"]
     assert "手动组" in art
 
 
@@ -1893,7 +1896,7 @@ def test_target_delete_cleans_references(client):
     h = auth_headers(csrf)
     make_policy(client, csrf)
     t = client.post("/api/v1/targets", headers=h, json={
-        "name": "stash-temp", "engine": "stash", "platform": "ios"}).json()
+        "name": "stash-temp", "engine": "stash", "platform": "tvos"}).json()
     client.post("/api/v1/groups", headers=h, json={
         "name": "临时组", "type": "select", "proxies": ["节点选择"],
         "targets": ["stash-temp"]})
@@ -2408,35 +2411,32 @@ def test_base_config_scopes_follow_target_and_device_order(client):
     general = [s for s in scopes if s["kind"] == "general"]
     assert [s["label"] for s in general][:2] == ["Stash-macOS", "Stash-iOS"]
     device = [s for s in scopes if s["kind"] == "device"]
-    assert [s["label"] for s in device] == ["iPhone（设备配置）", "MacBook（设备配置）"]
+    assert [s["label"] for s in device] == ["iPhone（设备独立配置）", "MacBook（设备独立配置）"]
 
 
 def test_base_config_scope_labels_match_engine_platforms(client):
-    """通用配置的名字一律是引擎平台名；同平台多个引擎平台时全部列出。
+    """引擎平台配置的名字一律是引擎平台名。
 
-    同一个「引擎 + 平台」可能被多个引擎平台共用（如 Stash-Android 与
-    Lvsp-Android-Stash），这一层改动会同时影响它们，所以名字必须写全。
+    同一「引擎 + 平台」只允许一个引擎平台（个性化落在设备上），
+    所以这一层的名字就是那一个引擎平台的名字。
     """
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     client.post("/api/v1/targets", headers=h, json={
         "name": "Stash-Android", "engine": "stash", "platform": "android"})
     client.post("/api/v1/targets", headers=h, json={
-        "name": "Lvsp-Android-Stash", "engine": "stash", "platform": "android"})
-    client.post("/api/v1/targets", headers=h, json={
-        "name": "Lvsp-MacBook-Mihomo", "engine": "mihomo", "platform": "macos"})
+        "name": "Mihomo-macOS", "engine": "mihomo", "platform": "macos"})
 
     scopes = client.get("/api/v1/base-config/scopes", headers=h).json()["scopes"]
     general = [s for s in scopes if s["kind"] == "general"]
     labels = [s["label"] for s in general]
-    # 共用平台的两个引擎平台都要写出来，不再退回「引擎 · 平台」
-    assert "Stash-Android、Lvsp-Android-Stash" in labels
+    assert "Stash-Android" in labels
+    assert "Mihomo-macOS" in labels
     assert not any("·" in label for label in labels)
     # 唯一对应时直接用引擎平台名
-    assert "Lvsp-MacBook-Mihomo" in labels
     # 说明行里也写清对应的引擎平台
     shared = next(s for s in general if s["label"].startswith("Stash-Android"))
-    assert "Stash-Android、Lvsp-Android-Stash" in shared["detail"]
+    assert "Stash-Android" in shared["detail"]
 
 
 def test_base_config_leaf_sources(client):
@@ -2457,8 +2457,8 @@ def test_base_config_leaf_sources(client):
     assert r.status_code == 200, r.text
     body = r.json()
     leaf = body["leaf_sources"]
-    assert leaf["dns.nameserver"] == "通用配置"
-    assert leaf["mode"] == "系统默认"
+    assert leaf["dns.nameserver"] == "引擎平台配置"
+    assert leaf["mode"] == "引擎默认配置"
 
 
 def test_portal_pin_is_four_digits(client):
@@ -2479,3 +2479,80 @@ def test_portal_pin_is_four_digits(client):
     assert "devices" in r.json()
     # 错误 PIN 被拒（403 = PIN 不正确；401 会误导为"会话问题"）
     assert client.post("/api/v1/portal/data", json={"pin": "1111"}).status_code == 403
+
+
+def test_target_engine_platform_must_be_unique(client):
+    """同一「引擎 + 平台」只能有一个引擎平台。
+
+    引擎平台代表"本项目支持的某引擎在某平台上的产物"，不是给某个人用的；
+    个性化应该落在设备上，而不是复制一份引擎平台。
+    """
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    r = client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-macOS", "engine": "stash", "platform": "macos"})
+    assert r.status_code == 201, r.text
+    # 同名不行
+    r = client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-macOS-2", "engine": "stash", "platform": "macos"})
+    assert r.status_code == 409, r.text
+    assert "macos" in r.json()["detail"]
+    # 换引擎或换平台都可以
+    r = client.post("/api/v1/targets", headers=h, json={
+        "name": "Mihomo-macOS", "engine": "mihomo", "platform": "macos"})
+    assert r.status_code == 201, r.text
+    r = client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-tvOS", "engine": "stash", "platform": "tvos"})
+    assert r.status_code == 201, r.text
+    # 改名不能撞上已有的引擎 + 平台
+    r = client.put(f"/api/v1/targets/{r.json()['id']}", headers=h, json={
+        "name": "Stash-tvOS-2", "engine": "stash", "platform": "macos"})
+    assert r.status_code == 409, r.text
+
+
+def test_device_scope_produces_per_device_artifact(client):
+    """设备专属的策略组与规则只出现在这台设备的产物里。
+
+    引擎平台共享产物里不含这些条目；构建会另外产出一份设备专属产物，
+    设备拉取时优先用自己的那份。
+    """
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    target = client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-macOS", "engine": "stash", "platform": "macos"}).json()
+    other = client.post("/api/v1/targets", headers=h, json={
+        "name": "Mihomo-macOS", "engine": "mihomo", "platform": "macos"}).json()
+    dev_a = client.post("/api/v1/devices", headers=h, json={
+        "name": "设备A", "platform": "macos", "target_id": target["id"]}).json()
+    dev_b = client.post("/api/v1/devices", headers=h, json={
+        "name": "设备B", "platform": "macos", "target_id": target["id"]}).json()
+
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "专属组", "type": "select", "proxies": ["DIRECT"],
+        "devices": ["设备A"]})
+    assert r.status_code == 201, r.text
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "only-a.com", "target": "专属组",
+        "devices": ["设备A"]})
+    assert r.status_code == 201, r.text
+    # 设备名写错必须报错，不能静默失效
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "x.com", "target": "专属组",
+        "devices": ["不存在的设备"]})
+    assert r.status_code == 400, r.text
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["verify_status"] == "success", build
+    shared = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/Stash-macOS").json()["content"])
+    assert not any(g["name"] == "专属组" for g in shared["proxy-groups"])
+    assert "DOMAIN-SUFFIX,only-a.com,专属组" not in shared["rules"]
+    # 设备 A 有自己的产物
+    own = yaml.safe_load(client.get(
+        f"/api/v1/builds/{build['id']}/artifact/设备A").json()["content"])
+    assert any(g["name"] == "专属组" for g in own["proxy-groups"])
+    assert "DOMAIN-SUFFIX,only-a.com,专属组" in own["rules"]
+    # 设备 B 没有专属条目，仍用共享产物
+    assert "设备B" not in build["results"]
+    assert dev_b["id"] and dev_a["id"]

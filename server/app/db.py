@@ -1,4 +1,5 @@
 """SQLite 数据层：连接、事务与建表。单实例单写入，WAL 模式。"""
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -336,6 +337,9 @@ def init_db() -> None:
         _migrate_releases_env(conn)
         _migrate_local_node_type(conn)
         _migrate_local_node_test(conn)
+        _migrate_verification_wording(conn)
+        _migrate_base_config_defaults(conn)
+        _migrate_device_scope(conn)
 
 
 def _migrate_release_state_machine(conn) -> None:
@@ -553,6 +557,138 @@ def _migrate_local_node_test(conn) -> None:
     _ensure_column(conn, "local_nodes", "tested_at", "tested_at TEXT")
     conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
                  "VALUES('local_node_test_v1', ?)", (now(),))
+
+
+def _migrate_device_scope(conn) -> None:
+    """策略组与规则支持"适用设备"维度。
+
+    引擎平台 = 引擎 + 平台，同一对只能有一个；个性化（谁走哪条规则、
+    谁用哪个策略组）落在设备上，而不是再复制一份引擎平台。
+    """
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='device_scope_v1'")
+    if done:
+        return
+    _ensure_column(conn, "rules", "devices", "devices TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "proxy_groups", "devices",
+                   "devices TEXT NOT NULL DEFAULT '[]'")
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('device_scope_v1', ?)", (now(),))
+
+
+def _migrate_base_config_defaults(conn) -> None:
+    """引擎默认补全后，清掉各层里与新默认重复的覆盖。
+
+    引擎默认配置按官方文档补全后，原来堆在"引擎平台配置 / 设备独立配置"
+    里的通用键就变成了重复内容。这里重算每层的差异并写回：
+    **每层实际生效的值保持不变**，只是把与上层相同的键删掉。
+    """
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='base_defaults_full_v1'")
+    if done:
+        return
+    from .services import base_config as base_config_service
+
+    # 补全前的默认：stash 是 4 键精简版，mihomo 是兼容现状
+    old_defaults = {
+        "stash": {
+            "mode": "rule", "log-level": "warning", "ipv6": False,
+            base_config_service.PANEL_DIRECT_KEY: True,
+        },
+        "mihomo": {
+            "mixed-port": 7890, "allow-lan": False, "mode": "rule",
+            "log-level": "warning", "ipv6": False,
+            "profile": {"store-selected": True, "store-fake-ip": True},
+            base_config_service.PANEL_DIRECT_KEY: True,
+        },
+    }
+    docs: dict = {}
+    for row in all_(conn, "SELECT engine, platform, device_id, content "
+                          "FROM base_configs"):
+        key = (row["engine"], row["platform"], int(row["device_id"] or 0))
+        try:
+            doc = base_config_service.parse_content(row["content"] or "")
+        except ValueError:
+            doc = {}
+        docs[key] = doc
+    devices = all_(conn, "SELECT id, target_id FROM devices")
+    target_of = {int(d["id"]): int(d["target_id"]) for d in devices}
+    targets = all_(conn, "SELECT id, engine, platform FROM targets")
+    target_info = {int(t["id"]): (t["engine"], t["platform"]) for t in targets}
+
+    def save(engine: str, platform: str, device_id: int, overlay: dict) -> None:
+        key = (engine, platform, device_id)
+        content = base_config_service.to_yaml(overlay) if overlay else ""
+        if key in docs and not overlay:
+            conn.execute("DELETE FROM base_configs WHERE engine=? AND platform=? "
+                         "AND device_id=?", (engine, platform, device_id))
+        else:
+            conn.execute(
+                "INSERT INTO base_configs(engine, platform, device_id, content, "
+                "updated_at) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(engine, platform, device_id) DO UPDATE SET "
+                "content=excluded.content, updated_at=excluded.updated_at",
+                (engine, platform, device_id, content, now()))
+
+    for engine in base_config_service.ENGINES:
+        old_default = old_defaults[engine]
+        new_default = base_config_service.default_doc(engine)
+        # 引擎默认层：生效值不变，只去掉与新默认重复的键
+        builtin_old = base_config_service.merge_docs(
+            old_default, docs.get((engine, "", 0), {}))
+        builtin_overlay = base_config_service.diff_overlay(new_default, builtin_old)
+        save(engine, "", 0, builtin_overlay)
+        platforms = sorted({p for (e, p, d) in docs if e == engine and p})
+        for platform in platforms:
+            plat_old = base_config_service.merge_docs(
+                builtin_old, docs.get((engine, platform, 0), {}))
+            plat_overlay = base_config_service.diff_overlay(builtin_old, plat_old)
+            save(engine, platform, 0, plat_overlay)
+            for did, tid in target_of.items():
+                if target_info.get(tid, ("", ""))[1] != platform:
+                    continue
+                dev_old = base_config_service.merge_docs(
+                    plat_old, docs.get((engine, platform, did), {}))
+                dev_overlay = base_config_service.diff_overlay(plat_old, dev_old)
+                save(engine, platform, did, dev_overlay)
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('base_defaults_full_v1', ?)", (now(),))
+
+
+def _migrate_verification_wording(conn) -> None:
+    """校验文案只报发布结果与校验状态，不再提“实机待验收”。
+
+    面板只负责构建与发布，客户端上的实机行为不是发布环节关心的事；
+    历史构建里已存的旧文案一并改掉，避免同一个页面两种说法。
+    """
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='verification_wording_v1'")
+    if done:
+        return
+    rows = all_(conn, "SELECT id, results FROM builds WHERE results LIKE '%实机%'")
+    for row in rows:
+        try:
+            data = json.loads(row["results"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        changed = False
+        for item in data.values():
+            if not isinstance(item, dict):
+                continue
+            text = item.get("verification") or ""
+            new_text = (text.replace("核心校验通过（mihomo -t），实机行为待验收",
+                                     "核心校验通过（mihomo -t）")
+                        .replace("静态通过（未做核心校验），实机待验收",
+                                 "静态通过（未做核心校验）")
+                        .replace("静态通过，实机待验收", "静态通过"))
+            if new_text != text:
+                item["verification"] = new_text
+                changed = True
+        if changed:
+            conn.execute("UPDATE builds SET results=? WHERE id=?",
+                         (json.dumps(data, ensure_ascii=False), row["id"]))
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('verification_wording_v1', ?)", (now(),))
 
 
 def _migrate_settings(conn) -> None:

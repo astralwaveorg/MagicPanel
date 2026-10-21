@@ -48,6 +48,7 @@ def collect_snapshot(conn) -> dict:
          "local_nodes": json.loads(r["local_nodes"] or "[]"),
          "proxies": json.loads(r["proxies"] or "[]"), "url": r["url"],
          "targets": json.loads(r["targets"] or "[]"),
+         "devices": json.loads(r["devices"] or "[]") if "devices" in r.keys() else [],
          "local_first": bool(r["local_first"]) if "local_first" in r.keys() else False,
          "interval": r["interval"], "timeout": r["timeout"],
          "tolerance": r["tolerance"], "lazy": bool(r["lazy"]),
@@ -57,13 +58,20 @@ def collect_snapshot(conn) -> dict:
     rules = [
         {"type": r["type"], "value": r["value"], "target": r["target"],
          "enabled": bool(r["enabled"]), "no_resolve": bool(r["no_resolve"]),
-         "targets": json.loads(r["targets"] or "[]")}
+         "targets": json.loads(r["targets"] or "[]"),
+         "devices": json.loads(r["devices"] or "[]") if "devices" in r.keys() else []}
         for r in db.all_(conn, "SELECT * FROM rules ORDER BY sort, id")
     ]
     targets = [
-        {"name": r["name"], "engine": r["engine"], "platform": r["platform"],
-         "extra_yaml": r["extra_yaml"]}
+        {"id": int(r["id"]), "name": r["name"], "engine": r["engine"],
+         "platform": r["platform"], "extra_yaml": r["extra_yaml"]}
         for r in db.all_(conn, "SELECT * FROM targets ORDER BY id")
+    ]
+    devices = [
+        {"id": int(r["id"]), "name": r["name"], "target_id": int(r["target_id"]),
+         "env": r["env"]}
+        for r in db.all_(conn, "SELECT id, name, target_id, env FROM devices "
+                               "ORDER BY id")
     ]
     base_docs: dict[str, dict] = {}      # 通用配置：引擎+平台 → 覆盖文档
     base_devices: dict[str, dict] = {}   # 设备专属配置：设备 id → 覆盖文档
@@ -90,7 +98,7 @@ def collect_snapshot(conn) -> dict:
         "sources": sources, "rule_providers": rule_providers,
         "local_nodes": local_nodes, "groups": groups, "rules": rules,
         "targets": targets, "snippets": snippets, "base": base_docs,
-        "base_devices": base_devices,
+        "base_devices": base_devices, "devices": devices,
     }
 
 
@@ -230,12 +238,12 @@ def create_build(operator: str, note: str = "",
                 if core_error:
                     errors.append(core_error)
                 else:
-                    verification = "核心校验通过（mihomo -t），实机行为待验收"
+                    verification = "核心校验通过（mihomo -t）"
         if not errors and not verification.startswith("核心"):
             # Stash 无官方无头校验工具；核心缺失时 Mihomo 也只有静态校验
-            verification = ("静态通过（未做核心校验），实机待验收"
+            verification = ("静态通过（未做核心校验）"
                             if target["engine"] == "mihomo" and not core_checked
-                            else "静态通过，实机待验收")
+                            else "静态通过")
         if errors:
             overall = "failed"
             verification = "未通过"
@@ -257,6 +265,59 @@ def create_build(operator: str, note: str = "",
             "verification": verification,
             "core_checked": core_checked,
         }
+    # 设备专属产物：同一引擎平台下，个别设备有专属策略组 / 规则时单独出一份。
+    # 引擎平台 = 引擎 + 平台，个性化落在设备上，所以产物也要分设备。
+    scoped = set()
+    for item in list(snapshot.get("rules", [])) + list(snapshot.get("groups", [])):
+        scoped.update(item.get("devices") or [])
+    if scoped:
+        target_by_id = {int(t["id"]): t for t in snapshot["targets"]}
+        for device in snapshot.get("devices", []):
+            if device["name"] not in scoped:
+                continue
+            target = target_by_id.get(int(device["target_id"]))
+            if not target:
+                continue
+            errors: list[str] = []
+            warnings = list(policy_warnings)
+            text = ""
+            verification = "未通过"
+            try:
+                text = render.render_target(snapshot, target, warnings, device=device)
+                errors.extend(validate.validate_rendered(text, target["engine"]))
+            except Exception as exc:
+                errors.append(f"渲染失败：{exc}")
+            if not errors and target["engine"] == "mihomo":
+                checked, core_error = tester.validate_config(text)
+                if checked:
+                    if core_error:
+                        errors.append(core_error)
+                    else:
+                        verification = "核心校验通过（mihomo -t）"
+            if not errors and not verification.startswith("核心"):
+                verification = "静态通过"
+            if errors:
+                overall = "failed"
+                verification = "未通过"
+            else:
+                path = artifact_path(build_id, device["name"])
+                path.write_text(text, encoding="utf-8")
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass
+            results[device["name"]] = {
+                "ok": not errors,
+                "engine": target["engine"],
+                "platform": target["platform"],
+                "device": device["name"],
+                "target": target["name"],
+                "errors": errors,
+                "warnings": warnings,
+                "sha256": security.sha256_text(text) if text else "",
+                "size": len(text.encode()),
+                "verification": verification,
+            }
     with db.tx() as conn:
         conn.execute(
             "UPDATE builds SET verify_status=?, results=? WHERE id=?",

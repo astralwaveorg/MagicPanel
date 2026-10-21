@@ -68,7 +68,7 @@
       <h3>测速链路</h3>
       <div class="mp-direct-head">
         <StatusDot :kind="directKind" :text="directTitle" />
-        <el-button size="small" :loading="directLoading" @click="loadDirect(true)">重新检测</el-button>
+        <el-button size="small" :loading="directLoading" @click="loadDirect(true)" type="primary">重新检测</el-button>
       </div>
       <ul v-if="direct.notes?.length" class="mp-direct-notes">
         <li v-for="(n, i) in direct.notes" :key="i">{{ n }}</li>

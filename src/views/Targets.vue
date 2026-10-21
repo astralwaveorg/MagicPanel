@@ -7,7 +7,7 @@
 
     <div class="mp-toolbar">
       <div class="left"></div>
-      <el-button type="primary" @click="openEdit()">添加引擎平台</el-button>
+      <el-button @click="openEdit()" type="primary">添加引擎平台</el-button>
     </div>
 
     <ErrorState v-if="error" :error="error" @retry="load" />
@@ -48,7 +48,7 @@
           <el-table-column label="操作" width="150">
             <template #default="{ row }">
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+              <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -109,10 +109,7 @@
             <span class="mp-field-hint">{{ engineHint }}</span>
           </template>
           <div class="mp-template-bar">
-            <el-button
-              v-for="t in templates" :key="t.label" size="small" text type="primary"
-              @click="insertTemplate(t.content)"
-            >插入{{ t.label }}</el-button>
+            <el-button v-for="t in templates" :key="t.label" size="small" text type="primary" @click="insertTemplate(t.content)">插入{{ t.label }}</el-button>
           </div>
           <el-input v-model="form.extra_yaml" type="textarea" :rows="8" class="mono"
                     :placeholder="enginePlaceholder" />
@@ -123,7 +120,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button :loading="saving" @click="save" type="primary">保存</el-button>
       </template>
     </el-dialog>
   </div>

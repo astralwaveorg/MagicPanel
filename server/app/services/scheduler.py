@@ -363,7 +363,7 @@ def _record_run(summary: dict, trigger: str, actor: str) -> None:
 
 def run_once(force: bool = False, trigger: str = "scheduled",
              actor: str = AUTO_OPERATOR) -> dict:
-    """执行一轮检查；force=True 时忽略到期时间（用于“立即运行一次”）。"""
+    """执行一轮检查；force=True 时忽略到期时间（用于“立即手动发布”）。"""
     if not _lock.acquire(blocking=False):
         return {"skipped": "上一轮任务仍在运行"}
     _state["running"] = True

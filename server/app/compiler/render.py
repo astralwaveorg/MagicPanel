@@ -199,15 +199,25 @@ def _merge(dst: dict, src: dict) -> None:
             dst[key] = value
 
 
-def applies_to(item: dict, target_name: str) -> bool:
-    """策略组 / 规则是否适用于该目标：未指定则适用于全部目标。"""
+def applies_to(item: dict, target_name: str, device_name: str | None = None) -> bool:
+    """策略组 / 规则是否适用于该目标（以及该设备）。
+
+    两个维度都是"收窄"关系，取交集：
+    * targets —— 适用引擎平台，为空表示适用于全部平台；
+    * devices —— 适用设备，为空表示适用于全部设备；
+      指定了设备时，只在这些设备自己的产物里出现（共享产物里剔除）。
+    """
     scope = item.get("targets") or []
-    if not scope:
-        return True
-    return target_name in scope
+    if scope and target_name not in scope:
+        return False
+    devices = item.get("devices") or []
+    if devices:
+        return bool(device_name) and device_name in devices
+    return True
 
 
-def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tuple[list, list]:
+def _select_structure(snapshot: dict, target: dict, warnings: list | None,
+                      device_name: str | None = None) -> tuple[list, list]:
     """按目标过滤策略组与规则，并剔除当前平台必然无效的规则。
 
     安全约束：
@@ -222,9 +232,10 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
 
     # 复制一份再改，避免污染快照（同一快照会渲染多个目标）
     groups = [dict(g, proxies=list(g.get("proxies") or []))
-              for g in snapshot.get("groups", []) if applies_to(g, target_name)]
+              for g in snapshot.get("groups", [])
+              if applies_to(g, target_name, device_name)]
     rules = [r for r in snapshot.get("rules", []) if r.get("enabled", True)
-             and applies_to(r, target_name)]
+             and applies_to(r, target_name, device_name)]
 
     trimmed = [r for r in rules if r["type"] in unsupported]
     if trimmed and warnings is not None:
@@ -294,8 +305,13 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
     return groups, rules
 
 
-def render_target(snapshot: dict, target: dict, warnings: list | None = None) -> str:
-    """渲染单个目标的完整配置文本。"""
+def render_target(snapshot: dict, target: dict, warnings: list | None = None,
+                  device: dict | None = None) -> str:
+    """渲染单个目标的完整配置文本。
+
+    device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
+    传入设备 = 渲染这台设备自己的产物（含只属于它的策略组与规则）。
+    """
     engine = target["engine"]
     # ① 基础配置：系统默认 → 通用配置（引擎+平台）；设备配置在分发时叠加
     layers = [("系统默认", base_config_service.default_doc(engine))]
@@ -312,7 +328,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None) ->
         base.pop(base_config_service.FAKE_IP_FILTER_KEY, None))
     cfg: dict = base_config_service.ordered(base)
 
-    groups, rules = _select_structure(snapshot, target, warnings)
+    groups, rules = _select_structure(
+        snapshot, target, warnings, (device or {}).get("name"))
     # 本地节点跟随本目标实际生效的策略组，避免把其他设备的私有隧道及密钥
     # 分发给本目标。不能按全局策略组筛选：其中可能包含目标专属的策略组。
     used_local = {

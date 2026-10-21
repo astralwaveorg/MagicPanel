@@ -18,7 +18,7 @@
         <el-form-item label="核心下载代理（可选，仅用于安装测速核心，例如 http://127.0.0.1:7890）">
           <el-input v-model="settings.core_proxy" class="mono" placeholder="留空表示直连" />
         </el-form-item>
-        <el-button type="primary" :loading="savingSettings" @click="saveSettings">保存设置</el-button>
+        <el-button :loading="savingSettings" @click="saveSettings" type="primary">保存设置</el-button>
       </el-form>
     </div>
 
@@ -60,10 +60,10 @@
           <div class="mp-form-hint">超出后自动删除最旧的快照与其主密钥。</div>
         </el-form-item>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <el-button type="primary" :loading="webdavSaving" @click="saveWebdav">保存配置</el-button>
-          <el-button :loading="webdavTesting" @click="testWebdav">测试连接</el-button>
-          <el-button :loading="webdavUploading" @click="uploadWebdav">立即备份到 WebDAV</el-button>
-          <el-button @click="loadWebdavFiles">查看远端备份</el-button>
+          <el-button :loading="webdavSaving" @click="saveWebdav" type="primary">保存配置</el-button>
+          <el-button :loading="webdavTesting" @click="testWebdav" type="primary">测试连接</el-button>
+          <el-button :loading="webdavUploading" @click="uploadWebdav" type="success" plain>立即备份到 WebDAV</el-button>
+          <el-button @click="loadWebdavFiles" type="info" plain>查看远端备份</el-button>
         </div>
       </el-form>
       <div v-if="webdavInfo" style="margin-top:12px;font-size:12.5px;color:var(--mp-text-secondary)">
@@ -82,8 +82,7 @@
         <el-table-column prop="modified" label="修改时间" min-width="180" />
         <el-table-column label="操作" width="120" align="right">
           <template #default="{ row }">
-            <el-button v-if="row.name.endsWith('.db')" size="small" type="warning" plain
-                       @click="restoreWebdav(row)">恢复</el-button>
+            <el-button v-if="row.name.endsWith('.db')" size="small" @click="restoreWebdav(row)" type="warning" plain>恢复</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -98,7 +97,7 @@
           服务端平台 <span class="mono">{{ core.platform }}</span><template v-if="core.asset_hint">，手动下载请选 <span class="mono">{{ core.asset_hint }}</span></template>
         </div>
         <div>
-          <el-button type="primary" plain :loading="coreBusy" @click="installCoreOnline">
+          <el-button :loading="coreBusy" @click="installCoreOnline" type="primary">
             在线安装最新版
           </el-button>
           <el-upload
@@ -130,8 +129,7 @@
         <el-button type="primary" :loading="savingPin" @click="savePin">
           {{ store.user?.has_portal_pin ? '更换 PIN' : '设置 PIN' }}
         </el-button>
-        <el-button v-if="store.user?.has_portal_pin" type="danger" plain :loading="savingPin"
-                   @click="clearPin">撤销我的 PIN</el-button>
+        <el-button v-if="store.user?.has_portal_pin" :loading="savingPin" @click="clearPin" type="warning" plain>撤销我的 PIN</el-button>
       </div>
       <p class="mp-form-hint" style="margin:8px 0 0">
         {{ store.user?.has_portal_pin ? '更换我的 PIN（4 位数字）' : '设置我的 PIN（4 位数字）' }}
@@ -157,7 +155,7 @@
           >
             <el-button type="primary" plain>上传头像</el-button>
           </el-upload>
-          <el-button v-if="store.user?.has_avatar" type="danger" plain @click="removeAvatar">移除</el-button>
+          <el-button v-if="store.user?.has_avatar" @click="removeAvatar" type="danger" plain>移除</el-button>
           <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:8px 0 0">
             支持 PNG / JPEG / WebP，不超过 2 MB；未上传时按用户名生成默认头像。
           </p>
@@ -168,7 +166,7 @@
     <div class="mp-card">
       <div class="mp-toolbar">
         <h3 style="margin:0">维护者账号</h3>
-        <el-button type="primary" plain @click="userDialog = true">添加维护者</el-button>
+        <el-button @click="userDialog = true" type="primary">添加维护者</el-button>
       </div>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
         所有维护者共享同一份数据，账号仅用于访问控制。
@@ -190,9 +188,7 @@
           </el-table-column>
           <el-table-column label="操作" width="100">
             <template #default="{ row }">
-              <el-button size="small" type="danger" plain
-                         :disabled="row.username === store.user?.username"
-                         @click="removeUser(row)">删除</el-button>
+              <el-button size="small" :disabled="row.username === store.user?.username" @click="removeUser(row)" type="danger" plain>删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -208,7 +204,7 @@
         <el-form-item label="新密码（至少 8 位；修改后其他设备的会话将失效）">
           <el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" />
         </el-form-item>
-        <el-button :loading="changingPwd" @click="changePwd">修改密码</el-button>
+        <el-button :loading="changingPwd" @click="changePwd" type="warning" plain>修改密码</el-button>
       </el-form>
     </div>
 
@@ -218,9 +214,9 @@
         备份含加密后的订阅地址与令牌摘要，需与服务端 data/secret.key 分开保管；恢复会覆盖全部数据。
       </p>
       <div class="mp-row-actions">
-        <el-button @click="exportBackup">导出备份（JSON）</el-button>
+        <el-button @click="exportBackup" type="info" plain>导出备份（JSON）</el-button>
         <el-upload :auto-upload="false" :show-file-list="false" accept=".json" :on-change="importBackup">
-          <el-button type="warning" plain>从备份恢复</el-button>
+          <el-button plain type="warning">从备份恢复</el-button>
         </el-upload>
       </div>
     </div>
@@ -239,7 +235,7 @@
       </el-form>
       <template #footer>
         <el-button @click="userDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingUser" @click="addUser">创建</el-button>
+        <el-button :loading="savingUser" @click="addUser" type="primary">创建</el-button>
       </template>
     </el-dialog>
   </div>

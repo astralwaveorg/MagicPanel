@@ -10,11 +10,11 @@
         <template v-if="selected.length">
           <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
           <el-button @click="openBatch">批量修改</el-button>
-          <el-button type="danger" plain @click="removeSelected">批量删除</el-button>
+          <el-button @click="removeSelected" type="danger" plain>批量删除</el-button>
           <el-button link @click="clearSelection">取消选择</el-button>
         </template>
       </div>
-      <el-button type="primary" :disabled="!targets.length" @click="openEdit()">添加设备</el-button>
+      <el-button :disabled="!targets.length" @click="openEdit()" type="primary">添加设备</el-button>
     </div>
 
     <ErrorState v-if="error" :error="error" @retry="load" />
@@ -39,17 +39,15 @@
             <template #default="{ row, $index }">
               <div class="order-cell">
                 <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
-                <el-button text size="small" :disabled="$index === 0"
-                           @click="move($index, -1)">↑</el-button>
-                <el-button text size="small" :disabled="$index === rows.length - 1"
-                           @click="move($index, 1)">↓</el-button>
+                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
+                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="文件名" min-width="130" :fixed="isMobile ? false : 'left'">
+          <el-table-column label="文件名" min-width="165" :fixed="isMobile ? false : 'left'">
             <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
           </el-table-column>
-          <el-table-column label="设备名" min-width="130">
+          <el-table-column label="设备名" min-width="150">
             <template #default="{ row }">{{ row.display_name }}</template>
           </el-table-column>
           <el-table-column label="平台" width="90">
@@ -67,8 +65,10 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="最近下载" min-width="130">
-            <template #default="{ row }">{{ fmtTime(row.last_pull_at) }}</template>
+          <el-table-column label="最近下载" min-width="150">
+            <template #default="{ row }">
+              <span class="mp-nowrap">{{ fmtTime(row.last_pull_at) }}</span>
+            </template>
           </el-table-column>
           <el-table-column prop="pull_count" label="下载次数" width="90" align="right" />
           <el-table-column label="最近来源 IP" min-width="120">
@@ -77,10 +77,10 @@
           <el-table-column label="操作" width="290" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
-                <el-button size="small" @click="reveal(row)">复制地址</el-button>
+                <el-button size="small" @click="reveal(row)" type="info" plain>复制地址</el-button>
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
-                <el-button size="small" type="warning" plain @click="rotate(row)">轮换令牌</el-button>
-                <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+                <el-button size="small" @click="rotate(row)" type="warning" plain>轮换令牌</el-button>
+                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -123,7 +123,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button :loading="saving" @click="save" type="primary">保存</el-button>
       </template>
     </el-dialog>
 
@@ -158,7 +158,7 @@
       </el-form>
       <template #footer>
         <el-button @click="batchDialog = false">取消</el-button>
-        <el-button type="primary" :loading="batchSaving" @click="saveBatch">应用</el-button>
+        <el-button :loading="batchSaving" @click="saveBatch" type="primary">应用</el-button>
       </template>
     </el-dialog>
 

@@ -12,11 +12,11 @@
           <el-button @click="openBatch">批量修改</el-button>
           <el-button @click="batchEnable(true)">批量启用</el-button>
           <el-button @click="batchEnable(false)">批量停用</el-button>
-          <el-button type="danger" plain @click="removeSelected">批量删除</el-button>
+          <el-button @click="removeSelected" type="danger" plain>批量删除</el-button>
           <el-button link @click="clearSelection">取消选择</el-button>
         </template>
       </div>
-      <el-button type="primary" @click="openEdit()">添加规则</el-button>
+      <el-button @click="openEdit()" type="primary">添加规则</el-button>
     </div>
 
     <ErrorState v-if="error" :error="error" @retry="load" />
@@ -52,6 +52,9 @@
             <template #default="{ row }">
               <span v-if="!row.targets || !row.targets.length">全部</span>
               <span v-else>{{ row.targets.join('、') }}</span>
+              <div v-if="row.devices && row.devices.length" class="mp-cell-sub">
+                设备：{{ row.devices.join('、') }}
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="no-resolve" width="100" align="center">
@@ -66,7 +69,7 @@
           <el-table-column label="操作" width="150">
             <template #default="{ row }">
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+              <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -108,6 +111,18 @@
             只在选中的引擎平台里生效；若该规则指向的策略组不适用于同一平台，规则会被自动剔除。
           </div>
         </el-form-item>
+        <el-form-item label="适用设备（不选 = 全部）">
+          <MultiSelectClear :has-value="form.devices.length" @clear="form.devices = []">
+            <el-select v-model="form.devices" multiple style="width:100%"
+                       placeholder="不选表示适用于全部设备">
+              <el-option v-for="d in devices" :key="d.name" :value="d.name" :label="d.name" />
+            </el-select>
+          </MultiSelectClear>
+          <div class="mp-form-hint">
+            个性化放这里：选了设备后，这条规则只出现在这些设备自己的产物里，
+            同平台的其他设备不受影响。
+          </div>
+        </el-form-item>
         <el-form-item label="备注（可选）">
           <el-input v-model="form.note" />
         </el-form-item>
@@ -120,7 +135,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button :loading="saving" @click="save" type="primary">保存</el-button>
       </template>
     </el-dialog>
 
@@ -174,7 +189,7 @@
       </el-form>
       <template #footer>
         <el-button @click="batchDialog = false">取消</el-button>
-        <el-button type="primary" :loading="batchSaving" @click="saveBatch">应用</el-button>
+        <el-button :loading="batchSaving" @click="saveBatch" type="primary">应用</el-button>
       </template>
     </el-dialog>
   </div>
@@ -217,6 +232,7 @@ const limit = ref(50)
 const groups = ref([])
 const ruleProviders = ref([])
 const targets = ref([])
+const devices = ref([])
 const loading = ref(false)
 const error = ref('')
 const dialog = ref(false)
@@ -238,7 +254,7 @@ const NO_RESOLVE_TYPES = ['IP-CIDR', 'IP-CIDR6', 'GEOIP', 'RULE-SET', 'SRC-IP-CI
 
 const emptyForm = () => ({
   type: 'DOMAIN-SUFFIX', value: '', target: 'DIRECT', enabled: true, note: '',
-  no_resolve: false, targets: [],
+  no_resolve: false, targets: [], devices: [],
 })
 const form = reactive(emptyForm())
 const isFinal = computed(() => ['MATCH', 'FINAL'].includes(form.type))
@@ -254,16 +270,17 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [paged, gs, rps, targetList] = await Promise.all([
+    const [paged, gs, rps, targetList, deviceList] = await Promise.all([
       api(`/api/v1/rules/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
       api('/api/v1/groups'), api('/api/v1/rule-providers'),
-      api('/api/v1/targets'),
+      api('/api/v1/targets'), api('/api/v1/devices'),
     ])
     rows.value = paged.items
     total.value = paged.total
     groups.value = gs
     ruleProviders.value = rps.filter((p) => p.enabled)
     targets.value = targetList
+    devices.value = deviceList
   } catch (e) {
     error.value = e.message
     ElMessage.error(e.message)
@@ -280,6 +297,7 @@ function openEdit(row) {
   Object.assign(form, emptyForm(), row ? {
     type: row.type, value: row.value, target: row.target, enabled: row.enabled,
     note: row.note, no_resolve: row.no_resolve, targets: [...(row.targets || [])],
+    devices: [...(row.devices || [])],
   } : {})
   dialog.value = true
 }

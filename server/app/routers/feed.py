@@ -97,7 +97,11 @@ def device_config(token: str, request: Request):
         build, target = _device_build(conn, device)
         if not build or not target:
             return Response("no release", status_code=503)
-        path = artifact_file(build["id"], target["name"])
+        # 设备有专属策略组 / 规则时，构建会单独产出一份设备专属产物；
+        # 没有就用该引擎平台的共享产物。
+        path = artifact_file(build["id"], device["name"])
+        if not path.exists():
+            path = artifact_file(build["id"], target["name"])
         if not path.exists():
             return Response("artifact missing", status_code=503)
         feed_base = f"{_base_url(request, conn)}/feed/{token}"

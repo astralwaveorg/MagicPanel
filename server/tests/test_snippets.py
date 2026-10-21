@@ -79,7 +79,7 @@ def test_snippet_merge_into_build(client):
         f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"])
     assert stash["panel"]["首页"]["title"] == "家庭网络"
     assert stash["log-level"] == "info"      # 启用模块覆盖默认值
-    assert "dns" not in stash                # mihomo 专用片段不进 stash
+    # mihomo 专用片段不进 stash（stash 自带 DNS 基线，但不能被片段改写）
     assert "fallback" not in stash.get("dns", {})
 
     mih = yaml.safe_load(client.get(

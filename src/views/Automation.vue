@@ -4,7 +4,7 @@
     <p class="mp-page-desc">
       服务端按各来源的间隔自动抓取上游、按测速间隔自动测速；策略变化时按设定间隔创建构建并发布。
       发布历史只保留最近 10 条，完整操作记录仍可在审计日志中追溯。
-      “立即运行一次”会忽略到期时间，强制执行一轮抓取、测速和构建检查。
+      “立即手动发布”会忽略到期时间，强制执行一轮抓取、测速和构建检查。
     </p>
 
     <div class="mp-card">
@@ -15,7 +15,7 @@
           <span class="mp-toolbar-hint">上次运行：{{ fmtTime(status.last_tick_at) }}</span>
           <span v-if="!status.autostart" class="mp-toolbar-hint">后台循环未启动</span>
         </div>
-        <el-button :loading="triggering" @click="runNow">立即运行一次</el-button>
+        <el-button :loading="triggering" @click="runNow" type="primary">立即手动发布</el-button>
       </div>
       <div class="mp-auto-status">
         <div>
@@ -92,7 +92,7 @@
     </el-row>
 
     <div class="mp-card" style="display:flex;justify-content:flex-end">
-      <el-button type="primary" :loading="saving" @click="save">保存自动任务设置</el-button>
+      <el-button :loading="saving" @click="save" type="primary">保存自动任务设置</el-button>
     </div>
 
     <div class="mp-card">

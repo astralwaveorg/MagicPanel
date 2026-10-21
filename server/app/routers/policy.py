@@ -27,6 +27,7 @@ class GroupBody(BaseModel):
     lazy: bool = True
     strategy: str = Field(default="", max_length=32)
     targets: list[str] = Field(default_factory=list)  # 适用引擎平台，空 = 全部
+    devices: list[str] = Field(default_factory=list)  # 适用设备，空 = 全部
     local_first: bool = False   # 本地单节点排在组成员最前
 
 
@@ -38,6 +39,7 @@ class RuleBody(BaseModel):
     note: str = Field(default="", max_length=256)
     no_resolve: bool = False
     targets: list[str] = Field(default_factory=list)  # 适用引擎平台，空 = 全部
+    devices: list[str] = Field(default_factory=list)  # 适用设备，空 = 全部
 
 
 def _group_public(row) -> dict:
@@ -48,6 +50,7 @@ def _group_public(row) -> dict:
     data["local_nodes"] = json.loads(row["local_nodes"] or "[]")
     data["proxies"] = json.loads(row["proxies"] or "[]")
     data["targets"] = json.loads(row["targets"] or "[]")
+    data["devices"] = json.loads(row["devices"] or "[]") if "devices" in row.keys() else []
     data["local_first"] = bool(row["local_first"]) if "local_first" in row.keys() else False
     return data
 
@@ -57,6 +60,7 @@ def _rule_public(row) -> dict:
     data["enabled"] = bool(row["enabled"])
     data["no_resolve"] = bool(row["no_resolve"])
     data["targets"] = json.loads(row["targets"] or "[]")
+    data["devices"] = json.loads(row["devices"] or "[]") if "devices" in row.keys() else []
     data["local_first"] = bool(row["local_first"]) if "local_first" in row.keys() else False
     return data
 
@@ -133,15 +137,16 @@ def create_group(body: GroupBody, user=CurrentUser):
             cur = db.insert_unique(conn,
                 "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
                 "local_nodes, proxies, url, interval, timeout, tolerance, lazy, strategy, "
-                "targets, local_first, created_at, updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "targets, devices, local_first, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (body.name, body.type, sort, int(body.hidden), body.filter,
                  json.dumps(body.use_sources, ensure_ascii=False),
                  json.dumps(local_ids, ensure_ascii=False),
                  json.dumps(body.proxies, ensure_ascii=False),
                  body.url, body.interval, body.timeout, body.tolerance,
                  int(body.lazy), body.strategy,
-                 json.dumps(body.targets, ensure_ascii=False), int(body.local_first),
+                 json.dumps(body.targets, ensure_ascii=False),
+                 json.dumps(body.devices, ensure_ascii=False), int(body.local_first),
                  now, now),
             )
             security.audit(conn, user["username"], "新增策略组", "group", cur.lastrowid,
@@ -172,13 +177,14 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
             "local_nodes=?, proxies=?, url=?, interval=?, timeout=?, tolerance=?, "
-            "lazy=?, strategy=?, targets=?, local_first=?, updated_at=? WHERE id=?",
+            "lazy=?, strategy=?, targets=?, devices=?, local_first=?, updated_at=? WHERE id=?",
             (body.name, body.type, int(body.hidden), body.filter,
              json.dumps(body.use_sources, ensure_ascii=False),
              json.dumps(local_ids, ensure_ascii=False),
              json.dumps(body.proxies, ensure_ascii=False),
              body.url, body.interval, body.timeout, body.tolerance, int(body.lazy),
              body.strategy, json.dumps(body.targets, ensure_ascii=False),
+             json.dumps(body.devices, ensure_ascii=False),
              int(body.local_first), db.now(), gid),
         )
         security.audit(conn, user["username"], "更新策略组", "group", gid,
@@ -251,6 +257,7 @@ class BatchRulePatch(BaseModel):
     ids: list[int] = Field(default_factory=list)
     target: str | None = None
     targets: list[str] | None = None
+    devices: list[str] | None = None
     enabled: bool | None = None
     note: str | None = None
     no_resolve: bool | None = None
@@ -400,8 +407,8 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
     ids = list(dict.fromkeys(body.ids))
     if not ids:
         raise HTTPException(400, "请先选择要修改的分流规则")
-    if body.target is None and body.targets is None and body.enabled is None \
-            and body.note is None and body.no_resolve is None:
+    if body.target is None and body.targets is None and body.devices is None \
+            and body.enabled is None and body.note is None and body.no_resolve is None:
         raise HTTPException(400, "请至少选择一个要修改的字段")
     updated = 0
     skipped: list[dict] = []
@@ -409,6 +416,7 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
     with db.tx() as conn:
         group_names = {r["name"] for r in db.all_(conn, "SELECT name FROM proxy_groups")}
         target_names = {r["name"] for r in db.all_(conn, "SELECT name FROM targets")}
+        device_names = {r["name"] for r in db.all_(conn, "SELECT name FROM devices")}
         for rid in ids:
             row = db.one(conn, "SELECT * FROM rules WHERE id=?", (rid,))
             if not row:
@@ -429,6 +437,12 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
                 if len(keep) != len(body.targets):
                     notes.append("剔除了不存在的引擎平台")
                 fields.append("targets=?")
+                args.append(json.dumps(keep, ensure_ascii=False))
+            if body.devices is not None:
+                keep = [d for d in body.devices if d in device_names]
+                if len(keep) != len(body.devices):
+                    notes.append("剔除了不存在的设备")
+                fields.append("devices=?")
                 args.append(json.dumps(keep, ensure_ascii=False))
             if body.enabled is not None:
                 fields.append("enabled=?")
@@ -456,6 +470,7 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
         security.audit(conn, user["username"], "批量修改分流规则", "rule",
                        ",".join(str(i) for i in ids),
                        {"target": body.target, "targets": body.targets,
+                        "devices": body.devices,
                         "enabled": body.enabled, "note": body.note})
     return {"ok": True, "updated": updated, "missing": missing, "skipped": skipped}
 
@@ -537,6 +552,18 @@ def _remap_group_refs(conn, old_name: str, new_name: str) -> int:
     return changed
 
 
+def _check_device_names(conn, names: list[str]) -> None:
+    """写时校验"适用设备"必须真实存在。
+
+    设备名写错时，该条规则/策略组会被所有产物静默剔除——
+    与引擎平台名写错的后果一样，必须在写入时挡下来。
+    """
+    for name in names or []:
+        row = db.one(conn, "SELECT id FROM devices WHERE name=?", (name,))
+        if not row:
+            raise HTTPException(400, f"设备不存在：{name}")
+
+
 def _check_target_names(conn, names: list[str]) -> None:
     """写时校验"适用引擎平台"必须真实存在。
 
@@ -553,10 +580,12 @@ def _check_target_names(conn, names: list[str]) -> None:
 
 def _check_rule_refs(conn, body: RuleBody) -> None:
     _check_target_names(conn, body.targets)
+    _check_device_names(conn, body.devices)
 
 
 def _check_group_refs(conn, body: GroupBody) -> None:
     _check_target_names(conn, body.targets)
+    _check_device_names(conn, body.devices)
 
 
 @router.get("/rules/page")
@@ -590,10 +619,11 @@ def create_rule(body: RuleBody, user=CurrentUser):
             now = db.now()
             cur = db.insert_unique(conn,
                 "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
-                "targets, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "targets, devices, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (sort, body.type, body.value, body.target, int(body.enabled),
                  body.note, int(body.no_resolve),
-                 json.dumps(body.targets, ensure_ascii=False), now, now),
+                 json.dumps(body.targets, ensure_ascii=False),
+                 json.dumps(body.devices, ensure_ascii=False), now, now),
             )
             security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
                            {"rule": f"{body.type},{body.value},{body.target}"})
@@ -612,9 +642,10 @@ def update_rule(rid: int, body: RuleBody, user=CurrentUser):
         _get_rule(conn, rid)
         conn.execute(
             "UPDATE rules SET type=?, value=?, target=?, enabled=?, note=?, "
-            "no_resolve=?, targets=?, updated_at=? WHERE id=?",
+            "no_resolve=?, targets=?, devices=?, updated_at=? WHERE id=?",
             (body.type, body.value, body.target, int(body.enabled), body.note,
              int(body.no_resolve), json.dumps(body.targets, ensure_ascii=False),
+             json.dumps(body.devices, ensure_ascii=False),
              db.now(), rid),
         )
         security.audit(conn, user["username"], "更新分流规则", "rule", rid,

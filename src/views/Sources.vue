@@ -14,8 +14,7 @@
     >
       <template #title>
         测速核心未安装，测速不可用。
-        <el-button size="small" type="warning" plain :loading="installingCore"
-                   style="margin-left: 8px" @click="installCore">
+        <el-button size="small" :loading="installingCore" style="margin-left: 8px" @click="installCore" type="primary">
           在线安装最新版
         </el-button>
         <el-upload
@@ -31,24 +30,18 @@
       <div class="left">
         <template v-if="selected.length">
           <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
-          <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting"
-                     @click="refreshMany(selected)">抓取选中</el-button>
-          <el-button :loading="batchTesting" :disabled="batchRefreshing || batchTesting"
-                     @click="testMany(selected)">测速选中</el-button>
-          <el-button :disabled="batchRefreshing || batchTesting"
-                     @click="openBatchInterval">修改抓取间隔</el-button>
-          <el-button type="danger" plain :disabled="batchRefreshing || batchTesting"
-                     @click="removeSelected">批量删除</el-button>
+          <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting" @click="refreshMany(selected)" type="primary">抓取选中</el-button>
+          <el-button :loading="batchTesting" :disabled="batchRefreshing || batchTesting" @click="testMany(selected)" type="success" plain>测速选中</el-button>
+          <el-button :disabled="batchRefreshing || batchTesting" @click="openBatchInterval">修改抓取间隔</el-button>
+          <el-button :disabled="batchRefreshing || batchTesting" @click="removeSelected" type="danger" plain>批量删除</el-button>
           <el-button link @click="clearSelection">取消选择</el-button>
           <span v-if="batchTesting" class="mp-toolbar-hint">
             正在测速 {{ testDone }}/{{ testTotal }}…
           </span>
         </template>
         <template v-else>
-          <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting"
-                     @click="refreshMany(rows)">一键抓取</el-button>
-          <el-button :loading="batchTesting" :disabled="batchRefreshing || batchTesting"
-                     @click="testMany(rows)">一键测速</el-button>
+          <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting" @click="refreshMany(rows)" type="primary">一键抓取</el-button>
+          <el-button :loading="batchTesting" :disabled="batchRefreshing || batchTesting" @click="testMany(rows)" type="success" plain>一键测速</el-button>
           <span v-if="batchRefreshing" class="mp-toolbar-hint">
             正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
           </span>
@@ -58,8 +51,8 @@
         </template>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <el-button type="primary" @click="openEdit()">添加订阅</el-button>
-        <el-button type="primary" @click="openLocalEdit()">添加节点</el-button>
+        <el-button @click="openEdit()" type="primary">添加订阅</el-button>
+        <el-button @click="openLocalEdit()" type="primary">添加节点</el-button>
       </div>
     </div>
 
@@ -79,7 +72,7 @@
           <el-table-column prop="name" label="名称" min-width="100" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="订阅地址" width="110">
             <template #default="{ row }">
-              <el-button size="small" @click="copyUrl(row)">复制 URL</el-button>
+              <el-button size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
             </template>
           </el-table-column>
           <el-table-column label="抓取状态" min-width="110">
@@ -140,12 +133,10 @@
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" type="info" plain @click="openNodes(row)">节点</el-button>
-                <el-button size="small" type="primary" plain :loading="row._refreshing"
-                           @click="refresh(row)">抓取</el-button>
-                <el-button size="small" type="success" plain :loading="row._testing"
-                           @click="testNodes(row)">测速</el-button>
+                <el-button size="small" :loading="row._refreshing" @click="refresh(row)" type="primary">抓取</el-button>
+                <el-button size="small" :loading="row._testing" @click="testNodes(row)" type="success" plain>测速</el-button>
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
-                <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -193,10 +184,9 @@
           </el-table-column>
           <el-table-column label="操作" width="230">
             <template #default="{ row }">
-              <el-button size="small" type="success" plain :loading="testingLocal === row.id"
-                         @click="testLocal(row)">测速</el-button>
+              <el-button size="small" :loading="testingLocal === row.id" @click="testLocal(row)" type="success" plain>测速</el-button>
               <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
-              <el-button size="small" type="danger" plain @click="removeLocal(row)">删除</el-button>
+              <el-button size="small" @click="removeLocal(row)" type="danger" plain>删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -285,7 +275,7 @@
       </el-form>
       <template #footer>
         <el-button @click="localDialog = false">取消</el-button>
-        <el-button type="primary" :loading="localSaving" @click="saveLocal">保存</el-button>
+        <el-button :loading="localSaving" @click="saveLocal" type="primary">保存</el-button>
       </template>
     </el-dialog>
 
@@ -369,7 +359,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button :loading="saving" @click="save" type="primary">保存</el-button>
       </template>
     </el-dialog>
 
@@ -383,15 +373,13 @@
       <p style="font-size:13px;margin:0 0 6px">抓取间隔（秒）</p>
       <el-input-number v-model="batchInterval" :min="600" :max="604800" style="width:100%" />
       <div class="mp-preset-row">
-        <el-button v-for="p in INTERVAL_PRESETS" :key="p.value" size="small"
-                   :type="batchInterval === p.value ? 'primary' : 'default'"
-                   @click="batchInterval = p.value">{{ p.label }}</el-button>
+        <el-button v-for="p in INTERVAL_PRESETS" :key="p.value" size="small" :type="batchInterval === p.value ? 'primary' : 'default'" @click="batchInterval = p.value">{{ p.label }}</el-button>
       </div>
       <p style="font-size:13px;margin:14px 0 6px">测速间隔（秒，0 = 不自动测速）</p>
       <el-input-number v-model="batchTestInterval" :min="0" :max="604800" style="width:100%" />
       <template #footer>
         <el-button @click="intervalDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingInterval" @click="saveBatchInterval">应用</el-button>
+        <el-button :loading="savingInterval" @click="saveBatchInterval" type="primary">应用</el-button>
       </template>
     </el-dialog>
 

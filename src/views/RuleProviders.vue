@@ -9,16 +9,13 @@
       <div class="left">
         <template v-if="selected.length">
           <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
-          <el-button :loading="batchRefreshing" :disabled="batchRefreshing"
-                     @click="refreshMany(selected)">抓取选中</el-button>
+          <el-button :loading="batchRefreshing" :disabled="batchRefreshing" @click="refreshMany(selected)" type="primary">抓取选中</el-button>
           <el-button :disabled="batchRefreshing" @click="openBatchInterval">修改抓取间隔</el-button>
-          <el-button type="danger" plain :disabled="batchRefreshing"
-                     @click="removeSelected">批量删除</el-button>
+          <el-button :disabled="batchRefreshing" @click="removeSelected" type="danger" plain>批量删除</el-button>
           <el-button link @click="clearSelection">取消选择</el-button>
         </template>
         <template v-else>
-          <el-button :loading="batchRefreshing" :disabled="batchRefreshing"
-                     @click="refreshMany(remoteRows)">一键抓取</el-button>
+          <el-button :loading="batchRefreshing" :disabled="batchRefreshing" @click="refreshMany(remoteRows)" type="primary">一键抓取</el-button>
           <span v-if="batchRefreshing" class="mp-toolbar-hint">
             正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
           </span>
@@ -30,7 +27,7 @@
           style="width:240px"
         />
       </div>
-      <el-button type="primary" @click="openEdit()">添加规则来源</el-button>
+      <el-button @click="openEdit()" type="primary">添加规则来源</el-button>
     </div>
 
     <ErrorState v-if="error" :error="error" @retry="load" />
@@ -59,8 +56,7 @@
           <el-table-column prop="format" label="格式" width="80" />
           <el-table-column label="URL" width="110">
             <template #default="{ row }">
-              <el-button v-if="row.kind === 'remote' && row.url" size="small"
-                         @click="copyUrl(row)">复制 URL</el-button>
+              <el-button v-if="row.kind === 'remote' && row.url" size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
@@ -87,11 +83,10 @@
           <el-table-column label="操作" width="192" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
-                <el-button size="small" :disabled="!row.has_content" @click="preview(row)">内容</el-button>
-                <el-button size="small" v-if="row.kind === 'remote'" :loading="row._refreshing"
-                           @click="refresh(row)">抓取</el-button>
+                <el-button size="small" :disabled="!row.has_content" @click="preview(row)" type="info" plain>内容</el-button>
+                <el-button size="small" v-if="row.kind === 'remote'" :loading="row._refreshing" @click="refresh(row)" type="primary">抓取</el-button>
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
-                <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -165,7 +160,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button :loading="saving" @click="save" type="primary">保存</el-button>
       </template>
     </el-dialog>
 
@@ -178,13 +173,11 @@
       </p>
       <el-input-number v-model="batchInterval" :min="600" :max="604800" style="width:100%" />
       <div class="mp-preset-row">
-        <el-button v-for="p in INTERVAL_PRESETS" :key="p.value" size="small"
-                   :type="batchInterval === p.value ? 'primary' : 'default'"
-                   @click="batchInterval = p.value">{{ p.label }}</el-button>
+        <el-button v-for="p in INTERVAL_PRESETS" :key="p.value" size="small" :type="batchInterval === p.value ? 'primary' : 'default'" @click="batchInterval = p.value">{{ p.label }}</el-button>
       </div>
       <template #footer>
         <el-button @click="intervalDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingInterval" @click="saveBatchInterval">应用</el-button>
+        <el-button :loading="savingInterval" @click="saveBatchInterval" type="primary">应用</el-button>
       </template>
     </el-dialog>
 

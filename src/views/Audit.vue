@@ -5,10 +5,10 @@
 
     <div class="mp-toolbar" style="margin-bottom:12px">
       <div class="left">
-        <el-button size="small" :disabled="!selection.length" @click="removeSelected">
+        <el-button size="small" type="danger" plain :disabled="!selection.length" @click="removeSelected">
           删除选中（{{ selection.length }}）
         </el-button>
-        <el-button size="small" type="danger" plain :disabled="!total" @click="clearAll">
+        <el-button size="small" :disabled="!total" @click="clearAll" type="danger" plain>
           清空全部
         </el-button>
       </div>

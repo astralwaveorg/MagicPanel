@@ -2,8 +2,9 @@
   <div class="mp-artifact">
     <h2 class="mp-page-title">产物配置</h2>
     <p class="mp-page-desc">
-      配置分三层：<strong>系统默认</strong>（随程序发布，可直接改）→ <strong>通用配置</strong> →
-      <strong>设备配置</strong>。
+      配置分三层：<strong>引擎默认配置</strong>（引擎内置的能力基线，随程序发布，可直接改）→
+      <strong>引擎平台配置</strong>（按引擎 + 平台，可新增）→
+      <strong>设备独立配置</strong>（对应最终产物的个性化设置）。
       越靠后优先级越高；每层只保存改动过的部分，其余自动继承上一层。
     </p>
 
@@ -60,15 +61,15 @@
                 <el-option value="production" label="生产环境" />
                 <el-option value="testing" label="测试环境" />
               </el-select>
-              <el-button v-if="!readonly" @click="openSource">源码编辑</el-button>
-              <el-button v-if="isBuiltin ? builtinOverridden : !readonly" @click="reset">
+              <el-button v-if="!readonly" @click="openSource" type="info" plain>源码编辑</el-button>
+              <el-button v-if="isBuiltin ? builtinOverridden : !readonly" type="warning" plain @click="reset">
                 {{ isBuiltin ? '恢复默认' : '清除改动' }}
               </el-button>
-              <el-button @click="preview">预览产物</el-button>
-              <el-button v-if="!readonly" type="primary" :loading="saving" @click="save">
+              <el-button @click="preview" type="info" plain>预览产物</el-button>
+              <el-button v-if="!readonly" :loading="saving" @click="save" type="primary">
                 保存
               </el-button>
-              <el-button v-if="!readonly" type="primary" plain :loading="applying" @click="apply">
+              <el-button v-if="!readonly" :loading="applying" @click="apply" type="success">
                 保存并构建发布
               </el-button>
             </div>
@@ -76,8 +77,8 @@
 
           <el-alert v-if="isBuiltin" type="warning" :closable="false" show-icon
                     style="margin-bottom:12px">
-            <strong>系统默认是全局基础配置</strong>：修改将影响全部客户端，
-            并被下层通用配置与设备配置继承。保存时仅记录改动项，支持随时「恢复默认」。
+            <strong>引擎默认配置是所有客户端的基础</strong>：修改将影响该引擎下的全部客户端，
+            并被下层引擎平台配置与设备独立配置继承。保存时仅记录改动项，支持随时「恢复默认」。
           </el-alert>
           <el-alert v-else-if="state && !state.overlay" type="info" :closable="false" show-icon
                     style="margin-bottom:12px">
@@ -91,7 +92,7 @@
           <!-- 生效配置：可点击编辑 -->
           <h3 class="mp-section-title">生效配置</h3>
           <div class="mp-effective-toolbar">
-            <el-button v-if="!readonly" type="primary" size="small" @click="openAddParam">新增参数</el-button>
+            <el-button v-if="!readonly" size="small" @click="openAddParam" type="primary">新增参数</el-button>
             <span class="mp-toolbar-hint">
               点击「值」即可编辑。修改仅对当前层级生效，保存时仅记录改动项。
             </span>
@@ -111,7 +112,7 @@
                   <el-input v-else v-model="editText" type="textarea" :rows="3" size="small"
                             class="mono" @keyup.esc="cancelEdit" />
                   <div class="mp-effective-actions">
-                    <el-button size="small" type="primary" text @click="commitEdit">确定</el-button>
+                    <el-button size="small" text @click="commitEdit" type="primary">确定</el-button>
                     <el-button size="small" text @click="cancelEdit">取消</el-button>
                   </div>
                 </template>
@@ -140,7 +141,7 @@
                   <el-input v-else v-model="editText" type="textarea" :rows="3" size="small"
                             class="mono" @keyup.esc="cancelEdit" />
                   <div class="mp-effective-actions">
-                    <el-button size="small" type="primary" text @click="commitEdit">确定</el-button>
+                    <el-button size="small" text @click="commitEdit" type="primary">确定</el-button>
                     <el-button size="small" text @click="cancelEdit">取消</el-button>
                   </div>
                 </template>
@@ -157,8 +158,7 @@
             </el-table-column>
             <el-table-column v-if="!readonly" label="" width="90" align="right">
               <template #default="{ row }">
-                <el-button v-if="!row.isDict && row.overridden" size="small" text
-                           @click="revertKey(row)">恢复继承</el-button>
+                <el-button v-if="!row.isDict && row.overridden" size="small" text @click="revertKey(row)" type="warning">恢复继承</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -174,7 +174,7 @@
                 <span class="mono mp-effective-key"
                       :style="{ paddingLeft: (row.depth * 16) + 'px' }">{{ row.path }}</span>
                 <span class="mono mp-overlay-value">{{ row.display }}</span>
-                <el-button size="small" text @click="revertKey(row)">恢复继承</el-button>
+                <el-button size="small" text @click="revertKey(row)" type="warning">恢复继承</el-button>
               </div>
             </div>
           </template>
@@ -238,9 +238,9 @@
             <h3 class="mp-section-title">默认内容（可直接修改）</h3>
             <el-input v-model="raw" type="textarea" :rows="14" class="mono" />
             <div class="mp-form-hint">
-              这里是系统默认的完整内容。保存时只把
+              这里是引擎默认配置的完整内容。保存时只把
               <strong>与默认值不同的部分</strong>记下来，其余保持原样；
-              改动会影响该引擎下所有通用配置与设备配置。点「恢复默认」即可还原。
+              改动会影响该引擎下所有引擎平台配置与设备独立配置。点「恢复默认」即可还原。
             </div>
           </template>
         </div>
@@ -264,7 +264,7 @@
       </el-form>
       <template #footer>
         <el-button @click="addDialog = false">取消</el-button>
-        <el-button type="primary" @click="confirmAddParam">新增</el-button>
+        <el-button @click="confirmAddParam" type="primary">新增</el-button>
       </template>
     </el-dialog>
 
@@ -277,7 +277,7 @@
       <el-input v-model="sourceText" type="textarea" :rows="20" class="mono" />
       <template #footer>
         <el-button @click="sourceVisible = false">取消</el-button>
-        <el-button type="primary" @click="applySource">应用到编辑器</el-button>
+        <el-button @click="applySource" type="primary">应用到编辑器</el-button>
       </template>
     </el-dialog>
 
@@ -341,9 +341,9 @@ const scopeGroups = computed(() => {
     byKind[s.kind].push(s)
   }
   return [
-    { kind: 'builtin', title: '系统默认', hint: '支持修改', items: byKind.builtin },
-    { kind: 'general', title: '通用配置', hint: '', items: byKind.general },
-    { kind: 'device', title: '设备配置', hint: '', items: byKind.device },
+    { kind: 'builtin', title: '引擎默认配置', hint: '引擎内置基线', items: byKind.builtin },
+    { kind: 'general', title: '引擎平台配置', hint: '按引擎 + 平台', items: byKind.general },
+    { kind: 'device', title: '设备独立配置', hint: '按设备', items: byKind.device },
   ].filter((g) => g.items.length)
 })
 
@@ -372,33 +372,33 @@ function applySource() {
   ElMessage.success('已应用到编辑器，点「保存」生效')
 }
 
-// 系统默认是整条链路最底层，改动前必须明确告知影响范围
+// 引擎默认配置是整条链路最底层，改动前必须明确告知影响范围
 async function confirmBuiltinChange() {
   return confirmBox(
-    '系统默认是全局基础配置：修改将影响全部客户端，'
-    + '并被下层通用配置与设备配置继承。确定要修改吗？',
-    '修改系统默认',
+    '引擎默认配置是所有客户端的基础：修改将影响该引擎下的全部客户端，'
+    + '并被下层引擎平台配置与设备独立配置继承。确定要修改吗？',
+    '修改引擎默认配置',
     { type: 'warning', confirmButtonText: '继续修改' })
 }
 
-// 系统默认也可改：改的是"默认值之上的差异"，可一键恢复默认
+// 引擎默认配置也可改：改的是"默认值之上的差异"，可一键恢复默认
 const readonly = computed(() => false)
 const isBuiltin = computed(() => current.value?.kind === 'builtin')
 const builtinOverridden = computed(() =>
   isBuiltin.value && Object.keys(state.value?.overlay || {}).length > 0)
 const layerLabel = computed(() => {
   if (!current.value) return ''
-  if (current.value.kind === 'builtin') return '系统默认'
-  if (current.value.kind === 'general') return '通用配置'
-  return '设备配置'
+  if (current.value.kind === 'builtin') return '引擎默认配置'
+  if (current.value.kind === 'general') return '引擎平台配置'
+  return '设备独立配置'
 })
 
 const currentHint = computed(() => {
   if (!current.value) return ''
   const s = current.value
-  if (s.kind === 'builtin') return '系统默认内容，是该引擎全部配置的起点'
-  if (s.kind === 'general') return '覆盖系统默认，作用于该引擎与平台的全部设备'
-  return `覆盖通用配置，仅对当前设备生效（${s.detail}）`
+  if (s.kind === 'builtin') return '引擎内置的默认内容，是该引擎全部配置的起点'
+  if (s.kind === 'general') return '覆盖引擎默认配置，作用于该引擎 + 平台的全部设备'
+  return `覆盖引擎平台配置，仅对当前设备生效（${s.detail}）`
 })
 
 // 生效配置展开成"点号路径"的扁平行：字典行是分组标题，叶子行可编辑。
@@ -422,7 +422,7 @@ const effectiveRows = computed(() => {
     ...row,
     simple: row.value === null || typeof row.value !== 'object',
     display: row.isDict ? `{ ${Object.keys(row.value).length} 项 }` : formatValue(row.value),
-    source: leafSrc[row.path] || topSrc[row.key] || '系统默认',
+    source: leafSrc[row.path] || topSrc[row.key] || '引擎默认配置',
     overridden: isOverridden(row.path),
   }))
 })
@@ -709,7 +709,7 @@ async function reset() {
   if (!current.value) return
   if (isBuiltin.value) {
     const ok = await confirmBox(
-      '恢复默认会丢弃对系统默认的所有修改，回到随程序发布的默认内容。确定继续？',
+      '恢复默认会丢弃对引擎默认配置的所有修改，回到随程序发布的默认内容。确定继续？',
       '恢复默认', { type: 'warning', confirmButtonText: '恢复默认' })
     if (!ok) return
   } else if (!await confirmBox('清空当前层改动，恢复继承上层？', '清除改动',
@@ -719,7 +719,7 @@ async function reset() {
     state.value = r
     const kept = Object.keys(r.overlay || {}).length
     if (isBuiltin.value) {
-      ElMessage.success('已恢复为系统默认内容')
+      ElMessage.success('已恢复为引擎默认配置内容')
     } else {
       ElMessage.success(kept
         ? `已恢复继承上层（保留个人直连域名与 Fake-IP 过滤 ${kept} 项）`

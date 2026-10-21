@@ -157,6 +157,27 @@ def list_targets(user=CurrentUser):
     return [_target_public(r) for r in rows]
 
 
+def _check_engine_platform_unique(conn, engine: str, platform: str,
+                                 exclude_id: int | None = None) -> None:
+    """同一「引擎 + 平台」只能有一个引擎平台。
+
+    引擎平台代表"本项目支持的某引擎在某平台上的产物"，
+    它不是给某个人用的：个性化（谁走哪条规则、谁用哪个策略组）
+    应该落在设备上，而不是复制一份引擎平台。
+    """
+    sql = "SELECT id, name FROM targets WHERE engine=? AND platform=?"
+    args: list = [engine, platform]
+    if exclude_id:
+        sql += " AND id!=?"
+        args.append(exclude_id)
+    row = db.one(conn, sql, tuple(args))
+    if row:
+        raise HTTPException(
+            409,
+            f"「{engine} + {platform}」已存在引擎平台“{row['name']}”。"
+            "同一引擎 + 平台只能有一个；个性化请在“设备管理”里配置设备独立配置。")
+
+
 @router.post("/targets", status_code=201)
 def create_target(body: TargetBody, user=CurrentUser):
     _check_target(body)
@@ -164,6 +185,7 @@ def create_target(body: TargetBody, user=CurrentUser):
         with db.tx() as conn:
             if db.one(conn, "SELECT id FROM targets WHERE name=?", (body.name,)):
                 raise HTTPException(409, "同名引擎平台已存在")
+            _check_engine_platform_unique(conn, body.engine, body.platform)
             now = db.now()
             sort = db.one(conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM targets")["n"]
             cur = db.insert_unique(conn,
@@ -206,6 +228,7 @@ def update_target(tid: int, body: TargetBody, user=CurrentUser):
         )
         if clash:
             raise HTTPException(409, "同名引擎平台已存在")
+        _check_engine_platform_unique(conn, body.engine, body.platform, exclude_id=tid)
         old = _get_target(conn, tid)
         conn.execute(
             "UPDATE targets SET name=?, engine=?, platform=?, description=?, "

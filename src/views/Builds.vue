@@ -23,8 +23,7 @@
                 <span v-if="releaseState.production.publish_reason" class="release-reason">
                   {{ releaseState.production.publish_reason }}
                 </span>
-                <el-button size="small" text type="primary"
-                           @click="openDetail(releaseState.production)">查看详情</el-button>
+                <el-button size="small" text @click="openDetail(releaseState.production)" type="info">查看详情</el-button>
               </template>
               <span v-else class="release-empty">暂无生效版本</span>
             </div>
@@ -43,19 +42,18 @@
                 <span v-if="releaseState.testing.publish_reason" class="release-reason">
                   {{ releaseState.testing.publish_reason }}
                 </span>
-                <el-button size="small" text type="primary"
-                           @click="openDetail(releaseState.testing)">查看详情</el-button>
+                <el-button size="small" text @click="openDetail(releaseState.testing)" type="info">查看详情</el-button>
               </template>
               <span v-else class="release-empty">暂无生效版本</span>
             </div>
           </div>
           <div v-if="selected.length" class="selected-actions">
             <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
-            <el-button type="danger" plain @click="removeSelected">批量删除</el-button>
+            <el-button @click="removeSelected" type="danger" plain>批量删除</el-button>
             <el-button link @click="clearSelection">取消选择</el-button>
           </div>
         </div>
-        <el-button type="primary" :loading="building" @click="createBuild">创建构建</el-button>
+        <el-button :loading="building" @click="createBuild" type="primary">创建构建</el-button>
       </div>
     </div>
 
@@ -88,11 +86,11 @@
               <StatusDot :kind="verifyKind(row)" :text="verifyText(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="创建时间" min-width="135">
+          <el-table-column label="创建时间" min-width="150">
             <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
           </el-table-column>
           <el-table-column prop="created_by" label="创建人" width="100" />
-          <el-table-column label="策略摘要" min-width="110">
+          <el-table-column label="策略摘要" min-width="135">
             <template #default="{ row }"><span class="mono">{{ shortSha(row.policy_sha) }}</span></template>
           </el-table-column>
           <el-table-column prop="note" label="备注" min-width="240">
@@ -101,22 +99,18 @@
           <el-table-column label="操作" width="240" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
-                <el-button size="small" @click="openDetail(row)">详情</el-button>
+                <el-button size="small" @click="openDetail(row)" type="info" plain>详情</el-button>
                 <template v-if="row.status === 'BUILT'">
-                  <el-button size="small" type="primary" plain :disabled="!verified(row)"
-                             @click="publishToTest(row)">发布至测试</el-button>
-                  <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+                  <el-button size="small" :disabled="!verified(row)" @click="publishToTest(row)" type="success" plain>发布至测试</el-button>
+                  <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
                 </template>
                 <template v-else-if="row.status === 'TESTING'">
-                  <el-button size="small" type="primary" plain :disabled="!verified(row)"
-                             @click="publishToProd(row)">发布至生产</el-button>
-                  <el-button size="small" type="warning" plain @click="offlineBuild(row)">下线</el-button>
+                  <el-button size="small" :disabled="!verified(row)" @click="publishToProd(row)" type="success" plain>发布至生产</el-button>
+                  <el-button size="small" @click="offlineBuild(row)" type="warning" plain>下线</el-button>
                 </template>
                 <template v-else-if="row.status === 'OFFLINE'">
-                  <el-button size="small" type="primary" plain :disabled="!verified(row)"
-                             @click="publishToTest(row)">重新测试</el-button>
-                  <el-button size="small" type="warning" plain :disabled="!verified(row)"
-                             @click="rollbackToProd(row)">回滚至生产</el-button>
+                  <el-button size="small" :disabled="!verified(row)" @click="publishToTest(row)" type="primary">重新测试</el-button>
+                  <el-button size="small" :disabled="!verified(row)" @click="rollbackToProd(row)" type="warning" plain>回滚至生产</el-button>
                 </template>
               </div>
             </template>
@@ -163,8 +157,8 @@
             <StatusDot :kind="result.ok ? 'ok' : 'danger'"
                        :text="result.ok ? result.verification : '未通过'" />
             <span style="flex:1"></span>
-            <el-button v-if="result.ok" size="small" @click="previewArtifact(name)">预览产物</el-button>
-            <el-button size="small" @click="openDiff(name)">与上一构建对比</el-button>
+            <el-button v-if="result.ok" @click="previewArtifact(name)" type="info" plain>预览产物</el-button>
+            <el-button @click="openDiff(name)" type="primary" plain>与上一构建对比</el-button>
           </h3>
           <div style="font-size:12.5px;color:var(--mp-text-secondary)">
             {{ result.engine }} / {{ PLATFORM_LABELS[result.platform] || result.platform }} ·

@@ -1,8 +1,8 @@
 """产物基础配置：多级联动的顶层键文档。
 
 层级（后者覆盖前者）：
-① 系统默认：随程序发布的默认内容（按引擎），可直接改；
-② 通用配置：按「引擎 + 平台」维护（与"引擎平台"一一对应，如 Stash · macOS）；
+① 引擎默认配置：引擎内置的能力基线，随程序发布，可直接改；
+② 引擎平台配置：按「引擎 + 平台」维护（与"引擎平台"一一对应，如 Stash-macOS）；
 ③ 设备配置：按设备维护，只对该设备的最终配置生效。
 
 每层只存"与上层不同"的差异（overlay），因此上层默认值变化时，
@@ -39,7 +39,6 @@ DEVICE_FORBIDDEN_KEYS = {
     "external-ui": "设备配置不能指定外部控制器界面",
     "secret": "设备配置不能设置控制端口密钥",
     "listeners": "设备配置不能新增监听器",
-    "tun": "设备配置不能开启 TUN",
 }
 
 # 产物中固定出现的顶层键（顺序固定，保证产物排版稳定）
@@ -59,15 +58,109 @@ PANEL_DIRECT_KEY = "_panel_direct_rule"
 DIRECT_DOMAINS_KEY = "_direct_domains"      # 个人直连域名 → 置顶 DOMAIN-SUFFIX 规则
 FAKE_IP_FILTER_KEY = "_fake_ip_filter"      # Fake-IP 过滤域名 → dns.fake-ip-filter
 
-# Stash 官方精简：只保留官方有文档的顶层键
-STASH_OFFICIAL = {
+# ---- 引擎默认配置（按官方文档补全）----
+#
+# 依据：
+#   Stash  —— https://stash.wiki/configuration/example-config
+#   Mihomo —— MetaCubeX/mihomo 的 docs/config.yaml
+#
+# 取舍：
+#   * 只收"客户端通用能力"类键，让下层（引擎平台配置 / 设备独立配置）不必重复；
+#   * 对外控制端口（external-controller / external-ui / secret）不进默认——
+#     那是服务端行为，客户端配置里带上等于把管理口开到局域网；
+#   * MitM（http.ca）、脚本与定时任务需要用户内容，也不进默认；
+#   * DNS 段给出通用取值，个人的 nameserver-policy 与 fake-ip-filter 留在下层。
+
+_COMMON_DEFAULTS = {
     "mode": "rule",
     "log-level": "warning",
     "ipv6": False,
+    "allow-lan": False,
+    "bind-address": "127.0.0.1",
+    # 真实延迟（而非握手延迟）、并发拨号、长连接保活
+    "unified-delay": True,
+    "tcp-concurrent": True,
+    "keep-alive-interval": 30,
+    "find-process-mode": "strict",
+    # Geo 数据：交给内核自动更新，规则里的 geosite/geoip 才不会命中过期数据
+    "geodata-mode": True,
+    "geo-auto-update": True,
+    "geo-update-interval": 24,
+    # 嗅探真实域名：应用走 IP 直连时也能命中分流规则
+    "sniffer": {
+        "enable": True,
+        "force-dns-mapping": True,
+        "parse-pure-ip": True,
+        "override-destination": False,
+        "sniff": {
+            "HTTP": {"ports": [80, "8080-8880"], "override-destination": True},
+            "TLS": {},
+            "QUIC": {},
+        },
+        "sniffing": ["tls", "http", "quic"],
+    },
     PANEL_DIRECT_KEY: True,
 }
 
-# 兼容现状（含 Clash 端口与 profile 段）
+_DNS_COMMON = {
+    "fake-ip-range": "198.18.0.1/16",
+    "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+    "nameserver": ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"],
+    "proxy-server-nameserver": ["223.5.5.5", "119.29.29.29"],
+}
+
+# Stash 官方内置 DNS 服务支持的键（https://stash.wiki/features/dns-server）：
+#   nameserver / default-nameserver / proxy-server-nameserver / nameserver-policy
+#   fake-ip-range / fake-ip-filter / ipv6 / fallback / follow-rule / hosts
+# 注意：Stash 常驻 Fake-IP，没有 enhanced-mode，也没有 enable；
+# 跟随规则用 follow-rule（Mihomo 才叫 respect-rules）。
+STASH_DNS = {
+    **_DNS_COMMON,
+    "ipv6": False,
+}
+
+# Google 中国站重定向（Stash HTTP 引擎）：
+#   MitM 列表 + url-rewrite 一起用；HTTPS 重写需要设备信任 Stash 的 CA 证书
+#   （Stash 首页 → MitM → CA 证书 → 安装并信任），否则这些域名会证书报错。
+#   列表只收 Google 中国站域名，范围小、可控。
+STASH_HTTP = {
+    "ca": "",
+    "ca-passphrase": "",
+    "mitm": ["g.cn", "*.google.cn"],
+    "url-rewrite": [
+        # 谷歌地图（旧域名 ditu.google.cn 一并带上）
+        "^https?://(maps|ditu)\\.google\\.cn https://www.google.com/maps 302",
+        # 谷歌中国站其余子域
+        "^https?://([\\w-]+\\.)?google\\.cn https://www.google.com 302",
+        # 明文 HTTP 的 g.cn：透明改写，不改变客户端可见的 IP
+        "^http://(www\\.)?g\\.cn https://www.google.com transparent",
+    ],
+}
+
+# Stash：DNS 段与 HTTP 引擎按官方文档给全
+STASH_OFFICIAL = {
+    **_COMMON_DEFAULTS,
+    "dns": deepcopy(STASH_DNS),
+    "http": deepcopy(STASH_HTTP),
+}
+
+# Mihomo：DNS 由内核接管，需要显式 enable；端口与 profile 由内核读取
+MIHOMO_OFFICIAL = {
+    **_COMMON_DEFAULTS,
+    "mixed-port": 7890,
+    "profile": {"store-selected": True, "store-fake-ip": True},
+    "dns": {
+        **deepcopy(_DNS_COMMON),
+        "enable": True,
+        "ipv6": False,
+        "enhanced-mode": "fake-ip",
+        "fake-ip-filter-mode": "blacklist",
+        "prefer-h3": False,
+        "respect-rules": False,
+    },
+}
+
+# 兼容现状（补全前的旧默认，保留作预设与迁移基准）
 COMPAT = {
     "mixed-port": 7890,
     "allow-lan": False,
@@ -80,17 +173,12 @@ COMPAT = {
 
 PRESETS = {
     "stash": {
-        "official": ("Stash 官方精简", deepcopy(STASH_OFFICIAL)),
-        "compat": ("兼容现状（含端口与 profile）", deepcopy(COMPAT)),
+        "official": ("Stash 官方完整默认", deepcopy(STASH_OFFICIAL)),
+        "compat": ("兼容现状（精简）", deepcopy(COMPAT)),
     },
     "mihomo": {
-        "compat": ("Mihomo 现状", deepcopy(COMPAT)),
-        "official": ("Mihomo 官方精简", {
-            "mode": "rule",
-            "log-level": "warning",
-            "ipv6": False,
-            PANEL_DIRECT_KEY: True,
-        }),
+        "official": ("Mihomo 官方完整默认", deepcopy(MIHOMO_OFFICIAL)),
+        "compat": ("兼容现状（精简）", deepcopy(COMPAT)),
     },
 }
 
@@ -98,8 +186,8 @@ DEFAULT_ENGINE = "stash"
 
 
 def default_doc(engine: str) -> dict:
-    key = "official" if engine == "stash" else "compat"
-    return deepcopy(PRESETS[engine][key][1])
+    """引擎默认配置：按官方文档补全的完整基线。"""
+    return deepcopy(PRESETS[engine]["official"][1])
 
 
 # ---- 多级联动：合并、差异、来源 ----
@@ -151,7 +239,7 @@ def diff_overlay(base: dict, effective: dict) -> dict:
 def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
     """按层级顺序合并，返回 (生效文档, 每个键的来源层级)。
 
-    layers 形如 [("系统默认", {...}), ("通用配置", {...}), ("设备配置", {...})]，
+    layers 形如 [("引擎默认配置", {...}), ("引擎平台配置", {...}), ("设备独立配置", {...})]，
     来源记录到最后一次改写该键的层（顶层键粒度），便于界面展示"这个值来自哪一层"。
     """
     effective: dict = {}
@@ -207,13 +295,13 @@ def scope_layers(engine: str, platform: str = "", device_id: int = 0,
     override = docs.get((engine, "", 0))
     if override:
         base = merge_docs(base, override)
-    layers: list[tuple[str, dict]] = [("系统默认", base)]
+    layers: list[tuple[str, dict]] = [("引擎默认配置", base)]
     if platform:
         # 当前作用域自己那一层始终参与（没有覆盖时为空层），
         # 这样 layers[:-1] 才是"继承自上层的值"。
-        layers.append(("通用配置", deepcopy(docs.get((engine, platform, 0)) or {})))
+        layers.append(("引擎平台配置", deepcopy(docs.get((engine, platform, 0)) or {})))
     if device_id:
-        layers.append(("设备配置", deepcopy(docs.get((engine, platform, int(device_id))) or {})))
+        layers.append(("设备独立配置", deepcopy(docs.get((engine, platform, int(device_id))) or {})))
     return layers
 
 

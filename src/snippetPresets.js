@@ -21,7 +21,7 @@ export const SNIPPET_PRESETS = [
     name: 'Geo 数据自动更新',
     category: 'general',
     engine: 'mihomo',
-    note: '启动时自动更新 GeoIP/GeoSite 数据，每 24 小时一次，避免分流规则命中过期数据。',
+    note: '启动时自动更新 GeoIP/GeoSite 数据，每 24 小时一次，避免分流规则命中过期数据。引擎默认配置里已内置同样的键，留着可以不改引擎默认就单独开关。',
     content: `geodata-mode: true
 geo-auto-update: true
 geo-update-interval: 24
@@ -32,7 +32,7 @@ geo-update-interval: 24
     name: '嗅探域名（提升分流准确度）',
     category: 'general',
     engine: 'mihomo',
-    note: '从 TLS/HTTP 流量里嗅探真实域名，弥补应用走 IP 直连导致的分流不准；不改写目标地址。',
+    note: '从 TLS/HTTP 流量里嗅探真实域名，弥补应用走 IP 直连导致的分流不准；不改写目标地址。引擎默认配置里已启用嗅探，这里可以再补端口与排除域名。',
     content: `sniffer:
   enable: true
   force-dns-mapping: true
@@ -57,7 +57,7 @@ geo-update-interval: 24
     name: '持久化选择与 Fake-IP',
     category: 'general',
     engine: 'mihomo',
-    note: '记住上次选的节点与 Fake-IP 映射，重启后不用重新选。',
+    note: '记住上次选的节点与 Fake-IP 映射，重启后不用重新选。引擎默认配置里已内置同样的键。',
     content: `profile:
   store-selected: true
   store-fake-ip: true

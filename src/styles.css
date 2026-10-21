@@ -335,3 +335,10 @@ html, body, #app {
   flex-wrap: wrap;
 }
 .mp-pin-input { width: 160px; }
+
+/* 表格单元格里的补充说明（第二行小字） */
+.mp-cell-sub {
+  font-size: 12px;
+  color: var(--mp-text-secondary);
+  margin-top: 2px;
+}

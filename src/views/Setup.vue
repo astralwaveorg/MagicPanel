@@ -16,7 +16,7 @@
           <el-input v-model="form.confirm" type="password" show-password autocomplete="new-password"
                     @keyup.enter="submit" />
         </el-form-item>
-        <el-button type="primary" style="width:100%" :loading="loading" @click="submit">
+        <el-button style="width:100%" :loading="loading" @click="submit" type="primary">
           创建并进入
         </el-button>
       </el-form>
