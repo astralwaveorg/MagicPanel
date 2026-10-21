@@ -35,7 +35,7 @@
           <button
             v-for="s in group.items" :key="scopeKey(s)"
             class="mp-scope-item" :class="{ active: isActive(s) }"
-            type="button" @click="select(s)"
+            type="button" :title="s.detail" @click="select(s)"
           >
             <span class="mp-scope-dot" :class="{ on: s.customized }" />
             <span class="mp-scope-name">{{ s.name || s.label }}</span>
@@ -858,7 +858,10 @@ onMounted(async () => {
   background: var(--mp-border, #3a3d44); flex: none;
 }
 .mp-scope-dot.on { background: var(--mp-accent, #409eff); }
-.mp-scope-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-scope-name {
+  flex: 1; min-width: 0; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .mp-scope-tag { font-size: 11px; opacity: .55; }
 .mp-scope-current { display: flex; flex-direction: column; gap: 2px; }
 .mp-section-title { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }

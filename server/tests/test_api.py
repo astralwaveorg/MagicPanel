@@ -2411,6 +2411,34 @@ def test_base_config_scopes_follow_target_and_device_order(client):
     assert [s["label"] for s in device] == ["iPhone（设备配置）", "MacBook（设备配置）"]
 
 
+def test_base_config_scope_labels_match_engine_platforms(client):
+    """通用配置的名字一律是引擎平台名；同平台多个引擎平台时全部列出。
+
+    同一个「引擎 + 平台」可能被多个引擎平台共用（如 Stash-Android 与
+    Lvsp-Android-Stash），这一层改动会同时影响它们，所以名字必须写全。
+    """
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "Stash-Android", "engine": "stash", "platform": "android"})
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "Lvsp-Android-Stash", "engine": "stash", "platform": "android"})
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "Lvsp-MacBook-Mihomo", "engine": "mihomo", "platform": "macos"})
+
+    scopes = client.get("/api/v1/base-config/scopes", headers=h).json()["scopes"]
+    general = [s for s in scopes if s["kind"] == "general"]
+    labels = [s["label"] for s in general]
+    # 共用平台的两个引擎平台都要写出来，不再退回「引擎 · 平台」
+    assert "Stash-Android、Lvsp-Android-Stash" in labels
+    assert not any("·" in label for label in labels)
+    # 唯一对应时直接用引擎平台名
+    assert "Lvsp-MacBook-Mihomo" in labels
+    # 说明行里也写清对应的引擎平台
+    shared = next(s for s in general if s["label"].startswith("Stash-Android"))
+    assert "Stash-Android、Lvsp-Android-Stash" in shared["detail"]
+
+
 def test_base_config_leaf_sources(client):
     """叶子级来源：dns.nameserver 与 dns.enable 可以来自不同层级。"""
     csrf = setup_admin(client)

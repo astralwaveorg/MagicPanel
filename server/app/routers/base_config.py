@@ -160,9 +160,10 @@ def list_scopes(user=CurrentUser):
             "detail": "系统默认值（随程序发布）；可直接修改，改动以差异保存，可一键恢复默认",
             "customized": bool(docs.get((engine, "", 0))),
         })
-    # 通用配置：按「引擎 + 平台」，与引擎平台一一对应
-    # 顺序 = 引擎平台页的顺序；名称：该「引擎 + 平台」只有一个引擎平台时
-    # 直接用它的名字（与引擎平台页一致），有多个时退回「引擎 · 平台」
+    # 通用配置：按「引擎 + 平台」，一个引擎平台对一个作用域
+    # 顺序 = 引擎平台页的顺序；名称一律用对应的引擎平台名（多个用「、」连接）：
+    # 只写「引擎 · 平台」会让同一平台在两个页面长得不一样，写单个引擎平台名
+    # 又会漏掉"这一层同时管着别的引擎平台"的事实。
     pair_names: dict[tuple, list] = {}
     for row in targets:
         pair_names.setdefault((row["engine"], row["platform"]), []).append(row["name"])
@@ -174,7 +175,7 @@ def list_scopes(user=CurrentUser):
         seen_pairs.append(pair)
         platform = PLATFORM_LABELS.get(row["platform"], row["platform"])
         names = pair_names.get(pair) or []
-        label = (names[0] if len(names) == 1
+        label = ("、".join(names) if names
                  else f"{ENGINE_LABELS.get(row['engine'], row['engine'])} · {platform}")
         scopes.append({
             "kind": "general", "engine": row["engine"], "platform": row["platform"],
@@ -182,7 +183,7 @@ def list_scopes(user=CurrentUser):
             "label": label,
             "name": label,
             "detail": "覆盖系统默认；作用于该引擎与平台的全部设备"
-                      + (f"（对应引擎平台：{'、'.join(names)}）" if len(names) > 1 else ""),
+                      + (f"（对应引擎平台：{'、'.join(names)}）" if names else ""),
             "customized": bool(docs.get((row["engine"], row["platform"], 0))),
         })
     for dev in devices:
