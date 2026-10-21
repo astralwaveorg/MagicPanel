@@ -400,6 +400,18 @@
       :items="blockedItems"
     />
 
+    <RefConfirmDialog
+      v-model:visible="refDialog.visible"
+      :title="refDialog.title"
+      :message="refDialog.message"
+      :references="refDialog.references"
+      :warnings="refDialog.warnings"
+      :hint="refDialog.hint"
+      :confirm-text="refDialog.confirmText"
+      :busy="refDialog.busy"
+      @confirm="onRefConfirm"
+    />
+
     <el-drawer v-model="nodesDrawer" :title="`节点列表 · ${nodesSource?.name || ''}`"
                size="min(520px, 92vw)">
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin-top:0">
@@ -438,6 +450,7 @@ import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
+import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
 const INTERVAL_PRESETS = [
@@ -485,6 +498,10 @@ const intervalDialog = ref(false)
 const savingInterval = ref(false)
 const batchInterval = ref(21600)
 const batchTestInterval = ref(21600)
+const refDialog = reactive({
+  visible: false, title: '', message: '', references: [], warnings: [],
+  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
+})
 const blockedVisible = ref(false)
 const blockedItems = ref([])
 const deletedCount = ref(0)
@@ -698,9 +715,35 @@ async function save() {
     ElMessage.success('已保存')
     await load()
   } catch (e) {
+    if (e.status === 409 && e.data?.code === 'source_in_use' && e.data?.rename_to) {
+      openRefDialog({
+        title: `重命名节点来源“${e.data.source.name}”`,
+        message: e.data.message,
+        references: e.data.references,
+        hint: `改名后，上面这些策略组会自动改为引用新名字“${e.data.rename_to}”。`,
+        confirmText: '改名并同步引用',
+        action: () => forceRenameSource(editing.value, form),
+      })
+      return
+    }
     ElMessage.error(e.message)
   } finally {
     saving.value = false
+  }
+}
+
+async function forceRenameSource(row, body) {
+  refDialog.busy = true
+  try {
+    await api(`/api/v1/sources/${row.id}?force=1`, { method: 'PUT', body })
+    refDialog.visible = false
+    dialog.value = false
+    ElMessage.success('已改名，策略组引用同步更新')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
   }
 }
 
@@ -805,8 +848,44 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
+    if (e.status === 409 && e.data?.code === 'source_in_use') {
+      openRefDialog({
+        title: `删除节点来源“${row.name}”`,
+        message: e.data.message,
+        references: e.data.references,
+        hint: '删除时会自动从上面这些策略组中移除该来源；之后需要重新为它们选择节点来源。',
+        action: () => forceDeleteSource(row),
+      })
+      return
+    }
     ElMessage.error(e.message)
   }
+}
+
+async function forceDeleteSource(row) {
+  refDialog.busy = true
+  try {
+    const resp = await api(`/api/v1/sources/${row.id}?force=1`, { method: 'DELETE' })
+    refDialog.visible = false
+    const n = resp.detached_groups?.length || 0
+    ElMessage.success(n ? `已删除，并从 ${n} 个策略组中移除该来源` : '已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
+  }
+}
+
+function openRefDialog({ title, message, references, warnings = [], hint, action, confirmText }) {
+  Object.assign(refDialog, {
+    visible: true, title, message, references, warnings, hint,
+    confirmText: confirmText || '删除并解除关联', busy: false, action,
+  })
+}
+
+async function onRefConfirm() {
+  if (refDialog.action) await refDialog.action()
 }
 
 async function removeSelected() {
@@ -823,7 +902,17 @@ async function removeSelected() {
     })
     deletedCount.value = resp.deleted.length
     blockedItems.value = resp.blocked
-    if (resp.blocked.length) {
+    const withRefs = resp.blocked.filter((b) => b.references?.length)
+    if (withRefs.length) {
+      openRefDialog({
+        title: '部分节点来源仍被引用',
+        message: `有 ${withRefs.length} 个节点来源仍被策略组引用`,
+        references: withRefs.flatMap((b) =>
+          b.references.map((r) => ({ ...r, extra: `来源：${b.name}` }))),
+        hint: '继续删除会自动从这些策略组中移除对应来源；之后需要重新为它们选择节点来源。',
+        action: () => forceBatchDelete(ids),
+      })
+    } else if (resp.blocked.length) {
       blockedVisible.value = true
     } else {
       ElMessage.success(`已删除 ${resp.deleted.length} 个节点来源`)
@@ -832,6 +921,23 @@ async function removeSelected() {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+async function forceBatchDelete(ids) {
+  refDialog.busy = true
+  try {
+    const resp = await api('/api/v1/sources/batch/delete', {
+      method: 'POST', body: { ids, force: true },
+    })
+    refDialog.visible = false
+    const n = Object.values(resp.detached_groups || {}).flat().length
+    ElMessage.success(`已删除 ${resp.deleted.length} 个节点来源，并解除 ${n} 处策略组引用`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
   }
 }
 
@@ -955,7 +1061,7 @@ async function saveLocal() {
 
 async function removeLocal(row) {
   if (!await confirmBox(
-    `删除本地节点 “${row.display_name}”？被策略组引用时不会删除。`,
+    `删除本地节点 “${row.display_name}”？被策略组引用时会先提示引用关系。`,
     '删除本地节点', { type: 'warning' },
   )) return
   try {
@@ -963,7 +1069,34 @@ async function removeLocal(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
+    if (e.status === 409 && e.data?.code === 'local_node_in_use') {
+      openRefDialog({
+        title: `删除本地节点“${row.display_name}”`,
+        message: e.data.message,
+        references: e.data.references,
+        hint: '删除时会自动从上面这些策略组中移除该本地节点；之后需要重新为它们选择成员。',
+        action: () => forceDeleteLocal(row),
+      })
+      return
+    }
     ElMessage.error(e.message)
+  }
+}
+
+async function forceDeleteLocal(row) {
+  refDialog.busy = true
+  try {
+    const resp = await api(`/api/v1/local-nodes/${row.id}?force=1`, { method: 'DELETE' })
+    refDialog.visible = false
+    const n = resp.detached_groups?.length || 0
+    const warns = resp.warnings || []
+    if (warns.length) ElMessage.warning(`已删除并解除 ${n} 个策略组引用，但有策略组需要补成员`)
+    else ElMessage.success(n ? `已删除，并从 ${n} 个策略组中移除该节点` : '已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
   }
 }
 

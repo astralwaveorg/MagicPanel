@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from .. import db, security
 from ..deps import CurrentUser
 from ..services import local_nodes
+from ..services import refs
 from ..services import tester
 
 router = APIRouter(prefix="/api/v1/local-nodes", tags=["local-nodes"])
@@ -194,17 +195,25 @@ def test_node(node_id: int, user=CurrentUser):
 
 
 @router.delete("/{node_id}")
-def delete_node(node_id: int, user=CurrentUser):
+def delete_node(node_id: int, force: bool = False, user=CurrentUser):
+    """删除本地节点。
+
+    仍被策略组引用时默认拒绝并返回引用明细（前端弹二次确认）；
+    带 force=1 时自动把这些策略组里的引用摘掉再删除。
+    """
     with db.tx() as conn:
         row = _get_or_404(conn, node_id)
-        used = [
-            g["name"] for g in db.all_(conn, "SELECT name, local_nodes FROM proxy_groups")
-            if node_id in json.loads(g["local_nodes"] or "[]")
-        ]
-        if used:
-            raise HTTPException(
-                400, f"本地节点仍被策略组引用：{'、'.join(used)}，请先调整策略组")
+        used_by = refs.local_node_refs(conn, node_id)
+        if used_by and not force:
+            raise HTTPException(409, detail={
+                "code": "local_node_in_use",
+                "message": f"本地节点“{row['name']}”仍被 {len(used_by)} 个策略组引用",
+                "node": {"id": node_id, "name": row["name"]},
+                "references": used_by,
+            })
+        detached, warnings = (refs.detach_local_node(conn, node_id)
+                              if used_by else ([], []))
         conn.execute("DELETE FROM local_nodes WHERE id=?", (node_id,))
         security.audit(conn, user["username"], "删除本地节点", "local_node", node_id,
-                       {"name": row["name"]})
-    return {"ok": True}
+                       {"name": row["name"], "detached_groups": detached})
+    return {"ok": True, "detached_groups": detached, "warnings": warnings}

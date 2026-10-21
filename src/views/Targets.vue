@@ -56,6 +56,23 @@
       <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
+    <RefConfirmDialog
+      v-model:visible="refDialog.visible"
+      :title="refDialog.title"
+      :message="refDialog.message"
+      :references="refDialog.references"
+      :warnings="refDialog.warnings"
+      :hint="refDialog.hint"
+      :confirm-text="refDialog.confirmText"
+      :busy="refDialog.busy"
+      :choices="refDialog.choices"
+      :choice-label="refDialog.choiceLabel"
+      :choice-placeholder="refDialog.choicePlaceholder"
+      :choice-value="refDialog.choiceValue"
+      @update:choice-value="refDialog.choiceValue = $event"
+      @confirm="onRefConfirm"
+    />
+
     <el-dialog v-model="dialog" :title="editing ? '编辑引擎平台' : '添加引擎平台'"
                width="min(620px, 94vw)">
       <el-form :model="form" label-position="top">
@@ -120,6 +137,7 @@ import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
+import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { PLATFORM_LABELS, ENGINE_LABELS } from '../format'
 
 // 引擎差异以官方文档为准：
@@ -157,6 +175,11 @@ const TEMPLATES = {
 }
 
 const rows = ref([])
+const refDialog = reactive({
+  visible: false, title: '', message: '', references: [], warnings: [],
+  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
+  choices: [], choiceLabel: '', choicePlaceholder: '请选择', choiceValue: null,
+})
 const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
@@ -264,8 +287,59 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
+    if (e.status === 409 && e.data?.code === 'target_in_use') {
+      const choices = (e.data.candidates || []).map((c) => ({
+        id: c.id, label: `${c.name}（${c.platform}）`,
+      }))
+      openRefDialog({
+        title: `删除引擎平台“${row.name}”`,
+        message: e.data.message,
+        references: e.data.references,
+        hint: '删除前需要把这些设备迁移到另一个引擎平台；迁移后它们的配置会按新平台生成。',
+        choices,
+        choiceLabel: '把这些设备迁移到：',
+        choicePlaceholder: '请选择目标引擎平台',
+        confirmText: '迁移并删除',
+        action: () => forceDeleteTarget(row),
+      })
+      return
+    }
     ElMessage.error(e.message)
   }
+}
+
+async function forceDeleteTarget(row) {
+  if (!refDialog.choiceValue) {
+    ElMessage.warning('请先选择要把设备迁移到哪个引擎平台')
+    return
+  }
+  refDialog.busy = true
+  try {
+    const resp = await api(
+      `/api/v1/targets/${row.id}?force=1&move_to=${refDialog.choiceValue}`,
+      { method: 'DELETE' })
+    refDialog.visible = false
+    const n = resp.moved_devices?.length || 0
+    ElMessage.success(n ? `已删除，${n} 台设备已迁移` : '已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
+  }
+}
+
+function openRefDialog({ title, message, references, warnings = [], hint, action,
+  confirmText, choices = [], choiceLabel = '', choicePlaceholder = '请选择' }) {
+  Object.assign(refDialog, {
+    visible: true, title, message, references, warnings, hint,
+    confirmText: confirmText || '删除并解除关联', busy: false, action,
+    choices, choiceLabel, choicePlaceholder, choiceValue: null,
+  })
+}
+
+async function onRefConfirm() {
+  if (refDialog.action) await refDialog.action()
 }
 </script>
 

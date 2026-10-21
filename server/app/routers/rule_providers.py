@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from .. import db, security
 from ..deps import CurrentUser
-from ..services import fetcher, updater
+from ..services import fetcher, refs, updater
 
 router = APIRouter(prefix="/api/v1/rule-providers", tags=["rule-providers"])
 
@@ -26,6 +26,7 @@ class RuleProviderBody(BaseModel):
 
 class BatchIds(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=200)
+    force: bool = False
 
 
 class BatchInterval(BaseModel):
@@ -90,10 +91,12 @@ def _reference_reason(refs: list) -> str:
     return f"仍被 {len(refs)} 条分流规则引用（{ids}{more}），请先删除或调整对应规则"
 
 
-def _delete_one(conn, row, operator: str) -> None:
+def _delete_one(conn, row, operator: str,
+                removed_rules: list[dict] | None = None) -> None:
     conn.execute("DELETE FROM rule_providers WHERE id=?", (row["id"],))
     security.audit(conn, operator, "删除规则来源", "rule_provider", row["id"],
-                   {"name": row["name"]})
+                   {"name": row["name"],
+                    "removed_rules": [r["id"] for r in (removed_rules or [])]})
 
 
 @router.get("/page")
@@ -158,7 +161,8 @@ def create_provider(body: RuleProviderBody, user=CurrentUser):
 
 
 @router.put("/{rp_id}")
-def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
+def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
+                  user=CurrentUser):
     _validate_body(body)
     with db.tx() as conn:
         _get_or_404(conn, rp_id)
@@ -169,14 +173,23 @@ def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名规则来源已存在")
         old = _get_or_404(conn, rp_id)
+        renamed_rules: list[dict] = []
         if body.name != old["name"]:
-            refs = _rule_refs(conn, old["name"])
-            if refs:
-                raise HTTPException(
-                    400,
-                    f"规则来源“{old['name']}”{_reference_reason(refs)}；"
-                    "重命名会使这些引用失效，请先调整分流规则或保持名称不变",
-                )
+            used_by = _rule_refs(conn, old["name"])
+            if used_by and not force:
+                raise HTTPException(409, detail={
+                    "code": "rule_provider_in_use",
+                    "message": f"规则来源“{old['name']}”仍被 {len(used_by)} 条分流规则引用",
+                    "provider": {"id": rp_id, "name": old["name"]},
+                    "references": [
+                        {"id": r["id"], "name": f"#{r['id']}", "type": "分流规则",
+                         "extra": r["target"] + ("（已停用）" if not r["enabled"] else "")}
+                        for r in used_by
+                    ],
+                    "rename_to": body.name,
+                })
+            if used_by:
+                renamed_rules = refs.rename_rule_provider(conn, old["name"], body.name)
         content = old["content"]
         count = old["rule_count"]
         sha = old["sha256"]
@@ -210,15 +223,29 @@ def update_provider(rp_id: int, body: RuleProviderBody, user=CurrentUser):
 
 
 @router.delete("/{rp_id}")
-def delete_provider(rp_id: int, user=CurrentUser):
+def delete_provider(rp_id: int, force: bool = False, user=CurrentUser):
+    """删除规则来源。
+
+    仍被分流规则引用时默认拒绝，并返回引用明细（前端据此弹二次确认）；
+    带 force=1 时自动删除这些规则再删来源。
+    """
     with db.tx() as conn:
         row = _get_or_404(conn, rp_id)
-        refs = _rule_refs(conn, row["name"])
-        if refs:
-            raise HTTPException(
-                400, f"规则来源“{row['name']}”{_reference_reason(refs)}")
-        _delete_one(conn, row, user["username"])
-    return {"ok": True}
+        used_by = _rule_refs(conn, row["name"])
+        if used_by and not force:
+            raise HTTPException(409, detail={
+                "code": "rule_provider_in_use",
+                "message": f"规则来源“{row['name']}”仍被 {len(used_by)} 条分流规则引用",
+                "provider": {"id": rp_id, "name": row["name"]},
+                "references": [
+                    {"id": r["id"], "name": f"#{r['id']}", "type": "分流规则",
+                     "extra": r["target"] + ("（已停用）" if not r["enabled"] else "")}
+                    for r in used_by
+                ],
+            })
+        removed = refs.detach_rule_provider(conn, row["name"]) if used_by else []
+        _delete_one(conn, row, user["username"], removed)
+    return {"ok": True, "deleted_rules": removed}
 
 
 @router.patch("/batch")
@@ -246,9 +273,13 @@ def batch_update_providers(body: BatchInterval, user=CurrentUser):
 
 @router.post("/batch/delete")
 def batch_delete_providers(body: BatchIds, user=CurrentUser):
-    """批量删除：逐个校验分流规则引用，被引用的保留并返回原因。"""
+    """批量删除：逐个校验分流规则引用。
+
+    默认被引用的保留并返回引用明细；force=True 时自动删除相关规则后一并删除。
+    """
     deleted: list[int] = []
     blocked: list[dict] = []
+    removed_rules: list[dict] = []
     with db.tx() as conn:
         for rp_id in dict.fromkeys(body.ids):
             row = db.one(conn, "SELECT * FROM rule_providers WHERE id=?", (rp_id,))
@@ -256,14 +287,24 @@ def batch_delete_providers(body: BatchIds, user=CurrentUser):
                 blocked.append({"id": rp_id, "name": f"#{rp_id}",
                                 "reason": "规则来源不存在（可能已被删除）"})
                 continue
-            refs = _rule_refs(conn, row["name"])
-            if refs:
-                blocked.append({"id": rp_id, "name": row["name"],
-                                "reason": _reference_reason(refs)})
+            used_by = _rule_refs(conn, row["name"])
+            if used_by and not body.force:
+                blocked.append({
+                    "id": rp_id, "name": row["name"],
+                    "reason": _reference_reason(used_by),
+                    "references": [
+                        {"id": r["id"], "name": f"#{r['id']}", "type": "分流规则",
+                         "extra": r["target"] + ("（已停用）" if not r["enabled"] else "")}
+                        for r in used_by
+                    ],
+                })
                 continue
-            _delete_one(conn, row, user["username"])
+            gone = refs.detach_rule_provider(conn, row["name"]) if used_by else []
+            removed_rules.extend(gone)
+            _delete_one(conn, row, user["username"], gone)
             deleted.append(rp_id)
-    return {"ok": True, "deleted": deleted, "blocked": blocked}
+    return {"ok": True, "deleted": deleted, "blocked": blocked,
+            "deleted_rules": removed_rules}
 
 
 @router.post("/{rp_id}/refresh")

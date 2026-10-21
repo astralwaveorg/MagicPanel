@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .. import db, security
 from ..deps import CurrentUser
-from ..services import fetcher, tester, updater
+from ..services import fetcher, refs, tester, updater
 
 router = APIRouter(prefix="/api/v1/sources", tags=["sources"])
 
@@ -31,6 +31,7 @@ class SourceBody(BaseModel):
 
 class BatchIds(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=200)
+    force: bool = False
 
 
 class BatchInterval(BaseModel):
@@ -103,23 +104,20 @@ def _get_or_404(conn, source_id: int):
     return row
 
 
-def _group_refs(conn, name: str) -> list[str]:
+def _group_refs(conn, name: str) -> list[dict]:
     """按名称找出引用该来源的策略组（构建按名称固化引用）。"""
-    return [
-        g["name"] for g in db.all_(
-            conn, "SELECT name, use_sources FROM proxy_groups ORDER BY name")
-        if name in json.loads(g["use_sources"] or "[]")
-    ]
+    return refs.source_refs(conn, name)
 
 
-def _reference_reason(refs: list[str]) -> str:
-    return f"仍被策略组引用：{'、'.join(refs)}，请先调整策略组"
+def _reference_reason(refs_list: list[dict]) -> str:
+    names = "、".join(r["name"] for r in refs_list)
+    return f"仍被策略组引用：{names}，请先调整策略组"
 
 
-def _delete_one(conn, row, operator: str) -> None:
+def _delete_one(conn, row, operator: str, detached: list[str] | None = None) -> None:
     conn.execute("DELETE FROM sources WHERE id=?", (row["id"],))
     security.audit(conn, operator, "删除节点来源", "source", row["id"],
-                   {"name": row["name"]})
+                   {"name": row["name"], "detached_groups": detached or []})
 
 
 @router.get("/page")
@@ -173,7 +171,8 @@ def create_source(body: SourceBody, user=CurrentUser):
 
 
 @router.put("/{source_id}")
-def update_source(source_id: int, body: SourceBody, user=CurrentUser):
+def update_source(source_id: int, body: SourceBody, force: bool = False,
+                  user=CurrentUser):
     _check_filter(body.filter)
     with db.tx() as conn:
         row = _get_or_404(conn, source_id)
@@ -182,14 +181,19 @@ def update_source(source_id: int, body: SourceBody, user=CurrentUser):
         )
         if clash:
             raise HTTPException(409, "同名节点来源已存在")
+        renamed_groups: list[str] = []
         if body.name != row["name"]:
-            refs = _group_refs(conn, row["name"])
-            if refs:
-                raise HTTPException(
-                    400,
-                    f"节点来源“{row['name']}”{_reference_reason(refs)}；"
-                    "重命名会使这些引用失效，请先调整策略组或保持名称不变",
-                )
+            used_by = _group_refs(conn, row["name"])
+            if used_by and not force:
+                raise HTTPException(409, detail={
+                    "code": "source_in_use",
+                    "message": f"节点来源“{row['name']}”仍被 {len(used_by)} 个策略组引用",
+                    "source": {"id": source_id, "name": row["name"]},
+                    "references": used_by,
+                    "rename_to": body.name,
+                })
+            if used_by:
+                renamed_groups = refs.rename_source(conn, row["name"], body.name)
         url_enc = row["url_enc"]
         if body.url:
             url_enc = security.encrypt_text(body.url)
@@ -204,20 +208,33 @@ def update_source(source_id: int, body: SourceBody, user=CurrentUser):
              int(body.filter_unavailable), db.now(), source_id),
         )
         security.audit(conn, user["username"], "更新节点来源", "source", source_id,
-                       {"name": body.name, "url_changed": bool(body.url)})
+                       {"name": body.name, "url_changed": bool(body.url),
+                        "renamed_groups": renamed_groups})
         row = _get_or_404(conn, source_id)
     return _public(row)
 
 
 @router.delete("/{source_id}")
-def delete_source(source_id: int, user=CurrentUser):
+def delete_source(source_id: int, force: bool = False, user=CurrentUser):
+    """删除节点来源。
+
+    仍被策略组引用时默认拒绝，并返回引用明细（前端据此弹二次确认）；
+    带 force=1 时自动把这些策略组里的引用摘掉再删除。
+    """
     with db.tx() as conn:
         row = _get_or_404(conn, source_id)
-        refs = _group_refs(conn, row["name"])
-        if refs:
-            raise HTTPException(400, f"节点来源“{row['name']}”{_reference_reason(refs)}")
-        _delete_one(conn, row, user["username"])
-    return {"ok": True}
+        used_by = _group_refs(conn, row["name"])
+        if used_by and not force:
+            raise HTTPException(409, detail={
+                "code": "source_in_use",
+                "message": f"节点来源“{row['name']}”仍被 {len(used_by)} 个策略组引用",
+                "source": {"id": row["id"], "name": row["name"]},
+                "references": used_by,
+            })
+        detached, warnings = (refs.detach_source(conn, row["name"])
+                              if used_by else ([], []))
+        _delete_one(conn, row, user["username"], detached)
+    return {"ok": True, "detached_groups": detached, "warnings": warnings}
 
 
 @router.patch("/batch")
@@ -256,9 +273,14 @@ def batch_update_sources(body: BatchInterval, user=CurrentUser):
 
 @router.post("/batch/delete")
 def batch_delete_sources(body: BatchIds, user=CurrentUser):
-    """批量删除：逐个校验策略组引用，被引用的保留并返回原因。"""
+    """批量删除：逐个校验策略组引用。
+
+    默认被引用的保留并返回引用明细；force=True 时自动解绑引用后一并删除。
+    """
     deleted: list[int] = []
     blocked: list[dict] = []
+    detached: dict[str, list[str]] = {}
+    warnings: list[str] = []
     with db.tx() as conn:
         for source_id in dict.fromkeys(body.ids):
             row = db.one(conn, "SELECT * FROM sources WHERE id=?", (source_id,))
@@ -266,14 +288,21 @@ def batch_delete_sources(body: BatchIds, user=CurrentUser):
                 blocked.append({"id": source_id, "name": f"#{source_id}",
                                 "reason": "节点来源不存在（可能已被删除）"})
                 continue
-            refs = _group_refs(conn, row["name"])
-            if refs:
+            used_by = _group_refs(conn, row["name"])
+            if used_by and not body.force:
                 blocked.append({"id": source_id, "name": row["name"],
-                                "reason": _reference_reason(refs)})
+                                "reason": _reference_reason(used_by),
+                                "references": used_by})
                 continue
-            _delete_one(conn, row, user["username"])
+            groups, warns = (refs.detach_source(conn, row["name"])
+                              if used_by else ([], []))
+            if groups:
+                detached[row["name"]] = groups
+            warnings.extend(warns)
+            _delete_one(conn, row, user["username"], groups)
             deleted.append(source_id)
-    return {"ok": True, "deleted": deleted, "blocked": blocked}
+    return {"ok": True, "deleted": deleted, "blocked": blocked,
+            "detached_groups": detached, "warnings": warnings}
 
 
 @router.post("/{source_id}/reveal")

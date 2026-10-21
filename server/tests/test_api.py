@@ -378,11 +378,21 @@ def test_source_batch_interval_delete_and_references(client):
     assert r.json()["updated"] == 2
     assert {s["interval"] for s in client.get("/api/v1/sources").json()} == {3600}
 
-    # 被引用时重命名同样会被拒绝，避免策略组引用失效
+    # 被引用时重命名默认拒绝（409 + 引用明细），force=1 时同步更新引用
     r = client.put(f"/api/v1/sources/{a['id']}", headers=h, json={
         "name": "A机场改名", "enabled": True, "interval": 3600})
-    assert r.status_code == 400
-    assert "重命名" in r.json()["detail"]
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "source_in_use"
+    assert detail["rename_to"] == "A机场改名"
+    r = client.put(f"/api/v1/sources/{a['id']}?force=1", headers=h, json={
+        "name": "A机场改名", "enabled": True, "interval": 3600})
+    assert r.status_code == 200, r.text
+    groups = client.get("/api/v1/groups", headers=h).json()
+    assert groups[0]["use_sources"] == ["A机场改名"]
+    # 改回原名，后面用例还用旧名字
+    assert client.put(f"/api/v1/sources/{a['id']}?force=1", headers=h, json={
+        "name": "A机场", "enabled": True, "interval": 3600}).status_code == 200
 
     # 批量删除：A 被策略组引用而保留，B 正常删除
     r = client.post("/api/v1/sources/batch/delete", headers=h,
@@ -421,8 +431,21 @@ def test_rule_provider_batch_interval_delete_and_references(client):
     r = client.put(f"/api/v1/rule-providers/{a['id']}", headers=h, json={
         "name": "rules-a-renamed", "kind": "inline", "behavior": "domain",
         "inline_content": "payload:\n  - a.example.com\n"})
-    assert r.status_code == 400
-    assert "重命名" in r.json()["detail"]
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "rule_provider_in_use"
+    assert detail["rename_to"] == "rules-a-renamed"
+    # force=1 时把引用它的 RULE-SET 规则一起改名
+    r = client.put(f"/api/v1/rule-providers/{a['id']}?force=1", headers=h, json={
+        "name": "rules-a-renamed", "kind": "inline", "behavior": "domain",
+        "inline_content": "payload:\n  - a.example.com\n"})
+    assert r.status_code == 200, r.text
+    rules = client.get("/api/v1/rules", headers=h).json()
+    assert any(x["value"] == "rules-a-renamed" for x in rules)
+    # 改回原名，后面用例继续用旧名字
+    assert client.put(f"/api/v1/rule-providers/{a['id']}?force=1", headers=h, json={
+        "name": "rules-a", "kind": "inline", "behavior": "domain",
+        "inline_content": "payload:\n  - a.example.com\n"}).status_code == 200
 
     r = client.post("/api/v1/rule-providers/batch/delete", headers=h,
                     json={"ids": [a["id"], b["id"]]})
@@ -432,12 +455,17 @@ def test_rule_provider_batch_interval_delete_and_references(client):
     assert [x["id"] for x in data["blocked"]] == [a["id"]]
     assert "分流规则" in data["blocked"][0]["reason"]
 
-    # 单删同样被停用规则引用阻止
-    assert client.delete(f"/api/v1/rule-providers/{a['id']}",
-                         headers=h).status_code == 400
-    client.delete(f"/api/v1/rules/{rule['id']}", headers=h)
-    assert client.delete(f"/api/v1/rule-providers/{a['id']}",
-                         headers=h).status_code == 200
+    # 单删同样被停用规则引用阻止：409 + 引用明细（前端据此弹二次确认）
+    r = client.delete(f"/api/v1/rule-providers/{a['id']}", headers=h)
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "rule_provider_in_use"
+    assert detail["references"][0]["id"] == rule["id"]
+    # 强制删除会连带删掉引用它的分流规则
+    r = client.delete(f"/api/v1/rule-providers/{a['id']}?force=1", headers=h)
+    assert r.status_code == 200, r.text
+    assert [x["id"] for x in r.json()["deleted_rules"]] == [rule["id"]]
+    assert client.get(f"/api/v1/rules/{rule['id']}", headers=h).status_code == 404
 
 
 def test_build_delete_and_release_state_reference(client):
@@ -923,9 +951,29 @@ def test_local_node_crud_render_and_group_reference(client):
     assert "hk.example.com" in art
     assert "aes-256-gcm" in art
 
-    # 被策略组引用时不能删除
+    # 被策略组引用时默认不删：409 + 引用明细（前端据此弹二次确认）
+    r = client.delete(f"/api/v1/local-nodes/{node['id']}", headers=h)
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "local_node_in_use"
+    assert detail["references"][0]["name"] == group["name"]
+    # 强制删除会自动从策略组里摘掉这个节点
+    r = client.delete(f"/api/v1/local-nodes/{node['id']}?force=1", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["detached_groups"] == [group["name"]]
+    groups = client.get("/api/v1/groups", headers=h).json()
+    assert next(g for g in groups if g["id"] == group["id"])["local_nodes"] == []
+    # 节点已删除
     assert client.delete(f"/api/v1/local-nodes/{node['id']}",
-                         headers=h).status_code == 400
+                         headers=h).status_code == 404
+    # 后续用例继续用节点重建一个同名的，避免影响其它断言
+    node = client.post("/api/v1/local-nodes", headers=h, json={
+        "name": node["name"], "protocol": node["protocol"],
+        "server": node["server"], "port": node["port"],
+        "params": node["params"], "extra_yaml": node["extra_yaml"],
+    }).json()
+    client.put(f"/api/v1/groups/{group['id']}", headers=h,
+               json={**group, "local_nodes": [node["id"]]})
 
     # 停用后不再写入产物，但组里仍有 DIRECT，构建仍可通过
     disabled = client.put(f"/api/v1/local-nodes/{node['id']}", headers=h, json={

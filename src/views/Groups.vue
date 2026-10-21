@@ -188,6 +188,18 @@
       </template>
     </el-dialog>
 
+    <RefConfirmDialog
+      v-model:visible="refDialog.visible"
+      :title="refDialog.title"
+      :message="refDialog.message"
+      :references="refDialog.references"
+      :warnings="refDialog.warnings"
+      :hint="refDialog.hint"
+      :confirm-text="refDialog.confirmText"
+      :busy="refDialog.busy"
+      @confirm="onRefConfirm"
+    />
+
     <el-dialog v-model="batchDialog" title="批量修改策略组" width="min(620px, 94vw)">
       <p class="mp-dialog-desc">
         将选中的 {{ selected.length }} 个策略组按下面的设置统一修改。
@@ -276,10 +288,15 @@ import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import MultiSelectClear from '../components/MultiSelectClear.vue'
 import ErrorState from '../components/ErrorState.vue'
+import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 
 const rows = ref([])
 const isMobile = useMobile()
 const selected = ref([])
+const refDialog = reactive({
+  visible: false, title: '', message: '', references: [], warnings: [],
+  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
+})
 const batchDialog = ref(false)
 const batchSaving = ref(false)
 const batch = reactive({
@@ -422,8 +439,51 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
+    if (e.status === 409 && e.data?.code === 'group_in_use') {
+      openRefDialog({
+        title: `删除策略组“${row.name}”`,
+        message: e.data.message,
+        references: e.data.references,
+        hint: '删除时会自动把其它策略组里的成员引用摘掉，并删除指向它的分流规则。',
+        action: () => forceDeleteGroup(row),
+      })
+      return
+    }
     ElMessage.error(e.message)
   }
+}
+
+async function forceDeleteGroup(row) {
+  refDialog.busy = true
+  try {
+    const resp = await api(`/api/v1/groups/${row.id}?force=1`, { method: 'DELETE' })
+    refDialog.visible = false
+    const n = resp.removed_rules?.length || 0
+    const m = resp.detached_groups?.length || 0
+    const parts = []
+    if (m) parts.push(`解除 ${m} 个策略组的成员引用`)
+    if (n) parts.push(`删除 ${n} 条分流规则`)
+    ElMessage.success(parts.length ? `已删除，${parts.join('，')}` : '已删除')
+    if (resp.warnings?.length) {
+      ElMessage.warning(resp.warnings[0])
+    }
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
+  }
+}
+
+function openRefDialog({ title, message, references, warnings = [], hint, action, confirmText }) {
+  Object.assign(refDialog, {
+    visible: true, title, message, references, warnings, hint,
+    confirmText: confirmText || '删除并解除关联', busy: false, action,
+  })
+}
+
+async function onRefConfirm() {
+  if (refDialog.action) await refDialog.action()
 }
 
 function onSelectionChange(selection) {
@@ -489,9 +549,19 @@ async function removeSelected() {
     const resp = await api('/api/v1/groups/batch/delete', {
       method: 'POST', body: { ids },
     })
-    if (resp.blocked?.length) {
+    const withRefs = (resp.blocked || []).filter((b) => b.references?.length)
+    if (withRefs.length) {
+      openRefDialog({
+        title: '部分策略组仍被引用',
+        message: `有 ${withRefs.length} 个策略组仍被其它策略组或分流规则引用`,
+        references: withRefs.flatMap((b) =>
+          b.references.map((r) => ({ ...r, extra: r.extra || `策略组：${b.name}` }))),
+        hint: '继续删除会自动解除成员引用，并删除指向它们的分流规则。',
+        action: () => forceBatchDelete(ids),
+      })
+    } else if (resp.blocked?.length) {
       ElMessage.warning(
-        `已删除 ${resp.deleted.length} 个；${resp.blocked.length} 个被引用未删：`
+        `已删除 ${resp.deleted.length} 个；${resp.blocked.length} 个未删：`
         + resp.blocked.map((b) => `${b.name}（${b.reason}）`).join('；'), { duration: 9000 })
     } else {
       ElMessage.success(`已删除 ${resp.deleted.length} 个策略组`)
@@ -500,6 +570,24 @@ async function removeSelected() {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+async function forceBatchDelete(ids) {
+  refDialog.busy = true
+  try {
+    const resp = await api('/api/v1/groups/batch/delete', {
+      method: 'POST', body: { ids, force: true },
+    })
+    refDialog.visible = false
+    const n = resp.removed_rules?.length || 0
+    ElMessage.success(`已删除 ${resp.deleted.length} 个策略组，并删除 ${n} 条相关分流规则`)
+    if (resp.warnings?.length) ElMessage.warning(resp.warnings[0])
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
   }
 }
 </script>

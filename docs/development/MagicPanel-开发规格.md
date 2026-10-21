@@ -122,11 +122,19 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 - **一键抓取**：节点来源页抓取全部来源，但跳过关闭了 `auto_fetch` 的本地快照来源；规则来源页只抓取远程来源（内联来源无需抓取）。前端以最多 3 个并发逐个调用单条 refresh 接口，显示完成进度；失败来源保留最近一次成功快照。
 - **一键测速**：节点来源页可对全部有快照的来源顺序执行测速（包括关闭自动抓取的本地快照来源），避免同时启动多个 Mihomo 核心；也可勾选后“测速选中”；显示完成进度，核心未安装时先提示安装。
 - **批量修改间隔**：节点来源可同时修改抓取间隔与自动测速间隔；规则来源修改抓取间隔。弹窗内输入秒数或选择 15 分钟 / 1 小时 / 6 小时 / 1 天 / 7 天预设。抓取间隔同时写入后续构建产物，由客户端按 provider 间隔更新。
-- **批量删除**：先确认，再逐项校验引用；被引用的项目保留，其余删除，结果通过对话框列出未删除项及原因。
+- **批量删除**：先确认，再逐项校验引用；被引用的项目保留并列出引用明细；确认后可用同样的方式强制删除并自动解绑（请求体带 `force: true`）。
 - **规则来源检索**：支持按名称或 URL 模糊搜索；表格分页，可选每页 10 / 20 / 50 / 100 条，并提供页码跳转。搜索或翻页时清空当前选择，避免批量操作作用到不可见条目。
 - **URL 展示**：规则来源表格不再平铺长 URL，改为“复制 URL”按钮；复制成功后弹窗展示完整 URL，剪贴板不可用时也保留可手动选择的文本。
 
-引用规则：节点来源被策略组 `use_sources` 引用时不可删除、不可重命名；规则来源被任意 RULE-SET 分流规则引用时不可删除、不可重命名（含已停用规则，因为重新启用后会再次生效）；构建处于 `TESTING` / `PRODUCTION` / `OFFLINE` 状态（即发布过）时不可删除。单条删除与编辑同样执行这些校验，并返回明确原因。
+引用规则（**友好删除**）：对象仍被引用时，接口返回 `409` 与结构化引用明细（`code` / `message` / `references`），前端据此弹二次确认对话框，列出被哪些配置引用；用户确认后带 `force=1` 重试，后台自动解绑再删除——
+- 节点来源：被策略组 `use_sources` 引用 → 从这些策略组的 `use_sources` 里摘掉；
+- 本地节点：被策略组 `local_nodes` 引用 → 从这些策略组里摘掉；
+- 规则来源：被 RULE-SET 分流规则引用（含已停用规则）→ 连这些规则一起删除；
+- 策略组：被其它策略组当作成员 → 摘掉成员引用；被分流规则指向 → 删除这些规则；
+- 引擎平台：还有设备在用 → 必须指定迁移目标（`move_to`），设备迁移后再删；
+- 构建处于 `TESTING` / `PRODUCTION` / `OFFLINE` 状态（即发布过）时不可删除，这一条不做自动处理，由留存任务按窗口回收。
+
+解绑后可能出现"策略组变空"或"relay 成员不足两个"，这类问题会在确认对话框里提前警告。改名同理：被引用时返回 `409`，带 `force=1` 会把引用一并改成新名字。
 
 ## 服务端定时任务（自动发布）
 
@@ -165,10 +173,10 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 | `POST /api/v1/sources/{id}/refresh` | 抓取订阅并留存快照，成功后作废旧测速结果 |
 | `POST /api/v1/sources/{id}/reveal` | 解密返回订阅地址原文用于复制，操作记入审计 |
 | `POST /api/v1/sources/{id}/test` | 用本地核心测速全部节点，结果随来源返回 |
-| `PATCH /api/v1/sources/batch` / `POST /api/v1/sources/batch/delete` | 批量修改抓取/测速间隔 / 批量删除（引用校验） |
-| `GET /api/v1/local-nodes/schema` / `GET/POST /api/v1/local-nodes` / `PUT/DELETE /api/v1/local-nodes/{id}` | 本地单节点协议 schema、列表、增删改（参数加密落盘，删除校验策略组引用） |
+| `PATCH /api/v1/sources/batch` / `POST /api/v1/sources/batch/delete` | 批量修改抓取/测速间隔 / 批量删除（引用校验；请求体 `force: true` 可自动解绑后删除） |
+| `GET /api/v1/local-nodes/schema` / `GET/POST /api/v1/local-nodes` / `PUT/DELETE /api/v1/local-nodes/{id}` | 本地单节点协议 schema、列表、增删改（参数加密落盘；删除被引用时 409 + 引用明细，`force=1` 自动解绑） |
 | `GET/PUT /api/v1/base-config` / `POST /api/v1/base-config/reset` / `GET /api/v1/base-config/schema` / `GET /api/v1/base-config/scopes` / `POST /api/v1/base-config/preview` / `POST /api/v1/base-config/apply` | 产物基础配置：按「引擎 / 平台 / 设备」读写与恢复本层（保留个人配置）、表单 schema、作用域列表（系统默认 / 通用配置 / 设备配置）、产物预览（不产生构建）、保存并构建发布。GET 返回继承值、本层差异、生效值与每个键的来源层级 |
-| `PATCH /api/v1/rule-providers/batch` / `POST /api/v1/rule-providers/batch/delete` | 批量修改间隔 / 批量删除（引用校验） |
+| `PATCH /api/v1/rule-providers/batch` / `POST /api/v1/rule-providers/batch/delete` | 批量修改间隔 / 批量删除（引用校验；`force: true` 可连带删除引用规则后删除） |
 | `DELETE /api/v1/builds/{id}` / `POST /api/v1/builds/batch/delete` | 删除构建 / 批量删除构建（只允许删除 `BUILT` 状态的构建） |
 | `POST /api/v1/groups/reorder` / `POST /api/v1/rules/reorder` / `POST /api/v1/targets/reorder` | 策略组 / 分流规则 / 引擎平台拖动排序 |
 | `GET /api/v1/automation/status` / `POST /api/v1/automation/run` | 自动任务状态 / 立即强制执行一轮 |

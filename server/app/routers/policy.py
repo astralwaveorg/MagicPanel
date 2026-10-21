@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
+from ..services import refs
 
 router = APIRouter(prefix="/api/v1", tags=["policy"])
 
@@ -187,30 +188,50 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
 
 
 @router.delete("/groups/{gid}")
-def delete_group(gid: int, user=CurrentUser):
+def delete_group(gid: int, force: bool = False, user=CurrentUser):
+    """删除策略组。
+
+    被其它策略组当作成员、或被分流规则指向时默认拒绝，并返回引用明细
+    （前端据此弹二次确认）；带 force=1 时自动解绑：把成员引用摘掉，
+    并删除指向它的分流规则。
+    """
     with db.tx() as conn:
         row = _get_group(conn, gid)
-        refs = [
-            g["name"] for g in db.all_(conn, "SELECT name, proxies FROM proxy_groups")
-            if row["name"] in json.loads(g["proxies"] or "[]")
-        ]
-        if refs:
-            raise HTTPException(400, f"策略组仍被引用：{'、'.join(refs)}")
-        used = db.one(
-            conn, "SELECT COUNT(*) AS c FROM rules WHERE target=?", (row["name"],)
-        )["c"]
-        if used:
-            raise HTTPException(400, f"仍有 {used} 条分流规则指向该策略组")
+        members = refs.group_members(conn, row["name"])
+        rules = refs.rules_targeting(conn, row["name"])
+        if (members or rules) and not force:
+            detail = []
+            if members:
+                detail.append(f"被 {len(members)} 个策略组当作成员")
+            if rules:
+                detail.append(f"被 {len(rules)} 条分流规则指向")
+            raise HTTPException(409, detail={
+                "code": "group_in_use",
+                "message": f"策略组“{row['name']}”{'、'.join(detail)}",
+                "group": {"id": gid, "name": row["name"]},
+                "references": (
+                    [{"id": m["id"], "name": m["name"], "type": "策略组",
+                      "extra": f"{m['group_type']} 组，把它当作成员"} for m in members]
+                    + [{"id": r["id"], "name": f"#{r['id']}", "type": "分流规则",
+                        "extra": f"{r['type']} {r['value']} → {row['name']}"
+                                 + ("（已停用）" if not r["enabled"] else "")}
+                       for r in rules]
+                ),
+            })
+        changed, removed, warns = refs.detach_group(conn, row["name"])
         conn.execute("DELETE FROM proxy_groups WHERE id=?", (gid,))
         security.audit(conn, user["username"], "删除策略组", "group", gid,
-                       {"name": row["name"]})
-    return {"ok": True}
+                       {"name": row["name"], "detached_groups": changed,
+                        "removed_rules": [r["id"] for r in removed]})
+    return {"ok": True, "detached_groups": changed,
+            "removed_rules": removed, "warnings": warns}
 
 
 # ---- 批量操作 ----
 
 class BatchIds(BaseModel):
     ids: list[int] = Field(default_factory=list)
+    force: bool = False
 
 
 class BatchGroupPatch(BaseModel):
@@ -329,9 +350,15 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
 
 @router.post("/groups/batch/delete")
 def batch_delete_groups(body: BatchIds, user=CurrentUser):
-    """批量删除策略组：被其它组或规则引用的保留并说明原因。"""
+    """批量删除策略组。
+
+    默认被其它组或规则引用的保留并返回引用明细；
+    force=True 时自动解绑（摘掉成员引用、删除指向它的规则）后一并删除。
+    """
     deleted: list[int] = []
     blocked: list[dict] = []
+    removed_rules: list[dict] = []
+    warnings: list[str] = []
     with db.tx() as conn:
         for gid in dict.fromkeys(body.ids):
             row = db.one(conn, "SELECT * FROM proxy_groups WHERE id=?", (gid,))
@@ -339,24 +366,32 @@ def batch_delete_groups(body: BatchIds, user=CurrentUser):
                 blocked.append({"id": gid, "name": f"#{gid}",
                                 "reason": "策略组不存在（可能已被删除）"})
                 continue
-            refs = [g["name"] for g in db.all_(
-                conn, "SELECT id, name, proxies FROM proxy_groups")
-                if g["id"] != gid and row["name"] in json.loads(g["proxies"] or "[]")]
-            if refs:
-                blocked.append({"id": gid, "name": row["name"],
-                                "reason": f"仍被策略组引用：{'、'.join(refs)}"})
+            members = [m for m in refs.group_members(conn, row["name"])]
+            rules = refs.rules_targeting(conn, row["name"])
+            if (members or rules) and not body.force:
+                blocked.append({
+                    "id": gid, "name": row["name"],
+                    "reason": "仍被引用"
+                               + (f"（{len(members)} 个策略组把它当成员）" if members else "")
+                               + (f"（{len(rules)} 条分流规则指向）" if rules else ""),
+                    "references": (
+                        [{"id": m["id"], "name": m["name"], "type": "策略组",
+                          "extra": f"{m['group_type']} 组，把它当作成员"} for m in members]
+                        + [{"id": r["id"], "name": f"#{r['id']}", "type": "分流规则",
+                            "extra": f"{r['type']} {r['value']} → {row['name']}"}
+                           for r in rules]
+                    ),
+                })
                 continue
-            used = db.one(conn, "SELECT COUNT(*) AS c FROM rules WHERE target=?",
-                          (row["name"],))["c"]
-            if used:
-                blocked.append({"id": gid, "name": row["name"],
-                                "reason": f"仍有 {used} 条分流规则指向该策略组"})
-                continue
+            changed, gone, warns = refs.detach_group(conn, row["name"])
+            removed_rules.extend(gone)
+            warnings.extend(warns)
             conn.execute("DELETE FROM proxy_groups WHERE id=?", (gid,))
             deleted.append(gid)
             security.audit(conn, user["username"], "批量删除策略组", "group", gid,
-                           {"name": row["name"]})
-    return {"ok": True, "deleted": deleted, "blocked": blocked}
+                           {"name": row["name"], "detached_groups": changed})
+    return {"ok": True, "deleted": deleted, "blocked": blocked,
+            "removed_rules": removed_rules, "warnings": warnings}
 
 
 @router.patch("/rules/batch")

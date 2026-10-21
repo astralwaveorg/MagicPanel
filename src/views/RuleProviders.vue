@@ -186,6 +186,18 @@
       </template>
     </el-dialog>
 
+    <RefConfirmDialog
+      v-model:visible="refDialog.visible"
+      :title="refDialog.title"
+      :message="refDialog.message"
+      :references="refDialog.references"
+      :warnings="refDialog.warnings"
+      :hint="refDialog.hint"
+      :confirm-text="refDialog.confirmText"
+      :busy="refDialog.busy"
+      @confirm="onRefConfirm"
+    />
+
     <BatchResultDialog
       v-model:visible="blockedVisible"
       title="部分规则来源未删除"
@@ -219,6 +231,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
 import Pager from '../components/Pager.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
+import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
 const INTERVAL_PRESETS = [
@@ -251,6 +264,10 @@ const refreshTotal = ref(0)
 const intervalDialog = ref(false)
 const savingInterval = ref(false)
 const batchInterval = ref(86400)
+const refDialog = reactive({
+  visible: false, title: '', message: '', references: [], warnings: [],
+  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
+})
 const blockedVisible = ref(false)
 const blockedItems = ref([])
 const deletedCount = ref(0)
@@ -361,6 +378,17 @@ async function save() {
     ElMessage.success('已保存')
     await load()
   } catch (e) {
+    if (e.status === 409 && e.data?.code === 'rule_provider_in_use' && e.data?.rename_to) {
+      openRefDialog({
+        title: `重命名规则来源“${e.data.provider.name}”`,
+        message: e.data.message,
+        references: e.data.references,
+        hint: `改名后，上面这些分流规则会自动改为引用新名字“${e.data.rename_to}”。`,
+        confirmText: '改名并同步引用',
+        action: () => forceRenameProvider(editing.value, body),
+      })
+      return
+    }
     error.value = e.message
     ElMessage.error(e.message)
   } finally {
@@ -449,9 +477,35 @@ async function saveBatchInterval() {
   }
 }
 
+function openRefDialog({ title, message, references, warnings = [], hint, action, confirmText }) {
+  Object.assign(refDialog, {
+    visible: true, title, message, references, warnings, hint,
+    confirmText: confirmText || '删除并解除关联', busy: false, action,
+  })
+}
+
+async function onRefConfirm() {
+  if (refDialog.action) await refDialog.action()
+}
+
+async function forceRenameProvider(row, body) {
+  refDialog.busy = true
+  try {
+    await api(`/api/v1/rule-providers/${row.id}?force=1`, { method: 'PUT', body })
+    refDialog.visible = false
+    dialog.value = false
+    ElMessage.success('已改名，分流规则引用同步更新')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
+  }
+}
+
 async function remove(row) {
   if (!await confirmBox(
-    `删除规则来源 “${row.name}”？删除前会校验分流规则引用；仍被引用的来源不能删除。`,
+    `删除规则来源 “${row.name}”？删除前会校验分流规则引用；仍被引用的会先提示引用关系。`,
     '删除规则来源',
   )) return
   try {
@@ -459,7 +513,32 @@ async function remove(row) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
+    if (e.status === 409 && e.data?.code === 'rule_provider_in_use') {
+      openRefDialog({
+        title: `删除规则来源“${row.name}”`,
+        message: e.data.message,
+        references: e.data.references,
+        hint: '删除时会一并删除上面这些引用该规则集的分流规则。',
+        action: () => forceDeleteProvider(row),
+      })
+      return
+    }
     ElMessage.error(e.message)
+  }
+}
+
+async function forceDeleteProvider(row) {
+  refDialog.busy = true
+  try {
+    const resp = await api(`/api/v1/rule-providers/${row.id}?force=1`, { method: 'DELETE' })
+    refDialog.visible = false
+    const n = resp.deleted_rules?.length || 0
+    ElMessage.success(n ? `已删除，并同时删除 ${n} 条引用它的分流规则` : '已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
   }
 }
 
@@ -477,7 +556,17 @@ async function removeSelected() {
     })
     deletedCount.value = resp.deleted.length
     blockedItems.value = resp.blocked
-    if (resp.blocked.length) {
+    const withRefs = resp.blocked.filter((b) => b.references?.length)
+    if (withRefs.length) {
+      openRefDialog({
+        title: '部分规则来源仍被引用',
+        message: `有 ${withRefs.length} 个规则来源仍被分流规则引用`,
+        references: withRefs.flatMap((b) =>
+          b.references.map((r) => ({ ...r, extra: `来源：${b.name}` }))),
+        hint: '继续删除会一并删除引用它们的分流规则。',
+        action: () => forceBatchDelete(ids),
+      })
+    } else if (resp.blocked.length) {
       blockedVisible.value = true
     } else {
       ElMessage.success(`已删除 ${resp.deleted.length} 个规则来源`)
@@ -486,6 +575,23 @@ async function removeSelected() {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+async function forceBatchDelete(ids) {
+  refDialog.busy = true
+  try {
+    const resp = await api('/api/v1/rule-providers/batch/delete', {
+      method: 'POST', body: { ids, force: true },
+    })
+    refDialog.visible = false
+    const n = resp.deleted_rules?.length || 0
+    ElMessage.success(`已删除 ${resp.deleted.length} 个规则来源，并删除 ${n} 条相关分流规则`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refDialog.busy = false
   }
 }
 

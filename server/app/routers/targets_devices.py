@@ -12,6 +12,7 @@ import yaml
 from .. import db, security
 from ..deps import CurrentUser
 from ..services import base_config as base_config_service
+from ..services import refs
 
 router = APIRouter(prefix="/api/v1", tags=["targets-devices"])
 
@@ -222,19 +223,50 @@ def update_target(tid: int, body: TargetBody, user=CurrentUser):
 
 
 @router.delete("/targets/{tid}")
-def delete_target(tid: int, user=CurrentUser):
+def delete_target(tid: int, force: bool = False, move_to: int | None = None,
+                  user=CurrentUser):
+    """删除引擎平台。
+
+    还有设备在用它时默认拒绝，并返回设备清单与可选的目标平台；
+    带 force=1 时把这些设备迁移到 move_to 指定的平台再删除。
+    """
     with db.tx() as conn:
         row = _get_target(conn, tid)
-        used = db.one(
-            conn, "SELECT COUNT(*) AS c FROM devices WHERE target_id=?", (tid,)
-        )["c"]
-        if used:
-            raise HTTPException(400, f"仍有 {used} 台设备使用该引擎平台")
+        devices = refs.target_devices(conn, tid)
+        if devices and not force:
+            others = [
+                {"id": t["id"], "name": t["name"], "platform": t["platform"]}
+                for t in db.all_(
+                    conn, "SELECT id, name, platform FROM targets "
+                          "WHERE id!=? ORDER BY sort, id", (tid,))
+            ]
+            raise HTTPException(409, detail={
+                "code": "target_in_use",
+                "message": f"引擎平台“{row['name']}”仍有 {len(devices)} 台设备在用",
+                "target": {"id": tid, "name": row["name"]},
+                "references": [
+                    {"id": d["id"], "name": d["name"], "type": "设备",
+                     "extra": d.get("platform") or ""} for d in devices
+                ],
+                "candidates": others,
+            })
+        moved: list[str] = []
+        if devices:
+            if not move_to:
+                raise HTTPException(400, "请先指定把设备迁移到哪个引擎平台")
+            dest = db.one(conn, "SELECT id, name FROM targets WHERE id=?", (move_to,))
+            if not dest:
+                raise HTTPException(400, "目标引擎平台不存在")
+            if dest["id"] == tid:
+                raise HTTPException(400, "设备不能迁移到正在删除的引擎平台")
+            conn.execute("UPDATE devices SET target_id=? WHERE target_id=?",
+                         (dest["id"], tid))
+            moved = [d["name"] for d in devices]
         cleaned = _clean_target_refs(conn, row["name"])
         conn.execute("DELETE FROM targets WHERE id=?", (tid,))
         security.audit(conn, user["username"], "删除引擎平台", "target", tid,
-                       {"name": row["name"]})
-    return {"ok": True}
+                       {"name": row["name"], "moved_devices": moved})
+    return {"ok": True, "moved_devices": moved}
 
 
 # ---- 设备 ----
