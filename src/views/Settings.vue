@@ -147,7 +147,8 @@
       <h3>我的头像</h3>
       <div style="display:flex;align-items:center;gap:16px">
         <UserAvatar :user="store.user" :size="56" />
-        <div>
+        <!-- 两个按钮并排一行，窄屏再换行 -->
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <el-upload
             :auto-upload="false" :show-file-list="false"
             accept="image/png,image/jpeg,image/webp" :on-change="uploadAvatar"
