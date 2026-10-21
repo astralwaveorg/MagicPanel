@@ -281,9 +281,22 @@
         </el-form-item>
         <el-form-item :label="editing ? '订阅地址（留空表示不修改）' : '订阅地址'">
           <el-input v-model="form.url" type="password" show-password
-                    placeholder="https://…（保存后不再次显示原文）" autocomplete="off" />
+                    :placeholder="editing ? 'https://…（留空表示不修改）' : 'https://…'"
+                    autocomplete="off" />
+          <div v-if="editing" class="mp-form-hint">
+            <el-button link type="primary" size="small" @click="toggleRevealUrl">
+              {{ revealedUrl ? '隐藏原文' : '查看原文' }}
+            </el-button>
+            <span>订阅地址含访问凭据，请勿外传。</span>
+          </div>
+          <el-input v-if="revealedUrl" :model-value="revealedUrl" readonly
+                    class="mono" style="margin-top:6px">
+            <template #append>
+              <el-button @click="copyRevealed">复制</el-button>
+            </template>
+          </el-input>
         </el-form-item>
-        <el-form-item label="节点过滤正则（可选，用于剔除套餐提示等无效节点）">
+        <el-form-item label="过滤正则（可选，过滤套餐提示等无效节点）">
           <el-input v-model="form.filter" class="mono" placeholder="(?i)^(?!.*(?:剩余|到期|官网)).+$" />
         </el-form-item>
         <el-row :gutter="12">
@@ -435,6 +448,7 @@ const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
+const revealedUrl = ref('')
 const localNodes = ref([])
 const localSchema = ref({ protocols: [], node_types: [] })
 const localDialog = ref(false)
@@ -646,6 +660,7 @@ function clearSelection() {
 
 function openEdit(row) {
   editing.value = row || null
+  revealedUrl.value = '' 
   Object.assign(form, emptyForm(), row ? {
     name: row.name, url: '', enabled: row.enabled, filter: row.filter,
     ua: row.ua, interval: row.interval, test_interval: row.test_interval,
@@ -806,6 +821,29 @@ async function removeSelected() {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+async function toggleRevealUrl() {
+  if (revealedUrl.value) {
+    revealedUrl.value = ''
+    return
+  }
+  if (!editing.value) return
+  try {
+    const data = await api(`/api/v1/sources/${editing.value.id}/reveal`, { method: 'POST' })
+    revealedUrl.value = data.url
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function copyRevealed() {
+  try {
+    await navigator.clipboard.writeText(revealedUrl.value)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择复制')
   }
 }
 
