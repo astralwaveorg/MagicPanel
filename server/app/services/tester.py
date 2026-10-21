@@ -28,7 +28,9 @@ MIHOMO_FALLBACK_VERSION = "v1.19.32"
 RELEASE_BASE = "https://github.com/MetaCubeX/mihomo/releases/download"
 RELEASE_LATEST = "https://github.com/MetaCubeX/mihomo/releases/latest"
 DELAY_URL = "https://www.gstatic.com/generate_204"
-DELAY_TIMEOUT_MS = 5000
+# 测速超时：订阅来源与本地节点共用同一口径。
+# 2 秒：能连上的节点通常在 1 秒内完成往返；再久只是让失败节点干等。
+DELAY_TIMEOUT_MS = 2000
 CONCURRENCY = 16
 STARTUP_TIMEOUT = 8.0
 UPLOAD_MAX_BYTES = 100 * 1024 * 1024
@@ -387,3 +389,18 @@ def test_nodes(snapshot_yaml: str) -> dict:
         "failed": len(results) - ok,
         "results": results,
     }
+
+
+def test_proxy(proxy: dict) -> dict:
+    """测试单个节点（本地节点用）。
+
+    与批量测速同一机制：以该节点生成临时配置启动核心，
+    经 external-controller 发起一次 delay 测试。
+    返回 {ok, delay, name}；失败时 delay 为 -1。
+    """
+    if not isinstance(proxy, dict) or not proxy.get("name"):
+        raise TestError("节点信息不完整，无法测速")
+    text = yaml.safe_dump({"proxies": [proxy]}, allow_unicode=True)
+    result = test_nodes(text)
+    delay = next(iter(result["results"].values()), -1)
+    return {"ok": delay >= 0, "delay": delay, "name": proxy["name"]}

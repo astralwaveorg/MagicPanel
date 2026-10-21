@@ -181,8 +181,18 @@
           <el-table-column label="启用" width="80">
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="150">
+          <el-table-column label="测速状态" width="130">
             <template #default="{ row }">
+              <StatusDot v-if="row.test_status === 'ok'" kind="ok"
+                         :text="`成功 ${row.test_delay} ms`" />
+              <StatusDot v-else-if="row.test_status === 'failed'" kind="danger" text="失败" />
+              <span v-else style="color:var(--mp-muted)">未测速</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="230">
+            <template #default="{ row }">
+              <el-button size="small" :loading="testingLocal === row.id"
+                         @click="testLocal(row)">测速</el-button>
               <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
               <el-button size="small" type="danger" plain @click="removeLocal(row)">删除</el-button>
             </template>
@@ -450,6 +460,7 @@ const saving = ref(false)
 const editing = ref(null)
 const revealedUrl = ref('')
 const localNodes = ref([])
+const testingLocal = ref(0)
 const localSchema = ref({ protocols: [], node_types: [] })
 const localDialog = ref(false)
 const localSaving = ref(false)
@@ -844,6 +855,25 @@ async function copyRevealed() {
     ElMessage.success('已复制')
   } catch {
     ElMessage.warning('复制失败，请手动选择复制')
+  }
+}
+
+async function testLocal(row) {
+  testingLocal.value = row.id
+  try {
+    const res = await api(`/api/v1/local-nodes/${row.id}/test`, { method: 'POST' })
+    const item = localNodes.value.find((n) => n.id === row.id)
+    if (item) {
+      item.test_status = res.status
+      item.test_delay = res.delay
+      item.tested_at = res.tested_at
+    }
+    if (res.ok) ElMessage.success(`节点测速通过（${res.delay} ms）`)
+    else ElMessage.warning('节点测速失败：无法通过该节点访问测试地址')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    testingLocal.value = 0
   }
 }
 

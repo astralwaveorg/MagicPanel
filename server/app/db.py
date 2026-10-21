@@ -85,6 +85,9 @@ CREATE TABLE IF NOT EXISTS local_nodes (
   extra_yaml_enc TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
   sort INTEGER NOT NULL DEFAULT 0,
+  test_status TEXT NOT NULL DEFAULT '',
+  test_delay INTEGER NOT NULL DEFAULT 0,
+  tested_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -332,6 +335,7 @@ def init_db() -> None:
         _migrate_release_state_machine(conn)
         _migrate_releases_env(conn)
         _migrate_local_node_type(conn)
+        _migrate_local_node_test(conn)
 
 
 def _migrate_release_state_machine(conn) -> None:
@@ -534,6 +538,21 @@ def _migrate_local_node_type(conn) -> None:
                      (cleaned, row["id"]))
     conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
                  "VALUES('local_node_type_v1', ?)", (now(),))
+
+
+def _migrate_local_node_test(conn) -> None:
+    """本地节点补测速结果列（最近一次测速的状态与延迟）。"""
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='local_node_test_v1'")
+    if done:
+        return
+    _ensure_column(conn, "local_nodes", "test_status",
+                   "test_status TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "local_nodes", "test_delay",
+                   "test_delay INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "local_nodes", "tested_at", "tested_at TEXT")
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('local_node_test_v1', ?)", (now(),))
 
 
 def _migrate_settings(conn) -> None:
