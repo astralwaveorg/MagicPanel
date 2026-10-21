@@ -82,7 +82,7 @@
               <el-input v-model="form.name" class="mono" placeholder="例如：stash-ios" />
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="12">
             <el-form-item label="引擎">
               <el-select v-model="form.engine" style="width:100%">
                 <el-option value="stash" label="Stash" />
@@ -90,7 +90,9 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
             <el-form-item label="平台">
               <el-select v-model="form.platform" style="width:100%">
                 <el-option v-for="(label, key) in PLATFORM_LABELS" :key="key" :value="key" :label="label" />

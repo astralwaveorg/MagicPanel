@@ -204,6 +204,7 @@
     <el-dialog v-model="localDialog" :title="localEditing ? '编辑本地节点' : '添加本地节点'"
                width="min(760px, 94vw)">
       <el-form :model="localForm" label-position="top">
+        <!-- 一行最多两项：挤在一行时端口的输入框会被压到看不见 -->
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12">
             <el-form-item label="名称">
@@ -213,7 +214,7 @@
               </div>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="4">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="节点类型">
               <el-select v-model="localForm.node_type" style="width:100%" filterable
                          placeholder="选择类型">
@@ -221,16 +222,19 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="5">
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="协议">
               <el-select v-model="localForm.protocol" style="width:100%" @change="onLocalProtocolChange">
                 <el-option v-for="p in localProtocols" :key="p.value" :value="p.value" :label="p.label" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="3">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="端口">
-              <el-input-number v-model="localForm.port" :min="1" :max="65535" style="width:100%" />
+              <el-input-number v-model="localForm.port" :min="1" :max="65535" style="width:100%"
+                               controls-position="right" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -309,24 +313,28 @@
         <el-form-item label="过滤正则（可选，过滤套餐提示等无效节点）">
           <el-input v-model="form.filter" class="mono" placeholder="(?i)^(?!.*(?:剩余|到期|官网)).+$" />
         </el-form-item>
+        <!-- 一行最多两项：挤在一行时输入框会被压窄到看不清 -->
         <el-row :gutter="12">
-          <el-col :xs="24"
-                  :sm="(form.auto_fetch && form.auto_test) ? 8 : ((form.auto_fetch || form.auto_test) ? 12 : 24)">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="抓取 UA">
               <el-input v-model="form.ua" />
             </el-form-item>
           </el-col>
-          <el-col v-if="form.auto_fetch" :xs="24" :sm="form.auto_test ? 8 : 12">
+          <el-col v-if="form.auto_fetch" :xs="24" :sm="12">
             <el-form-item label="抓取间隔">
               <el-input-number v-model="form.interval" :min="600" :max="604800" style="width:100%" />
             </el-form-item>
           </el-col>
-          <el-col v-if="form.auto_test" :xs="24" :sm="form.auto_fetch ? 8 : 12">
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="客户端更新间隔（0 = 跟随抓取间隔）">
+              <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.auto_test" :xs="24" :sm="12">
             <el-form-item label="测速间隔">
               <el-input-number v-model="form.test_interval" :min="0" :max="604800" style="width:100%" />
-            </el-form-item>
-            <el-form-item label="客户端更新间隔">
-              <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
             </el-form-item>
           </el-col>
         </el-row>

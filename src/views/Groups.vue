@@ -157,18 +157,21 @@
           <el-form-item :label="form.type === 'relay' ? '测速地址（Stash 目标渲染为 benchmark-url）' : '测速地址'">
             <el-input v-model="form.url" class="mono" maxlength="512" />
           </el-form-item>
+          <!-- 一行最多两项 -->
           <el-row :gutter="12">
-            <el-col :span="8">
+            <el-col :span="12">
               <el-form-item label="间隔（秒）">
                 <el-input-number v-model="form.interval" :min="30" :max="86400" style="width:100%" />
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+            <el-col :span="12">
               <el-form-item label="超时（毫秒）">
                 <el-input-number v-model="form.timeout" :min="100" :max="60000" style="width:100%" />
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+          </el-row>
+          <el-row :gutter="12">
+            <el-col :span="12">
               <el-form-item v-if="form.type === 'url-test'" label="容差（毫秒）">
                 <el-input-number v-model="form.tolerance" :min="0" :max="5000" style="width:100%" />
               </el-form-item>

@@ -151,6 +151,8 @@
               <el-input-number v-model="form.interval" :min="600" :max="604800" style="width:100%" />
             </el-form-item>
           </el-col>
+        </el-row>
+        <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="客户端更新间隔（秒，0 = 跟随抓取间隔）">
               <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
