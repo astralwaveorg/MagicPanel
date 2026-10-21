@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">MagicPanel</string>
     <string name="menu_reload">刷新</string>
-    <string name="menu_home">回到概览</string>
+    <string name="menu_home">回到系统状态</string>
     <string name="menu_settings">面板地址</string>
     <string name="menu_relogin">重新登录</string>
     <string name="error_title">连接不上面板</string>
@@ -19,5 +19,4 @@
     <string name="cancel">取消</string>
     <string name="saved">已保存</string>
     <string name="bad_url">地址无效，请以 http:// 或 https:// 开头</string>
-    <string name="home_portal">返回门户首页</string>
 </resources>

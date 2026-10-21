@@ -9,9 +9,9 @@
 
     <div class="mp-card">
       <h3>当前版本</h3>
-      <el-row :gutter="12">
+      <el-row :gutter="12" class="mp-equal-row">
         <el-col :xs="24" :sm="12">
-          <div class="mp-card" style="margin-bottom:8px">
+          <div class="mp-card mp-equal-card" style="margin-bottom:8px">
             <h3>当前生产版本</h3>
             <template v-if="data.release_state?.production">
               <div>构建 <span class="mono">#{{ data.release_state.production.id }}</span></div>
@@ -26,7 +26,7 @@
           </div>
         </el-col>
         <el-col :xs="24" :sm="12">
-          <div class="mp-card" style="margin-bottom:8px">
+          <div class="mp-card mp-equal-card" style="margin-bottom:8px">
             <h3>当前测试版本</h3>
             <template v-if="data.release_state?.testing">
               <div>构建 <span class="mono">#{{ data.release_state.testing.id }}</span></div>

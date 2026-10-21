@@ -12,8 +12,8 @@ android {
         // Android 7.0 起：覆盖小米 17 Pro Max / 一加 13 等 Android 15/16 设备
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
         resourceConfigurations += listOf("zh", "zh-rCN", "en")
     }
 
@@ -68,6 +68,5 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("com.google.android.material:material:1.12.0")
 }

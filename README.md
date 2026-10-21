@@ -76,10 +76,10 @@ tar xzf magicpanel-*.tar.gz && cd magicpanel
 管理端的 Android 原壳（Kotlin + WebView），源码在 `android/`，产物：
 
 ```
-dist/MagicPanel-1.0.1.apk
+dist/MagicPanel-1.0.2.apk
 ```
 
-- 右下角有可拖动的悬浮小房子：点击回到门户首页（`/`），可拖到任意位置，松开自动吸附到左/右边缘并记住位置
+- 回到 Magic Panel 首页：点侧边栏的 logo 标题（管理端顶部「☰ → MagicPanel」也一样）
 - 刷新走工具栏按钮（不再用下拉手势，避免向下滑动被刷新劫持）
 
 - 包名 `top.magichub.panel`，minSdk 24 / targetSdk 35

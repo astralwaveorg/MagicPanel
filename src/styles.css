@@ -145,6 +145,13 @@ html, body, #app {
 .mp-toolbar-hint { color: var(--mp-text-secondary); font-size: 12.5px; }
 .mp-selected-hint { font-size: 13px; font-weight: 600; }
 .mp-form-hint { color: var(--mp-text-secondary); font-size: 12px; line-height: 1.6; margin-top: 2px; }
+/* 同一行的卡片等高，桌面端看起来更整齐；窄屏各列独占一行时仍是自然高度 */
+.mp-equal-row > .el-col { display: flex; }
+.mp-equal-row .mp-equal-card { flex: 1; display: flex; flex-direction: column; }
+@media (max-width: 767px) {
+  .mp-equal-row > .el-col { display: block; }
+}
+
 /* 宽屏下保持一行（设置页的测速核心说明），窄屏再换行 */
 .mp-nowrap-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 900px) { .mp-nowrap-line { white-space: normal; } }
