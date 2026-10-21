@@ -59,7 +59,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <el-button type="primary" @click="openEdit()">添加订阅</el-button>
-        <el-button type="primary" plain @click="openLocalEdit()">添加节点</el-button>
+        <el-button type="primary" @click="openLocalEdit()">添加节点</el-button>
       </div>
     </div>
 
@@ -91,7 +91,7 @@
           <el-table-column label="启用" width="70">
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
           </el-table-column>
-          <el-table-column label="节点数" width="80" align="right">
+          <el-table-column label="节点数" width="90" align="left">
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="摘要" min-width="130">
@@ -139,9 +139,11 @@
           <el-table-column label="操作" width="252" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
-                <el-button size="small" @click="openNodes(row)">节点</el-button>
-                <el-button size="small" :loading="row._refreshing" @click="refresh(row)">抓取</el-button>
-                <el-button size="small" :loading="row._testing" @click="testNodes(row)">测速</el-button>
+                <el-button size="small" type="info" plain @click="openNodes(row)">节点</el-button>
+                <el-button size="small" type="primary" plain :loading="row._refreshing"
+                           @click="refresh(row)">抓取</el-button>
+                <el-button size="small" type="success" plain :loading="row._testing"
+                           @click="testNodes(row)">测速</el-button>
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
                 <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
               </div>
@@ -191,7 +193,7 @@
           </el-table-column>
           <el-table-column label="操作" width="230">
             <template #default="{ row }">
-              <el-button size="small" :loading="testingLocal === row.id"
+              <el-button size="small" type="success" plain :loading="testingLocal === row.id"
                          @click="testLocal(row)">测速</el-button>
               <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
               <el-button size="small" type="danger" plain @click="removeLocal(row)">删除</el-button>

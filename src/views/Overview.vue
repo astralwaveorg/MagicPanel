@@ -100,7 +100,8 @@
               <StatusDot v-bind="sourceStatus(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="节点数" width="80" align="right">
+          <!-- 数字列左对齐：右对齐时数字贴着列右边缘，和上一列隔得很远 -->
+          <el-table-column label="节点数" width="90" align="left">
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="最近成功" min-width="130">
