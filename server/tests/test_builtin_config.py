@@ -1,4 +1,4 @@
-"""内置默认（默认值）可覆盖、可恢复默认的回归测试。"""
+"""系统默认（默认值）可覆盖、可恢复默认的回归测试。"""
 import yaml
 
 from conftest import auth_headers, setup_admin
@@ -36,7 +36,7 @@ def test_builtin_default_is_editable_and_resettable(client):
     assert resp.status_code == 200
     assert resp.json()["effective"]["mode"] == doc["mode"]
 
-    # 作用域列表里内置项标记为"已自定义"
+    # 作用域列表里系统默认项标记为"已自定义"
     resp = client.get("/api/v1/base-config/scopes")
     builtins = {s["engine"]: s for s in resp.json()["scopes"] if s.get("kind") == "builtin"}
     assert set(builtins) == {"stash", "mihomo"}
@@ -65,7 +65,7 @@ def test_builtin_default_rejects_protected_keys(client):
 
 
 def test_builtin_scope_needs_engine(client):
-    """内置默认是按引擎分层的，engine 必填。"""
+    """系统默认是按引擎分层的，engine 必填。"""
     setup_admin(client)
     resp = client.get("/api/v1/base-config")
     assert resp.status_code == 200

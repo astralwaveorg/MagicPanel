@@ -914,9 +914,9 @@ def test_base_config_defaults_and_crud(client):
     assert saved.json()["effective"]["mode"] == "global"
     assert saved.json()["is_default"] is False
     assert saved.json()["overlay"] == {"mode": "global"}
-    # 来源标注：被本层改写的键来源是「通用配置」，其余仍是「内置默认」
+    # 来源标注：被本层改写的键来源是「通用配置」，其余仍是「系统默认」
     assert saved.json()["sources"]["mode"] == "通用配置"
-    assert saved.json()["sources"]["log-level"] == "内置默认"
+    assert saved.json()["sources"]["log-level"] == "系统默认"
 
     # 乐观锁：版本不一致时拒绝
     stale = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
@@ -1530,13 +1530,13 @@ def test_device_level_override_only_affects_that_device(client):
     other = client.post("/api/v1/devices", headers=h, json={
         "name": "普通设备", "platform": "ios", "target_id": 1,
         "channel": "stable"}).json()
-    # 设备专属作用域：只存与上层不同的差异
+    # 设备配置作用域：只存与上层不同的差异
     r = client.put(f"/api/v1/base-config?engine=stash&device_id={dev['id']}",
                    headers=h, json={"content": "mode: rule\nlog-level: debug\n"
                                               "ipv6: false\n"})
     assert r.status_code == 200, r.text
     assert r.json()["overlay"]["log-level"] == "debug"
-    assert r.json()["sources"]["log-level"] == "设备专属"
+    assert r.json()["sources"]["log-level"] == "设备配置"
     a = client.get(f"/feed/{dev['token']}/config.yaml").text
     b = client.get(f"/feed/{other['token']}/config.yaml").text
     assert "log-level: debug" in a
@@ -1556,7 +1556,7 @@ def test_device_override_rejects_structural_keys(client):
         "channel": "stable"}).json()
     client.post("/api/v1/builds", headers=h, json={})
     client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
-    # 结构键在设备专属作用域同样被拒绝
+    # 结构键在设备配置作用域同样被拒绝
     r = client.put(f"/api/v1/base-config?engine=stash&device_id={dev['id']}",
                    headers=h, json={"content": "rules:\n  - MATCH,DIRECT\n"})
     assert r.status_code == 400
@@ -1732,11 +1732,11 @@ def test_base_config_cascade_sources():
     }
     layers = bc.scope_layers("stash", "ios", 7, docs)
     effective, sources = bc.cascade(layers)
-    assert effective["mode"] == "rule"          # 设备专属覆盖通用配置
-    assert effective["log-level"] == "info"     # 通用配置覆盖内置默认
-    assert sources["mode"] == "设备专属"
+    assert effective["mode"] == "rule"          # 设备配置覆盖通用配置
+    assert effective["log-level"] == "info"     # 通用配置覆盖系统默认
+    assert sources["mode"] == "设备配置"
     assert sources["log-level"] == "通用配置"
-    assert sources["ipv6"] == "内置默认"
+    assert sources["ipv6"] == "系统默认"
 
 
 def test_target_rename_keeps_group_and_rule_references(client):
@@ -2202,7 +2202,7 @@ def test_device_reorder_and_batch(client):
     # 空字段 → 400
     assert client.patch("/api/v1/devices/batch", headers=h, json={
         "ids": ids[:1]}).status_code == 400
-    # 批量删除：设备专属配置一并清理
+    # 批量删除：设备配置一并清理
     r = client.post("/api/v1/devices/batch/delete", headers=h, json={"ids": ids[:2]})
     assert r.status_code == 200, r.text
     assert set(r.json()["deleted"]) == set(ids[:2])
@@ -2230,7 +2230,7 @@ def test_base_config_scopes_follow_target_and_device_order(client):
     general = [s for s in scopes if s["kind"] == "general"]
     assert [s["label"] for s in general][:2] == ["Stash-macOS", "Stash-iOS"]
     device = [s for s in scopes if s["kind"] == "device"]
-    assert [s["label"] for s in device] == ["iPhone（设备专属）", "MacBook（设备专属）"]
+    assert [s["label"] for s in device] == ["iPhone（设备配置）", "MacBook（设备配置）"]
 
 
 def test_base_config_leaf_sources(client):
@@ -2252,7 +2252,7 @@ def test_base_config_leaf_sources(client):
     body = r.json()
     leaf = body["leaf_sources"]
     assert leaf["dns.nameserver"] == "通用配置"
-    assert leaf["mode"] == "内置默认"
+    assert leaf["mode"] == "系统默认"
 
 
 def test_portal_pin_is_four_digits(client):

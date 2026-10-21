@@ -113,7 +113,7 @@ def device_config(token: str, request: Request):
             problems = validate.validate_rendered(raw, target["engine"])
             if problems:
                 return Response(
-                    "设备专属配置导致产物校验失败：" + "；".join(problems),
+                    "设备配置导致产物校验失败：" + "；".join(problems),
                     status_code=500,
                 )
         text = render.substitute_feed(raw, feed_base)

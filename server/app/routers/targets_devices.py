@@ -34,7 +34,7 @@ class DeviceBody(BaseModel):
     target_id: int
     channel: str = "stable"
     note: str = Field(default="", max_length=256)
-    # 设备级个性化统一走「产物配置 → 设备专属」作用域，
+    # 设备级个性化统一走「产物配置 → 设备配置」作用域，
     # 这里的 extra_yaml 曾是另一条从未接通的通道（写了不生效），已移除。
 
 

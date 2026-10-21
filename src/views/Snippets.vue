@@ -2,8 +2,8 @@
   <div>
     <h2 class="mp-page-title">功能模块</h2>
     <p class="mp-page-desc">
-      脚本、复写、面板等 YAML 片段，按引擎在构建时合并进目标配置；
-      字典递归合并、列表追加、标量覆盖，目标扩展最后应用、优先级最高。
+      用于补充脚本、复写、面板等 YAML 片段，构建时按引擎合并至目标配置。
+      合并规则：字典递归合并、列表追加、标量覆盖；目标扩展最后生效，优先级最高。
     </p>
 
     <div class="mp-toolbar">
@@ -23,8 +23,8 @@
 
     <EmptyState
       v-if="!rows.length"
-      reason="还没有功能模块。"
-      next="点击“添加模块”，例如为 Stash 增加面板、为 Mihomo 追加 DNS 配置。"
+      reason="暂未添加任何功能模块。"
+      next="点击“添加模块”即可配置，例如为 Stash 增加面板，或为 Mihomo 追加 DNS 配置。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">

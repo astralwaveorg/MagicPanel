@@ -297,8 +297,8 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None) -> tu
 def render_target(snapshot: dict, target: dict, warnings: list | None = None) -> str:
     """渲染单个目标的完整配置文本。"""
     engine = target["engine"]
-    # ① 基础配置：内置默认 → 通用配置（引擎+平台）；设备专属在分发时叠加
-    layers = [("内置默认", base_config_service.default_doc(engine))]
+    # ① 基础配置：系统默认 → 通用配置（引擎+平台）；设备配置在分发时叠加
+    layers = [("系统默认", base_config_service.default_doc(engine))]
     platform = target.get("platform") or ""
     general_base = (snapshot.get("base") or {}).get(f"{engine}|{platform}")
     if general_base:

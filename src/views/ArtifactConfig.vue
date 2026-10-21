@@ -2,8 +2,8 @@
   <div class="mp-artifact">
     <h2 class="mp-page-title">产物配置</h2>
     <p class="mp-page-desc">
-      配置分三层：<strong>内置默认</strong>（程序内置，可直接改）→ <strong>通用配置</strong>（引擎 + 平台）→
-      <strong>设备专属</strong>（按设备）。
+      配置分三层：<strong>系统默认</strong>（随程序发布，可直接改）→ <strong>通用配置</strong> →
+      <strong>设备配置</strong>。
       越靠后优先级越高；每层只保存改动过的部分，其余自动继承上一层。
     </p>
 
@@ -19,7 +19,7 @@
           v-for="s in group.items"
           :key="scopeKey(s)"
           :value="scopeKey(s)"
-          :label="s.label"
+          :label="s.name || s.label"
         />
       </el-option-group>
     </el-select>
@@ -30,7 +30,7 @@
         <div v-for="group in scopeGroups" :key="group.kind" class="mp-scope-group">
           <div class="mp-scope-group-title">
             {{ group.title }}
-            <span class="mp-scope-group-hint">{{ group.hint }}</span>
+            <span v-if="group.hint" class="mp-scope-group-hint">{{ group.hint }}</span>
           </div>
           <button
             v-for="s in group.items" :key="scopeKey(s)"
@@ -38,7 +38,7 @@
             type="button" @click="select(s)"
           >
             <span class="mp-scope-dot" :class="{ on: s.customized }" />
-            <span class="mp-scope-name">{{ s.label }}</span>
+            <span class="mp-scope-name">{{ s.name || s.label }}</span>
             <span class="mp-scope-tag">{{ scopeTag(s) }}</span>
           </button>
         </div>
@@ -61,7 +61,7 @@
               </el-select>
               <el-button v-if="!readonly" @click="openSource">源码编辑</el-button>
               <el-button v-if="isBuiltin ? builtinOverridden : !readonly" @click="reset">
-                {{ isBuiltin ? '恢复默认' : '清除本层改动' }}
+                {{ isBuiltin ? '恢复默认' : '清除改动' }}
               </el-button>
               <el-button @click="preview">预览产物</el-button>
               <el-button v-if="!readonly" type="primary" :loading="saving" @click="save">
@@ -75,16 +75,16 @@
 
           <el-alert v-if="isBuiltin" type="warning" :closable="false" show-icon
                     style="margin-bottom:12px">
-            <strong>内置默认是所有配置的起点</strong>：改动会被该引擎下的通用配置和设备专属继承，
-            影响全部客户端。保存时只记录与默认值的差异，可随时「恢复默认」。
+            <strong>系统默认是全局基础配置</strong>：修改将影响全部客户端，
+            并被下层通用配置与设备配置继承。保存时仅记录改动项，支持随时「恢复默认」。
           </el-alert>
           <el-alert v-else-if="state && !state.overlay" type="info" :closable="false" show-icon
                     style="margin-bottom:12px">
-            本层没有改动，完全继承上层。保存时只记录差异部分。
+            当前层级暂无改动，完全继承上层。保存时仅记录改动项。
           </el-alert>
           <el-alert v-else type="success" :closable="false" show-icon
                     style="margin-bottom:12px">
-            本层已改动 {{ Object.keys(state.overlay || {}).length }} 个键，其余继承上层。
+            当前层级已改动 {{ Object.keys(state.overlay || {}).length }} 个键，其余继承上层。
           </el-alert>
 
           <!-- 生效配置：可点击编辑 -->
@@ -92,7 +92,7 @@
           <div class="mp-effective-toolbar">
             <el-button v-if="!readonly" size="small" @click="openAddParam">新增参数</el-button>
             <span class="mp-toolbar-hint">
-              点击「值」直接编辑；只影响当前作用域，保存时只记录差异。
+              点击「值」即可编辑。修改仅对当前层级生效，保存时仅记录改动项。
             </span>
           </div>
           <!-- 窄屏：表格会把"值"挤到屏幕外，改成卡片列表（键在上、值在下） -->
@@ -162,11 +162,11 @@
             </el-table-column>
           </el-table>
 
-          <!-- 本层改动：这一层改了哪些键 -->
+          <!-- 当前层级改动：这一层改了哪些键 -->
           <template v-if="!readonly">
-            <h3 class="mp-section-title">本层改动</h3>
+            <h3 class="mp-section-title">当前层级改动</h3>
             <div v-if="!overlayRows.length" class="mp-form-hint">
-              本层没有改动，全部继承上层。
+              当前层级暂无改动，全部继承上层配置。
             </div>
             <div v-else class="mp-overlay-list">
               <div v-for="row in overlayRows" :key="row.path" class="mp-overlay-item">
@@ -178,7 +178,7 @@
             </div>
           </template>
 
-          <!-- 本层编辑 -->
+          <!-- 当前层级编辑 -->
           <template v-if="!readonly">
             <h3 class="mp-section-title">编辑配置</h3>
             <el-form :model="doc" label-position="top">
@@ -215,7 +215,7 @@
               <el-form-item label="高级 YAML（其他顶层键）">
                 <el-input v-model="raw" type="textarea" :rows="10" class="mono" />
                 <div class="mp-form-hint">
-                  编辑的是最终生效值，保存时只把与上层不同的部分记到本层。
+                  编辑的是最终生效值，保存时只把与上层不同的部分记到当前层级。
                   字典逐层合并，列表整体替换。
                   不能包含 proxies / proxy-providers / proxy-groups / rule-providers / rules。
                 </div>
@@ -227,7 +227,7 @@
                              @change="applyPreset">
                     <el-option v-for="p in presets" :key="p.key" :value="p.key" :label="p.label" />
                   </el-select>
-                  <span class="mp-form-hint">套用后会覆盖本层对应的键。</span>
+                  <span class="mp-form-hint">套用后会覆盖当前层级对应的键。</span>
                 </div>
               </el-form-item>
             </el-form>
@@ -237,9 +237,9 @@
             <h3 class="mp-section-title">默认内容（可直接修改）</h3>
             <el-input v-model="raw" type="textarea" :rows="14" class="mono" />
             <div class="mp-form-hint">
-              这里是内置默认的完整内容。保存时只把
+              这里是系统默认的完整内容。保存时只把
               <strong>与默认值不同的部分</strong>记下来，其余保持原样；
-              改动会影响该引擎下所有通用配置与设备专属。点「恢复默认」即可还原。
+              改动会影响该引擎下所有通用配置与设备配置。点「恢复默认」即可还原。
             </div>
           </template>
         </div>
@@ -269,7 +269,7 @@
 
     <el-dialog v-model="sourceVisible" title="源码编辑" width="min(760px, 94vw)">
       <p class="mp-dialog-desc">
-        直接编辑本层的 YAML 源码，必须是合法 YAML，层级用缩进表达。
+        直接编辑当前层级的 YAML 源码，必须是合法 YAML，层级用缩进表达。
         应用后回到编辑器，确认无误再点「保存」；保存时仍会做键级校验
         （不能包含 proxies / proxy-providers / proxy-groups / rule-providers / rules）。
       </p>
@@ -340,9 +340,9 @@ const scopeGroups = computed(() => {
     byKind[s.kind].push(s)
   }
   return [
-    { kind: 'builtin', title: '内置默认', hint: '默认值·可改', items: byKind.builtin },
-    { kind: 'general', title: '通用配置', hint: '引擎 + 平台', items: byKind.general },
-    { kind: 'device', title: '设备专属', hint: '按设备', items: byKind.device },
+    { kind: 'builtin', title: '系统默认', hint: '支持修改', items: byKind.builtin },
+    { kind: 'general', title: '通用配置', hint: '', items: byKind.general },
+    { kind: 'device', title: '设备配置', hint: '', items: byKind.device },
   ].filter((g) => g.items.length)
 })
 
@@ -371,33 +371,33 @@ function applySource() {
   ElMessage.success('已应用到编辑器，点「保存」生效')
 }
 
-// 内置默认是整条链路最底层，改动前必须明确告知影响范围
+// 系统默认是整条链路最底层，改动前必须明确告知影响范围
 async function confirmBuiltinChange() {
   return confirmBox(
-    '内置默认是所有配置的起点：这里的改动会被该引擎下所有「通用配置」和'
-    + '「设备专属」继承，影响全部客户端。确定要修改吗？',
-    '修改内置默认',
+    '系统默认是全局基础配置：修改将影响全部客户端，'
+    + '并被下层通用配置与设备配置继承。确定要修改吗？',
+    '修改系统默认',
     { type: 'warning', confirmButtonText: '继续修改' })
 }
 
-// 内置默认也可改：改的是"默认值之上的差异"，可一键恢复默认
+// 系统默认也可改：改的是"默认值之上的差异"，可一键恢复默认
 const readonly = computed(() => false)
 const isBuiltin = computed(() => current.value?.kind === 'builtin')
 const builtinOverridden = computed(() =>
   isBuiltin.value && Object.keys(state.value?.overlay || {}).length > 0)
 const layerLabel = computed(() => {
   if (!current.value) return ''
-  if (current.value.kind === 'builtin') return '内置默认'
+  if (current.value.kind === 'builtin') return '系统默认'
   if (current.value.kind === 'general') return '通用配置'
-  return '设备专属'
+  return '设备配置'
 })
 
 const currentHint = computed(() => {
   if (!current.value) return ''
   const s = current.value
-  if (s.kind === 'builtin') return '程序内置默认值，是该引擎全部配置的起点'
-  if (s.kind === 'general') return '覆盖内置默认，作用于该引擎与平台的全部设备'
-  return `覆盖通用配置，只影响这台设备（${s.detail}）`
+  if (s.kind === 'builtin') return '系统默认内容，是该引擎全部配置的起点'
+  if (s.kind === 'general') return '覆盖系统默认，作用于该引擎与平台的全部设备'
+  return `覆盖通用配置，仅对当前设备生效（${s.detail}）`
 })
 
 // 生效配置展开成"点号路径"的扁平行：字典行是分组标题，叶子行可编辑。
@@ -421,12 +421,12 @@ const effectiveRows = computed(() => {
     ...row,
     simple: row.value === null || typeof row.value !== 'object',
     display: row.isDict ? `{ ${Object.keys(row.value).length} 项 }` : formatValue(row.value),
-    source: leafSrc[row.path] || topSrc[row.key] || '内置默认',
+    source: leafSrc[row.path] || topSrc[row.key] || '系统默认',
     overridden: isOverridden(row.path),
   }))
 })
 
-// 本层覆盖：这一层实际改掉的键（存下来的差异）
+// 当前层级覆盖：这一层实际改掉的键（存下来的差异）
 const overlayRows = computed(() => {
   const ov = state.value?.overlay || {}
   return flattenDoc(ov).map((row) => ({
@@ -708,17 +708,17 @@ async function reset() {
   if (!current.value) return
   if (isBuiltin.value) {
     const ok = await confirmBox(
-      '恢复默认会丢弃对内置默认的所有修改，回到程序内置内容。确定继续？',
+      '恢复默认会丢弃对系统默认的所有修改，回到随程序发布的默认内容。确定继续？',
       '恢复默认', { type: 'warning', confirmButtonText: '恢复默认' })
     if (!ok) return
-  } else if (!await confirmBox('清空本层改动，恢复继承上层？', '清除本层改动',
+  } else if (!await confirmBox('清空当前层改动，恢复继承上层？', '清除改动',
                         { type: 'warning' })) return
   try {
     const r = await api(`/api/v1/base-config/reset?${scopeQuery()}`, { method: 'POST' })
     state.value = r
     const kept = Object.keys(r.overlay || {}).length
     if (isBuiltin.value) {
-      ElMessage.success('已恢复为程序默认内容')
+      ElMessage.success('已恢复为系统默认内容')
     } else {
       ElMessage.success(kept
         ? `已恢复继承上层（保留个人直连域名与 Fake-IP 过滤 ${kept} 项）`

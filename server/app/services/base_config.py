@@ -1,9 +1,9 @@
 """产物基础配置：多级联动的顶层键文档。
 
 层级（后者覆盖前者）：
-① 内置默认：随程序发布的默认内容（按引擎），可直接改；
+① 系统默认：随程序发布的默认内容（按引擎），可直接改；
 ② 通用配置：按「引擎 + 平台」维护（与"引擎平台"一一对应，如 Stash · macOS）；
-③ 设备专属：按设备维护，只对该设备的最终配置生效。
+③ 设备配置：按设备维护，只对该设备的最终配置生效。
 
 每层只存"与上层不同"的差异（overlay），因此上层默认值变化时，
 没有被显式改过的键会自动跟随；"恢复默认"= 清空本层差异。
@@ -31,15 +31,15 @@ PROTECTED_KEYS = {
     "rules": "分流规则由“分流规则”页维护",
 }
 
-# 设备专属作用域额外禁止的键：控制面相关。
+# 设备配置作用域额外禁止的键：控制面相关。
 # 设备层只用于"这台设备的个性化"，写上对外控制端口等于
 # 把管理接口暴露到局域网，客户端侧也没有对应的鉴权配置。
 DEVICE_FORBIDDEN_KEYS = {
-    "external-controller": "设备专属配置不能开启对外控制端口",
-    "external-ui": "设备专属配置不能指定外部控制器界面",
-    "secret": "设备专属配置不能设置控制端口密钥",
-    "listeners": "设备专属配置不能新增监听器",
-    "tun": "设备专属配置不能开启 TUN",
+    "external-controller": "设备配置不能开启对外控制端口",
+    "external-ui": "设备配置不能指定外部控制器界面",
+    "secret": "设备配置不能设置控制端口密钥",
+    "listeners": "设备配置不能新增监听器",
+    "tun": "设备配置不能开启 TUN",
 }
 
 # 产物中固定出现的顶层键（顺序固定，保证产物排版稳定）
@@ -151,7 +151,7 @@ def diff_overlay(base: dict, effective: dict) -> dict:
 def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
     """按层级顺序合并，返回 (生效文档, 每个键的来源层级)。
 
-    layers 形如 [("内置默认", {...}), ("通用配置", {...}), ("设备专属", {...})]，
+    layers 形如 [("系统默认", {...}), ("通用配置", {...}), ("设备配置", {...})]，
     来源记录到最后一次改写该键的层（顶层键粒度），便于界面展示"这个值来自哪一层"。
     """
     effective: dict = {}
@@ -171,7 +171,7 @@ def leaf_sources(layers: list[tuple[str, dict]]) -> dict[str, str]:
     """每个叶子路径的来源层级（点号路径，如 "dns.nameserver"）。
 
     顶层来源不足以说明"dns 里的 nameserver 来自哪一层"——通用配置改了
-    dns.nameserver、内置默认改了 dns.enable，两者来源不同。界面按叶子
+    dns.nameserver、系统默认改了 dns.enable，两者来源不同。界面按叶子
     展示来源，这里给出对应的点号路径映射。
     """
     sources: dict[str, str] = {}
@@ -191,13 +191,13 @@ def leaf_sources(layers: list[tuple[str, dict]]) -> dict[str, str]:
 
 def scope_layers(engine: str, platform: str = "", device_id: int = 0,
                  docs: dict | None = None) -> list[tuple[str, dict]]:
-    """按作用域取出各层文档（从低到高：内置默认 → 通用配置 → 设备专属）。
+    """按作用域取出各层文档（从低到高：系统默认 → 通用配置 → 设备配置）。
 
     返回的列表**包含当前作用域自己那一层**，因此：
     - layers[:-1] 是当前层的"继承值"（上层合并结果）；
     - layers 是完整链路，合并结果即"生效值"。
 
-    内置默认本身也可以被覆盖：用户改的是"默认值之上的差异"，
+    系统默认本身也可以被覆盖：用户改的是"默认值之上的差异"，
     差异存在 (engine, "", 0) 这条记录里；不覆盖时就是源码里的默认值，
     随时可以删掉这条记录恢复默认。
     """
@@ -207,13 +207,13 @@ def scope_layers(engine: str, platform: str = "", device_id: int = 0,
     override = docs.get((engine, "", 0))
     if override:
         base = merge_docs(base, override)
-    layers: list[tuple[str, dict]] = [("内置默认", base)]
+    layers: list[tuple[str, dict]] = [("系统默认", base)]
     if platform:
         # 当前作用域自己那一层始终参与（没有覆盖时为空层），
         # 这样 layers[:-1] 才是"继承自上层的值"。
         layers.append(("通用配置", deepcopy(docs.get((engine, platform, 0)) or {})))
     if device_id:
-        layers.append(("设备专属", deepcopy(docs.get((engine, platform, int(device_id))) or {})))
+        layers.append(("设备配置", deepcopy(docs.get((engine, platform, int(device_id))) or {})))
     return layers
 
 

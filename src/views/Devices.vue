@@ -93,7 +93,7 @@
       <el-form :model="form" label-position="top">
         <el-form-item label="文件名">
           <el-input v-model="form.name" placeholder="例如：Stash-Macmini" />
-          <div class="mp-form-hint">下载得到的文件名为“输入值.yaml”，同时用于区分设备，需唯一。</div>
+          <div class="mp-form-hint">将作为下载配置的文件名（.yaml），并作为设备的唯一标识，请勿重复。</div>
         </el-form-item>
         <el-form-item label="引擎平台">
           <el-select v-model="form.target_id" style="width:100%" @change="onTargetChange">
@@ -101,23 +101,23 @@
                        :label="`${t.name}（${ENGINE_LABELS[t.engine] || t.engine} / ${PLATFORM_LABELS[t.platform] || t.platform}）`" />
           </el-select>
           <div class="mp-form-hint">
-            设备平台由所选引擎平台决定（当前：{{ PLATFORM_LABELS[form.platform] || form.platform }}）。
+            设备平台由所选引擎自动决定（当前：{{ PLATFORM_LABELS[form.platform] || form.platform }}）。
           </div>
         </el-form-item>
         <el-form-item label="更新通道">
           <el-radio-group v-model="form.channel">
             <el-radio value="stable">稳定（跟随正式发布）</el-radio>
-            <el-radio value="candidate">候选（提前试用新构建）</el-radio>
+            <el-radio value="candidate">候选（提前试用）</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="设备名">
           <el-input v-model="form.note" placeholder="例如：客厅 Mac mini" />
-          <div class="mp-form-hint">用于后台与门户展示；留空时显示文件名。</div>
+          <div class="mp-form-hint">用于界面展示；留空时默认使用文件名。</div>
         </el-form-item>
-        <el-form-item label="设备专属配置">
+        <el-form-item label="设备配置">
           <div class="mp-form-hint">
-            这台设备的个性化（端口、DNS、日志等）请到「产物配置 → 设备专属」里改，
-            那里能看到内置默认 → 通用配置 → 设备专属的逐层来源。
+            端口、DNS、日志等个性化配置，请前往「产物配置 → 设备配置」修改。
+            该页面可查看配置的逐层继承来源。
           </div>
         </el-form-item>
       </el-form>
@@ -314,7 +314,7 @@ async function removeSelected() {
   if (!selected.value.length) return
   const ids = selected.value.map((r) => r.id)
   const ok = await confirmBox(
-    `删除选中的 ${ids.length} 台设备？订阅地址会立即失效，设备专属配置一并删除。`,
+    `删除选中的 ${ids.length} 台设备？订阅地址会立即失效，设备配置一并删除。`,
     '批量删除设备', { type: 'warning', confirmButtonText: '删除' })
   if (!ok) return
   try {
