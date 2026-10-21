@@ -64,6 +64,17 @@
     <el-dialog v-model="dialog" :title="editing ? '编辑模块' : '添加模块'"
                width="min(640px, 94vw)">
       <el-form :model="form" label-position="top">
+        <el-form-item label="常用预设（选好后点“填入”，内容可继续修改）">
+          <div style="display:flex;gap:8px;width:100%">
+            <el-select v-model="presetKey" placeholder="选择一个预设" style="flex:1" filterable>
+              <el-option-group v-for="(items, cat) in PRESETS_BY_CATEGORY" :key="cat"
+                               :label="CATEGORY_LABELS[cat] || cat">
+                <el-option v-for="p in items" :key="p.key" :label="p.name" :value="p.key" />
+              </el-option-group>
+            </el-select>
+            <el-button :disabled="!presetKey" @click="applyPreset">填入</el-button>
+          </div>
+        </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="名称">
@@ -128,6 +139,7 @@ import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import { fmtTime } from '../format'
+import { PRESETS_BY_CATEGORY, SNIPPET_PRESETS } from '../snippetPresets'
 
 const CATEGORY_LABELS = {
   script: '脚本', rewrite: '复写', panel: '面板', dns: 'DNS', general: '通用',
@@ -145,6 +157,7 @@ const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const categoryFilter = ref('')
+const presetKey = ref('')
 const previewDialog = ref(false)
 const previewContent = ref('')
 const previewName = ref('')
@@ -154,6 +167,18 @@ const emptyForm = () => ({
   enabled: true, sort: 0, note: '',
 })
 const form = reactive(emptyForm())
+
+function applyPreset() {
+  const preset = SNIPPET_PRESETS.find((p) => p.key === presetKey.value)
+  if (!preset) return
+  form.name = preset.name
+  form.category = preset.category
+  form.engine = preset.engine
+  form.content = preset.content
+  form.note = preset.note || ''
+  form.enabled = preset.enabled !== false
+  ElMessage.success('已填入预设，可继续修改后保存')
+}
 
 const filtered = computed(() =>
   categoryFilter.value
@@ -183,6 +208,7 @@ async function load() {
 onMounted(load)
 
 function openEdit(row) {
+  presetKey.value = ''
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     name: row.name, category: row.category, engine: row.engine,

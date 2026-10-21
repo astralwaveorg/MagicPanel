@@ -33,6 +33,22 @@ def test_snippet_crud_validation(client):
     assert client.get("/api/v1/snippets", headers=h).json() == []
 
 
+def test_snippet_paged_list(client):
+    """分页列表要能正常返回（曾经缺 _public，整页 500）。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    client.post("/api/v1/snippets", headers=h, json={
+        "name": "首页面板", "category": "panel", "engine": "stash",
+        "content": "tiles:\n  - name: t1\n    title: '示例'\n"})
+
+    r = client.get("/api/v1/snippets/page?limit=50&offset=0", headers=h)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["total"] == 1
+    assert data["items"][0]["name"] == "首页面板"
+    assert data["items"][0]["enabled"] is True
+
+
 def test_snippet_merge_into_build(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)

@@ -47,6 +47,13 @@ def _check(body: SnippetBody) -> None:
             raise HTTPException(400, f"功能模块不能包含“{key}”：{reason}")
 
 
+def _public(row) -> dict:
+    """对外字段：布尔值还原成 True/False，其余按原样。"""
+    data = db.row_to_dict(row)
+    data["enabled"] = bool(data.get("enabled"))
+    return data
+
+
 def _get(conn, sid: int):
     row = db.one(conn, "SELECT * FROM snippets WHERE id=?", (sid,))
     if not row:
@@ -72,7 +79,7 @@ def list_snippets_paged(limit: int = 50, offset: int = 0, keyword: str = "",
 def list_snippets(user=CurrentUser):
     with db.connect() as conn:
         rows = db.all_(conn, "SELECT * FROM snippets ORDER BY sort, id")
-    return [db.row_to_dict(r) for r in rows]
+    return [_public(r) for r in rows]
 
 
 @router.post("", status_code=201)
@@ -91,7 +98,7 @@ def create_snippet(body: SnippetBody, user=CurrentUser):
         security.audit(conn, user["username"], "新增功能模块", "snippet",
                        cur.lastrowid, {"name": body.name, "category": body.category})
         row = _get(conn, cur.lastrowid)
-    return db.row_to_dict(row)
+    return _public(row)
 
 
 @router.put("/{sid}")

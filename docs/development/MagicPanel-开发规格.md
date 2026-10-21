@@ -48,7 +48,7 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 | base_configs（产物基础配置） | YAML 文档，定义产物的顶层全局键（端口、模式、日志、IPv6、profile、DNS 及任意自定义键）；按 `engine` + `platform` + `device_id` 存放，构成**三层联动**：系统默认（程序内置，可改）→ 通用配置（按「引擎 + 平台」，与引擎平台一一对应）→ 设备配置（按设备）；每层只存与上层不同的差异；引擎与平台两级随构建快照固化，设备级在分发时叠加 |
 | proxy_groups（策略组） | select / url-test / fallback；成员引用、节点来源、本地单节点 ID、过滤正则、测速参数 |
 | rules（分流规则） | 有序、首条匹配；RULE-SET 引用规则来源；MATCH 兜底 |
-| snippets（功能模块） | 脚本 / 复写 / 面板 / DNS / 通用五类 YAML 片段，按适用引擎（stash / mihomo / all）在构建时合并 |
+| snippets（功能模块） | 脚本 / 复写 / 面板 / DNS / 通用五类 YAML 片段，按适用引擎（stash / mihomo / all）在构建时合并；前端内置 17 条常用预设（`src/snippetPresets.js`），「添加模块」里选预设一键填入 |
 | targets（引擎平台） | 一个引擎平台 = 引擎（Stash / Mihomo）+ 平台（iOS / macOS / tvOS / Windows / Android / Linux），对应一类客户端；`name` 建议写成「引擎-平台」（如 `Stash-macOS`）；另含平台扩展 YAML（顶层整键覆盖）；`sort` 控制界面展示顺序 |
 | devices（设备） | `name` 是下载配置文件名（唯一，写入 `Content-Disposition`）；`note` 是用户可读的设备名，后台与门户优先展示，留空回退文件名；绑定引擎平台与**订阅环境**（`env` = production / testing）；令牌存 SHA-256 摘要、前 10 位指纹与 Fernet 加密副本（`token_enc`，用于后台与门户重新展示地址） |
 | builds（构建） | 不可变策略快照 + 逐目标校验结果（`verify_status` = building / success / failed）；产物落盘 `data/builds/<id>/<目标>.yaml`；`status` 只存生命周期状态（BUILT / TESTING / PRODUCTION / OFFLINE）；只有从未发布过的 `BUILT` 构建可删除，删除时一并清理产物与发布历史 |
