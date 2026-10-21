@@ -2,10 +2,9 @@
   <div class="mp-artifact">
     <h2 class="mp-page-title">产物配置</h2>
     <p class="mp-page-desc">
-      配置按层级生效：<strong>内置默认</strong>（出厂值，可直接改）→ <strong>通用配置</strong>（按引擎 + 平台）→
+      配置分三层：<strong>内置默认</strong>（程序内置，可直接改）→ <strong>通用配置</strong>（引擎 + 平台）→
       <strong>设备专属</strong>（按设备）。
-      合并规则是<b>键级并集</b>：同一个键以下层为准，字典逐层递归合并、列表整体替换；
-      每一层只保存"与上层不同"的差异，没改过的键会跟随上层。
+      越靠后优先级越高；每层只保存改动过的部分，其余自动继承上一层。
     </p>
 
     <!-- 手机：作用域改用下拉选择，左侧长列表在窄屏太占版面 -->
@@ -62,7 +61,7 @@
               </el-select>
               <el-button v-if="!readonly" @click="openSource">源码编辑</el-button>
               <el-button v-if="isBuiltin ? builtinOverridden : !readonly" @click="reset">
-                {{ isBuiltin ? '恢复出厂' : '恢复本层' }}
+                {{ isBuiltin ? '恢复默认' : '清除本层改动' }}
               </el-button>
               <el-button @click="preview">预览产物</el-button>
               <el-button v-if="!readonly" type="primary" :loading="saving" @click="save">
@@ -76,17 +75,16 @@
 
           <el-alert v-if="isBuiltin" type="warning" :closable="false" show-icon
                     style="margin-bottom:12px">
-            <strong>内置默认是整条链路的最底层</strong>：这里改的是所有配置项的出厂值，
-            通用配置与设备专属都会继承它。改动会以"与出厂值的差异"单独保存，
-            随时可以「恢复出厂」一键还原。改之前请确认你清楚影响范围。
+            <strong>内置默认是所有配置的起点</strong>：改动会被该引擎下的通用配置和设备专属继承，
+            影响全部客户端。保存时只记录与默认值的差异，可随时「恢复默认」。
           </el-alert>
           <el-alert v-else-if="state && !state.overlay" type="info" :closable="false" show-icon
                     style="margin-bottom:12px">
-            本层尚未做任何覆盖，当前完全继承上层。改动后会只保存差异部分。
+            本层没有改动，完全继承上层。保存时只记录差异部分。
           </el-alert>
           <el-alert v-else type="success" :closable="false" show-icon
                     style="margin-bottom:12px">
-            本层已覆盖 {{ Object.keys(state.overlay || {}).length }} 个键，其余继承上层。
+            本层已改动 {{ Object.keys(state.overlay || {}).length }} 个键，其余继承上层。
           </el-alert>
 
           <!-- 生效配置：可点击编辑 -->
@@ -94,7 +92,7 @@
           <div class="mp-effective-toolbar">
             <el-button v-if="!readonly" size="small" @click="openAddParam">新增参数</el-button>
             <span class="mp-toolbar-hint">
-              点击"值"即可就地编辑；改动只影响当前作用域，保存时自动只记录与上层不同的部分。
+              点击「值」直接编辑；只影响当前作用域，保存时只记录差异。
             </span>
           </div>
           <!-- 窄屏：表格会把"值"挤到屏幕外，改成卡片列表（键在上、值在下） -->
@@ -164,11 +162,11 @@
             </el-table-column>
           </el-table>
 
-          <!-- 本层覆盖：这一层改掉了哪些键 -->
+          <!-- 本层改动：这一层改了哪些键 -->
           <template v-if="!readonly">
-            <h3 class="mp-section-title">本层覆盖</h3>
+            <h3 class="mp-section-title">本层改动</h3>
             <div v-if="!overlayRows.length" class="mp-form-hint">
-              本层没有覆盖任何键，全部继承上层。
+              本层没有改动，全部继承上层。
             </div>
             <div v-else class="mp-overlay-list">
               <div v-for="row in overlayRows" :key="row.path" class="mp-overlay-item">
@@ -182,7 +180,7 @@
 
           <!-- 本层编辑 -->
           <template v-if="!readonly">
-            <h3 class="mp-section-title">本层修改</h3>
+            <h3 class="mp-section-title">编辑配置</h3>
             <el-form :model="doc" label-position="top">
               <template v-for="group in groupOrder" :key="group">
                 <div v-if="fieldsOf(group).length" style="margin-bottom:16px">
@@ -214,11 +212,11 @@
                 </div>
               </template>
 
-              <el-form-item label="高级 YAML（其余任意顶层键）">
+              <el-form-item label="高级 YAML（其他顶层键）">
                 <el-input v-model="raw" type="textarea" :rows="10" class="mono" />
                 <div class="mp-form-hint">
-                  编辑的是"生效值"，保存时服务端只把与上层不同的部分记到本层。
-                  合并为键级并集：同键以下层为准，字典递归合并、列表整体替换。
+                  编辑的是最终生效值，保存时只把与上层不同的部分记到本层。
+                  字典逐层合并，列表整体替换。
                   不能包含 proxies / proxy-providers / proxy-groups / rule-providers / rules。
                 </div>
               </el-form-item>
@@ -229,19 +227,19 @@
                              @change="applyPreset">
                     <el-option v-for="p in presets" :key="p.key" :value="p.key" :label="p.label" />
                   </el-select>
-                  <span class="mp-form-hint">预设是官方推荐的整份配置，套用后本层会覆盖对应键。</span>
+                  <span class="mp-form-hint">套用后会覆盖本层对应的键。</span>
                 </div>
               </el-form-item>
             </el-form>
           </template>
 
           <template v-else>
-            <h3 class="mp-section-title">出厂内容（可直接修改）</h3>
+            <h3 class="mp-section-title">默认内容（可直接修改）</h3>
             <el-input v-model="raw" type="textarea" :rows="14" class="mono" />
             <div class="mp-form-hint">
-              这里是内置默认的完整出厂配置。保存时服务端只把
-              <strong>与源码出厂值不同的部分</strong>记下来，其余保持出厂原样；
-              改动会影响该引擎下所有通用配置与设备专属配置。点「恢复出厂」即可还原。
+              这里是内置默认的完整内容。保存时只把
+              <strong>与默认值不同的部分</strong>记下来，其余保持原样；
+              改动会影响该引擎下所有通用配置与设备专属。点「恢复默认」即可还原。
             </div>
           </template>
         </div>
@@ -250,10 +248,9 @@
 
     <el-dialog v-model="addDialog" title="新增参数" width="min(560px, 94vw)">
       <p class="mp-dialog-desc">
-        在配置的任意节点下新增一个参数。路径用点号分隔（<span class="mono">dns.nameserver</span>
-        表示 dns 下的 nameserver），顶层参数直接写名字（<span class="mono">sniffer</span>）。
-        值按 YAML 解析：<span class="mono">true</span>、<span class="mono">123</span>、
-        <span class="mono">["1.1.1.1","8.8.8.8"]</span> 或一段 YAML 映射。
+        在任意节点下新增参数。路径用点号分隔，如 <span class="mono">dns.nameserver</span>；
+        顶层参数直接写名字。值按 YAML 解析：<span class="mono">true</span>、<span class="mono">123</span>、
+        <span class="mono">["1.1.1.1","8.8.8.8"]</span> 或一段映射。
       </p>
       <el-form :model="addForm" label-position="top">
         <el-form-item label="参数路径">
@@ -272,8 +269,8 @@
 
     <el-dialog v-model="sourceVisible" title="源码编辑" width="min(760px, 94vw)">
       <p class="mp-dialog-desc">
-        直接编辑本层的 YAML 源码。语法必须是合法 YAML；键的层级用缩进表达。
-        应用后会回到编辑器，确认无误再点「保存」；保存时仍会做键级校验
+        直接编辑本层的 YAML 源码，必须是合法 YAML，层级用缩进表达。
+        应用后回到编辑器，确认无误再点「保存」；保存时仍会做键级校验
         （不能包含 proxies / proxy-providers / proxy-groups / rule-providers / rules）。
       </p>
       <el-input v-model="sourceText" type="textarea" :rows="20" class="mono" />
@@ -343,8 +340,8 @@ const scopeGroups = computed(() => {
     byKind[s.kind].push(s)
   }
   return [
-    { kind: 'builtin', title: '内置默认', hint: '出厂值·可改', items: byKind.builtin },
-    { kind: 'general', title: '通用配置', hint: '按引擎 + 平台', items: byKind.general },
+    { kind: 'builtin', title: '内置默认', hint: '默认值·可改', items: byKind.builtin },
+    { kind: 'general', title: '通用配置', hint: '引擎 + 平台', items: byKind.general },
     { kind: 'device', title: '设备专属', hint: '按设备', items: byKind.device },
   ].filter((g) => g.items.length)
 })
@@ -377,13 +374,13 @@ function applySource() {
 // 内置默认是整条链路最底层，改动前必须明确告知影响范围
 async function confirmBuiltinChange() {
   return confirmBox(
-    '内置默认是配置链路的最底层：这里的改动会被该引擎下所有「通用配置」和'
-    + '「设备专属」继承，影响面是全部客户端。确定要修改吗？',
-    '确认修改内置默认',
-    { type: 'warning', confirmButtonText: '我已了解，继续修改' })
+    '内置默认是所有配置的起点：这里的改动会被该引擎下所有「通用配置」和'
+    + '「设备专属」继承，影响全部客户端。确定要修改吗？',
+    '修改内置默认',
+    { type: 'warning', confirmButtonText: '继续修改' })
 }
 
-// 内置默认现在也可以改：改的是"出厂值之上的差异"，可一键恢复出厂
+// 内置默认也可改：改的是"默认值之上的差异"，可一键恢复默认
 const readonly = computed(() => false)
 const isBuiltin = computed(() => current.value?.kind === 'builtin')
 const builtinOverridden = computed(() =>
@@ -398,7 +395,7 @@ const layerLabel = computed(() => {
 const currentHint = computed(() => {
   if (!current.value) return ''
   const s = current.value
-  if (s.kind === 'builtin') return '程序出厂配置，作为该引擎全部配置的起点'
+  if (s.kind === 'builtin') return '程序内置默认值，是该引擎全部配置的起点'
   if (s.kind === 'general') return '覆盖内置默认，作用于该引擎与平台的全部设备'
   return `覆盖通用配置，只影响这台设备（${s.detail}）`
 })
@@ -507,7 +504,7 @@ function coerceScalar(text) {
 function revertKey(row) {
   deletePath(doc, row.path)
   syncRaw()
-  ElMessage.success(`已把 ${row.path} 恢复为继承上层，保存后生效`)
+  ElMessage.success(`已恢复 ${row.path} 继承上层，保存后生效`)
 }
 
 function openAddParam() {
@@ -545,7 +542,7 @@ function scopeKey(s) {
 }
 
 function scopeTag(s) {
-  if (s.kind === 'builtin') return '只读'
+  if (s.kind === 'builtin') return '默认'
   if (s.kind === 'general') return '通用'
   return '设备'
 }
@@ -711,18 +708,22 @@ async function reset() {
   if (!current.value) return
   if (isBuiltin.value) {
     const ok = await confirmBox(
-      '恢复出厂会丢弃对内置默认的所有修改，出厂值回到源码里的原始内容。确定继续？',
-      '恢复出厂', { type: 'warning', confirmButtonText: '恢复出厂' })
+      '恢复默认会丢弃对内置默认的所有修改，回到程序内置内容。确定继续？',
+      '恢复默认', { type: 'warning', confirmButtonText: '恢复默认' })
     if (!ok) return
-  } else if (!await confirmBox('清空本层覆盖，回到继承上层？', '恢复本层',
+  } else if (!await confirmBox('清空本层改动，恢复继承上层？', '清除本层改动',
                         { type: 'warning' })) return
   try {
     const r = await api(`/api/v1/base-config/reset?${scopeQuery()}`, { method: 'POST' })
     state.value = r
     const kept = Object.keys(r.overlay || {}).length
-    ElMessage.success(kept
-      ? `已恢复为继承上层（保留个人直连域名与 Fake-IP 过滤 ${kept} 项）`
-      : '已恢复为继承上层')
+    if (isBuiltin.value) {
+      ElMessage.success('已恢复为程序默认内容')
+    } else {
+      ElMessage.success(kept
+        ? `已恢复继承上层（保留个人直连域名与 Fake-IP 过滤 ${kept} 项）`
+        : '已恢复继承上层')
+    }
     Object.keys(doc).forEach((key) => delete doc[key])
     Object.assign(doc, r.effective || {})
     raw.value = r.content || ''

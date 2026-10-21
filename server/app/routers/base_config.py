@@ -1,7 +1,7 @@
 """产物基础配置：内置默认 → 通用配置 → 目标通用 → 设备专属 的多级联动。
 
 层级语义（后者覆盖前者）：
-① 内置默认：随程序发布，只读可见（按引擎）；
+① 内置默认：随程序发布的默认内容（按引擎），可直接改；
 ② 通用配置：按「引擎 + 平台」维护，与"引擎平台"一一对应（如 Stash · macOS）；
 ③ 设备专属：按设备维护，只对该设备最终下发的配置生效。
 
@@ -57,8 +57,8 @@ def _check_scope(conn, engine: str, platform: str, device_id: int,
                  for_write: bool = False) -> tuple[str, int]:
     """校验作用域：平台与设备必须存在且与引擎一致。
 
-    不带平台也不带设备时表示"内置默认"——可以写入：改的是"出厂值之上的差异"，
-    差异单独存着，随时能删掉恢复出厂。
+    不带平台也不带设备时表示"内置默认"——可以写入：改的是"默认值之上的差异"，
+    差异单独存着，随时能删掉恢复默认。
     """
     plat = platform
     if not device_id and not platform:
@@ -155,7 +155,7 @@ def list_scopes(user=CurrentUser):
         scopes.append({
             "kind": "builtin", "engine": engine, "platform": "", "device_id": 0,
             "label": f"{ENGINE_LABELS.get(engine, engine)} 内置",
-            "detail": "出厂值（源码内置）；可直接修改，改动以差异形式保存，可一键恢复出厂",
+            "detail": "默认值（源码内置）；可直接修改，改动以差异保存，可一键恢复默认",
             "customized": bool(docs.get((engine, "", 0))),
         })
     # 通用配置：按「引擎 + 平台」，与引擎平台一一对应
@@ -215,7 +215,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         "engine": engine,
         "platform": plat,
         "device_id": dev_id,
-        "readonly": False,   # 内置默认也可改（存的是与出厂值的差异）
+        "readonly": False,   # 内置默认也可改（存的是与默认值的差异）
         "inherited": inherited,
         "overlay": overlay,
         "effective": effective,
@@ -246,7 +246,7 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
         if not plat and not dev_id:
-            # 内置默认：与"源码出厂值"求差异，只把改动过的键存下来
+            # 内置默认：与"程序默认值"求差异，只把改动过的键存下来
             inherited = base_config_service.default_doc(engine)
         else:
             inherited, _ = (base_config_service.cascade(layers[:-1])
@@ -284,7 +284,7 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
         plat, dev_id = _check_scope(conn, engine, platform, device_id, for_write=True)
         _, overlay, _ = _load_scope(conn, engine, plat, dev_id)
         if not plat and not dev_id:
-            # 内置默认：删掉覆盖记录即恢复出厂（出厂值来自源码，不需要保留任何键）
+            # 内置默认：删掉覆盖记录即恢复默认（默认值来自源码，不需要保留任何键）
             conn.execute(
                 "DELETE FROM base_configs WHERE engine=? AND platform='' AND device_id=0",
                 (engine,))
@@ -292,7 +292,7 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
             docs = _all_docs(conn)
             layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
             effective, sources = base_config_service.cascade(layers)
-            security.audit(conn, user["username"], "恢复内置默认（出厂值）",
+            security.audit(conn, user["username"], "恢复内置默认",
                            "base_config", f"{engine}:内置", {})
             return {
                 "ok": True, "engine": engine, "platform": plat, "device_id": dev_id,

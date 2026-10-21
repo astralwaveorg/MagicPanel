@@ -1,4 +1,4 @@
-"""内置默认（出厂值）可覆盖、可恢复出厂的回归测试。"""
+"""内置默认（默认值）可覆盖、可恢复默认的回归测试。"""
 import yaml
 
 from conftest import auth_headers, setup_admin
@@ -12,14 +12,14 @@ def test_builtin_default_is_editable_and_resettable(client):
     csrf = setup_admin(client)
     hdr = auth_headers(csrf)
 
-    # 出厂值可读
+    # 默认值可读
     resp = client.get("/api/v1/base-config?engine=stash")
     assert resp.status_code == 200
     data = resp.json()
     assert data["readonly"] is False
     origin_mode = data["effective"]["mode"]
 
-    # 改一个键 → 只把与出厂值的差异记下来
+    # 改一个键 → 只把与默认值的差异记下来
     doc = dict(data["effective"])
     doc["mode"] = "global" if origin_mode != "global" else "rule"
     resp = client.put("/api/v1/base-config?engine=stash",
@@ -28,10 +28,10 @@ def test_builtin_default_is_editable_and_resettable(client):
     assert resp.status_code == 200, resp.text
     saved = resp.json()
     assert saved["overlay"].get("mode") == doc["mode"]
-    assert len(saved["overlay"]) == 1, "只应保存与出厂值不同的差异"
+    assert len(saved["overlay"]) == 1, "只应保存与默认值不同的差异"
     assert saved["effective"]["mode"] == doc["mode"]
 
-    # 通用配置继承新的出厂值
+    # 通用配置继承新的默认值
     resp = client.get("/api/v1/base-config?engine=stash&platform=ios")
     assert resp.status_code == 200
     assert resp.json()["effective"]["mode"] == doc["mode"]
@@ -43,7 +43,7 @@ def test_builtin_default_is_editable_and_resettable(client):
     assert builtins["stash"]["customized"] is True
     assert builtins["mihomo"]["customized"] is False
 
-    # 恢复出厂 → 覆盖记录清空，出厂值回到源码内容
+    # 恢复默认 → 覆盖记录清空，默认值回到源码内容
     resp = client.post("/api/v1/base-config/reset?engine=stash", headers=hdr)
     assert resp.status_code == 200
     assert resp.json()["overlay"] == {}
