@@ -74,7 +74,7 @@ SETTINGS_DEFAULTS = {
     "auto_build_enabled": "1",
     "auto_build_interval_hours": "1",
     "auto_publish_enabled": "1",
-    "auto_publish_channel": "stable",   # stable / candidate
+    "auto_publish_env": "production",   # production / testing
     "auto_build_last_attempt": "",      # 内部：上次自动构建检查时间
 }
 

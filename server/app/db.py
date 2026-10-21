@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS devices (
   name TEXT UNIQUE NOT NULL,
   platform TEXT NOT NULL,
   target_id INTEGER NOT NULL REFERENCES targets(id),
-  channel TEXT NOT NULL DEFAULT 'stable',
+  env TEXT NOT NULL DEFAULT 'production',
   token_hash TEXT UNIQUE NOT NULL,
   token_hint TEXT NOT NULL,
   token_enc TEXT,
@@ -151,28 +151,25 @@ CREATE TABLE IF NOT EXISTS builds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   created_at TEXT NOT NULL,
   created_by TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'BUILT',
+  verify_status TEXT NOT NULL DEFAULT 'success',
   policy_sha TEXT NOT NULL,
   snapshot TEXT NOT NULL,
   results TEXT NOT NULL DEFAULT '{}',
-  note TEXT NOT NULL DEFAULT ''
+  note TEXT NOT NULL DEFAULT '',
+  published_at TEXT,
+  published_by TEXT NOT NULL DEFAULT '',
+  publish_reason TEXT NOT NULL DEFAULT '',
+  status_updated_at TEXT
 );
 CREATE TABLE IF NOT EXISTS releases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   build_id INTEGER NOT NULL REFERENCES builds(id),
-  channel TEXT NOT NULL,
+  env TEXT NOT NULL,
   action TEXT NOT NULL,
   operator TEXT NOT NULL DEFAULT '',
   reason TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS pointers (
-  channel TEXT PRIMARY KEY,
-  build_id INTEGER,
-  released_at TEXT,
-  operator TEXT NOT NULL DEFAULT '',
-  action TEXT NOT NULL DEFAULT '',
-  reason TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,6 +215,14 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''
 );
+
+-- 状态机约束：生产版本与测试版本全局各至多一条。
+-- 部分唯一索引（status 为常量时对 id 建唯一索引）把"同一环境双活"
+-- 从应用层校验升级为数据库层强制，应用层校验被并发绕过时仍不会写坏。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_builds_production
+  ON builds(id) WHERE status='PRODUCTION';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_builds_testing
+  ON builds(id) WHERE status='TESTING';
 """
 
 
@@ -284,14 +289,6 @@ def init_db() -> None:
                        "client_interval INTEGER NOT NULL DEFAULT 0")
         # 引擎平台支持拖动排序
         _ensure_column(conn, "targets", "sort", "sort INTEGER NOT NULL DEFAULT 0")
-        # 通道指针记录最近一次发布/回滚的来源，供界面展示“当前版本由谁、何时发布”
-        _ensure_column(conn, "pointers", "released_at", "released_at TEXT")
-        _ensure_column(conn, "pointers", "operator",
-                       "operator TEXT NOT NULL DEFAULT ''")
-        _ensure_column(conn, "pointers", "action",
-                       "action TEXT NOT NULL DEFAULT ''")
-        _ensure_column(conn, "pointers", "reason",
-                       "reason TEXT NOT NULL DEFAULT ''")
         # 令牌同时保存 Fernet 加密副本：哈希用于校验，密文用于门户与后台重新展示地址
         _ensure_column(conn, "devices", "token_enc", "token_enc TEXT")
         # 门户 PIN 与维护者账号绑定，可按人撤销
@@ -331,6 +328,175 @@ def init_db() -> None:
         _migrate_base_configs_scope(conn)
         _migrate_base_configs(conn)
         _migrate_build_snapshots(conn)
+        _migrate_release_state_machine(conn)
+        _migrate_releases_env(conn)
+
+
+def _migrate_release_state_machine(conn) -> None:
+    """通道双轨 → 单一生命周期状态机（一次性迁移）。
+
+    旧模型：builds.status 存校验结果，"发布到哪里"由 pointers 表的
+    stable / candidate 两个指针决定，因此同一个构建可以同时占两个通道。
+
+    新模型：builds.status 只存生命周期状态（BUILT / TESTING /
+    PRODUCTION / OFFLINE），校验结果移到 verify_status，pointers 表废弃。
+
+    迁移规则：
+      * 旧 status（success/failed/building）→ verify_status；
+      * stable 指针 → PRODUCTION，candidate 指针 → TESTING；
+        同一构建同时命中两个指针时生产优先（候选指针作废）；
+      * 曾在 releases 出现但当前未生效的构建 → OFFLINE；
+      * 从未发布过的构建 → BUILT；
+      * 指针上的发布元数据（时间/操作人/说明）上移到 builds 行。
+    """
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='release_state_v1'")
+    if done:
+        return
+
+    def has_table(name: str) -> bool:
+        return bool(one(conn, "SELECT name FROM sqlite_master "
+                              "WHERE type='table' AND name=?", (name,)))
+
+    def columns(table: str) -> set[str]:
+        return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+    # --- builds：拆分校验结果与生命周期状态 ---
+    build_cols = columns("builds")
+    _ensure_column(conn, "builds", "verify_status",
+                   "verify_status TEXT NOT NULL DEFAULT 'success'")
+    _ensure_column(conn, "builds", "published_at", "published_at TEXT")
+    _ensure_column(conn, "builds", "published_by",
+                   "published_by TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "builds", "publish_reason",
+                   "publish_reason TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "builds", "status_updated_at", "status_updated_at TEXT")
+    if "verify_status" not in build_cols:
+        # 新加的列：先把旧 status 当作校验结果搬过去
+        conn.execute("UPDATE builds SET verify_status=status "
+                     "WHERE status IN ('building','success','failed')")
+    else:
+        conn.execute("UPDATE builds SET verify_status=status "
+                     "WHERE verify_status='success' "
+                     "AND status IN ('building','success','failed')")
+
+    # --- pointers → 生命周期状态 ---
+    pointer_rows = []
+    if has_table("pointers"):
+        pointer_rows = [dict(r) for r in conn.execute("SELECT * FROM pointers")]
+    # 一个构建可能同时占着两个指针（双轨模型的老毛病）：
+    # 生产优先，候选指针作废，测试环境迁移后为空。
+    pointer_state: dict[int, tuple[str, dict]] = {}
+    for row in pointer_rows:
+        if not row.get("build_id"):
+            continue
+        bid = int(row["build_id"])
+        status = "PRODUCTION" if row.get("channel") == "stable" else "TESTING"
+        if bid in pointer_state and pointer_state[bid][0] == "PRODUCTION":
+            continue
+        pointer_state[bid] = (status, row)
+    for bid, (status, row) in pointer_state.items():
+        conn.execute(
+            "UPDATE builds SET status=?, published_at=?, published_by=?, "
+            "publish_reason=?, status_updated_at=? WHERE id=?",
+            (status, row.get("released_at"), row.get("operator") or "",
+             row.get("reason") or "", row.get("released_at") or now(), bid),
+        )
+    # 未被指针占用、但发布过的构建 → 已下线归档
+    conn.execute(
+        "UPDATE builds SET status='OFFLINE', status_updated_at=COALESCE(status_updated_at, ?) "
+        "WHERE status NOT IN ('PRODUCTION','TESTING') AND id IN "
+        "(SELECT DISTINCT build_id FROM releases WHERE build_id IS NOT NULL)",
+        (now(),),
+    )
+    # 从未发布过的构建 → 已构建
+    conn.execute(
+        "UPDATE builds SET status='BUILT' "
+        "WHERE status NOT IN ('PRODUCTION','TESTING','OFFLINE')")
+    # 迁移前 status 里残留的旧校验值统一纠正
+    conn.execute(
+        "UPDATE builds SET status='BUILT' "
+        "WHERE status NOT IN ('BUILT','TESTING','PRODUCTION','OFFLINE')")
+
+    # --- releases 表结构在 v2 里重建（见 _migrate_releases_env）---
+
+    # --- devices：channel → env ---
+    device_cols = columns("devices")
+    if "env" not in device_cols:
+        conn.execute("ALTER TABLE devices ADD COLUMN env TEXT "
+                     "NOT NULL DEFAULT 'production'")
+    if "channel" in device_cols:
+        conn.execute(
+            "UPDATE devices SET env = CASE channel "
+            "WHEN 'candidate' THEN 'testing' ELSE 'production' END")
+        conn.execute("ALTER TABLE devices DROP COLUMN channel")
+    else:
+        conn.execute("UPDATE devices SET env='production' WHERE env=''")
+
+    # --- settings：auto_publish_channel → auto_publish_env ---
+    old = one(conn, "SELECT value FROM settings WHERE key='auto_publish_channel'")
+    if old:
+        env = "testing" if old["value"] == "candidate" else "production"
+        conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?,?)",
+                     ("auto_publish_env", env))
+        conn.execute("DELETE FROM settings WHERE key='auto_publish_channel'")
+
+    # --- 废弃 pointers 表 ---
+    if has_table("pointers"):
+        conn.execute("DROP TABLE pointers")
+
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_builds_production "
+                 "ON builds(id) WHERE status='PRODUCTION'")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_builds_testing "
+                 "ON builds(id) WHERE status='TESTING'")
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('release_state_v1', ?)", (now(),))
+
+
+def _migrate_releases_env(conn) -> None:
+    """releases 表重建：channel → env，并去掉旧的 NOT NULL 列。
+
+    旧表的 channel 列是 NOT NULL 且没有默认值：只加 env 列的话，
+    之后写发布历史会因缺 channel 而整条 INSERT 失败。
+    因此这里整表重建，一次到位。
+    """
+    done = one(conn, "SELECT value FROM schema_version "
+                     "WHERE key='release_state_v2'")
+    if done:
+        return
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(releases)")}
+    if not cols:
+        return
+    conn.execute("DROP TABLE IF EXISTS releases_env_new")
+    conn.execute("""CREATE TABLE releases_env_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        build_id INTEGER NOT NULL REFERENCES builds(id),
+        env TEXT NOT NULL,
+        action TEXT NOT NULL,
+        operator TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    if "env" in cols:
+        # 已有 env：按旧值归一（半迁移库里可能还存着 stable / candidate）
+        conn.execute(
+            "INSERT INTO releases_env_new(id, build_id, env, action, operator, "
+            "reason, created_at) SELECT id, build_id, "
+            "CASE env WHEN 'stable' THEN 'production' "
+            "WHEN 'candidate' THEN 'testing' "
+            "WHEN 'testing' THEN 'testing' ELSE 'production' END, "
+            "CASE action WHEN 'promote' THEN 'publish' ELSE action END, "
+            "operator, reason, created_at FROM releases")
+    else:
+        conn.execute(
+            "INSERT INTO releases_env_new(id, build_id, env, action, operator, "
+            "reason, created_at) SELECT id, build_id, "
+            "CASE channel WHEN 'candidate' THEN 'testing' ELSE 'production' END, "
+            "CASE action WHEN 'promote' THEN 'publish' ELSE action END, "
+            "operator, reason, created_at FROM releases")
+    conn.execute("DROP TABLE releases")
+    conn.execute("ALTER TABLE releases_env_new RENAME TO releases")
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('release_state_v2', ?)", (now(),))
 
 
 def _migrate_settings(conn) -> None:
@@ -438,10 +604,19 @@ def _migrate_build_snapshots(conn) -> None:
 
 
 @contextmanager
-def tx():
-    """写事务：提交或回滚，连接随上下文关闭。"""
+def tx(immediate: bool = False):
+    """写事务：提交或回滚，连接随上下文关闭。
+
+    immediate=True 时用 BEGIN IMMEDIATE 立即取写锁：
+    状态切换（发布/下线/回滚）必须串行执行，否则两个并发请求
+    可能各自读到"旧版本"并同时写入，出现同一环境两条生效记录。
+    """
     conn = connect()
+    if immediate:
+        conn.isolation_level = None      # 关闭 Python 的隐式事务，改用显式 BEGIN
     try:
+        if immediate:
+            conn.execute("BEGIN IMMEDIATE")
         yield conn
         conn.commit()
     except Exception:

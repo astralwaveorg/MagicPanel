@@ -19,7 +19,28 @@ export const PLATFORM_LABELS = {
   linux: 'Linux',
 }
 
-export const CHANNEL_LABELS = { stable: '稳定', candidate: '候选' }
+// 构建生命周期状态（后端状态机的四种状态）
+export const BUILD_STATUS_LABELS = {
+  BUILT: '已构建', TESTING: '测试中', PRODUCTION: '生产中', OFFLINE: '已下线',
+}
+
+// 发布环境（生产 / 测试）
+export const ENV_LABELS = { production: '生产环境', testing: '测试环境' }
+
+// 发布历史里的动作
+export const RELEASE_ACTION_LABELS = { publish: '发布', rollback: '回滚', offline: '下线' }
+
+/** 构建状态对应的 el-tag 颜色。 */
+export function buildStatusTagType(status) {
+  if (status === 'PRODUCTION') return 'success'
+  if (status === 'TESTING') return 'primary'
+  return 'info'
+}
+
+/** 已下线的构建用暗灰，其余用默认浅色。 */
+export function buildStatusTagEffect(status) {
+  return status === 'OFFLINE' ? 'dark' : 'light'
+}
 
 export function sourceStatus(s) {
   if (!s.last_status || s.last_status === 'never') return { kind: 'muted', text: '从未抓取' }

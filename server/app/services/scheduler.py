@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from .. import config, db, security
 from ..routers import builds
-from . import retention, tester, updater
+from . import releases, retention, tester, updater
 
 logger = logging.getLogger("magicpanel.scheduler")
 AUTO_OPERATOR = "系统"
@@ -215,17 +215,13 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
             summary["build_error"] = "尚未配置任何引擎平台"
             return
         publish = _enabled(conn, "auto_publish_enabled", "1")
-        channel = _setting(conn, "auto_publish_channel", "stable")
-        if channel not in ("stable", "candidate"):
-            channel = "stable"
-        # 判定基准是"通道当前指向的构建"，不是"最近一次成功构建"——
+        env = _setting(conn, "auto_publish_env", "production")
+        if env not in ("production", "testing"):
+            env = "production"
+        # 判定基准是"该环境当前生效的构建"，不是"最近一次成功构建"——
         # 否则构建成功但没发布出去时，后续每轮都会因"策略未变化"被跳过，
         # 新产物永远上线不了。
-        pointer = db.one(conn, "SELECT build_id FROM pointers WHERE channel=?", (channel,))
-        released = None
-        if pointer and pointer["build_id"]:
-            released = db.one(conn, "SELECT policy_sha FROM builds WHERE id=?",
-                              (pointer["build_id"],))
+        released = releases.current(conn, env)
         if released and released["policy_sha"] == policy_sha:
             with db.tx() as wconn:
                 db.set_setting(wconn, "auto_build_last_attempt", db.now())
@@ -249,7 +245,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     with db.tx() as conn:
         db.set_setting(conn, "auto_build_last_attempt", db.now())
     try:
-        build_id, status = builds.create_candidate(
+        build_id, status = builds.create_build(
             AUTO_OPERATOR, note="自动构建", snapshot=snapshot,
             policy_sha=policy_sha,
         )
@@ -263,7 +259,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     summary["build"] = {"id": build_id, "status": status}
     if status != "success" or not publish:
         return
-    # 核心缺失时 Mihomo 产物只做了静态校验：自动发布到稳定通道前必须确认
+    # 核心缺失时 Mihomo 产物只做了静态校验：自动发布到生产环境前必须确认
     # 每个 Mihomo 目标都过了核心校验，否则先降级为候选，等核心就位再发。
     try:
         with db.connect() as conn:
@@ -282,13 +278,11 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     except Exception as exc:
         summary["build_error"] = f"读取构建结果失败：{exc}"
         return
-    if channel not in ("stable", "candidate"):
-        channel = "stable"
     try:
-        with db.tx() as conn:
+        with db.tx(immediate=True) as conn:
             build = builds._get_build(conn, build_id)
-            builds.promote_internal(
-                conn, build, channel, "promote", AUTO_OPERATOR, "自动构建发布",
+            releases.publish_build(
+                conn, build, AUTO_OPERATOR, "自动构建发布", releases.Env(env),
             )
     except Exception as exc:
         summary["build_error"] = f"自动发布失败：{exc}"
@@ -297,7 +291,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
         with db.tx() as wconn:
             db.set_setting(wconn, "auto_build_last_attempt", "")
         return
-    summary["published"] = channel
+    summary["published"] = env
 
 
 def _run_retention(summary: dict) -> None:
@@ -451,7 +445,7 @@ def status() -> dict:
                 ("auto_build_interval_hours",
                  str(config.SETTINGS_DEFAULTS.get("auto_build_interval_hours", 1))),
                 ("auto_publish_enabled", "1"),
-                ("auto_publish_channel", "stable"),
+                ("auto_publish_env", "production"),
             )
         }
     return {

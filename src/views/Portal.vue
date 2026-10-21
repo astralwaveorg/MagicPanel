@@ -40,7 +40,7 @@
           <p class="pt-hero-sub">
             {{ devices.length }} 台设备 · {{ data.rules.length }} 条个人规则 ·
             {{ data.rule_providers.length }} 个规则来源 ·
-            稳定通道 {{ channelText('stable') }} · 候选通道 {{ channelText('candidate') }}
+            {{ releaseText('production') }} · {{ releaseText('testing') }}
           </p>
           <div class="pt-search">
             <input v-model="query" placeholder="搜索订阅、规则、客户端…" aria-label="搜索">
@@ -58,8 +58,8 @@
               <article v-for="d in g.devices" :key="d.name" class="pt-card">
                 <div class="pt-card-head">
                   <span class="pt-card-name">{{ d.display_name || d.name }}</span>
-                  <span class="pt-tag" :data-channel="d.channel">
-                    {{ d.channel === 'stable' ? '稳定' : '候选' }}
+                  <span class="pt-tag" :data-env="d.env">
+                    {{ d.env === 'production' ? '生产环境' : '测试环境' }}
                   </span>
                 </div>
                 <p class="pt-card-meta">
@@ -90,7 +90,7 @@
           </div>
         </section>
         <p v-else-if="!query" class="pt-empty">
-          暂无订阅地址：设备尚未创建或通道未发布，请联系维护者在管理后台完成配置与发布。
+          暂无订阅地址：设备尚未创建或尚未发布版本，请联系维护者在管理后台完成配置与发布。
         </p>
 
         <!-- 客户端资源 -->
@@ -281,9 +281,11 @@ const hasAnyResult = computed(() =>
 
 function platformLabel(p) { return PLATFORM_LABELS[p] || p }
 function engineLabel(e) { return e === 'stash' ? 'Stash' : 'Mihomo' }
-function channelText(ch) {
-  const c = data.value?.channels?.[ch]
-  return c ? `构建 #${c.build_id}` : '未发布'
+// 头部摘要：当前生效的生产 / 测试版本
+function releaseText(env) {
+  const label = env === 'production' ? '生产版本' : '测试版本'
+  const build = data.value?.release_state?.[env]
+  return `${label} ${build ? `构建 #${build.id}` : '未发布'}`
 }
 function ruleLine(r) {
   if (['MATCH', 'FINAL'].includes(r.type)) return `MATCH,${r.target}`
@@ -561,8 +563,8 @@ onMounted(async () => {
   border-radius: 99px;
   white-space: nowrap;
 }
-.pt-tag[data-channel='stable'] { background: rgba(63, 185, 128, 0.18); color: #4ade9d; }
-.pt-tag[data-channel='candidate'] { background: rgba(250, 183, 82, 0.16); color: #f5c069; }
+.pt-tag[data-env='production'] { background: rgba(63, 185, 128, 0.18); color: #4ade9d; }
+.pt-tag[data-env='testing'] { background: rgba(250, 183, 82, 0.16); color: #f5c069; }
 .pt-tag.soft { background: rgba(255, 255, 255, 0.1); color: #aab1c8; }
 .pt-card-meta { color: #8f96b0; font-size: 12px; margin: 6px 0 0; }
 .pt-card-note { color: #79809a; font-size: 12px; margin: 8px 0 0; }

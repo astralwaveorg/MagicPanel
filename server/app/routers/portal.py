@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from .. import db, security
 from ..deps import CurrentUser
+from ..services import releases
 
 router = APIRouter(prefix="/api/v1/portal", tags=["portal"])
 
@@ -200,7 +201,7 @@ def portal_data(body: PinBody, request: Request):
                 "name": r["name"],
                 "display_name": r["note"] or r["name"],
                 "platform": r["platform"],
-                "channel": r["channel"],
+                "env": r["env"],
                 "engine": target["engine"] if target else "",
                 "target_name": target["name"] if target else "",
                 "note": r["note"],
@@ -232,13 +233,7 @@ def portal_data(body: PinBody, request: Request):
                 "SELECT * FROM rule_providers WHERE enabled=1 ORDER BY id",
             )
         ]
-        channels = {}
-        for p in db.all_(conn, "SELECT * FROM pointers"):
-            build = db.one(conn, "SELECT * FROM builds WHERE id=?", (p["build_id"],))
-            if build:
-                channels[p["channel"]] = {
-                    "build_id": build["id"], "created_at": build["created_at"],
-                }
+        release_state = releases.state_public(conn)
         snippets = [
             {"name": r["name"], "category": r["category"], "engine": r["engine"],
              "note": r["note"]}
@@ -253,5 +248,5 @@ def portal_data(body: PinBody, request: Request):
         "rules": rules,
         "rule_providers": rule_providers,
         "snippets": snippets,
-        "channels": channels,
+        "release_state": release_state,
     }

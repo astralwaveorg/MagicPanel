@@ -13,7 +13,7 @@ def _make_device(client, h):
     client.post("/api/v1/targets", headers=h, json={
         "name": "stash-ios", "engine": "stash", "platform": "ios"})
     r = client.post("/api/v1/devices", headers=h, json={
-        "name": "展示手机", "platform": "ios", "target_id": 1, "channel": "stable"})
+        "name": "展示手机", "platform": "ios", "target_id": 1, "env": "production"})
     assert r.status_code == 201, r.text
     return r.json()
 

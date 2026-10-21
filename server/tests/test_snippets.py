@@ -55,7 +55,8 @@ def test_snippet_merge_into_build(client):
 
     build = client.post("/api/v1/builds", headers=h, json={})
     assert build.status_code == 201, build.text
-    assert build.json()["status"] == "success"
+    assert build.json()["verify_status"] == "success"
+    assert build.json()["status"] == "BUILT"
     bid = build.json()["id"]
 
     stash = yaml.safe_load(client.get(

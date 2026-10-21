@@ -20,6 +20,7 @@ from ..compiler import render
 from ..deps import CurrentUser
 from ..routers import builds
 from ..services import base_config as base_config_service
+from ..services import releases
 
 ENGINE_LABELS = config.ENGINE_LABELS
 PLATFORM_LABELS = config.PLATFORM_LABELS
@@ -43,7 +44,7 @@ class ApplyBody(BaseModel):
     platform: str = Field(default="", max_length=64)
     device_id: int = 0
     content: str = Field(default="", max_length=200_000)
-    channel: str = "stable"
+    env: str = "production"
     note: str = Field(default="", max_length=256)
 
 
@@ -384,8 +385,8 @@ def preview(body: PreviewBody, user=CurrentUser):
 @router.post("/apply")
 def apply(body: ApplyBody, user=CurrentUser):
     engine = _engine(body.engine)
-    if body.channel not in ("stable", "candidate"):
-        raise HTTPException(400, "通道仅支持 stable / candidate")
+    if body.env not in ("production", "testing"):
+        raise HTTPException(400, "发布环境仅支持 production / testing")
     with db.tx() as conn:
         plat, dev_id = _check_scope(conn, engine, body.platform, body.device_id)
         docs = _all_docs(conn)
@@ -403,7 +404,7 @@ def apply(body: ApplyBody, user=CurrentUser):
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])
     try:
-        build_id, status = builds.create_candidate(
+        build_id, status = builds.create_build(
             user["username"], note=body.note or "更新基础配置")
     except builds.BuildError as exc:
         raise HTTPException(400, str(exc))
@@ -411,12 +412,16 @@ def apply(body: ApplyBody, user=CurrentUser):
         with db.connect() as conn:
             row = builds._get_build(conn, build_id)
         raise HTTPException(400, f"构建未通过校验：{json_results(row)}")
-    with db.tx() as conn:
-        build = builds._get_build(conn, build_id)
-        builds.promote_internal(conn, build, body.channel, "promote",
-                                user["username"], body.note or "更新基础配置")
-    return {"ok": True, "build_id": build_id, "channel": body.channel,
-            "status": status}
+    try:
+        with db.tx(immediate=True) as conn:
+            build = builds._get_build(conn, build_id)
+            result = releases.publish_build(
+                conn, build, user["username"], body.note or "更新基础配置",
+                releases.Env(body.env))
+    except releases.ReleaseError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "build_id": build_id, "env": body.env,
+            "status": status, "release": result}
 
 
 def json_results(row) -> str:

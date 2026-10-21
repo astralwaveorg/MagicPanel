@@ -75,16 +75,16 @@
             <el-form-item label="校验通过后自动发布">
               <el-switch v-model="form.auto_publish_enabled" />
             </el-form-item>
-            <el-form-item label="发布通道">
-              <el-select v-model="form.auto_publish_channel" style="width:180px"
+            <el-form-item label="发布环境">
+              <el-select v-model="form.auto_publish_env" style="width:180px"
                          :disabled="!form.auto_publish_enabled">
-                <el-option value="stable" label="稳定" />
-                <el-option value="candidate" label="候选" />
+                <el-option value="production" label="生产环境" />
+                <el-option value="testing" label="测试环境" />
               </el-select>
             </el-form-item>
           </el-form>
           <p class="mp-form-hint">
-            只有策略快照变化且校验通过才发布；失败的构建不会覆盖当前通道。
+            只有策略快照变化且校验通过才发布；失败的构建不会覆盖当前生效版本。
           </p>
         </div>
       </el-col>
@@ -131,10 +131,8 @@
           <el-table-column label="构建" width="90">
             <template #default="{ row }"><span class="mono">#{{ row.build_id }}</span></template>
           </el-table-column>
-          <el-table-column label="动作" width="120">
-            <template #default="{ row }">
-              {{ row.action === 'promote' ? '发布' : '回滚' }}到{{ CHANNEL_LABELS[row.channel] }}
-            </template>
+          <el-table-column label="动作" width="130">
+            <template #default="{ row }">{{ releaseActionText(row) }}</template>
           </el-table-column>
           <el-table-column label="操作人" width="110">
             <template #default="{ row }">
@@ -160,7 +158,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
-import { fmtTime, CHANNEL_LABELS } from '../format'
+import { fmtTime, ENV_LABELS, RELEASE_ACTION_LABELS } from '../format'
 
 const router = useRouter()
 const status = ref({ running: false, autostart: true, last_tick_at: '', last_result: null, last_error: '' })
@@ -176,8 +174,15 @@ const form = reactive({
   auto_build_enabled: true,
   auto_build_interval_hours: 12,
   auto_publish_enabled: true,
-  auto_publish_channel: 'stable',
+  auto_publish_env: 'production',
 })
+
+// 发布历史动作：发布/回滚带上环境，下线只写动作
+function releaseActionText(row) {
+  const action = RELEASE_ACTION_LABELS[row.action] || row.action
+  if (row.action === 'offline') return action
+  return `${action}到${ENV_LABELS[row.env] || row.env}`
+}
 
 function resultText(r) {
   if (!r) return '暂无运行记录'
@@ -197,7 +202,7 @@ function resultText(r) {
       ? `构建：${r.build}`
       : `构建 #${r.build.id}（${r.build.status === 'success' ? '通过' : '失败'}）`)
   }
-  if (r.published) parts.push(`已发布到${CHANNEL_LABELS[r.published]}`)
+  if (r.published) parts.push(`已发布到${ENV_LABELS[r.published] || r.published}`)
   if (r.build_error) parts.push(`构建错误：${r.build_error}`)
   if (r.errors?.length) parts.push(`${r.errors.length} 个抓取/测速错误`)
   if (r.skipped) parts.push(r.skipped)
@@ -217,7 +222,7 @@ function applySettings(s) {
   form.auto_build_enabled = s.auto_build_enabled === '1'
   form.auto_build_interval_hours = Number(s.auto_build_interval_hours) || 12
   form.auto_publish_enabled = s.auto_publish_enabled === '1'
-  form.auto_publish_channel = s.auto_publish_channel === 'candidate' ? 'candidate' : 'stable'
+  form.auto_publish_env = s.auto_publish_env === 'testing' ? 'testing' : 'production'
 }
 
 async function load() {
@@ -260,7 +265,7 @@ async function save() {
       auto_build_enabled: form.auto_build_enabled ? '1' : '0',
       auto_build_interval_hours: String(form.auto_build_interval_hours),
       auto_publish_enabled: form.auto_publish_enabled ? '1' : '0',
-      auto_publish_channel: form.auto_publish_channel,
+      auto_publish_env: form.auto_publish_env,
     } } })
     ElMessage.success('自动任务设置已保存')
     await refreshStatus()

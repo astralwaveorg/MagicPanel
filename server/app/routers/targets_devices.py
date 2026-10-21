@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/v1", tags=["targets-devices"])
 
 ENGINES = {"stash", "mihomo"}
 PLATFORMS = {"ios", "macos", "tvos", "windows", "android", "linux"}
-CHANNELS = {"stable", "candidate"}
+ENVS = {"production", "testing"}
 
 
 class TargetBody(BaseModel):
@@ -32,7 +32,7 @@ class DeviceBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     platform: str
     target_id: int
-    channel: str = "stable"
+    env: str = "production"
     note: str = Field(default="", max_length=256)
     # 设备级个性化统一走「产物配置 → 设备配置」作用域，
     # 这里的 extra_yaml 曾是另一条从未接通的通道（写了不生效），已移除。
@@ -67,7 +67,7 @@ def _device_public(row, base_url: str = "") -> dict:
         "display_name": row["note"] or row["name"],
         "platform": row["platform"],
         "target_id": row["target_id"],
-        "channel": row["channel"],
+        "env": row["env"],
         "token_hint": row["token_hint"],
         "note": row["note"],
         "created_at": row["created_at"],
@@ -269,8 +269,8 @@ def list_devices(user=CurrentUser):
 
 @router.post("/devices", status_code=201)
 def create_device(body: DeviceBody, request: Request, user=CurrentUser):
-    if body.channel not in CHANNELS:
-        raise HTTPException(400, "通道仅支持 stable / candidate")
+    if body.env not in ENVS:
+        raise HTTPException(400, "订阅环境仅支持 production / testing")
     if body.platform not in PLATFORMS:
         raise HTTPException(400, f"平台仅支持：{'、'.join(sorted(PLATFORMS))}")
     token = security.new_device_token()
@@ -280,10 +280,10 @@ def create_device(body: DeviceBody, request: Request, user=CurrentUser):
             raise HTTPException(409, "同名设备已存在")
         sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM devices"))["s"]
         cur = conn.execute(
-            "INSERT INTO devices(name, platform, target_id, channel, token_hash, "
+            "INSERT INTO devices(name, platform, target_id, env, token_hash, "
             "token_hint, token_enc, note, created_at, sort) "
             "VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (body.name, body.platform, body.target_id, body.channel,
+            (body.name, body.platform, body.target_id, body.env,
              security.sha256_text(token), token[:10], security.encrypt_text(token),
              body.note, db.now(), sort),
         )
@@ -299,8 +299,8 @@ def create_device(body: DeviceBody, request: Request, user=CurrentUser):
 
 @router.put("/devices/{did}")
 def update_device(did: int, body: DeviceBody, user=CurrentUser):
-    if body.channel not in CHANNELS:
-        raise HTTPException(400, "通道仅支持 stable / candidate")
+    if body.env not in ENVS:
+        raise HTTPException(400, "订阅环境仅支持 production / testing")
     if body.platform not in PLATFORMS:
         raise HTTPException(400, f"平台仅支持：{'、'.join(sorted(PLATFORMS))}")
     with db.tx() as conn:
@@ -312,9 +312,9 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名设备已存在")
         conn.execute(
-            "UPDATE devices SET name=?, platform=?, target_id=?, channel=?, note=? "
+            "UPDATE devices SET name=?, platform=?, target_id=?, env=?, note=? "
             "WHERE id=?",
-            (body.name, body.platform, body.target_id, body.channel, body.note, did),
+            (body.name, body.platform, body.target_id, body.env, body.note, did),
         )
         security.audit(conn, user["username"], "更新设备", "device", did,
                        {"name": body.name})
@@ -332,7 +332,7 @@ class BatchDevicePatch(BaseModel):
     """批量修改设备。字段为 null 表示不修改；空字符串表示清空。"""
     ids: list[int] = Field(default_factory=list)
     target_id: int | None = None
-    channel: str | None = None
+    env: str | None = None
     note: str | None = None
 
 
@@ -354,17 +354,17 @@ def reorder_devices(ids: list[int], user=CurrentUser):
 
 @router.patch("/devices/batch")
 def batch_update_devices(body: BatchDevicePatch, user=CurrentUser):
-    """批量修改设备的共性配置（引擎平台、通道、备注）。
+    """批量修改设备的共性配置（引擎平台、订阅环境、备注）。
 
     换引擎平台时平台的取值随目标一起改，避免与目标不一致。
     """
     ids = list(dict.fromkeys(body.ids))
     if not ids:
         raise HTTPException(400, "请先选择要修改的设备")
-    if body.target_id is None and body.channel is None and body.note is None:
+    if body.target_id is None and body.env is None and body.note is None:
         raise HTTPException(400, "请至少选择一个要修改的字段")
-    if body.channel is not None and body.channel not in CHANNELS:
-        raise HTTPException(400, "通道仅支持 stable / candidate")
+    if body.env is not None and body.env not in ENVS:
+        raise HTTPException(400, "订阅环境仅支持 production / testing")
     updated = 0
     skipped: list[dict] = []
     missing: list[int] = []
@@ -386,9 +386,9 @@ def batch_update_devices(body: BatchDevicePatch, user=CurrentUser):
                 # 平台跟随目标，避免出现"目标是 Stash-iOS、平台却是 macOS"
                 fields.append("platform=?")
                 args.append(target["platform"])
-            if body.channel is not None:
-                fields.append("channel=?")
-                args.append(body.channel)
+            if body.env is not None:
+                fields.append("env=?")
+                args.append(body.env)
             if body.note is not None:
                 fields.append("note=?")
                 args.append(body.note)
@@ -403,7 +403,7 @@ def batch_update_devices(body: BatchDevicePatch, user=CurrentUser):
                                 "reason": "；".join(notes)})
         security.audit(conn, user["username"], "批量修改设备", "device",
                        ",".join(str(i) for i in ids),
-                       {"target_id": body.target_id, "channel": body.channel,
+                       {"target_id": body.target_id, "env": body.env,
                         "note": body.note})
     return {"ok": True, "updated": updated, "missing": missing, "skipped": skipped}
 

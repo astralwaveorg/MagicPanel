@@ -13,7 +13,7 @@ from .. import db, security
 from ..services import base_config as base_config_service
 from ..compiler import render, validate
 from ..services import tester
-from .builds import artifact_path
+from .builds import artifact_file
 
 router = APIRouter(prefix="/feed", tags=["feed"])
 
@@ -76,12 +76,13 @@ def _device_overlay(conn, device) -> str:
 
 
 def _device_build(conn, device):
-    pointer = db.one(
-        conn, "SELECT build_id FROM pointers WHERE channel=?", (device["channel"],)
-    )
-    if not pointer or not pointer["build_id"]:
-        return None, None
-    build = db.one(conn, "SELECT * FROM builds WHERE id=?", (pointer["build_id"],))
+    """取该设备所在环境当前生效的构建。
+
+    设备订阅环境（production / testing）直接对应构建的生命周期状态：
+    生效版本由 builds.status 唯一确定。
+    """
+    status = ("PRODUCTION" if device["env"] == "production" else "TESTING")
+    build = db.one(conn, "SELECT * FROM builds WHERE status=? LIMIT 1", (status,))
     target = db.one(conn, "SELECT * FROM targets WHERE id=?", (device["target_id"],))
     return build, target
 
@@ -96,7 +97,7 @@ def device_config(token: str, request: Request):
         build, target = _device_build(conn, device)
         if not build or not target:
             return Response("no release", status_code=503)
-        path = artifact_path(build["id"], target["name"])
+        path = artifact_file(build["id"], target["name"])
         if not path.exists():
             return Response("artifact missing", status_code=503)
         feed_base = f"{_base_url(request, conn)}/feed/{token}"

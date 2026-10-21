@@ -8,20 +8,35 @@
     <ErrorState v-if="error" :error="error" @retry="load" />
 
     <div class="mp-card">
-      <h3>发布通道</h3>
+      <h3>当前版本</h3>
       <el-row :gutter="12">
-        <el-col v-for="ch in ['stable', 'candidate']" :key="ch" :xs="24" :sm="12">
+        <el-col :xs="24" :sm="12">
           <div class="mp-card" style="margin-bottom:8px">
-            <h3>{{ CHANNEL_LABELS[ch] }}通道</h3>
-            <template v-if="data.channels?.[ch]">
-              <div>候选构建 <span class="mono">#{{ data.channels[ch].id }}</span></div>
+            <h3>当前生产版本</h3>
+            <template v-if="data.release_state?.production">
+              <div>构建 <span class="mono">#{{ data.release_state.production.id }}</span></div>
               <div style="font-size:12.5px;color:var(--mp-text-secondary);margin-top:4px">
-                发布时间 {{ fmtTime(data.channels[ch].created_at) }}<br />
-                策略摘要 <span class="mono">{{ shortSha(data.channels[ch].policy_sha) }}</span>
+                发布时间 {{ fmtTime(data.release_state.production.published_at || data.release_state.production.created_at) }}<br />
+                策略摘要 <span class="mono">{{ shortSha(data.release_state.production.policy_sha) }}</span>
               </div>
             </template>
             <div v-else style="font-size:13px;color:var(--mp-text-secondary)">
-              尚未发布。在 <strong>构建发布</strong> 中创建候选构建并发布后，设备才能拉取配置。
+              尚未发布。在 <strong>构建发布</strong> 中创建构建并发布后，设备才能拉取配置。
+            </div>
+          </div>
+        </el-col>
+        <el-col :xs="24" :sm="12">
+          <div class="mp-card" style="margin-bottom:8px">
+            <h3>当前测试版本</h3>
+            <template v-if="data.release_state?.testing">
+              <div>构建 <span class="mono">#{{ data.release_state.testing.id }}</span></div>
+              <div style="font-size:12.5px;color:var(--mp-text-secondary);margin-top:4px">
+                发布时间 {{ fmtTime(data.release_state.testing.published_at || data.release_state.testing.created_at) }}<br />
+                策略摘要 <span class="mono">{{ shortSha(data.release_state.testing.policy_sha) }}</span>
+              </div>
+            </template>
+            <div v-else style="font-size:13px;color:var(--mp-text-secondary)">
+              尚未发布。在 <strong>构建发布</strong> 中创建构建并发布后，设备才能拉取配置。
             </div>
           </div>
         </el-col>
@@ -128,8 +143,8 @@
           <el-table-column label="平台" width="90">
             <template #default="{ row }">{{ PLATFORM_LABELS[row.platform] || row.platform }}</template>
           </el-table-column>
-          <el-table-column label="通道" width="80">
-            <template #default="{ row }">{{ CHANNEL_LABELS[row.channel] || row.channel }}</template>
+          <el-table-column label="订阅环境" width="100">
+            <template #default="{ row }">{{ ENV_LABELS[row.env] || row.env }}</template>
           </el-table-column>
           <el-table-column label="最近下载" min-width="130">
             <template #default="{ row }">{{ fmtTime(row.last_pull_at) }}</template>
@@ -162,7 +177,7 @@ import { api } from '../api'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
-import { fmtTime, shortSha, sourceStatus, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
+import { fmtTime, shortSha, sourceStatus, PLATFORM_LABELS, ENV_LABELS } from '../format'
 
 const data = ref({})
 const error = ref('')

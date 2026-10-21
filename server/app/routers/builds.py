@@ -1,7 +1,7 @@
-"""候选构建、通道发布与回滚。
+"""构建与版本发布（状态机）。
 
-构建把当前策略固化为不可变快照并逐目标渲染；发布只移动通道指针，
-失败或空结果不会覆盖旧发布。
+构建把当前策略固化为不可变快照并逐目标渲染；发布按状态机切换
+版本状态（已构建 / 测试中 / 生产中 / 已下线），失败或空结果不会覆盖现网。
 """
 import difflib
 import json
@@ -14,11 +14,10 @@ from .. import config, db, security
 from ..compiler import render, validate
 from ..deps import CurrentUser
 from ..services import base_config as base_config_service
+from ..services import releases
 from ..services import tester
 
 router = APIRouter(prefix="/api/v1", tags=["builds"])
-
-CHANNELS = {"stable", "candidate"}
 
 
 def collect_snapshot(conn) -> dict:
@@ -104,38 +103,36 @@ def artifact_path(build_id: int, target_name: str):
     return _build_dir(build_id) / f"{target_name}.yaml"
 
 
+def artifact_file(build_id: int, target_name: str):
+    """只读路径：目录不存在时也不创建。
+
+    读接口不该有副作用——产物被留存清理后再查一次，
+    不应该凭空把空目录建出来。
+    """
+    return config.BUILDS_DIR / str(int(build_id)) / f"{target_name}.yaml"
+
+
 def _build_public(row, with_results: bool = False) -> dict:
-    data = {
-        "id": row["id"],
-        "created_at": row["created_at"],
-        "created_by": row["created_by"],
-        "status": row["status"],
-        "policy_sha": row["policy_sha"],
-        "note": row["note"],
-    }
-    if with_results:
-        data["results"] = json.loads(row["results"] or "{}")
-        data["snapshot"] = json.loads(
-            security.decrypt_payload(row["snapshot"] or "{}") or "{}")
-    return data
+    return releases.build_public(row, with_results=with_results)
 
 
 def _get_build(conn, bid: int):
     row = db.one(conn, "SELECT * FROM builds WHERE id=?", (bid,))
     if not row:
-        raise HTTPException(404, "候选构建不存在")
+        raise HTTPException(404, "构建不存在")
     return row
 
 
-def _channel_refs(conn, bid: int) -> list[str]:
-    return [r["channel"] for r in db.all_(
-        conn, "SELECT channel FROM pointers WHERE build_id=? ORDER BY channel", (bid,))]
-
-
-def _channel_reason(channels: list[str]) -> str:
-    labels = {"stable": "稳定", "candidate": "候选"}
-    return (f"仍发布在{'、'.join(labels.get(c, c) for c in channels)}通道，"
-            "不能删除；请先把该通道发布或回滚到其他构建")
+def _delete_guard(build) -> str:
+    """只有从未发布过的构建可以物理删除；其余状态是归档/生效版本。"""
+    if build["status"] == releases.BuildStatus.BUILT.value:
+        return ""
+    try:
+        label = releases.STATUS_LABELS[releases.BuildStatus(build["status"])]
+    except ValueError:
+        label = build["status"]
+    return (f"构建 #{build['id']} 当前为「{label}」，只有未发布过的构建可以删除；"
+            "已发布过的版本只能下线归档")
 
 
 def _purge_artifacts(build_id: int) -> None:
@@ -150,11 +147,11 @@ def _purge_artifacts(build_id: int) -> None:
 
 
 def _delete_build(conn, build, operator: str) -> int:
-    """删除构建并清理其发布历史；调用方需先校验通道指针。"""
+    """删除构建并清理其发布历史；调用方需先校验状态（仅「已构建」可删）。"""
     removed = conn.execute(
         "DELETE FROM releases WHERE build_id=?", (build["id"],)).rowcount
     conn.execute("DELETE FROM builds WHERE id=?", (build["id"],))
-    security.audit(conn, operator, "删除候选构建", "build", build["id"],
+    security.audit(conn, operator, "删除构建", "build", build["id"],
                    {"releases_removed": removed, "status": build["status"],
                     "note": build["note"]})
     return removed
@@ -180,12 +177,13 @@ def current_policy(conn) -> tuple[dict, str]:
     return snapshot, policy_sha
 
 
-def create_candidate(operator: str, note: str = "",
-                     snapshot: dict | None = None,
-                     policy_sha: str | None = None) -> tuple[int, str]:
-    """创建候选构建，返回 (build_id, status)。
+def create_build(operator: str, note: str = "",
+                 snapshot: dict | None = None,
+                 policy_sha: str | None = None) -> tuple[int, str]:
+    """创建构建，返回 (build_id, verify_status)。
 
     定时任务与手动创建共用；没有引擎平台时抛 BuildError。
+    新构建的生命周期状态为「已构建」（从未发布过）。
     写事务只用于落库，渲染与核心校验在事务之外执行，
     避免慢校验长期占用 SQLite 写锁（设备拉取配置会被阻塞）。
     """
@@ -203,11 +201,12 @@ def create_candidate(operator: str, note: str = "",
     overall = "success"
     with db.tx() as conn:
         cur = conn.execute(
-            "INSERT INTO builds(created_at, created_by, status, policy_sha, snapshot, "
-            "results, note) VALUES(?,?,?,?,?,?,?)",
-            (now, operator, "building", policy_sha,
+            "INSERT INTO builds(created_at, created_by, status, verify_status, "
+            "policy_sha, snapshot, results, note, status_updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (now, operator, releases.BuildStatus.BUILT.value, "building", policy_sha,
              security.encrypt_payload(json.dumps(snapshot, ensure_ascii=False)),
-             "{}", note),
+             "{}", note, now),
         )
         build_id = cur.lastrowid
     for target in snapshot["targets"]:
@@ -259,18 +258,18 @@ def create_candidate(operator: str, note: str = "",
         }
     with db.tx() as conn:
         conn.execute(
-            "UPDATE builds SET status=?, results=? WHERE id=?",
+            "UPDATE builds SET verify_status=?, results=? WHERE id=?",
             (overall, json.dumps(results, ensure_ascii=False), build_id),
         )
-        security.audit(conn, operator, "创建候选构建", "build", build_id,
+        security.audit(conn, operator, "创建构建", "build", build_id,
                        {"status": overall, "note": note})
     return build_id, overall
 
 
 @router.post("/builds", status_code=201)
-def create_build(body: BuildBody, user=CurrentUser):
+def create_build_api(body: BuildBody, user=CurrentUser):
     try:
-        build_id, _ = create_candidate(user["username"], body.note)
+        build_id, _ = create_build(user["username"], body.note)
     except BuildError as exc:
         raise HTTPException(400, str(exc))
     with db.connect() as conn:
@@ -303,7 +302,7 @@ def get_build(bid: int, user=CurrentUser):
 
 @router.post("/builds/batch/delete")
 def batch_delete_builds(body: BatchIds, user=CurrentUser):
-    """批量删除构建：仍被通道指针引用的构建保留并返回原因。
+    """批量删除构建：非「已构建」状态的构建保留并返回原因。
 
     历史发布记录不属于有效引用，会随构建一并清理（删除前由界面确认）。
     """
@@ -314,12 +313,11 @@ def batch_delete_builds(body: BatchIds, user=CurrentUser):
             build = db.one(conn, "SELECT * FROM builds WHERE id=?", (bid,))
             if not build:
                 blocked.append({"id": bid, "name": f"#{bid}",
-                                "reason": "候选构建不存在（可能已被删除）"})
+                                "reason": "构建不存在（可能已被删除）"})
                 continue
-            channels = _channel_refs(conn, bid)
-            if channels:
-                blocked.append({"id": bid, "name": f"#{bid}",
-                                "reason": _channel_reason(channels)})
+            reason = _delete_guard(build)
+            if reason:
+                blocked.append({"id": bid, "name": f"#{bid}", "reason": reason})
                 continue
             _delete_build(conn, build, user["username"])
             deleted.append(bid)
@@ -330,11 +328,11 @@ def batch_delete_builds(body: BatchIds, user=CurrentUser):
 
 @router.delete("/builds/{bid}")
 def delete_build(bid: int, user=CurrentUser):
-    with db.tx() as conn:
+    with db.tx(immediate=True) as conn:
         build = _get_build(conn, bid)
-        channels = _channel_refs(conn, bid)
-        if channels:
-            raise HTTPException(400, f"构建 #{bid} {_channel_reason(channels)}")
+        reason = _delete_guard(build)
+        if reason:
+            raise HTTPException(400, reason)
         removed = _delete_build(conn, build, user["username"])
     _purge_artifacts(bid)
     return {"ok": True, "deleted_releases": removed}
@@ -345,7 +343,7 @@ def get_artifact(bid: int, target_name: str, user=CurrentUser):
     """产物仅对维护者开放；本地单节点的凭据会直接出现在产物中。"""
     with db.connect() as conn:
         _get_build(conn, bid)
-    path = artifact_path(bid, target_name)
+    path = artifact_file(bid, target_name)
     if not path.exists():
         raise HTTPException(404, "该目标没有构建产物")
     return {"target": target_name, "content": path.read_text(encoding="utf-8")}
@@ -373,90 +371,60 @@ def diff_builds(bid: int, other_id: int, user=CurrentUser):
     return {"targets": diffs}
 
 
-class PromoteBody(BaseModel):
-    channel: str
+class PublishBody(BaseModel):
     reason: str = Field(default="", max_length=256)
 
 
-def promote_internal(conn, build, channel: str, action: str, operator: str, reason: str):
-    if build["status"] != "success":
-        raise HTTPException(400, "只有校验全部通过的候选构建才能发布")
-    now = db.now()
-    conn.execute(
-        "INSERT INTO pointers(channel, build_id, released_at, operator, action, reason) "
-        "VALUES(?,?,?,?,?,?) "
-        "ON CONFLICT(channel) DO UPDATE SET build_id=excluded.build_id, "
-        "released_at=excluded.released_at, operator=excluded.operator, "
-        "action=excluded.action, reason=excluded.reason",
-        (channel, build["id"], now, operator, action, reason),
-    )
-    conn.execute(
-        "INSERT INTO releases(build_id, channel, action, operator, reason, created_at) "
-        "VALUES(?,?,?,?,?,?)",
-        (build["id"], channel, action, operator, reason, now),
-    )
-    # 发布历史只保留最近 N 条；完整操作仍可在审计日志中追溯
-    conn.execute(
-        "DELETE FROM releases WHERE id NOT IN "
-        "(SELECT id FROM releases ORDER BY id DESC LIMIT ?)",
-        (config.RELEASE_HISTORY_LIMIT,),
-    )
-    security.audit(conn, operator,
-                   "发布到稳定通道" if action == "promote" and channel == "stable"
-                   else ("发布到候选通道" if action == "promote" else "回滚"),
-                   "build", build["id"], {"channel": channel, "reason": reason})
+def _publish(action: str, bid: int, reason: str, operator: str) -> dict:
+    """执行一次状态切换并把状态机错误翻译成 400。"""
+    try:
+        with db.tx(immediate=True) as conn:
+            build = _get_build(conn, bid)
+            if action == "test":
+                result = releases.publish_to_testing(
+                    conn, build, operator, reason)
+            elif action == "prod":
+                result = releases.publish_to_production(
+                    conn, build, operator, reason)
+            elif action == "rollback":
+                result = releases.publish_to_production(
+                    conn, build, operator, reason, rollback=True)
+            else:
+                result = releases.offline(conn, build, operator, reason)
+    except releases.ReleaseError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, **result}
 
 
-@router.post("/builds/{bid}/promote")
-def promote_build(bid: int, body: PromoteBody, user=CurrentUser):
-    if body.channel not in CHANNELS:
-        raise HTTPException(400, "通道仅支持 stable / candidate")
-    with db.tx() as conn:
-        build = _get_build(conn, bid)
-        promote_internal(conn, build, body.channel, "promote", user["username"], body.reason)
-    return {"ok": True, "channel": body.channel, "build_id": bid}
+@router.post("/builds/{bid}/publish-to-test")
+def publish_to_test(bid: int, body: PublishBody, user=CurrentUser):
+    """发布至测试环境：已构建 / 已下线 → 测试中。"""
+    return _publish("test", bid, body.reason, user["username"])
 
 
-class RollbackBody(BaseModel):
-    build_id: int
-    reason: str = Field(default="", max_length=256)
+@router.post("/builds/{bid}/publish-to-prod")
+def publish_to_prod(bid: int, body: PublishBody, user=CurrentUser):
+    """发布至生产环境：测试中 / 已下线 → 生产中。"""
+    return _publish("prod", bid, body.reason, user["username"])
 
 
-@router.post("/channels/{channel}/rollback")
-def rollback_to(channel: str, body: RollbackBody, user=CurrentUser):
-    """回滚即把通道指针移回指定的历史构建；客户端下次拉取才生效。"""
-    with db.tx() as conn:
-        build = _get_build(conn, body.build_id)
-        promote_internal(conn, build, channel, "rollback", user["username"], body.reason)
-    return {"ok": True, "channel": channel, "build_id": body.build_id}
+@router.post("/builds/{bid}/rollback-to-prod")
+def rollback_to_prod(bid: int, body: PublishBody, user=CurrentUser):
+    """回滚生产版本：把已下线的历史构建重新设为生产版本。"""
+    return _publish("rollback", bid, body.reason, user["username"])
 
 
-@router.get("/channels")
-def list_channels(user=CurrentUser):
+@router.post("/builds/{bid}/offline")
+def offline_build(bid: int, body: PublishBody, user=CurrentUser):
+    """手动下线：测试中 → 已下线（测试环境空置）。"""
+    return _publish("offline", bid, body.reason, user["username"])
+
+
+@router.get("/release-state")
+def release_state(user=CurrentUser):
+    """当前生效版本（生产 / 测试）。"""
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM pointers")
-        result = {}
-        for channel in CHANNELS:
-            result[channel] = None
-        for r in rows:
-            build = db.one(conn, "SELECT * FROM builds WHERE id=?", (r["build_id"],))
-            if not build:
-                continue
-            data = _build_public(build, with_results=True)
-            # 旧数据没有指针元数据时，回退到该通道最近一条发布记录
-            release = db.one(
-                conn,
-                "SELECT * FROM releases WHERE channel=? ORDER BY id DESC LIMIT 1",
-                (r["channel"],),
-            )
-            data["publish"] = {
-                "at": r["released_at"] or (release["created_at"] if release else ""),
-                "operator": r["operator"] or (release["operator"] if release else ""),
-                "action": r["action"] or (release["action"] if release else ""),
-                "reason": r["reason"] or (release["reason"] if release else ""),
-            }
-            result[r["channel"]] = data
-    return result
+        return releases.state_public(conn)
 
 
 @router.get("/releases")

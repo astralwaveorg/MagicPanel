@@ -91,9 +91,12 @@ def test_feed_filters_failed_nodes(client):
     client.post("/api/v1/targets", headers=h, json={
         "name": "stash-ios", "engine": "stash", "platform": "ios"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success"
-    client.post(f"/api/v1/builds/{build['id']}/promote", headers=h,
-                json={"channel": "stable"})
+    assert build["verify_status"] == "success"
+    # 发布到生产（状态机：先测试、后生产）
+    assert client.post(f"/api/v1/builds/{build['id']}/publish-to-test", headers=h,
+                       json={"reason": "先上测试"}).status_code == 200
+    assert client.post(f"/api/v1/builds/{build['id']}/publish-to-prod", headers=h,
+                       json={"reason": "再上生产"}).status_code == 200
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "iPhone", "platform": "ios", "target_id": 1}).json()
     token = dev["token"]

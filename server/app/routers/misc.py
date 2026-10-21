@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
-from ..services import tester, webdav
+from ..services import releases, tester, webdav
 
 router = APIRouter(prefix="/api/v1", tags=["misc"])
 
@@ -15,7 +15,7 @@ EDITABLE_SETTINGS = {
     "base_url", "session_ttl_hours", "profile_update_interval", "core_proxy",
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_test_sources", "auto_build_enabled", "auto_build_interval_hours",
-    "auto_publish_enabled", "auto_publish_channel",
+    "auto_publish_enabled", "auto_publish_env",
 }
 BOOL_SETTINGS = {
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
@@ -26,21 +26,7 @@ BOOL_SETTINGS = {
 @router.get("/overview")
 def overview(user=CurrentUser):
     with db.connect() as conn:
-        pointers = {
-            r["channel"]: r["build_id"]
-            for r in db.all_(conn, "SELECT * FROM pointers")
-        }
-        builds = {"stable": None, "candidate": None}
-        for channel, bid in pointers.items():
-            build = db.one(conn, "SELECT * FROM builds WHERE id=?", (bid,))
-            if build:
-                builds[channel] = {
-                    "id": build["id"],
-                    "created_at": build["created_at"],
-                    "status": build["status"],
-                    "policy_sha": build["policy_sha"],
-                    "results": json.loads(build["results"] or "{}"),
-                }
+        release_state = releases.state_public(conn)
         # 可用率口径与「节点来源」页一致：以当前节点列表为准，
         # 测速结果里已消失的节点不计入（否则两边数字对不上）。
         sources = []
@@ -67,7 +53,7 @@ def overview(user=CurrentUser):
             {"id": r["id"], "name": r["name"],
              "display_name": r["note"] or r["name"],
              "platform": r["platform"],
-             "channel": r["channel"], "last_pull_at": r["last_pull_at"],
+             "env": r["env"], "last_pull_at": r["last_pull_at"],
              "pull_count": r["pull_count"]}
             for r in db.all_(conn, "SELECT * FROM devices ORDER BY id")
         ]
@@ -77,7 +63,7 @@ def overview(user=CurrentUser):
             )
         ]
     return {
-        "channels": builds,
+        "release_state": release_state,
         "sources": sources,
         "rule_providers": rule_providers,
         "devices": devices,
@@ -251,8 +237,8 @@ def put_settings(body: SettingsBody, user=CurrentUser):
                 raise HTTPException(400, "自动构建间隔必须是整数小时")
             if not 1 <= hours <= 168:
                 raise HTTPException(400, "自动构建间隔需在 1–168 小时之间")
-        if key == "auto_publish_channel" and value not in ("stable", "candidate"):
-            raise HTTPException(400, "自动发布通道仅支持 stable / candidate")
+        if key == "auto_publish_env" and value not in ("production", "testing"):
+            raise HTTPException(400, "自动发布环境仅支持 production / testing")
     with db.tx() as conn:
         for key, value in body.values.items():
             db.set_setting(conn, key, value.strip())
@@ -267,7 +253,7 @@ def put_settings(body: SettingsBody, user=CurrentUser):
 # releases → builds 都有外键）。
 BACKUP_TABLES = [
     "users", "sources", "rule_providers", "local_nodes", "proxy_groups", "rules",
-    "targets", "snippets", "devices", "builds", "releases", "pointers", "settings",
+    "targets", "snippets", "devices", "builds", "releases", "settings",
     "base_configs",
 ]
 # 恢复范围比导出多一张表：sessions。

@@ -47,6 +47,21 @@ def make_policy(client, csrf):
     assert r.status_code == 201, r.text
 
 
+def publish_to_prod(client, h, bid, reason=""):
+    """把构建发布到生产环境。
+
+    生命周期状态机要求"先测试、后生产"：BUILT 不能直接上生产，
+    所以这里固定走 publish-to-test → publish-to-prod 两步。
+    """
+    r = client.post(f"/api/v1/builds/{bid}/publish-to-test", headers=h,
+                    json={"reason": reason})
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/v1/builds/{bid}/publish-to-prod", headers=h,
+                    json={"reason": reason})
+    assert r.status_code == 200, r.text
+    return r
+
+
 def test_setup_login_logout(client):
     assert client.get("/api/v1/setup/status").json() == {"initialized": False}
     csrf = setup_admin(client)
@@ -91,7 +106,9 @@ def test_build_release_feed_flow(client):
     build = client.post("/api/v1/builds", headers=h, json={"note": "首次"})
     assert build.status_code == 201, build.text
     build = build.json()
-    assert build["status"] == "success"
+    # 生命周期状态是「已构建」，校验结果单独看 verify_status
+    assert build["status"] == "BUILT"
+    assert build["verify_status"] == "success"
     assert set(build["results"]) == {"stash-ios", "mihomo-android"}
     for result in build["results"].values():
         assert result["ok"] and result["sha256"] and result["size"] > 0
@@ -108,25 +125,25 @@ def test_build_release_feed_flow(client):
 
     # 未发布时设备拉取返回 503
     dev = client.post("/api/v1/devices", headers=h, json={
-        "name": "测试手机", "platform": "ios", "target_id": 1, "channel": "stable",
+        "name": "测试手机", "platform": "ios", "target_id": 1, "env": "production",
     })
     assert dev.status_code == 201, dev.text
     dev = dev.json()
+    assert dev["env"] == "production"
     token = dev["token"]
     assert token.startswith("mp_")
     url_path = dev["subscription_url"].split("://", 1)[1]
     feed_path = "/" + url_path.split("/", 1)[1]
     assert client.get(feed_path).status_code == 503
 
-    # 发布稳定通道后拉取成功
-    r = client.post(f"/api/v1/builds/{bid}/promote", headers=h,
-                    json={"channel": "stable", "reason": "验收通过"})
-    assert r.status_code == 200, r.text
-    channel = client.get("/api/v1/channels").json()["stable"]
-    assert channel["publish"]["operator"] == "admin"
-    assert channel["publish"]["action"] == "promote"
-    assert channel["publish"]["reason"] == "验收通过"
-    assert channel["publish"]["at"]
+    # 发布到生产后拉取成功（状态机：先过测试环境）
+    publish_to_prod(client, h, bid, reason="验收通过")
+    state = client.get("/api/v1/release-state").json()["production"]
+    assert state["id"] == bid
+    assert state["status"] == "PRODUCTION"
+    assert state["published_by"] == "admin"
+    assert state["publish_reason"] == "验收通过"
+    assert state["published_at"]
     resp = client.get(feed_path)
     assert resp.status_code == 200
     assert resp.headers["Cache-Control"] == "private, no-cache"
@@ -150,12 +167,18 @@ def test_build_release_feed_flow(client):
     # 子资源：未抓取的来源没有快照
     assert client.get(f"/feed/{token}/res/provider/测试机场").status_code == 404
 
-    # 回滚到同一构建（指针移动有记录）
-    r = client.post("/api/v1/channels/stable/rollback", headers=h,
-                    json={"build_id": bid, "reason": "演练"})
-    assert r.status_code == 200
+    # 回滚：先造一个新版本顶替当前生产版本，旧版本下线后再回滚
+    second = client.post("/api/v1/builds", headers=h, json={"note": "第二个"}).json()
+    publish_to_prod(client, h, second["id"], reason="新版本")
+    r = client.post(f"/api/v1/builds/{bid}/rollback-to-prod", headers=h,
+                    json={"reason": "演练"})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v1/release-state").json()["production"]["id"] == bid
     releases = client.get("/api/v1/releases").json()
-    assert [r["action"] for r in releases] == ["rollback", "promote"]
+    assert releases[0]["action"] == "rollback"
+    assert releases[0]["env"] == "production"
+    assert [x["action"] for x in releases] == [
+        "rollback", "publish", "publish", "publish", "publish"]
 
     # 令牌轮换后旧令牌失效
     r = client.post(f"/api/v1/devices/{dev['id']}/rotate-token", headers=h)
@@ -175,14 +198,16 @@ def test_build_validation_blocks_bad_policy(client):
     client.post("/api/v1/groups", headers=h, json={
         "name": "空组", "type": "select"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "failed"
+    assert build["verify_status"] == "failed"
+    assert build["status"] == "BUILT"
     errors = build["results"]["stash-ios"]["errors"]
     assert any("兜底" in e for e in errors)
     assert any("为空" in e for e in errors)
     # 失败构建不能发布
-    r = client.post(f"/api/v1/builds/{build['id']}/promote", headers=h,
-                    json={"channel": "stable"})
+    r = client.post(f"/api/v1/builds/{build['id']}/publish-to-test", headers=h,
+                    json={"reason": "试试"})
     assert r.status_code == 400
+    assert "未通过校验" in r.json()["detail"]
 
 
 def test_group_cycle_detected(client):
@@ -196,7 +221,7 @@ def test_group_cycle_detected(client):
         "name": "B", "type": "select", "proxies": ["A"]})
     client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "A"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "failed"
+    assert build["verify_status"] == "failed"
     assert any("循环" in e for e in build["results"]["stash-ios"]["errors"])
 
 
@@ -214,9 +239,8 @@ def test_rule_provider_inline_and_feed(client):
     client.post("/api/v1/rules", headers=h, json={
         "type": "RULE-SET", "value": "my-rules", "target": "节点选择"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build["results"]
-    client.post(f"/api/v1/builds/{build['id']}/promote", headers=h,
-                json={"channel": "stable"})
+    assert build["verify_status"] == "success", build["results"]
+    publish_to_prod(client, h, build["id"])
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "安卓", "platform": "android", "target_id": 2}).json()
     token = dev["token"]
@@ -249,8 +273,9 @@ def test_overview(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)
     data = client.get("/api/v1/overview").json()
-    assert data["channels"] == {"stable": None, "candidate": None} or \
-        set(data["channels"]) == {"stable", "candidate"}
+    # 顶部发布状态：两个环境各一个生效版本（此处都还没有）
+    assert data["release_state"] == {"production": None, "testing": None}
+    assert "channels" not in data
     assert len(data["sources"]) == 1 and len(data["devices"]) == 0
     assert "note" in data
 
@@ -293,7 +318,7 @@ def test_group_load_balance_and_relay(client):
         "name": "mihomo-android", "engine": "mihomo", "platform": "android"})
     client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "前置"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
 
     bid = build["id"]
     art_s = client.get(f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"]
@@ -325,7 +350,7 @@ def test_rule_no_resolve(client):
     client.post("/api/v1/targets", headers=h, json={
         "name": "mihomo-android", "engine": "mihomo", "platform": "android"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art = client.get(
         f"/api/v1/builds/{build['id']}/artifact/mihomo-android").json()["content"]
     assert "- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve" in art
@@ -415,41 +440,53 @@ def test_rule_provider_batch_interval_delete_and_references(client):
                          headers=h).status_code == 200
 
 
-def test_build_delete_and_channel_reference(client):
-    """构建删除：通道指针是硬引用，历史发布记录随构建清理。"""
+def test_build_delete_and_release_state_reference(client):
+    """构建删除：只有从未发布过的构建可物理删除，其余状态只能归档。
+
+    旧模型里"通道指针"是硬引用，指针移走后旧构建就能删；
+    新模型改成单一生命周期状态机，发布过的构建一律不可删——
+    它们的发布历史要一直留着，界面才能回溯"谁在什么时候上了哪个版本"。
+    """
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
 
     first = client.post("/api/v1/builds", headers=h, json={"note": "一"}).json()
-    assert first["status"] == "success"
-    assert client.post(f"/api/v1/builds/{first['id']}/promote", headers=h,
-                       json={"channel": "stable"}).status_code == 200
+    assert first["verify_status"] == "success"
+    assert first["status"] == "BUILT"
+    publish_to_prod(client, h, first["id"])
 
-    # 活跃通道中的构建不能删除
+    # 生效中的构建不能删除
     r = client.delete(f"/api/v1/builds/{first['id']}", headers=h)
     assert r.status_code == 400
-    assert "稳定通道" in r.json()["detail"]
+    assert "只有未发布过的构建可以删除" in r.json()["detail"]
 
     second = client.post("/api/v1/builds", headers=h, json={"note": "二"}).json()
-    assert second["status"] == "success"
-    assert client.post(f"/api/v1/builds/{second['id']}/promote", headers=h,
-                       json={"channel": "stable"}).status_code == 200
-    # 指针移走后，旧构建可删除；产物与发布历史一并清理
+    assert second["verify_status"] == "success"
+    publish_to_prod(client, h, second["id"])
+    # 被替换的版本变成"已下线"，同样不能删（归档，不是垃圾）
     r = client.delete(f"/api/v1/builds/{first['id']}", headers=h)
+    assert r.status_code == 400
+    assert "只有未发布过的构建可以删除" in r.json()["detail"]
+
+    # 从未发布过的构建可以删；产物目录一并清理
+    third = client.post("/api/v1/builds", headers=h, json={"note": "三"}).json()
+    r = client.delete(f"/api/v1/builds/{third['id']}", headers=h)
     assert r.status_code == 200, r.text
-    assert r.json()["deleted_releases"] == 1
-    assert client.get(f"/api/v1/builds/{first['id']}").status_code == 404
-    assert client.get(f"/api/v1/builds/{first['id']}/artifact/stash-ios")\
+    # 从未发布过 → 没有发布历史需要清理
+    assert r.json()["deleted_releases"] == 0
+    assert client.get(f"/api/v1/builds/{third['id']}").status_code == 404
+    assert client.get(f"/api/v1/builds/{third['id']}/artifact/stash-ios")\
         .status_code == 404
 
-    third = client.post("/api/v1/builds", headers=h, json={"note": "三"}).json()
+    fourth = client.post("/api/v1/builds", headers=h, json={"note": "四"}).json()
     r = client.post("/api/v1/builds/batch/delete", headers=h,
-                    json={"ids": [second["id"], third["id"]]})
+                    json={"ids": [second["id"], fourth["id"]]})
     assert r.status_code == 200, r.text
     data = r.json()
-    assert data["deleted"] == [third["id"]]
+    assert data["deleted"] == [fourth["id"]]
     assert data["blocked"][0]["id"] == second["id"]
+    assert "只有未发布过的构建可以删除" in data["blocked"][0]["reason"]
 
 
 def test_device_display_name_and_filename(client):
@@ -501,12 +538,17 @@ def test_release_history_retention(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
-    build = client.post("/api/v1/builds", headers=h, json={}).json()
-    for _ in range(12):
-        assert client.post(f"/api/v1/builds/{build['id']}/promote", headers=h,
-                           json={"channel": "stable"}).status_code == 200
+    # 每次发布都会写一条历史；状态机不允许把同一个构建重复发布到同一环境，
+    # 所以用多个构建凑够 12 条（每个构建"先测试、后生产"两条）。
+    for i in range(6):
+        build = client.post("/api/v1/builds", headers=h,
+                            json={"note": f"版本{i}"}).json()
+        publish_to_prod(client, h, build["id"], reason=f"第{i}版")
     releases = client.get("/api/v1/releases").json()
     assert len(releases) == 10
+    # 动作是 publish / rollback / offline，不再是 promote
+    assert {r["action"] for r in releases} == {"publish"}
+    assert {r["env"] for r in releases} == {"testing", "production"}
     # 手动发布不进入“自动发布”页
     assert client.get("/api/v1/releases?auto_only=true").json() == []
     from app import db
@@ -559,7 +601,7 @@ def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
     monkeypatch.setattr(updater, "test_source", fake_test)
     monkeypatch.setattr(scheduler, "_core_available", lambda: True)
     # 模拟核心校验通过：没有核心时 Mihomo 目标只能静态校验，
-    # 自动发布到稳定通道会被拦下。
+    # 自动发布到生产环境会被拦下。
     from app.services import tester
     monkeypatch.setattr(tester, "validate_config", lambda text, *a, **k: (True, ""))
 
@@ -570,21 +612,30 @@ def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
     assert summary["tests_run"] == 1
     assert summary["tests_ok"] == 1 and summary["tests_failed"] == 1
     assert summary["build"]["status"] == "success"
-    assert summary["published"] == "stable"
+    # 发布目标现在是环境名，不是通道名
+    assert summary["published"] == "production"
 
-    channels = client.get("/api/v1/channels").json()
-    assert channels["stable"]["id"] == summary["build"]["id"]
-    assert channels["stable"]["publish"]["operator"] == "系统"
-    assert channels["stable"]["publish"]["action"] == "promote"
+    state = client.get("/api/v1/release-state").json()
+    assert state["production"]["id"] == summary["build"]["id"]
+    assert state["production"]["status"] == "PRODUCTION"
+    assert state["production"]["published_by"] == "系统"
+    assert state["production"]["publish_reason"] == "自动构建发布"
+    # 自动发布到生产时是"先置测试、再置生产"两步同事务，
+    # 因此发布完成后测试环境空置，直到下一次发布。
+    assert state["testing"] is None
     releases = client.get("/api/v1/releases").json()
     assert releases[0]["operator"] == "系统"
     assert releases[0]["reason"] == "自动构建发布"
+    assert releases[0]["action"] == "publish"
+    assert releases[0]["env"] == "production"
     auto_releases = client.get("/api/v1/releases?auto_only=true").json()
+    # 自动发布是"同一事务内先置测试再置生产"的一步操作，发布历史只记一条
     assert len(auto_releases) == 1
-    assert auto_releases[0]["build_id"] == summary["build"]["id"]
+    assert auto_releases[0]["env"] == "production"
+    assert all(r["build_id"] == summary["build"]["id"] for r in auto_releases)
 
     status = client.get("/api/v1/automation/status", headers=h).json()
-    assert status["last_result"]["published"] == "stable"
+    assert status["last_result"]["published"] == "production"
 
     # 第二轮：按正常到期判断，不应重复抓取或构建
     second = scheduler.run_once()
@@ -601,24 +652,24 @@ def test_automation_settings_and_run_endpoint(client, monkeypatch):
     assert status["autostart"] is False
     assert status["settings"]["auto_build_interval_hours"] == "1"
 
-    # 非法开关 / 通道 / 间隔被拒绝
+    # 非法开关 / 发布环境 / 间隔被拒绝
     for values in (
         {"auto_publish_enabled": "yes"},
         {"auto_build_interval_hours": "0"},
-        {"auto_publish_channel": "beta"},
+        {"auto_publish_env": "beta"},
     ):
         assert client.put("/api/v1/settings", headers=h,
                           json={"values": values}).status_code == 400
 
     r = client.put("/api/v1/settings", headers=h, json={"values": {
         "auto_build_interval_hours": "6",
-        "auto_publish_channel": "candidate",
+        "auto_publish_env": "testing",
         "auto_publish_enabled": "0",
     }})
     assert r.status_code == 200
     status = client.get("/api/v1/automation/status", headers=h).json()
     assert status["settings"]["auto_build_interval_hours"] == "6"
-    assert status["settings"]["auto_publish_channel"] == "candidate"
+    assert status["settings"]["auto_publish_env"] == "testing"
     assert status["settings"]["auto_publish_enabled"] == "0"
 
     from app.services import scheduler
@@ -689,8 +740,16 @@ def test_auto_publish_waits_for_filtered_speed_test(client, monkeypatch):
         )
     summary = scheduler.run_once(force=True)
     assert summary["build"]["status"] == "success"
-    assert summary["published"] == "stable"
-    assert len(client.get("/api/v1/releases").json()) == 1
+    assert summary["published"] == "production"
+    # 自动发布到生产是"同一事务内先置测试再置生产"的一步操作，
+    # 发布历史只记最终那一条（否则 10 条上限一轮就吃掉两条）
+    history = client.get("/api/v1/releases").json()
+    assert len(history) == 1
+    assert history[0]["env"] == "production"
+    assert history[0]["action"] == "publish"
+    # 自动发布后该构建就是生产版本
+    state = client.get("/api/v1/release-state").json()
+    assert state["production"]["id"] == summary["build"]["id"]
 
 
 def test_auto_fetch_switch_skips_scheduled_fetch(client, monkeypatch):
@@ -855,7 +914,7 @@ def test_local_node_crud_render_and_group_reference(client):
         "type": "MATCH", "target": "手动节点"})
 
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
     assert "[单] HK-01" in art
@@ -875,7 +934,7 @@ def test_local_node_crud_render_and_group_reference(client):
     })
     assert disabled.status_code == 200, disabled.text
     build2 = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build2["status"] == "success", build2
+    assert build2["verify_status"] == "success", build2
     art2 = client.get(
         f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
     assert "[单] HK-01" not in art2
@@ -993,11 +1052,12 @@ def test_base_config_apply_builds_and_publishes(client):
     r = client.post("/api/v1/base-config/apply", headers=h, json={
         "engine": "stash", "platform": "ios",
         "content": "mode: rule\nlog-level: info\n",
-        "channel": "stable", "note": "基础配置发布"})
+        "env": "production", "note": "基础配置发布"})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "success"
-    channels = client.get("/api/v1/channels", headers=h).json()
-    assert channels["stable"]["id"] == r.json()["build_id"]
+    assert r.json()["env"] == "production"
+    state = client.get("/api/v1/release-state", headers=h).json()
+    assert state["production"]["id"] == r.json()["build_id"]
     art = client.get(
         f"/api/v1/builds/{r.json()['build_id']}/artifact/stash-ios").json()["content"]
     assert "log-level: info" in art
@@ -1018,7 +1078,7 @@ def test_artifact_keys_follow_official_docs(client):
     client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "单组"})
 
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art_s = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
     art_m = client.get(
@@ -1082,7 +1142,7 @@ def test_provider_etag_follows_test_results(client):
     h = auth_headers(csrf)
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "设备A", "platform": "ios", "target_id": 1,
-        "channel": "stable"}).json()
+        "env": "production"}).json()
     token = dev["token"]
     with db.connect() as conn:
         source = db.one(conn, "SELECT * FROM sources WHERE name='测试机场'")
@@ -1260,7 +1320,7 @@ def test_build_does_not_hold_write_lock_during_core_check(client, monkeypatch):
 
     monkeypatch.setattr(tester, "validate_config", probe)
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
 
 
 def test_panel_direct_rule_can_be_disabled(client):
@@ -1300,7 +1360,7 @@ def test_personal_direct_domains_and_fake_ip_filter(client):
     assert client.put("/api/v1/base-config?engine=mihomo&platform=android", headers=h,
                       json={"content": content}).status_code == 200
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art_s = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"])
     art_m = yaml.safe_load(client.get(
@@ -1364,10 +1424,9 @@ def test_feed_marker_and_duplicate_rules(client):
                    "_direct_domains:\n- testserver\n- example.com\n"})
     client.post("/api/v1/builds", headers=h, json={})
     client.post("/api/v1/builds", headers=h, json={})
-    r = client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
-    assert r.status_code == 200, r.text
+    publish_to_prod(client, h, 1)
     device = client.post("/api/v1/devices", headers=h, json={
-        "name": "测试机", "platform": "ios", "target_id": 1, "channel": "stable"}).json()
+        "name": "测试机", "platform": "ios", "target_id": 1, "env": "production"}).json()
     token = device["token"]
     url = f"/feed/{token}/config.yaml"
 
@@ -1410,7 +1469,7 @@ def test_platform_scoped_base_config_differs_per_platform(client):
     assert r.status_code == 200, r.text
 
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     mac = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-mac").json()["content"])
     ios = yaml.safe_load(client.get(
@@ -1442,7 +1501,7 @@ def test_group_and_rule_target_scope_filters_output(client):
     assert r.status_code == 201, r.text
 
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     a = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-a").json()["content"])
     b = yaml.safe_load(client.get(
@@ -1466,7 +1525,7 @@ def test_rule_pointing_to_absent_group_is_dropped(client):
     client.post("/api/v1/rules", headers=h, json={
         "type": "DOMAIN-SUFFIX", "value": "x.com", "target": "仅A"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     b = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-b").json()["content"])
     assert "DOMAIN-SUFFIX,x.com,仅A" not in b["rules"]
@@ -1489,7 +1548,7 @@ def test_final_rule_group_is_always_kept(client):
     client.post("/api/v1/rules", headers=h, json={
         "type": "MATCH", "value": "", "target": "兜底组"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     b = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-b").json()["content"])
     assert any(g["name"] == "兜底组" for g in b["proxy-groups"])
@@ -1507,7 +1566,7 @@ def test_platform_trims_process_rules(client):
     client.post("/api/v1/rules", headers=h, json={
         "type": "PROCESS-NAME", "value": "qbittorrent", "target": "节点选择"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     mac = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-mac").json()["content"])
     ios = yaml.safe_load(client.get(
@@ -1523,13 +1582,13 @@ def test_device_level_override_only_affects_that_device(client):
     make_policy(client, csrf)
     h = auth_headers(csrf)
     client.post("/api/v1/builds", headers=h, json={})
-    client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
+    publish_to_prod(client, h, 1)
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "个性化设备", "platform": "ios", "target_id": 1,
-        "channel": "stable"}).json()
+        "env": "production"}).json()
     other = client.post("/api/v1/devices", headers=h, json={
         "name": "普通设备", "platform": "ios", "target_id": 1,
-        "channel": "stable"}).json()
+        "env": "production"}).json()
     # 设备配置作用域：只存与上层不同的差异
     r = client.put(f"/api/v1/base-config?engine=stash&device_id={dev['id']}",
                    headers=h, json={"content": "mode: rule\nlog-level: debug\n"
@@ -1553,9 +1612,9 @@ def test_device_override_rejects_structural_keys(client):
     h = auth_headers(csrf)
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "坏设备", "platform": "ios", "target_id": 1,
-        "channel": "stable"}).json()
+        "env": "production"}).json()
     client.post("/api/v1/builds", headers=h, json={})
-    client.post("/api/v1/builds/1/promote", headers=h, json={"channel": "stable"})
+    publish_to_prod(client, h, 1)
     # 结构键在设备配置作用域同样被拒绝
     r = client.put(f"/api/v1/base-config?engine=stash&device_id={dev['id']}",
                    headers=h, json={"content": "rules:\n  - MATCH,DIRECT\n"})
@@ -1772,7 +1831,7 @@ def test_target_rename_keeps_group_and_rule_references(client):
 
     # 改名后产物里该组仍要出现
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art = client.get(
         f"/api/v1/builds/{build['id']}/artifact/Stash-iOS").json()["content"]
     assert "手动组" in art
@@ -1834,7 +1893,7 @@ def test_retention_prunes_old_artifacts_and_audit(client):
     h = auth_headers(csrf)
     make_policy(client, csrf)
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
 
     with db.tx() as conn:
         # 造一个很旧的构建产物目录（不在保留窗口内）
@@ -1935,29 +1994,65 @@ def test_overview_reports_health_snapshot(client):
     assert any("备份" in i for i in health["issues"]) or health["last_backup_at"]
 
 
-def test_retention_prunes_builds_with_release_rows(client):
-    """清理旧构建记录时，发布历史里的外键行必须一起删，否则整轮回滚。"""
+def test_retention_prunes_builds_with_release_rows(client, monkeypatch):
+    """留存清理按生命周期状态区分处理：
+
+    * 从未发布过（BUILT）的构建：整行删除；
+    * 发布过（OFFLINE）的构建：保留归档行，只清空含凭据的快照；
+    * 生效中（PRODUCTION / TESTING）的构建：永不清理。
+
+    同时发布历史里的外键行必须一起删，否则整轮清理回滚。
+    """
     from app import config, db
     from app.services import retention
 
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     make_policy(client, csrf)
-    build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
-    r = client.post(f"/api/v1/builds/{build['id']}/promote", headers=h,
-                    json={"channel": "candidate"})
-    assert r.status_code == 200, r.text
+    # 把留存窗口调到 2 个构建，才能在用例里触发清理
+    monkeypatch.setattr(config, "BUILD_ARTIFACT_KEEP", 2)
+
+    first = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert first["verify_status"] == "success", first
+    second = client.post("/api/v1/builds", headers=h, json={}).json()
+    third = client.post("/api/v1/builds", headers=h, json={}).json()
+    fourth = client.post("/api/v1/builds", headers=h, json={}).json()
+
+    # 第二个构建上线后再被第三个替换 → 变成"已下线"归档
+    publish_to_prod(client, h, second["id"])
+    publish_to_prod(client, h, third["id"])
+
     with db.connect() as conn:
         assert db.one(conn, "SELECT COUNT(*) AS c FROM releases")["c"] >= 1
+
     result = retention.run_once()
     assert "artifacts" in result
+
     with db.connect() as conn:
+        # 从未发布过的构建被整行删除
+        assert db.one(conn, "SELECT COUNT(*) AS c FROM builds WHERE id=?",
+                      (first["id"],))["c"] == 0
+        # 发布过的构建保留归档行，只清空快照
+        row = db.one(conn, "SELECT * FROM builds WHERE id=?", (second["id"],))
+        assert row is not None
+        assert row["status"] == "OFFLINE"
+        assert row["snapshot"] == ""
+        # 生效中的构建不受影响
+        row = db.one(conn, "SELECT * FROM builds WHERE id=?", (third["id"],))
+        assert row["status"] == "PRODUCTION" and row["snapshot"]
         # 清理后外键仍然一致
         broken = db.one(conn, "SELECT COUNT(*) AS c FROM releases r "
                               "LEFT JOIN builds b ON b.id = r.build_id "
                               "WHERE b.id IS NULL")["c"]
         assert broken == 0
+        # 被清理掉的构建，其发布历史一并清掉
+        assert db.one(conn, "SELECT COUNT(*) AS c FROM releases "
+                            "WHERE build_id=?", (second["id"],))["c"] == 0
+
+    # 归档行仍然可以查看（快照已清空，不再含凭据）
+    detail = client.get(f"/api/v1/builds/{second['id']}", headers=h).json()
+    assert detail["status"] == "OFFLINE"
+    assert detail["snapshot"] == {}
 
 
 def test_paged_list_endpoints(client):
@@ -2009,7 +2104,7 @@ def test_local_first_puts_local_nodes_before_group_members(client):
         "local_nodes": [node["id"]], "local_first": True}).json()
     assert gid["local_first"] is True
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
     cfg = _yaml.safe_load(art)
@@ -2032,7 +2127,7 @@ def test_fallback_rule_is_moved_to_end_of_artifact(client):
     client.post("/api/v1/rules", headers=h, json={
         "type": "DOMAIN-SUFFIX", "value": "late.example.com", "target": "节点选择"})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
     rules = _yaml.safe_load(art)["rules"]
@@ -2052,7 +2147,7 @@ def test_guard_proxy_is_last_member_of_auto_groups(client):
     h = auth_headers(csrf)
     make_policy(client, csrf)
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build["status"] == "success", build
+    assert build["verify_status"] == "success", build
     art = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
     cfg = _yaml.safe_load(art)
@@ -2179,7 +2274,7 @@ def test_device_reorder_and_batch(client):
     for i in range(3):
         r = client.post("/api/v1/devices", headers=h, json={
             "name": f"dev{i}", "platform": "ios", "target_id": t1["id"],
-            "channel": "stable", "note": f"note{i}"})
+            "env": "production", "note": f"note{i}"})
         assert r.status_code == 201, r.text
         ids.append(r.json()["id"])
     # 排序
@@ -2187,18 +2282,21 @@ def test_device_reorder_and_batch(client):
     assert r.status_code == 200, r.text
     rows = client.get("/api/v1/devices", headers=h).json()
     assert [d["id"] for d in rows] == list(reversed(ids))
-    # 批量修改：换目标（平台应跟随目标）、换通道、改备注
+    # 批量修改：换目标（平台应跟随目标）、换订阅环境、改备注
     r = client.patch("/api/v1/devices/batch", headers=h, json={
-        "ids": ids[:2], "target_id": t2["id"], "channel": "candidate", "note": "批量"})
+        "ids": ids[:2], "target_id": t2["id"], "env": "testing", "note": "批量"})
     assert r.status_code == 200, r.text
     assert r.json()["updated"] == 2
     rows = client.get("/api/v1/devices", headers=h).json()
     by_id = {d["id"]: d for d in rows}
     assert by_id[ids[0]]["target_id"] == t2["id"]
     assert by_id[ids[0]]["platform"] == "macos"     # 平台跟随目标
-    assert by_id[ids[0]]["channel"] == "candidate"
+    assert by_id[ids[0]]["env"] == "testing"
     assert by_id[ids[0]]["note"] == "批量"
     assert by_id[ids[2]]["note"] == "note2"          # 未选中的不动
+    # 非法环境值被拒绝
+    assert client.patch("/api/v1/devices/batch", headers=h, json={
+        "ids": ids[:1], "env": "beta"}).status_code == 400
     # 空字段 → 400
     assert client.patch("/api/v1/devices/batch", headers=h, json={
         "ids": ids[:1]}).status_code == 400

@@ -60,10 +60,10 @@
               <span class="mono">{{ targetName(row.target_id) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="通道" width="90">
+          <el-table-column label="订阅环境" width="100">
             <template #default="{ row }">
-              <el-tag size="small" :type="row.channel === 'stable' ? 'success' : 'warning'" effect="plain">
-                {{ CHANNEL_LABELS[row.channel] || row.channel }}
+              <el-tag size="small" :type="row.env === 'production' ? 'success' : 'warning'" effect="plain">
+                {{ ENV_LABELS[row.env] || row.env }}
               </el-tag>
             </template>
           </el-table-column>
@@ -104,10 +104,10 @@
             设备平台由所选引擎自动决定（当前：{{ PLATFORM_LABELS[form.platform] || form.platform }}）。
           </div>
         </el-form-item>
-        <el-form-item label="更新通道">
-          <el-radio-group v-model="form.channel">
-            <el-radio value="stable">稳定（跟随正式发布）</el-radio>
-            <el-radio value="candidate">候选（提前试用）</el-radio>
+        <el-form-item label="订阅环境">
+          <el-radio-group v-model="form.env">
+            <el-radio value="production">生产环境（跟随正式发布）</el-radio>
+            <el-radio value="testing">测试环境（提前试用）</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="设备名">
@@ -144,11 +144,11 @@
         </el-select>
 
         <el-form-item>
-          <el-checkbox v-model="batch.useChannel">修改通道</el-checkbox>
+          <el-checkbox v-model="batch.useEnv">修改订阅环境</el-checkbox>
         </el-form-item>
-        <el-radio-group v-if="batch.useChannel" v-model="batch.channel">
-          <el-radio value="stable">稳定通道</el-radio>
-          <el-radio value="candidate">候选通道</el-radio>
+        <el-radio-group v-if="batch.useEnv" v-model="batch.env">
+          <el-radio value="production">生产环境</el-radio>
+          <el-radio value="testing">测试环境</el-radio>
         </el-radio-group>
 
         <el-form-item>
@@ -177,7 +177,7 @@ import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import SecretDialog from '../components/SecretDialog.vue'
-import { fmtTime, PLATFORM_LABELS, CHANNEL_LABELS, ENGINE_LABELS } from '../format'
+import { fmtTime, PLATFORM_LABELS, ENV_LABELS, ENGINE_LABELS } from '../format'
 
 const rows = ref([])
 const isMobile = useMobile()
@@ -198,7 +198,7 @@ const batchSaving = ref(false)
 const tableRef = ref(null)
 const batch = reactive({
   useTarget: false, target_id: null,
-  useChannel: false, channel: 'stable',
+  useEnv: false, env: 'production',
   useNote: false, note: '',
 })
 
@@ -214,7 +214,7 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
 })
 
 const emptyForm = () => ({
-  name: '', platform: 'ios', target_id: null, channel: 'stable', note: '',
+  name: '', platform: 'ios', target_id: null, env: 'production', note: '',
 })
 const form = reactive(emptyForm())
 
@@ -280,7 +280,7 @@ async function move(index, delta) {
 function openBatch() {
   if (!selected.value.length) return
   batch.useTarget = false; batch.target_id = null
-  batch.useChannel = false; batch.channel = 'stable'
+  batch.useEnv = false; batch.env = 'production'
   batch.useNote = false; batch.note = ''
   batchDialog.value = true
 }
@@ -289,7 +289,7 @@ async function saveBatch() {
   if (!selected.value.length) return
   const payload = { ids: selected.value.map((r) => r.id) }
   if (batch.useTarget) payload.target_id = batch.target_id
-  if (batch.useChannel) payload.channel = batch.channel
+  if (batch.useEnv) payload.env = batch.env
   if (batch.useNote) payload.note = batch.note
   const keys = Object.keys(payload).filter((k) => k !== 'ids')
   if (!keys.length) {
@@ -334,7 +334,7 @@ function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     name: row.name, platform: row.platform, target_id: row.target_id,
-    channel: row.channel, note: row.note,
+    env: row.env, note: row.note,
   } : { target_id: targets.value[0]?.id ?? null })
   dialog.value = true
 }

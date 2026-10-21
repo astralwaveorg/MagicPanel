@@ -257,7 +257,7 @@
                width="min(560px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-form-item label="名称">
-          <el-input v-model="form.name" placeholder="例如：神龙机场" />
+          <el-input v-model="form.name" placeholder="例如：XX机场" />
         </el-form-item>
         <el-form-item :label="editing ? '订阅地址（留空表示不修改）' : '订阅地址'">
           <el-input v-model="form.url" type="password" show-password

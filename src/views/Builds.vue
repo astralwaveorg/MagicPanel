@@ -2,40 +2,51 @@
   <div>
     <h2 class="mp-page-title">构建发布</h2>
     <p class="mp-page-desc">
-      构建把当前策略固化为不可变候选并逐目标校验；发布只移动通道指针，失败构建不能发布。
-      回滚后客户端需下一次拉取才生效。
+      构建把当前策略固化为不可变快照并逐目标校验。构建有四种状态：已构建、测试中、生产中、已下线；同一时刻只有一个生产版本和一个测试版本。发布后客户端需下一次拉取才生效。
     </p>
 
     <div class="mp-card">
       <div class="mp-toolbar" style="margin-bottom:0">
         <div class="left" style="flex-direction:column;align-items:flex-start;gap:8px">
-          <div class="channel-list">
-            <div v-for="ch in ['stable', 'candidate']" :key="ch" class="channel-line">
-              <span class="channel-label">{{ CHANNEL_LABELS[ch] }}通道</span>
-              <template v-if="channels[ch]">
-                <span class="mono">构建 #{{ channels[ch].id }}</span>
-                <span class="mono" style="color:var(--mp-text-secondary)">
-                  策略 {{ shortSha(channels[ch].policy_sha) }}
+          <div class="release-list">
+            <div class="release-line">
+              <span class="release-dot">🟢</span>
+              <span class="release-label">当前生产版本：</span>
+              <template v-if="releaseState.production">
+                <span class="mono">构建 #{{ releaseState.production.id }}</span>
+                <span class="release-time">
+                  （发布于 {{ fmtTime(publishedAt(releaseState.production)) }}）
                 </span>
-                <template v-if="channels[ch].publish?.at">
-                  <el-tag size="small" effect="plain"
-                          :type="channels[ch].publish.operator === '系统' ? 'success' : 'info'">
-                    {{ channels[ch].publish.operator === '系统' ? '自动' : '手动' }}
-                  </el-tag>
-                  <span>
-                    {{ channels[ch].publish.action === 'rollback' ? '回滚' : '发布' }}于
-                    {{ fmtTime(channels[ch].publish.at) }}
-                  </span>
-                  <span class="mono">{{ channels[ch].publish.operator || '—' }}</span>
-                  <span v-if="channels[ch].publish.reason" class="channel-reason">
-                    · {{ channels[ch].publish.reason }}
-                  </span>
-                </template>
-                <span v-else style="color:var(--mp-text-secondary)">
-                  构建于 {{ fmtTime(channels[ch].created_at) }}
+                <span v-if="releaseState.production.published_by" class="release-meta">
+                  {{ releaseState.production.published_by }}
                 </span>
+                <span v-if="releaseState.production.publish_reason" class="release-reason">
+                  {{ releaseState.production.publish_reason }}
+                </span>
+                <el-button size="small" text type="primary"
+                           @click="openDetail(releaseState.production)">查看详情</el-button>
               </template>
-              <span v-else style="color:var(--mp-text-secondary)">未发布</span>
+              <span v-else class="release-empty">暂无生效版本</span>
+            </div>
+
+            <div class="release-line">
+              <span class="release-dot">🟡</span>
+              <span class="release-label">当前测试版本：</span>
+              <template v-if="releaseState.testing">
+                <span class="mono">构建 #{{ releaseState.testing.id }}</span>
+                <span class="release-time">
+                  （发布于 {{ fmtTime(publishedAt(releaseState.testing)) }}）
+                </span>
+                <span v-if="releaseState.testing.published_by" class="release-meta">
+                  {{ releaseState.testing.published_by }}
+                </span>
+                <span v-if="releaseState.testing.publish_reason" class="release-reason">
+                  {{ releaseState.testing.publish_reason }}
+                </span>
+                <el-button size="small" text type="primary"
+                           @click="openDetail(releaseState.testing)">查看详情</el-button>
+              </template>
+              <span v-else class="release-empty">暂无生效版本</span>
             </div>
           </div>
           <div v-if="selected.length" class="selected-actions">
@@ -44,7 +55,7 @@
             <el-button link @click="clearSelection">取消选择</el-button>
           </div>
         </div>
-        <el-button type="primary" :loading="building" @click="createBuild">创建候选构建</el-button>
+        <el-button type="primary" :loading="building" @click="createBuild">创建构建</el-button>
       </div>
     </div>
 
@@ -53,8 +64,8 @@
 
     <EmptyState
       v-if="!rows.length"
-      reason="还没有候选构建。"
-      next="点击“创建候选构建”，把当前策略编译为各目标的完整配置。"
+      reason="还没有构建。"
+      next="点击“创建构建”，把当前策略编译为各目标的完整配置。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -64,21 +75,17 @@
           <el-table-column label="构建" width="90">
             <template #default="{ row }"><span class="mono">#{{ row.id }}</span></template>
           </el-table-column>
-          <el-table-column label="状态" width="130">
+          <el-table-column label="发布状态" width="120">
             <template #default="{ row }">
-              <StatusDot :kind="row.status === 'success' ? 'ok' : 'danger'"
-                         :text="row.status === 'success' ? '校验通过' : '校验失败'" />
+              <el-tag size="small" :type="buildStatusTagType(row.status)"
+                      :effect="buildStatusTagEffect(row.status)">
+                {{ BUILD_STATUS_LABELS[row.status] || row.status }}
+              </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="当前通道" min-width="110">
+          <el-table-column label="校验" width="110">
             <template #default="{ row }">
-              <template v-for="ch in ['stable', 'candidate']" :key="ch">
-                <el-tag v-if="channels[ch]?.id === row.id" size="small" style="margin-right:6px"
-                        :type="ch === 'stable' ? 'success' : 'warning'" effect="plain">
-                  {{ CHANNEL_LABELS[ch] }}
-                </el-tag>
-              </template>
-              <span v-if="channels.stable?.id !== row.id && channels.candidate?.id !== row.id">—</span>
+              <StatusDot :kind="verifyKind(row)" :text="verifyText(row)" />
             </template>
           </el-table-column>
           <el-table-column label="创建时间" min-width="135">
@@ -91,20 +98,26 @@
           <el-table-column prop="note" label="备注" min-width="120">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="360" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="300" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="openDetail(row)">详情</el-button>
-                <el-button size="small" :disabled="channels.candidate?.id === row.id"
-                           @click="promote(row, 'candidate')">发到候选</el-button>
-                <el-button size="small" type="primary" plain
-                           :disabled="row.status !== 'success' || channels.stable?.id === row.id"
-                           @click="promote(row, 'stable')">发布稳定</el-button>
-                <el-button size="small" type="warning" plain
-                           :disabled="row.status !== 'success'"
-                           @click="rollback(row)">回滚至此</el-button>
-                <el-button size="small" type="danger" plain
-                           @click="remove(row)">删除</el-button>
+                <template v-if="row.status === 'BUILT'">
+                  <el-button size="small" type="primary" plain :disabled="!verified(row)"
+                             @click="publishToTest(row)">发布至测试</el-button>
+                  <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+                </template>
+                <template v-else-if="row.status === 'TESTING'">
+                  <el-button size="small" type="primary" plain :disabled="!verified(row)"
+                             @click="publishToProd(row)">发布至生产</el-button>
+                  <el-button size="small" type="warning" plain @click="offlineBuild(row)">下线</el-button>
+                </template>
+                <template v-else-if="row.status === 'OFFLINE'">
+                  <el-button size="small" type="primary" plain :disabled="!verified(row)"
+                             @click="publishToTest(row)">重新测试</el-button>
+                  <el-button size="small" type="warning" plain :disabled="!verified(row)"
+                             @click="rollbackToProd(row)">回滚至生产</el-button>
+                </template>
               </div>
             </template>
           </el-table-column>
@@ -121,10 +134,8 @@
           <el-table-column label="时间" width="140">
             <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
           </el-table-column>
-          <el-table-column label="动作" width="110">
-            <template #default="{ row }">
-              {{ row.action === 'promote' ? '发布' : '回滚' }}到{{ CHANNEL_LABELS[row.channel] }}
-            </template>
+          <el-table-column label="动作" width="130">
+            <template #default="{ row }">{{ releaseActionText(row) }}</template>
           </el-table-column>
           <el-table-column label="构建" width="90">
             <template #default="{ row }"><span class="mono">#{{ row.build_id }}</span></template>
@@ -137,14 +148,14 @@
       </div>
     </div>
 
-    <el-drawer v-model="detailVisible" :title="`候选构建 #${detail?.id}`" size="min(720px, 94vw)">
+    <el-drawer v-model="detailVisible" :title="`构建 #${detail?.id}`" size="min(720px, 94vw)">
       <template v-if="detail">
         <p style="font-size:13px;color:var(--mp-text-secondary);margin-top:0">
           {{ fmtTime(detail.created_at) }} · {{ detail.created_by }} ·
           策略摘要 <span class="mono">{{ shortSha(detail.policy_sha) }}</span>
           {{ detail.note ? ` · ${detail.note}` : '' }}
         </p>
-        <el-alert v-if="detail.status !== 'success'" type="error" :closable="false"
+        <el-alert v-if="detail.verify_status !== 'success'" type="error" :closable="false"
                   title="存在未通过的校验，不能发布" style="margin-bottom:12px" />
         <div v-for="(result, name) in detail.results" :key="name" class="mp-card">
           <h3 style="display:flex;align-items:center;gap:10px">
@@ -188,7 +199,7 @@
     <BatchResultDialog
       v-model:visible="blockedVisible"
       title="部分构建未删除"
-      :summary="`已删除 ${deletedCount} 项；${blockedItems.length} 项因仍在通道中而保留`"
+      :summary="`已删除 ${deletedCount} 项；${blockedItems.length} 项因已发布过而保留`"
       :items="blockedItems"
     />
   </div>
@@ -196,7 +207,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
@@ -205,14 +216,17 @@ import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
-import { fmtTime, shortSha, PLATFORM_LABELS, CHANNEL_LABELS } from '../format'
+import {
+  fmtTime, shortSha, PLATFORM_LABELS, BUILD_STATUS_LABELS, ENV_LABELS,
+  RELEASE_ACTION_LABELS, buildStatusTagType, buildStatusTagEffect,
+} from '../format'
 
 const rows = ref([])
 const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
 const limit = ref(50)
-const channels = ref({ stable: null, candidate: null })
+const releaseState = ref({ production: null, testing: null })
 const releases = ref([])
 const loading = ref(false)
 const error = ref('')
@@ -241,13 +255,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [builds, ch, rel] = await Promise.all([
-      api('/api/v1/builds'), api('/api/v1/channels'), api('/api/v1/releases'),
+    const [state, paged, rel] = await Promise.all([
+      api('/api/v1/release-state'),
+      api(`/api/v1/builds/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api('/api/v1/releases'),
     ])
-    const paged = await api(`/api/v1/builds/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`)
     rows.value = paged.items
     total.value = paged.total
-    channels.value = ch
+    releaseState.value = state
     releases.value = rel
   } catch (e) {
     error.value = e.message
@@ -267,15 +282,48 @@ function clearSelection() {
   selected.value = []
 }
 
+// 发布时间：未发布过的构建退回创建时间
+function publishedAt(build) {
+  return build?.published_at || build?.created_at || ''
+}
+
+function verified(row) {
+  return row.verify_status === 'success'
+}
+
+function verifyKind(row) {
+  if (row.verify_status === 'success') return 'ok'
+  if (row.verify_status === 'failed') return 'danger'
+  return 'warn'
+}
+
+function verifyText(row) {
+  if (row.verify_status === 'success') return '校验通过'
+  if (row.verify_status === 'failed') return '校验失败'
+  return '校验中'
+}
+
+// 发布历史动作：发布/回滚带上环境，下线只写动作
+function releaseActionText(row) {
+  const action = RELEASE_ACTION_LABELS[row.action] || row.action
+  if (row.action === 'offline') return action
+  return `${action}到${ENV_LABELS[row.env] || row.env}`
+}
+
+// 当前环境里生效的构建号，没有则写「无」
+function currentBuildText(build) {
+  return build ? `构建 #${build.id}` : '无'
+}
+
 async function createBuild() {
   building.value = true
   try {
     const build = await api('/api/v1/builds', { method: 'POST', body: { note: '' } })
     await load()
-    if (build.status === 'success') {
-      ElMessage.success(`候选构建 #${build.id} 校验通过`)
+    if (build.verify_status === 'success') {
+      ElMessage.success(`构建 #${build.id} 校验通过`)
     } else {
-      ElMessage.warning(`候选构建 #${build.id} 存在未通过的校验，请查看详情`)
+      ElMessage.warning(`构建 #${build.id} 存在未通过的校验，请查看详情`)
     }
     openDetail(build)
   } catch (e) {
@@ -319,41 +367,56 @@ async function openDiff(name) {
   }
 }
 
-async function promote(row, channel) {
-  const label = channel === 'stable' ? '稳定' : '候选'
-  let value
+async function publishToTest(row) {
+  if (!await confirmBox(
+    `确定将构建 #${row.id} 发布至测试环境吗？发布后，当前测试版本（${currentBuildText(releaseState.value.testing)}）将被转为已下线。`,
+    '发布至测试环境', { type: 'warning', confirmButtonText: '发布' },
+  )) return
   try {
-    ;({ value } = await ElMessageBox.prompt(
-      `将候选构建 #${row.id} 发布到${label}通道？该通道下设备将在下次拉取时获得新配置。`,
-      `发布到${label}通道`,
-      { confirmButtonText: '发布', inputPlaceholder: '说明（可选）', type: 'warning' },
-    ))
-  } catch { return }
-  try {
-    await api(`/api/v1/builds/${row.id}/promote`, {
-      method: 'POST', body: { channel, reason: value || '' },
-    })
-    ElMessage.success(`已发布到${label}通道`)
+    await api(`/api/v1/builds/${row.id}/publish-to-test`, { method: 'POST', body: { reason: '' } })
+    ElMessage.success(`构建 #${row.id} 已发布至测试环境`)
     await load()
   } catch (e) {
     ElMessage.error(e.message)
   }
 }
 
-async function rollback(row) {
-  let value
+async function publishToProd(row) {
+  if (!await confirmBox(
+    `⚠️ 确定将构建 #${row.id} 设为生产版本吗？这将会影响所有线上设备。当前的线上版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
+    '发布至生产环境', { type: 'warning', confirmButtonText: '发布' },
+  )) return
   try {
-    ;({ value } = await ElMessageBox.prompt(
-      `把稳定通道回滚到构建 #${row.id}？客户端在下次拉取时生效，已建立的连接不受影响。`,
-      '回滚稳定通道',
-      { confirmButtonText: '回滚', inputPlaceholder: '回滚原因', type: 'warning' },
-    ))
-  } catch { return }
+    await api(`/api/v1/builds/${row.id}/publish-to-prod`, { method: 'POST', body: { reason: '' } })
+    ElMessage.success(`构建 #${row.id} 已成为生产版本`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function rollbackToProd(row) {
+  if (!await confirmBox(
+    `确定将构建 #${row.id} 回滚为生产版本吗？这将会影响所有线上设备。当前的线上版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
+    '回滚生产版本', { type: 'warning', confirmButtonText: '回滚' },
+  )) return
   try {
-    await api('/api/v1/channels/stable/rollback', {
-      method: 'POST', body: { build_id: row.id, reason: value || '' },
-    })
-    ElMessage.success('已回滚')
+    await api(`/api/v1/builds/${row.id}/rollback-to-prod`, { method: 'POST', body: { reason: '' } })
+    ElMessage.success(`已回滚到构建 #${row.id}`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function offlineBuild(row) {
+  if (!await confirmBox(
+    `确定将构建 #${row.id} 下线吗？下线后测试环境将没有生效版本，客户端会在下次拉取时收到 503。`,
+    '下线构建', { type: 'warning', confirmButtonText: '下线' },
+  )) return
+  try {
+    await api(`/api/v1/builds/${row.id}/offline`, { method: 'POST', body: { reason: '' } })
+    ElMessage.success(`构建 #${row.id} 已下线`)
     await load()
   } catch (e) {
     ElMessage.error(e.message)
@@ -362,8 +425,8 @@ async function rollback(row) {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除候选构建 #${row.id}？产物文件与相关发布历史会一并删除；`
-    + '仍在稳定或候选通道中的构建不能删除，需先把通道移到其他构建。',
+    `删除构建 #${row.id}？产物文件与相关发布历史会一并删除；`
+    + '只有「已构建」状态的构建可以删除，已发布过的版本只能下线归档。',
     `删除构建 #${row.id}`, { type: 'warning', confirmButtonText: '删除' },
   )) return
   try {
@@ -379,7 +442,7 @@ async function removeSelected() {
   if (!selected.value.length) return
   if (!await confirmBox(
     `删除选中的 ${selected.value.length} 个构建？产物文件与相关发布历史会一并删除；`
-    + '仍在稳定或候选通道中的构建会保留，并列出原因。',
+    + '已发布过的版本会保留，并列出原因。',
     '批量删除构建', { type: 'warning', confirmButtonText: '删除' },
   )) return
   try {
@@ -404,34 +467,37 @@ async function removeSelected() {
 
 <style scoped>
 .op-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .op-grid .el-button {
-  width: 100%;
   margin: 0;
   padding-left: 4px;
   padding-right: 4px;
 }
+.op-grid .el-button + .el-button { margin-left: 0; }
 @media (max-width: 640px) {
   .op-grid { gap: 4px; }
   .op-grid .el-button { font-size: 12px; }
 }
-.channel-list {
+.release-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   font-size: 13px;
 }
-.channel-line {
+.release-line {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
-.channel-label { font-weight: 600; min-width: 64px; }
-.channel-reason {
+.release-label { font-weight: 600; min-width: 96px; }
+.release-time { color: var(--mp-text-secondary); }
+.release-meta { color: var(--mp-text-secondary); }
+.release-empty { color: var(--mp-text-secondary); }
+.release-reason {
   color: var(--mp-text-secondary);
   max-width: 360px;
   overflow: hidden;
@@ -445,6 +511,6 @@ async function removeSelected() {
   flex-wrap: wrap;
 }
 @media (max-width: 640px) {
-  .channel-reason { max-width: 220px; }
+  .release-reason { max-width: 220px; }
 }
 </style>

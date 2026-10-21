@@ -55,9 +55,9 @@
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <el-select v-model="channel" size="small" style="width:104px">
-                <el-option value="stable" label="稳定通道" />
-                <el-option value="candidate" label="候选通道" />
+              <el-select v-model="env" size="small" style="width:110px">
+                <el-option value="production" label="生产环境" />
+                <el-option value="testing" label="测试环境" />
               </el-select>
               <el-button v-if="!readonly" @click="openSource">源码编辑</el-button>
               <el-button v-if="isBuiltin ? builtinOverridden : !readonly" @click="reset">
@@ -303,7 +303,7 @@ import yaml from 'js-yaml'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
-import { PLATFORM_LABELS } from '../format'
+import { PLATFORM_LABELS, ENV_LABELS } from '../format'
 
 const scopes = ref([])
 const isMobile = useMobile()
@@ -316,7 +316,7 @@ const groups = ref({})
 const presets = ref([])
 const doc = reactive({})
 const raw = ref('')
-const channel = ref('stable')
+const env = ref('production')
 const saving = ref(false)
 const applying = ref(false)
 const previewVisible = ref(false)
@@ -743,10 +743,10 @@ async function apply() {
       method: 'POST',
       body: {
         engine: s.engine, platform: s.platform, device_id: s.device_id,
-        content: raw.value, channel: channel.value, note: '更新基础配置',
+        content: raw.value, env: env.value, note: '更新基础配置',
       },
     })
-    ElMessage.success(`已构建 #${r.build_id} 并发布到${channel.value === 'stable' ? '稳定' : '候选'}通道`)
+    ElMessage.success(`已构建 #${r.build_id} 并发布到${ENV_LABELS[env.value] || env.value}`)
     await loadScopes()
     await select(current.value)
   } catch (e) {
