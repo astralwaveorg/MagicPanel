@@ -1,0 +1,7 @@
+# 规则文件: grok.list
+# 规则说明: xAI Grok 服务规则
+
+# DOMAIN-SUFFIX
+DOMAIN-SUFFIX,grok.com
+DOMAIN-SUFFIX,groq.com
+DOMAIN-SUFFIX,x.ai

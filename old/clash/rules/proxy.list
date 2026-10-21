@@ -1,0 +1,38 @@
+# NAME: Proxy
+# URL: https://magichub.top/download/clash/rules/proxy.list
+
+# --- 自定义代理域名 ---
+DOMAIN-SUFFIX,qichiyu.com
+DOMAIN-SUFFIX,v2ex.com
+
+# --- Docker Hub 官方 ---
+DOMAIN-SUFFIX,docker.io
+DOMAIN-SUFFIX,hub.docker.com
+DOMAIN-SUFFIX,auth.docker.io
+DOMAIN-SUFFIX,registry-1.docker.io
+DOMAIN-SUFFIX,production.cloudflare.docker.com
+DOMAIN-SUFFIX,cloudflarestorage.com
+
+# --- GitHub Container Registry (GHCR) ---
+DOMAIN-SUFFIX,ghcr.io
+DOMAIN-SUFFIX,pkg-containers.githubusercontent.com
+
+# --- Google Container Registry (GCR) & Kubernetes ---
+DOMAIN-SUFFIX,gcr.io
+DOMAIN-SUFFIX,us.gcr.io
+DOMAIN-SUFFIX,eu.gcr.io
+DOMAIN-SUFFIX,asia.gcr.io
+DOMAIN-SUFFIX,k8s.gcr.io
+DOMAIN-SUFFIX,registry.k8s.io
+DOMAIN-SUFFIX,storage.googleapis.com
+
+# --- Quay.io (Red Hat) ---
+DOMAIN-SUFFIX,quay.io
+DOMAIN-SUFFIX,cdn.quay.io
+DOMAIN-SUFFIX,cdn01.quay.io
+DOMAIN-SUFFIX,cdn02.quay.io
+DOMAIN-SUFFIX,cdn03.quay.io
+
+# --- Microsoft Container Registry ---
+# VS Code Dev Containers 和 .NET 镜像常用
+DOMAIN-SUFFIX,mcr.microsoft.com

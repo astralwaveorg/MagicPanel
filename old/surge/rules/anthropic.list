@@ -1,0 +1,10 @@
+# 规则文件: anthropic.list
+# 规则说明: Anthropic Claude 服务规则
+
+# DOMAIN-KEYWORD
+
+# DOMAIN-SUFFIX
+DOMAIN-SUFFIX,anthropic.com
+DOMAIN-SUFFIX,claude.ai
+DOMAIN-SUFFIX,claude.com
+DOMAIN-SUFFIX,api.anthropic.com

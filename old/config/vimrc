@@ -1,0 +1,516 @@
+" ==================== 基础设置 ====================
+set nocompatible
+filetype off
+syntax enable
+set encoding=utf-8
+set fileencoding=utf-8
+set fileencodings=utf-8,gbk,ucs-bom,cp936
+
+" ==================== 显示优化 ====================
+set number                      " 显示行号
+set norelativenumber            " 使用绝对行号
+set wrap                        " 自动换行
+set linebreak                   " 在单词边界换行
+set showbreak=↪                 " 换行标识
+set breakindent                 " 折行缩进
+set display+=lastline           " 显示长行最后的内容
+
+" 界面优化
+set noshowmode                  " 不显示模式，状态栏已包含
+set shortmess+=c                " 减少提示信息
+set cmdheight=1                 " 命令栏高度
+set laststatus=2                " 总是显示状态栏
+set showcmd                     " 显示命令
+set wildmenu                    " 命令行补全
+set lazyredraw                  " 延迟重绘提升性能
+
+" 滚动优化
+set scrolloff=3                 " 光标上下保留行数
+set sidescrolloff=5             " 光标左右保留字符
+set sidescroll=1                " 横向滚动步长
+
+" ==================== 编辑设置 ====================
+set expandtab                   " 使用空格代替制表符
+set tabstop=4                   " Tab宽度
+set shiftwidth=4                " 自动缩进宽度
+set softtabstop=4               " 退格键删除缩进
+set autoindent                  " 自动缩进
+set smartindent                 " 智能缩进
+
+" 搜索设置
+set hlsearch                    " 高亮搜索
+set incsearch                   " 实时搜索
+set ignorecase                  " 忽略大小写
+set smartcase                   " 智能大小写
+
+" 其他设置
+set backspace=indent,eol,start  " 退格键行为
+set history=1000                " 历史记录
+set undofile                    " 持久化撤销
+set undodir=~/.vim/undodir      " 撤销文件目录
+set backup                      " 备份
+set backupdir=~/.vim/backup     " 备份目录
+set directory=~/.vim/swap       " 交换文件目录
+set mouse=                      " 禁用鼠标（触摸屏干扰）
+
+" 创建必要的目录
+silent! call system('mkdir -p ~/.vim/undodir ~/.vim/backup ~/.vim/swap')
+
+" ==================== 插件管理 ====================
+call plug#begin('~/.vim/plugged')
+
+" 主题和界面
+Plug 'morhetz/gruvbox'          " Gruvbox主题
+Plug 'vim-airline/vim-airline'  " 状态栏
+Plug 'vim-airline/vim-airline-themes'
+Plug 'ryanoasis/vim-devicons'   " 文件图标
+Plug 'nathanaelkane/vim-indent-guides' " 缩进指南
+
+" 文件浏览
+Plug 'preservim/nerdtree'       " 文件树
+Plug 'Xuyuanp/nerdtree-git-plugin'
+Plug 'ctrlpvim/ctrlp.vim'       " 文件搜索
+Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+Plug 'junegunn/fzf.vim'
+
+" 语法和高亮
+Plug 'sheerun/vim-polyglot'     " 多语言语法支持
+Plug 'stephpy/vim-yaml'         " YAML增强
+Plug 'fatih/vim-go', { 'do': ':GoUpdateBinaries' } " Go语言支持
+
+" 代码补全
+Plug 'neoclide/coc.nvim', {'branch': 'release'}  " 智能补全
+
+" Git集成
+Plug 'tpope/vim-fugitive'       " Git命令
+Plug 'airblade/vim-gitgutter'   " Git差异显示
+
+" 编辑增强
+Plug 'tpope/vim-commentary'     " 快速注释
+Plug 'tpope/vim-surround'       " 环绕符号
+Plug 'jiangmiao/auto-pairs'     " 自动括号
+Plug 'alvan/vim-closetag'       " HTML标签自动关闭
+Plug 'terryma/vim-multiple-cursors' " 多光标
+
+" 代码分析
+Plug 'dense-analysis/ale'       " 语法检查
+
+" 工具集成
+Plug 'christoomey/vim-tmux-navigator'  " Tmux导航
+
+call plug#end()
+
+" ==================== 主题设置 ====================
+colorscheme gruvbox
+set background=dark
+set termguicolors
+
+" ==================== 插件配置 ====================
+
+" NERDTree配置
+let NERDTreeShowHidden=1
+let NERDTreeAutoDeleteBuffer=1
+let NERDTreeMinimalUI=1          " 简化界面
+let NERDTreeDirArrows=1          " 使用箭头
+
+" Airline配置
+let g:airline#extensions#tabline#enabled=1
+let g:airline_powerline_fonts=1
+let g:airline_theme='gruvbox'
+let g:airline#extensions#ale#enabled=1
+
+" CtrlP配置
+let g:ctrlp_map='<leader>p'
+let g:ctrlp_cmd='CtrlP'
+let g:ctrlp_working_path_mode='ra'
+let g:ctrlp_show_hidden=1
+
+" ALE配置
+let g:ale_fixers={
+\   '*': ['remove_trailing_lines', 'trim_whitespace'],
+\   'python': ['black', 'isort'],
+\   'go': ['gofmt', 'goimports'],
+\   'javascript': ['prettier', 'eslint'],
+\   'typescript': ['prettier', 'tslint'],
+\   'yaml': ['prettier'],
+\   'json': ['prettier'],
+\   'html': ['prettier'],
+\   'css': ['prettier'],
+\   'markdown': ['prettier'],
+\   'ini': [],
+\}
+
+let g:ale_linters={
+\   'python': ['flake8', 'pylint'],
+\   'go': ['golint', 'govet'],
+\   'javascript': ['eslint'],
+\   'yaml': ['yamllint'],
+\   'json': ['jsonlint'],
+\   'markdown': ['markdownlint'],
+\   'ini': [],
+\}
+
+let g:ale_fix_on_save=1
+let g:ale_sign_error='✗'
+let g:ale_sign_warning='⚠'
+let g:ale_echo_msg_error_str='E'
+let g:ale_echo_msg_warning_str='W'
+let g:ale_echo_msg_format='[%linter%] %s [%severity%]'
+
+" coc.nvim配置
+let g:coc_global_extensions=[
+\   'coc-json',
+\   'coc-yaml',
+\   'coc-pyright',
+\   'coc-go',
+\   'coc-html',
+\   'coc-css',
+\   'coc-tsserver',
+\   'coc-markdownlint',
+\   'coc-snippets',
+\   'coc-pairs',
+\   'coc-highlight',
+\]
+
+" vim-go配置
+let g:go_fmt_command = "goimports"
+let g:go_auto_type_info = 1
+let g:go_highlight_types = 1
+let g:go_highlight_fields = 1
+let g:go_highlight_functions = 1
+let g:go_highlight_function_calls = 1
+let g:go_highlight_operators = 1
+let g:go_highlight_extra_types = 1
+
+" YAML配置
+let g:yaml_schema = "http://json-schema.org/draft-04/schema#"
+
+" ==================== 键盘配置 ====================
+
+" 领导键改为逗号（更容易按到）
+let mapleader = ","
+let maplocalleader = "\\"
+
+" ==================== 光标移动配置 ====================
+" 同时启用HJKL和方向键进行光标移动
+
+" 普通模式下的方向键
+noremap <Up> k
+noremap <Down> j
+noremap <Left> h
+noremap <Right> l
+
+" 插入模式下的方向键
+inoremap <Up> <Up>
+inoremap <Down> <Down>
+inoremap <Left> <Left>
+inoremap <Right> <Right>
+
+" 可视模式下的方向键
+vnoremap <Up> k
+vnoremap <Down> j
+vnoremap <Left> h
+vnoremap <Right> l
+
+" ==================== 窗口管理 ====================
+" 新的窗口切换快捷键
+
+" 使用Leader + WASD进行窗口切换
+nmap <Leader>w <C-w>k
+nmap <Leader>s <C-w>j
+nmap <Leader>a <C-w>h
+nmap <Leader>d <C-w>l
+
+" 窗口分割
+nmap <Leader>v :vsplit<CR>
+nmap <Leader>V :split<CR>
+
+" 关闭窗口
+nmap <Leader>wc <C-w>c
+
+" ==================== 核心操作快捷键 ====================
+" 使用容易按到的键位，避免组合键
+
+" 快速保存和退出（最常用）
+nmap <Leader>s :w<CR>
+nmap <Leader>q :q<CR>
+nmap <Leader>wq :wq<CR>
+nmap <Leader>! :q!<CR>
+nmap <Leader>Q :qa!<CR>
+nmap <Leader>S :wa<CR>
+
+" ==================== 模式切换快捷键 ====================
+" 简化模式切换，减少Esc键依赖
+imap jj <Esc>
+imap jk <Esc>
+imap kk <Esc>
+imap JJ <Esc>
+vmap vv <Esc>
+
+" ==================== 导航快捷键 ====================
+" 使用单手容易操作的键位
+
+" 行首行尾
+nmap H ^
+nmap L $
+
+" 页面导航
+nmap <Leader>j 10j
+nmap <Leader>k 10k
+nmap <Leader>h 10h
+nmap <Leader>l 10l
+
+" 快速翻页
+nmap <Space> <PageDown>
+nmap <Leader><Space> <PageUp>
+
+" 缓冲区导航
+nmap <Leader>bn :bn<CR>
+nmap <Leader>bp :bp<CR>
+nmap <Leader>bd :bd<CR>
+
+" ==================== 插入模式快捷输入 ====================
+" 减少输入工作量
+
+" 快速插入常用符号
+imap <Leader>, ,<Space>
+imap <Leader>. .<Space>
+imap <Leader>; ;<Space>
+imap <Leader>: :<Space>
+
+" 快速括号
+imap <Leader>( ()<Left>
+imap <Leader>[ []<Left>
+imap <Leader>{ {}<Left>
+imap <Leader>" ""<Left>
+imap <Leader>' ''<Left>
+imap <Leader>` ``<Left>
+
+" ==================== 文件操作快捷键 ====================
+" 简化文件操作
+
+" 快速打开文件
+nmap <Leader>o :e
+nmap <Leader>O :tabnew
+
+" 文件树
+nmap <Leader>f :NERDTreeToggle<CR>
+nmap <Leader>F :NERDTreeFind<CR>
+
+" ==================== 搜索和替换 ====================
+" 简化搜索操作
+
+" 快速搜索
+nmap <Leader>/ /
+nmap <Leader>? ?
+nmap <Leader>n n
+nmap <Leader>N N
+
+" 快速替换
+nmap <Leader>r :%s//g<Left><Left>
+nmap <Leader>R :%s//gc<Left><Left><Left>
+
+" 清除搜索高亮
+nmap <Leader>h :nohlsearch<CR>
+
+" ==================== 代码操作快捷键 ====================
+" 编程相关操作
+
+" 代码格式化
+nmap <Leader>ff :ALEFix<CR>
+nmap <Leader>fd :ALEDetail<CR>
+
+" 语法检查导航
+nmap <Leader>en :ALENext<CR>
+nmap <Leader>ep :ALEPrevious<CR>
+
+" 定义跳转
+nmap <Leader>gd <Plug>(coc-definition)
+nmap <Leader>gy <Plug>(coc-type-definition)
+nmap <Leader>gi <Plug>(coc-implementation)
+nmap <Leader>gr <Plug>(coc-references)
+
+" 重命名
+nmap <Leader>rn <Plug>(coc-rename)
+
+" 代码操作
+nmap <Leader>ca <Plug>(coc-codeaction)
+nmap <Leader>cl <Plug>(coc-codelens-action)
+
+" ==================== 文本编辑快捷操作 ====================
+" 常用编辑操作
+
+" 复制粘贴
+nmap <Leader>y "+y
+nmap <Leader>p "+p
+nmap <Leader>P "+P
+vmap <Leader>y "+y
+vmap <Leader>p "+p
+
+" 全选
+nmap <Leader>a ggVG
+
+" 注释切换
+nmap <Leader>c gcc
+vmap <Leader>c gc
+
+" 缩进调整
+vmap < <gv
+vmap > >gv
+
+" ==================== Git操作快捷键 ====================
+nmap <Leader>gs :Gstatus<CR>
+nmap <Leader>gc :Gcommit<CR>
+nmap <Leader>gp :Gpush<CR>
+nmap <Leader>gl :Glog<CR>
+nmap <Leader>gd :Gdiff<CR>
+
+" ==================== 语言特定配置 ====================
+
+" Python配置
+autocmd FileType python setlocal shiftwidth=4 tabstop=4 expandtab
+autocmd FileType python nmap <Leader>rt :!python %<CR>
+
+" Go配置
+autocmd FileType go setlocal shiftwidth=4 tabstop=4 noexpandtab
+autocmd FileType go nmap <Leader>rt :GoRun<CR>
+autocmd FileType go nmap <Leader>tt :GoTest<CR>
+
+" YAML配置
+autocmd FileType yaml setlocal shiftwidth=2 tabstop=2 expandtab
+
+" JSON配置
+autocmd FileType json setlocal shiftwidth=2 tabstop=2 expandtab
+
+" INI配置
+autocmd FileType dosini setlocal shiftwidth=2 tabstop=2 expandtab
+
+" Markdown配置
+autocmd FileType markdown setlocal wrap linebreak
+
+" ==================== coc.nvim 补全配置 ====================
+" 使用Tab进行补全
+inoremap <silent><expr> <TAB>
+      \ coc#pum#visible() ? coc#pum#next(1) :
+      \ CheckBackspace() ? "\<Tab>" :
+      \ coc#refresh()
+inoremap <expr><S-TAB> coc#pum#visible() ? coc#pum#prev(1) : "\<C-h>"
+
+" 确认补全
+inoremap <expr> <cr> coc#pum#visible() ? coc#pum#confirm() : "\<CR>"
+
+" ==================== 特殊功能 ====================
+
+" 显示/隐藏行号
+nmap <Leader>nn :set number!<CR>
+
+" 切换粘贴模式
+nmap <Leader>pp :set paste!<CR>
+
+" 重新加载配置
+nmap <Leader>rc :source ~/.vimrc<CR>
+
+" 强制刷新文件
+nmap <Leader>rf :e!<CR>
+
+" ==================== 紧急操作 ====================
+" 防止误操作和恢复
+
+" 撤销重做
+nmap <Leader>u :undo<CR>
+nmap <Leader>U :redo<CR>
+
+" ==================== 帮助系统 ====================
+" 优化的帮助说明
+
+function! VimHelp()
+    echo "================ Vim 快捷键指南 ================"
+    echo ""
+    echo "🏃‍♂️ 光标移动:"
+    echo "  HJKL 或 方向键 - 基本移动"
+    echo "  H/L - 行首/行尾"
+    echo "  ,j/,k/,h/,l - 快速移动10单位"
+    echo "  Space - 下翻页   ,Space - 上翻页"
+    echo ""
+    echo "🪟 窗口管理:"
+    echo "  ,w - 上窗口      ,s - 下窗口"
+    echo "  ,a - 左窗口      ,d - 右窗口"
+    echo "  ,v - 垂直分割    ,V - 水平分割"
+    echo "  ,wc - 关闭当前窗口"
+    echo ""
+    echo "📁 文件操作:"
+    echo "  ,s - 保存        ,q - 退出"
+    echo "  ,wq - 保存退出   ,! - 强制退出"
+    echo "  ,f - 文件树      ,o - 打开文件"
+    echo "  ,p - 搜索文件    ,F - 在文件树中定位"
+    echo ""
+    echo "🔍 搜索替换:"
+    echo "  ,/ - 搜索        ,? - 反向搜索"
+    echo "  ,n/N - 下一个/上一个结果"
+    echo "  ,h - 清除高亮    ,r - 全局替换"
+    echo ""
+    echo "💻 代码操作:"
+    echo "  ,ff - 格式化代码 ,fd - 错误详情"
+    echo "  ,en/ep - 下一个/上一个错误"
+    echo "  ,gd - 跳转定义   ,gy - 类型定义"
+    echo "  ,gi - 实现       ,gr - 引用"
+    echo "  ,rn - 重命名     ,ca - 代码操作"
+    echo ""
+    echo "✏️ 编辑操作:"
+    echo "  ,c - 注释/取消注释"
+    echo "  ,y - 复制        ,p - 粘贴"
+    echo "  ,a - 全选        ,u - 撤销"
+    echo "  ,U - 重做"
+    echo ""
+    echo "🔧 Git操作:"
+    echo "  ,gs - 状态       ,gc - 提交"
+    echo "  ,gp - 推送       ,gl - 日志"
+    echo "  ,gd - 差异比较"
+    echo ""
+    echo "⚡ 模式切换:"
+    echo "  jj/jk/kk - 退出插入模式"
+    echo "  vv - 退出可视模式"
+    echo ""
+    echo "🚨 紧急操作:"
+    echo "  ,! - 强制退出    ,Q - 全部强制退出"
+    echo "  ,rc - 重载配置   ,rf - 强制刷新文件"
+    echo ""
+    echo "❓ 帮助:"
+    echo "  ,help - 显示此帮助"
+    echo "  :CocCommand - 查看coc命令"
+    echo "  :ALEInfo - 查看ALE信息"
+    echo ""
+    echo "=============================================="
+endfunction
+
+command! VimHelp call VimHelp()
+nmap <Leader>help :VimHelp<CR>
+
+" ==================== 自定义函数 ====================
+function! CheckBackspace() abort
+  let col = col('.') - 1
+  return !col || getline('.')[col - 1]  =~# '\s'
+endfunction
+
+" 自动命令
+autocmd BufWritePre * %s/\s\+$//e  " 保存时删除行尾空格
+
+" 移动设备检测和优化
+if has('android') || has('ios') || $TERM ==? 'linux'
+    set lines=40
+    set columns=120
+    set guifont=Monospace\ 10
+    set mouse=
+    let g:airline_powerline_fonts=0  " 移动设备不使用特殊字体
+endif
+
+" 文件类型检测
+autocmd BufRead,BufNewFile *.ini,*.conf,*.cfg set filetype=dosini
+autocmd BufRead,BufNewFile *.yml,*.yaml set filetype=yaml
+
+" 最后设置文件类型检测
+filetype plugin indent on
+
+" ==================== 状态栏提示 ====================
+" 启动时显示简要提示
+autocmd VimEnter * echo "输入 ',help' 查看完整快捷键指南"

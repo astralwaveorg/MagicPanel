@@ -1,0 +1,9 @@
+# 规则文件: perplexity.list
+# 规则说明: Perplexity AI 服务规则
+
+# DOMAIN
+DOMAIN,pplx-res.cloudinary.com
+
+# DOMAIN-SUFFIX
+DOMAIN-SUFFIX,perplexity.ai
+DOMAIN-SUFFIX,pplx.ai

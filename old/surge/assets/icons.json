@@ -1,0 +1,89 @@
+{
+  "name": "SurgeIcons",
+  "icons": [
+    {
+      "name": "openai",
+      "url": "https://list.magichub.top/d/surge/assets/icons/chatgpt.png"
+    },
+    {
+      "name": "claude",
+      "url": "https://list.magichub.top/d/surge/assets/icons/claude.png"
+    },
+    {
+      "name": "google",
+      "url": "https://list.magichub.top/d/surge/assets/icons/google.png"
+    },
+    {
+      "name": "microsoft",
+      "url": "https://list.magichub.top/d/surge/assets/icons/microsoft.png"
+    },
+    {
+      "name": "apple",
+      "url": "https://list.magichub.top/d/surge/assets/icons/apple.png"
+    },
+    {
+      "name": "youtube",
+      "url": "https://list.magichub.top/d/surge/assets/icons/youtube.png"
+    },
+    {
+      "name": "netflix",
+      "url": "https://list.magichub.top/d/surge/assets/icons/netflix.png"
+    },
+    {
+      "name": "disney",
+      "url": "https://list.magichub.top/d/surge/assets/icons/disney-blue.png"
+    },
+    {
+      "name": "spotify",
+      "url": "https://list.magichub.top/d/surge/assets/icons/spotify.png"
+    },
+    {
+      "name": "telegram",
+      "url": "https://list.magichub.top/d/surge/assets/icons/telegram.png"
+    },
+    {
+      "name": "twitter",
+      "url": "https://list.magichub.top/d/surge/assets/icons/twitter.png"
+    },
+    {
+      "name": "instagram",
+      "url": "https://list.magichub.top/d/surge/assets/icons/instagram.png"
+    },
+    {
+      "name": "facebook",
+      "url": "https://list.magichub.top/d/surge/assets/icons/facebook.png"
+    },
+    {
+      "name": "discord",
+      "url": "https://list.magichub.top/d/surge/assets/icons/discord.png"
+    },
+    {
+      "name": "github",
+      "url": "https://list.magichub.top/d/surge/assets/icons/github.png"
+    },
+    {
+      "name": "reddit",
+      "url": "https://list.magichub.top/d/surge/assets/icons/reddit.png"
+    },
+    {
+      "name": "dropbox",
+      "url": "https://list.magichub.top/d/surge/assets/icons/dropbox.png"
+    },
+    {
+      "name": "wikipedia",
+      "url": "https://list.magichub.top/d/surge/assets/icons/wikipedia.png"
+    },
+    {
+      "name": "steam",
+      "url": "https://list.magichub.top/d/surge/assets/icons/steam.png"
+    },
+    {
+      "name": "tiktok",
+      "url": "https://list.magichub.top/d/surge/assets/icons/tiktok.png"
+    },
+    {
+      "name": "moviepilot",
+      "url": "https://list.magichub.top/d/surge/assets/icons/moviepilot.png"
+    }
+  ]
+}

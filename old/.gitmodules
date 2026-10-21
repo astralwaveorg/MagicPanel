@@ -1,0 +1,3 @@
+[submodule "external/subs-check"]
+	path = external/subs-check
+	url = https://github.com/beck-8/subs-check.git

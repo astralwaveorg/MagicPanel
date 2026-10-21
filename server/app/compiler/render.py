@@ -312,9 +312,15 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None) ->
         base.pop(base_config_service.FAKE_IP_FILTER_KEY, None))
     cfg: dict = base_config_service.ordered(base)
 
+    groups, rules = _select_structure(snapshot, target, warnings)
+    # 本地节点跟随本目标实际生效的策略组，避免把其他设备的私有隧道及密钥
+    # 分发给本目标。不能按全局策略组筛选：其中可能包含目标专属的策略组。
+    used_local = {
+        node_id for group in groups for node_id in (group.get("local_nodes") or [])
+    }
     local_enabled = {
         node["id"]: node for node in snapshot.get("local_nodes", [])
-        if node.get("enabled")
+        if node.get("enabled") and node["id"] in used_local
     }
     cfg["proxies"] = [_guard_proxy(engine)]
     for node in local_enabled.values():
@@ -326,7 +332,6 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None) ->
             s["name"]: _provider_entry(s, engine) for s in sources
         }
 
-    groups, rules = _select_structure(snapshot, target, warnings)
     if groups:
         cfg["proxy-groups"] = []
         for group in groups:

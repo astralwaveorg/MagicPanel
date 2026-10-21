@@ -1,0 +1,22 @@
+sqlite_mcp_server.db
+.vscode/
+.codegpt
+.venv
+.idea
+**/.DS_Store
+**/Thumbs.db
+**/node_modules/**
+**/__pycache__/**
+*.py[cod]
+**/misc.xml
+tools/node-checker/node-checker
+# Local caches, scratch output, and editor temporary files
+.cache/
+/.tmp/
+/tmp/
+/.artifacts/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

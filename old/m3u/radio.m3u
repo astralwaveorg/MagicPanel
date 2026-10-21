@@ -1,0 +1,82 @@
+﻿#EXTM3U
+
+# ========= 📻 新闻资讯 =========
+#EXTINF:-1,CNR 中国之声
+http://ngcdn001.cnr.cn/live/zgzs/index.m3u8
+#EXTINF:-1,CRI 环球资讯广播
+https://satellitepull.cnr.cn/live/wxhqzx01/playlist.m3u8
+#EXTINF:-1,北京新闻广播
+https://satellitepull.cnr.cn/live/wxbjxwgb/playlist.m3u8
+
+# ========= 💹 财经科技 =========
+#EXTINF:-1,第一财经广播
+http://satellitepull.cnr.cn/live/wx32dycjgb/playlist.m3u8
+#EXTINF:-1,CNR 经济之声
+http://ngcdn002.cnr.cn/live/jjzs/index.m3u8
+#EXTINF:-1,浙江经济广播
+https://satellitepull.cnr.cn/live/wxzjjjgb/playlist.m3u8
+#EXTINF:-1,广东股市广播
+https://satellitepull.cnr.cn/live/wxgdgsgb/playlist.m3u8
+
+# ========= 🌍 国际频道（英文） =========
+#EXTINF:-1,BBC World Service
+http://as-hls-ww-live.akamaized.net/pool_904/live/ww/bbc_world_service/bbc_world_service.isml/bbc_world_service-audio=320000.m3u8
+#EXTINF:-1,CNN News
+http://tunein.streamguys1.com/cnn-new
+#EXTINF:-1,Bloomberg TV（财经）
+http://tunein.streamguys1.com/BloombergTV
+#EXTINF:-1,CRI China Plus（英语环球）
+http://sk.cri.cn/am846.m3u8
+#EXTINF:-1,Al Jazeera English
+http://tunein.ord.streamguys1.com/secure-aljazeera-english
+
+# ========= 🛣️ 浙江与杭州本地 =========
+#EXTINF:-1,浙江之声
+https://satellitepull.cnr.cn/live/wxzjzs/playlist.m3u8
+#EXTINF:-1,杭州交通经济广播
+https://lhttp.qingting.fm/live/1133/64k.mp3
+#EXTINF:-1,浙江交通之声
+https://satellitepull.cnr.cn/live/wxzjjtgb/playlist.m3u8
+#EXTINF:-1,浙江城市之声
+https://satellitepull.cnr.cn/live/wxzjcszs/playlist.m3u8
+#EXTINF:-1,浙江民生资讯广播
+https://satellitepull.cnr.cn/live/wxzjmsgb/playlist.m3u8
+#EXTINF:-1,杭州城市资讯广播
+http://live.cooltv.top/tv/hz.php?id=23
+#EXTINF:-1,绍兴交通广播
+http://live.shaoxing.com.cn/audio/s10001-jt2/index.m3u8
+#EXTINF:-1,宁波交通广播
+http://ihzlh.linker.cc/ihzlh/zjnb_ts01_939.m3u8
+
+# ========= 🎵 音乐·轻松·氛围 =========
+#EXTINF:-1,浙江音乐调频·动听968
+https://satellitepull.cnr.cn/live/wxzj968/playlist.m3u8
+#EXTINF:-1,CNR 音乐之声
+http://ngcdn003.cnr.cn/live/yyzs/index.m3u8
+#EXTINF:-1,江苏经典流行音乐广播
+https://satellitepull.cnr.cn/live/wx32jsjdlxyy/playlist.m3u8
+#EXTINF:-1,AsiaFM 亚洲经典
+http://goldfm.cn:8000/goldfm
+#EXTINF:-1,Smooth Jazz（编程技术）
+https://smoothjazz.cdnstream1.com/2585_128.mp3
+#EXTINF:-1,古典音乐台
+http://play.redefine.ltd/Stream2/FM1058-2.m3u8
+#EXTINF:-1,天籁之音 Hi-Fi Radio
+http://play-radio-stream3.hndt.com/now/JxkyN5mR/playlist.m3u8
+#EXTINF:-1,民谣与蓝调
+http://play-radio-stream3.hndt.com/now/XWfN89gh/playlist.m3u8
+
+# ========= 📚 阅读·故事·亲子 =========
+#EXTINF:-1,CNR 阅读之声
+http://ngcdn014.cnr.cn/live/ylgb/index.m3u8
+#EXTINF:-1,北京故事广播
+http://123.56.16.201:1935/live/am603/96K/tzwj_video.m3u8
+#EXTINF:-1,安徽故事广播
+https://satellitepull.cnr.cn/live/wxahxspsgb/playlist.m3u8
+#EXTINF:-1,苏州儿童广播
+#EXTINF:-1,湖北亲子广播
+https://satellitepull.cnr.cn/live/wx32hubfnetgb/playlist.m3u8
+#EXTINF:-1,黑龙江老年少儿广播
+https://satellitepull.cnr.cn/live/wx32hljajgb/playlist.m3u8
+#EXTINF:-1,CCTV 新科动漫
+http://cctvalic.v.myalicdn.com/live/xinkedongman_1/index.m3u8?adapt=0&BR=audio

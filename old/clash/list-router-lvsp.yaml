@@ -1,0 +1,16 @@
+# URL: # https://magichub.top/download/clash/list-router-lvsp.yaml
+# URL Decode: https%3A%2F%2Fmagichub.top%2Fdownload%2Fclash%2Flist-router-lvsp.yaml
+proxies:
+  - {
+      name: '家里路由器',
+      server: vpn.jiek.top,
+      port: 51820,
+      type: wireguard,
+      ip-version: ipv4,
+      ip: 10.6.0.3,
+      private-key: WGDozpGBLDPfy/LSka9U9bSV29uapPT1NIKPKNMIbl8=,
+      public-key: elYLmOBX+yQLffVjbIg3OfDw9hIpzIa3JM/V9rx7Emw=,
+      udp: true,
+      mtu: 1420,
+      remote-dns-resolve: false
+    }

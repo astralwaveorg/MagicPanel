@@ -1,0 +1,908 @@
+# ===============================
+# Mihomo (Clash Meta) Config
+# 地址: https://list.magichub.top/download/clash/config.yaml
+# ===============================
+
+# [1] 端口设置
+port: 7890
+socks-port: 7891
+redir-port: 7892
+tproxy-port: 7894
+mixed-port: 7893
+
+# [2] 鉴权与免密
+authentication:
+  - 'rain:rain8240'
+# 设置允许跳过验证的 IP 段
+skip-auth-prefixes:
+  - 127.0.0.1/8
+  - ::1/128
+  - 10.0.1.0/24
+
+# [3] 局域网访问
+allow-lan: true
+bind-address: '*'
+ipv6: true
+mode: rule
+log-level: warning
+
+# [4] 网络栈优化
+unified-delay: true
+tcp-concurrent: true
+keep-alive-interval: 15
+keep-alive-idle: 15
+find-process-mode: strict
+global-ua: clash.meta
+
+# [5] API与面板
+secret: 'rain8240'
+external-controller: 0.0.0.0:9090
+external-controller-cors:
+  allow-origins: ['*']
+  allow-private-network: true
+external-ui: ui
+external-ui-url: 'https://ghfast.top/https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip'
+
+# [6] 缓存与Geo数据库
+profile:
+  store-selected: true
+  store-fake-ip: true
+geodata-mode: true
+geodata-loader: standard
+geo-auto-update: true
+geo-update-interval: 24
+etag-support: true
+geox-url:
+  geoip: 'https://ghfast.top/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat'
+  geosite: 'https://ghfast.top/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat'
+  mmdb: 'https://ghfast.top/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb'
+
+# [7] 流量嗅探
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - '+.push.apple.com'
+    - '+.apple.com'
+    - 'Mijia Cloud'
+
+# [8] TUN模式
+tun:
+  enable: true
+  stack: mixed
+  auto-route: true
+  auto-redirect: true
+  auto-detect-interface: true
+  dns-hijack:
+    - 'any:53'
+    - 'tcp://any:53'
+# [9] DNS解析
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '+.lan'
+    - '+.local'
+    - 'geosite:private,cn,apple'
+    - '+.homehub.stream'
+    - '+.magichub.top'
+    - '+.jiek.top'
+    - '+.dnscli.top'
+    - '+.eoysky.com'
+    - '+.astralwave.org'
+    - '+.microsoft.com'
+    - '+.microsoftstore.com'
+    - '+.s-microsoft.com'
+    - '+.windows.com'
+    - '+.windows.net'
+    - '+.windowsupdate.com'
+    - '+.msftauth.net'
+    - '+.msauth.net'
+    - '+.live.com'
+    - '+.msftconnecttest.com'
+    - '+.msftncsi.com'
+    - '+.xboxlive.com'
+
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+
+  proxy-server-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+
+  nameserver-policy:
+    # 你的核心直连域名，强制使用国内解析，不再查询 google
+    'domain:jiek.top,magichub.top,homehub.stream,eoysky.com,astralwave.org,233netcloud.com,ghfast.top':
+      [223.5.5.5, 119.29.29.29]
+    'geosite:cn,private': ['https://dns.alidns.com/dns-query', 'https://doh.pub/dns-query']
+    # 不使用国外 DNS 解析，避免访问失败
+    # 'geosite:!cn': [https://dns.google/dns-query, https://1.1.1.1/dns-query]
+
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+    - https://dns.alidns.com/dns-query
+
+  # 关键修改：去掉 fallback 里的国外 DoH，或者确保它们走代理
+  # fallback:
+  #   - https://dns.cloudflare.com/dns-query
+
+ntp:
+  enable: true
+  server: ntp.aliyun.com
+  server-port: 123
+  interval: 30
+proxies:
+proxy-providers:
+  订阅节点:
+    type: http
+    url: 'https://list.magichub.top/d/clash/list.yaml'
+    interval: 86400
+    path: ./profiles/proxies/subscription-merged.yaml
+    health-check: { enable: false, interval: 172800, url: 'http://www.gstatic.com/generate_204' }
+  路由器:
+    type: http
+    url: 'https://list.magichub.top/d/clash/list-router-lvsp.yaml'
+    interval: 86400
+    path: ./profiles/proxies/lvsp-router.yaml
+    health-check: { enable: false, interval: 172800, url: 'http://www.gstatic.com/generate_204' }
+proxy-groups:
+  # 基础测速分组
+  - name: '自动优选'
+    type: url-test
+    use: [订阅节点]
+    url: http://connectivitycheck.gstatic.com/generate_204
+    interval: 172800
+    tolerance: 100
+
+  # 地区筛选分组
+  - name: '🇺🇸 美国节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇺🇸|美国|US|States'
+
+  - name: '🇭🇰 香港节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇭🇰|香港|HK|Hong'
+
+  - name: '🇨🇳 台湾节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇹🇼|台湾|TW|Tai'
+
+  - name: '🇯🇵 日本节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇯🇵|日本|JP|Japan'
+
+  - name: '🇰🇷 韩国节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇰🇷|韩|KR|Korea'
+
+  - name: '🇸🇬 新加坡节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇸🇬|新加坡|SG|Singapore'
+
+  - name: '🇨🇦 加拿大节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇨🇦|加拿大|Canada|CA'
+
+  - name: '🇮🇳 印度节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇮🇳|^印度 |India'
+
+  - name: '🇮🇩 印度尼西亚节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇮🇩|印度尼西亚|Indonesia|ID'
+
+  - name: '🇩🇪 德国节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇩🇪|德国|Germany|DE'
+
+  - name: '🇹🇭 泰国节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇹🇭|泰国|Thailand|TH'
+
+  - name: '🇦🇺 澳大利亚节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇦🇺|澳大利亚|Australia|AU'
+
+  - name: '🇬🇧 英国节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇬🇧|英国|United Kingdom|UK|GB'
+
+  - name: '🇳🇱 荷兰节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇳🇱|荷兰|Netherlands|NL'
+
+  - name: '🇵🇭 菲律宾节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇵🇭|菲律宾|Philippines|PH'
+
+  - name: '🇲🇾 马来西亚节点'
+    type: select
+    use: [订阅节点]
+    filter: '(?i)🇲🇾|马来西亚|Malaysia|MY'
+  
+
+  - name: '🏠 路由器内网'
+    type: select
+    use: [路由器]
+    proxies:
+      - DIRECT
+
+  # 功能分流分组
+  - name: '代理选择'
+    type: select
+    proxies:
+      - 自动优选
+      - 🇺🇸 美国节点
+      - 🇭🇰 香港节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - 🇰🇷 韩国节点
+      - 🇸🇬 新加坡节点
+      - 🇨🇦 加拿大节点
+      - 🇮🇳 印度节点
+      - 🇮🇩 印度尼西亚节点
+      - 🇩🇪 德国节点
+      - 🇹🇭 泰国节点
+      - 🇦🇺 澳大利亚节点
+      - 🇬🇧 英国节点
+      - 🇳🇱 荷兰节点
+      - 🇵🇭 菲律宾节点
+      - 🇲🇾 马来西亚节点
+
+  - name: '人工智能'
+    type: select
+    proxies:
+      - 🇺🇸 美国节点
+      - 自动优选
+      - 🇸🇬 新加坡节点
+      - 🇰🇷 韩国节点
+      - 🇯🇵 日本节点
+
+  - name: '谷歌服务'
+    type: select
+    proxies:
+      - 🇺🇸 美国节点
+      - 自动优选
+      - 🇭🇰 香港节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - 🇸🇬 新加坡节点
+
+  - name: '社交通讯'
+    type: select
+    proxies:
+      - 代理选择
+      - 自动优选
+      - 🇭🇰 香港节点
+      - 🇯🇵 日本节点
+      - 🇺🇸 美国节点
+      - 🇨🇳 台湾节点
+      - 🇰🇷 韩国节点
+      - 🇸🇬 新加坡节点
+
+  - name: '开发平台'
+    type: select
+    proxies:
+      - 代理选择
+      - 自动优选
+      - 🇭🇰 香港节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - 🇰🇷 韩国节点
+      - 🇺🇸 美国节点
+      - 🇸🇬 新加坡节点
+
+  - name: '国外媒体'
+    type: select
+    proxies:
+      - 代理选择
+      - 自动优选
+      - 🇭🇰 香港节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - 🇰🇷 韩国节点
+      - 🇺🇸 美国节点
+      - 🇸🇬 新加坡节点
+
+  - name: '苹果代理'
+    type: select
+    proxies:
+      - 自动优选
+      - 🇭🇰 香港节点
+      - 🇺🇸 美国节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - DIRECT
+
+  - name: '游戏平台'
+    type: select
+    proxies:
+      - DIRECT
+      - 自动优选
+      - 🇭🇰 香港节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - 🇰🇷 韩国节点
+
+  - name: 'Steam平台'
+    type: select
+    proxies:
+      - DIRECT
+      - 自动优选
+      - 🇭🇰 香港节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - 🇰🇷 韩国节点
+      - 🇺🇸 美国节点
+      - 🇸🇬 新加坡节点
+
+  - name: '微软下载'
+    type: select
+    proxies:
+      - 自动优选
+      - 代理选择
+      - DIRECT
+      - 🇭🇰 香港节点
+      - 🇨🇳 台湾节点
+      - 🇯🇵 日本节点
+      - 🇰🇷 韩国节点
+      - 🇺🇸 美国节点
+      - 🇸🇬 新加坡节点
+
+rule-providers:
+  reject:
+    type: http
+    behavior: domain
+    url: 'https://list.magichub.top/d/clash/rules/reject.txt'
+    path: ./ruleset/reject.yaml
+    interval: 86400
+  lan:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/lan.yaml'
+    path: ./ruleset/lan.yaml
+    interval: 86400
+  download:
+    type: http
+    behavior: classical
+    url: 'https://ruleset.skk.moe/Clash/non_ip/download.txt'
+    path: ./ruleset/download.yaml
+    interval: 86400
+  chatgpt:
+    type: http
+    behavior: domain
+    format: text # 关键：告诉内核这是纯文本列表
+    url: 'https://list.magichub.top/d/clash/rules/chatgpt.list'
+    path: ./ruleset/chatgpt.yaml
+    interval: 86400
+
+  perplexity:
+    type: http
+    behavior: domain
+    format: text # 关键修正
+    url: 'https://list.magichub.top/d/clash/rules/perplexity.list'
+    path: ./ruleset/perplexity.yaml
+    interval: 86400
+
+  grok:
+    type: http
+    behavior: domain
+    format: text # 关键修正
+    url: 'https://list.magichub.top/d/clash/rules/grok.list'
+    path: ./ruleset/grok.yaml
+    interval: 86400
+  claude:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/claude.yaml'
+    path: ./ruleset/claude.yaml
+    interval: 86400
+  openai:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/openai.yaml'
+    path: ./ruleset/openai.yaml
+    interval: 86400
+  anthropic:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/anthropic.yaml'
+    path: ./ruleset/anthropic.yaml
+    interval: 86400
+  gemini:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/gemini.yaml'
+    path: ./ruleset/gemini.yaml
+    interval: 86400
+  copilot:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/copilot.yaml'
+    path: ./ruleset/copilot.yaml
+    interval: 86400
+  github:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/github.yaml'
+    path: ./ruleset/github.yaml
+    interval: 86400
+  jetbrains:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/jetbrains.yaml'
+    path: ./ruleset/jetbrains.yaml
+    interval: 86400
+  twitter:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/twitter.yaml'
+    path: ./ruleset/twitter.yaml
+    interval: 86400
+  facebook:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/facebook.yaml'
+    path: ./ruleset/facebook.yaml
+    interval: 86400
+  instagram:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/instagram.yaml'
+    path: ./ruleset/instagram.yaml
+    interval: 86400
+  telegram:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/telegram.yaml'
+    path: ./ruleset/telegram.yaml
+    interval: 86400
+  discord:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/discord.yaml'
+    path: ./ruleset/discord.yaml
+    interval: 86400
+  whatsapp:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/whatsapp.yaml'
+    path: ./ruleset/whatsapp.yaml
+    interval: 86400
+  reddit:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/reddit.yaml'
+    path: ./ruleset/reddit.yaml
+    interval: 86400
+  linkedin:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/linkedin.yaml'
+    path: ./ruleset/linkedin.yaml
+    interval: 86400
+  line:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/line.yaml'
+    path: ./ruleset/line.yaml
+    interval: 86400
+  youtube:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/youtube.yaml'
+    path: ./ruleset/youtube.yaml
+    interval: 86400
+  google:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/google.yaml'
+    path: ./ruleset/google.yaml
+    interval: 86400
+  netflix:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/netflix.yaml'
+    path: ./ruleset/netflix.yaml
+    interval: 86400
+  disney:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/disney.yaml'
+    path: ./ruleset/disney.yaml
+    interval: 86400
+  hbo:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/hbo.yaml'
+    path: ./ruleset/hbo.yaml
+    interval: 86400
+  hboasia:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/hboasia.yaml'
+    path: ./ruleset/hboasia.yaml
+    interval: 86400
+  spotify:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/spotify.yaml'
+    path: ./ruleset/spotify.yaml
+    interval: 86400
+  tiktok:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/tiktok.yaml'
+    path: ./ruleset/tiktok.yaml
+    interval: 86400
+  twitch:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/twitch.yaml'
+    path: ./ruleset/twitch.yaml
+    interval: 86400
+  primevideo:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/primevideo.yaml'
+    path: ./ruleset/primevideo.yaml
+    interval: 86400
+  wikipedia:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/wikipedia.yaml'
+    path: ./ruleset/wikipedia.yaml
+    interval: 86400
+  bahamut:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/bahamut.yaml'
+    path: ./ruleset/bahamut.yaml
+    interval: 86400
+  tvb:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/tvb.yaml'
+    path: ./ruleset/tvb.yaml
+    interval: 86400
+  playstation:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/playstation.yaml'
+    path: ./ruleset/playstation.yaml
+    interval: 86400
+  xbox:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/xbox.yaml'
+    path: ./ruleset/xbox.yaml
+    interval: 86400
+  nintendo:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/nintendo.yaml'
+    path: ./ruleset/nintendo.yaml
+    interval: 86400
+  microsoft:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/microsoft.yaml'
+    path: ./ruleset/microsoft.yaml
+    interval: 86400
+  onedrive:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/onedrive.yaml'
+    path: ./ruleset/onedrive.yaml
+    interval: 86400
+  appleproxy:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/appleproxy.yaml'
+    path: ./ruleset/appleproxy.yaml
+    interval: 86400
+  apple:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/apple.yaml'
+    path: ./ruleset/apple.yaml
+    interval: 86400
+  paypal:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/paypal.yaml'
+    path: ./ruleset/paypal.yaml
+    interval: 86400
+  bilibili:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/bilibili.yaml'
+    path: ./ruleset/bilibili.yaml
+    interval: 86400
+  iqiyi:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/iqiyi.yaml'
+    path: ./ruleset/iqiyi.yaml
+    interval: 86400
+  youku:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/youku.yaml'
+    path: ./ruleset/youku.yaml
+    interval: 86400
+  tencent:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/tencent.yaml'
+    path: ./ruleset/tencent.yaml
+    interval: 86400
+  privatetracker:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/privatetracker.yaml'
+    path: ./ruleset/privatetracker.yaml
+    interval: 86400
+  proxy-custom:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/download/clash/rules/proxy.list'
+    path: ./ruleset/proxy-custom.yaml
+    interval: 86400
+  proxy-all:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/proxy-all.yaml'
+    path: ./ruleset/proxy.yaml
+    interval: 86400
+  proxy-domain:
+    type: http
+    behavior: domain
+    url: 'https://list.magichub.top/d/clash/rules/proxy-domain.txt'
+    path: ./ruleset/proxy-domain.yaml
+    interval: 86400
+  china:
+    type: http
+    behavior: classical
+    url: 'https://list.magichub.top/d/clash/rules/china.yaml'
+    path: ./ruleset/china.yaml
+    interval: 86400
+  direct:
+    type: http
+    behavior: domain
+    url: 'https://list.magichub.top/d/clash/rules/direct.txt'
+    path: ./ruleset/direct.yaml
+    interval: 86400
+
+rules:
+  - DOMAIN,oapi.dnscli.top,🇯🇵 日本节点
+  - DOMAIN,subapi.dnscli.top,DIRECT
+  - IP-CIDR,192.168.50.0/24,🏠 路由器内网,no-resolve
+  - IP-CIDR,10.6.0.0/24,🏠 路由器内网,no-resolve
+  - DST-PORT,123,DIRECT
+  - RULE-SET,lan,DIRECT
+  - DOMAIN-SUFFIX,magichub.top,DIRECT
+  - DOMAIN-SUFFIX,jiek.top,DIRECT
+  - DOMAIN-SUFFIX,sub-store.vercel.app,DIRECT
+  - DOMAIN-SUFFIX,api.dler.io,DIRECT
+  - DOMAIN-SUFFIX,sub.id9.cc,DIRECT
+  - DOMAIN-SUFFIX,convert.v1.mk,DIRECT
+  - DOMAIN-SUFFIX,api.wcc.best,DIRECT
+  - DOMAIN-SUFFIX,sub.xeton.dev,DIRECT
+
+  - DOMAIN,sfdataservice-staging.microsoft.com,微软下载
+  - DOMAIN-SUFFIX,sfdataservice-staging.microsoft.com,微软下载
+  - DOMAIN-KEYWORD,sfdataservice-staging,微软下载
+  - DOMAIN-SUFFIX,delivery.mp.microsoft.com,微软下载
+  - DOMAIN-SUFFIX,dl.delivery.mp.microsoft.com,微软下载
+  - DOMAIN-SUFFIX,download.windowsupdate.com,微软下载
+  - DOMAIN-SUFFIX,download.microsoft.com,微软下载
+  - DOMAIN-SUFFIX,download.visualstudio.microsoft.com,微软下载
+
+  - DOMAIN-SUFFIX,microsoft.com,DIRECT
+  - DOMAIN-SUFFIX,microsoftstore.com,DIRECT
+  - DOMAIN-SUFFIX,s-microsoft.com,DIRECT
+  - DOMAIN-SUFFIX,windows.com,DIRECT
+  - DOMAIN-SUFFIX,windows.net,DIRECT
+  - DOMAIN-SUFFIX,windowsupdate.com,DIRECT
+  - DOMAIN-SUFFIX,msftauth.net,DIRECT
+  - DOMAIN-SUFFIX,msauth.net,DIRECT
+  - DOMAIN-SUFFIX,live.com,DIRECT
+  - DOMAIN-SUFFIX,msftconnecttest.com,DIRECT
+  - DOMAIN-SUFFIX,msftncsi.com,DIRECT
+  - DOMAIN-SUFFIX,xboxlive.com,DIRECT
+  - DOMAIN,img-prod-cms-rt-microsoft-com.akamaized.net,DIRECT
+
+  - DOMAIN-SUFFIX,myip.com,代理选择
+  - DOMAIN-SUFFIX,ipip.net,代理选择
+  - DOMAIN-SUFFIX,v2ex.com,代理选择
+  - DOMAIN-SUFFIX,ipinfo.io,代理选择
+  - DOMAIN-SUFFIX,ip-api.com,代理选择
+  - DOMAIN-SUFFIX,whatismyip.com,代理选择
+  - DOMAIN-REGEX,^shidongli[^.]*\.top$,代理选择
+  - DOMAIN-SUFFIX,cdnimg118574.com,代理选择
+
+  - RULE-SET,download,DIRECT
+  - RULE-SET,privatetracker,DIRECT
+
+  - RULE-SET,gemini,人工智能
+  - RULE-SET,chatgpt,人工智能
+  - RULE-SET,openai,人工智能
+  - RULE-SET,claude,人工智能
+  - RULE-SET,perplexity,人工智能
+  - RULE-SET,grok,人工智能
+  - RULE-SET,anthropic,人工智能
+  - RULE-SET,copilot,人工智能
+  - DOMAIN-SUFFIX,perplexity.ai,人工智能
+  - DOMAIN-SUFFIX,gemini.gstatic.com,人工智能
+  - DOMAIN-SUFFIX,midjourney.com,人工智能
+  - DOMAIN-SUFFIX,cdn.midjourney.com,人工智能
+  - DOMAIN-SUFFIX,character.ai,人工智能
+  - DOMAIN-SUFFIX,beta.character.ai,人工智能
+  - DOMAIN-SUFFIX,poe.com,人工智能
+  - DOMAIN-SUFFIX,huggingface.co,人工智能
+  - DOMAIN-SUFFIX,replicate.com,人工智能
+  - DOMAIN-SUFFIX,replicate.delivery,人工智能
+  - DOMAIN-SUFFIX,runwayml.com,人工智能
+  - DOMAIN-SUFFIX,x.ai,人工智能
+  - DOMAIN-SUFFIX,cohere.ai,人工智能
+  - DOMAIN-SUFFIX,cohere.com,人工智能
+
+  - AND,(DOMAIN-SUFFIX,github.com),(DST-PORT,22),DIRECT
+  - RULE-SET,github,开发平台
+  - DOMAIN-SUFFIX,gitlab.com,开发平台
+  - DOMAIN-SUFFIX,gitlab.io,开发平台
+  - DOMAIN-SUFFIX,stackoverflow.com,开发平台
+  - DOMAIN-SUFFIX,stackexchange.com,开发平台
+  - DOMAIN-SUFFIX,serverfault.com,开发平台
+  - DOMAIN-SUFFIX,superuser.com,开发平台
+  - DOMAIN-SUFFIX,askubuntu.com,开发平台
+  - DOMAIN-SUFFIX,vercel.com,开发平台
+  - DOMAIN-SUFFIX,vercel.app,开发平台
+  - DOMAIN-SUFFIX,netlify.com,开发平台
+  - DOMAIN-SUFFIX,netlify.app,开发平台
+  - DOMAIN-SUFFIX,cloudflare.com,开发平台
+  - DOMAIN-SUFFIX,workers.dev,开发平台
+  - DOMAIN-SUFFIX,pages.dev,开发平台
+  - DOMAIN-SUFFIX,cloudflarestream.com,开发平台
+  - DOMAIN-SUFFIX,docker.com,开发平台
+  - DOMAIN-SUFFIX,docker.io,开发平台
+  - RULE-SET,jetbrains,开发平台
+  - DOMAIN-SUFFIX,postman.com,开发平台
+  - DOMAIN-SUFFIX,getpostman.com,开发平台
+  - DOMAIN-SUFFIX,postman.co,开发平台
+  - DOMAIN-SUFFIX,notion.so,开发平台
+  - DOMAIN-SUFFIX,notion.site,开发平台
+  - DOMAIN-SUFFIX,notion-static.com,开发平台
+  - DOMAIN-SUFFIX,npmjs.com,开发平台
+  - DOMAIN-SUFFIX,npmjs.org,开发平台
+  - DOMAIN-SUFFIX,pypi.org,开发平台
+  - DOMAIN-SUFFIX,pythonhosted.org,开发平台
+  - DOMAIN-SUFFIX,amazonaws.com,开发平台
+  - DOMAIN-SUFFIX,cloud.google.com,开发平台
+  - DOMAIN-SUFFIX,googleapis.com,开发平台
+  - DOMAIN-SUFFIX,azure.com,开发平台
+  - DOMAIN-SUFFIX,azurewebsites.net,开发平台
+  - DOMAIN-SUFFIX,heroku.com,开发平台
+  - DOMAIN-SUFFIX,herokuapp.com,开发平台
+  - DOMAIN-SUFFIX,digitalocean.com,开发平台
+
+  - DOMAIN-KEYWORD,v2ex,社交通讯
+  - DOMAIN-KEYWORD,nodeseek,社交通讯
+  - RULE-SET,twitter,社交通讯
+  - RULE-SET,facebook,社交通讯
+  - RULE-SET,instagram,社交通讯
+  - RULE-SET,telegram,社交通讯
+  - RULE-SET,discord,社交通讯
+  - RULE-SET,whatsapp,社交通讯
+  - RULE-SET,reddit,社交通讯
+  - RULE-SET,linkedin,社交通讯
+  - DOMAIN-SUFFIX,pinterest.com,社交通讯
+  - DOMAIN-SUFFIX,pinimg.com,社交通讯
+  - DOMAIN-SUFFIX,tumblr.com,社交通讯
+  - DOMAIN-SUFFIX,tumblr.co,社交通讯
+  - RULE-SET,line,社交通讯
+  - DOMAIN-SUFFIX,signal.org,社交通讯
+  - DOMAIN-SUFFIX,signal.me,社交通讯
+  - DOMAIN-SUFFIX,snapchat.com,社交通讯
+  - DOMAIN-SUFFIX,sc-cdn.net,社交通讯
+  - DOMAIN-SUFFIX,mymyatt.net,社交通讯
+
+  - RULE-SET,youtube,谷歌服务
+  - RULE-SET,google,谷歌服务
+
+  - DOMAIN-KEYWORD,missav,国外媒体
+  - RULE-SET,netflix,国外媒体
+  - RULE-SET,disney,国外媒体
+  - RULE-SET,hbo,国外媒体
+  - RULE-SET,hboasia,国外媒体
+  - RULE-SET,spotify,国外媒体
+  - RULE-SET,tiktok,国外媒体
+  - RULE-SET,twitch,国外媒体
+  - RULE-SET,primevideo,国外媒体
+  - DOMAIN-SUFFIX,bbc.com,国外媒体
+  - DOMAIN-SUFFIX,bbc.co.uk,国外媒体
+  - DOMAIN-SUFFIX,bbci.co.uk,国外媒体
+  - DOMAIN-SUFFIX,cnn.com,国外媒体
+  - DOMAIN-SUFFIX,cnn.io,国外媒体
+  - DOMAIN-SUFFIX,nytimes.com,国外媒体
+  - DOMAIN-SUFFIX,nyt.com,国外媒体
+  - DOMAIN-SUFFIX,nytco.com,国外媒体
+  - DOMAIN-SUFFIX,twihub.net,国外媒体
+  - DOMAIN,xrw-album.christin3.com,国外媒体
+  - RULE-SET,wikipedia,国外媒体
+  - RULE-SET,bahamut,国外媒体
+  - RULE-SET,tvb,国外媒体
+
+  - DOMAIN-SUFFIX,steampowered.com,Steam平台
+  - DOMAIN-SUFFIX,steamgames.com,Steam平台
+  - DOMAIN-SUFFIX,steamcommunity.com,Steam平台
+  - DOMAIN-SUFFIX,steam-chat.com,Steam平台
+  - DOMAIN-SUFFIX,steamcontent.com,Steam平台
+  - DOMAIN-SUFFIX,steamstatic.com,Steam平台
+  - DOMAIN-SUFFIX,steamusercontent.com,Steam平台
+  - DOMAIN-SUFFIX,steam-api.com,Steam平台
+  - DOMAIN-SUFFIX,steamserver.net,Steam平台
+  - DOMAIN-SUFFIX,s.team,Steam平台
+  - DOMAIN-SUFFIX,steamdeck.com,Steam平台
+  - RULE-SET,playstation,游戏平台
+  - RULE-SET,xbox,游戏平台
+  - RULE-SET,nintendo,游戏平台
+
+  - RULE-SET,microsoft,DIRECT
+  - RULE-SET,onedrive,DIRECT
+
+  - RULE-SET,appleproxy,苹果代理
+  - RULE-SET,apple,DIRECT
+
+  - RULE-SET,paypal,DIRECT
+
+  - RULE-SET,bilibili,DIRECT
+  - RULE-SET,iqiyi,DIRECT
+  - RULE-SET,youku,DIRECT
+  - RULE-SET,tencent,DIRECT
+
+  - RULE-SET,proxy-custom,代理选择
+  - RULE-SET,proxy-all,代理选择
+  - RULE-SET,proxy-domain,代理选择
+
+  - RULE-SET,china,DIRECT
+  - GEOSITE,CN,DIRECT
+  - GEOIP,CN,DIRECT,no-resolve
+
+  - IP-CIDR,10.0.0.0/8,DIRECT
+  - IP-CIDR,172.16.0.0/12,DIRECT
+  - IP-CIDR,192.168.0.0/16,DIRECT
+  - IP-CIDR,100.64.0.0/10,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT
+
+  - RULE-SET,direct,DIRECT
+  - MATCH,DIRECT

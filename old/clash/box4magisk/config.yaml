@@ -1,0 +1,396 @@
+---
+#------------------------------------------------------------------------#
+# 基础配置 (Basic Settings)
+# Clash 核心运行所需的基本端口、模式、日志等级等。
+#------------------------------------------------------------------------#
+# HTTP 代理端口
+port: 7890
+# SOCKS5 代理端口
+socks-port: 7891
+# HTTP 和 SOCKS5 混合代理端口
+mixed-port: 7893
+# 透明代理端口 (Linux/macOS)
+redir-port: 7892
+# 允许来自局域网的连接
+allow-lan: true
+# 代理模式: rule (规则), global (全局), direct (直连)
+mode: rule
+# 日志级别: silent, error, warning, info, debug, verbose
+log-level: warning
+# 全局 IPv6 支持
+ipv6: true
+# 外部控制器 (API) 地址和端口，用于 Web UI 等交互
+external-controller: :9090
+# 全局 HTTP 客户端 User-Agent 指纹
+global-client-fingerprint: random
+# TCP 并发连接 (mihomo 特性)
+tcp-concurrent: true
+# 统一延迟测试 (mihomo 特性)
+unified-delay: true
+# TCP 连接保活间隔 (秒)
+keep-alive-interval: 1800
+# 查找进程模式 (Linux/macOS, mihomo 特性): off, strict, always
+find-process-mode: strict
+# GeoIP 数据库模式 (mihomo 特性)
+geodata-mode: true
+# Geo 数据库文件下载链接 (mihomo 特性)
+geox-url:
+  geoip: "https://ghfast.top/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
+  geosite: "https://ghfast.top/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
+  mmdb: "https://ghfast.top/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb"
+
+#------------------------------------------------------------------------#
+# DNS 配置 (DNS Settings)
+# 定义 Clash 内置 DNS 服务器的行为。
+#------------------------------------------------------------------------#
+dns:
+  enable: true
+  listen: :1053
+  # DNS 增强模式: redir-host 或 fake-ip
+  enhanced-mode: redir-host
+  # 默认 DNS 服务器 (用于解析 Clash 自身、直连域名等)
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+    - 114.114.114.114
+    - "[2402:4e00::]"
+    - "[2400:3200::1]"
+  # 上游 DNS 服务器 (通过代理的域名将使用这些服务器解析)
+  nameserver:
+    - 119.29.29.29
+    - 223.5.5.5
+    - "tls://8.8.4.4#dns"
+    - "tls://1.0.0.1#dns"
+    - "tls://[2001:4860:4860::8844]#dns"
+    - "tls://[2606:4700:4700::1001]#dns"
+  # 代理服务器使用的 DNS
+  proxy-server-nameserver:
+    - https://doh.pub/dns-query
+  # DNS 解析策略 (根据域名匹配决定使用哪些上游 DNS)
+  nameserver-policy:
+    "geosite:cn,private":
+      - https://doh.pub/dns-query
+      - https://dns.alidns.com/dns-query
+    "geosite:!cn,!private":
+      - "tls://dns.google"
+      - "tls://cloudflare-dns.com"
+
+#------------------------------------------------------------------------#
+# TUN 网卡配置 (TUN Interface Settings)
+# TUN 模式允许 Clash 创建虚拟网络接口接管系统流量。
+#------------------------------------------------------------------------#
+tun:
+  enable: false
+  # TUN 实现协议栈 (mihomo 特性): system, gvisor, lwip
+  stack: system
+  # DNS 劫持配置 (将指定 DNS 请求重定向到 Clash DNS)
+  dns-hijack:
+    - "any:53"
+    - "tcp://any:53"
+  auto-route: true
+  auto-detect-interface: true
+
+#------------------------------------------------------------------------#
+# 网络嗅探器配置 (Sniffer Settings)
+# Sniffer 用于从流量中提取真实域名，改善规则匹配。
+#------------------------------------------------------------------------#
+sniffer:
+  enable: true
+  sniff:
+    TLS:
+      ports: [443, 8443]
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+
+#------------------------------------------------------------------------#
+# NTP 时间同步配置 (NTP Settings)
+# 校准 Clash 内部时钟。
+#------------------------------------------------------------------------#
+ntp:
+  enable: true
+  write-to-system: false
+  server: time.apple.com
+  port: 123
+  interval: 30
+
+#------------------------------------------------------------------------#
+# 配置文件持久化设置 (Profile Persistence Settings)
+# 保存某些状态以便重启或切换配置后恢复。
+#------------------------------------------------------------------------#
+profile:
+  store-selected: true
+  store-fake-ip: true # (mihomo 特性)
+  # tracing: true # 用于调试，日常可关闭
+
+#------------------------------------------------------------------------#
+# 实验性功能 (Experimental Features) - mihomo 特性
+#------------------------------------------------------------------------#
+experimental:
+  # 是否强制嗅探所有 TLS 连接的 SNI
+  sniff-tls-sni: false
+
+#------------------------------------------------------------------------#
+# Clash for Android 特定设置
+#------------------------------------------------------------------------#
+clash-for-android:
+  append-system-dns: false
+
+#------------------------------------------------------------------------#
+# 代理提供商 (Proxy Providers)
+# 动态加载和管理代理节点列表。
+#------------------------------------------------------------------------#
+proxy-providers:
+  # 通用订阅
+  通用订阅:
+    type: http
+    interval: 3600
+    health-check:
+      enable: true
+      url: https://cp.cloudflare.com
+      interval: 300
+      timeout: 1000
+      # 健康检查容忍度。100 是一个非常高的值，通常建议 0-5。
+      tolerance: 100
+    url: "https://api-huacloud.net/sub?target=clash&insert=true&emoji=true&udp=true&clash.doh=true&new_name=true&filename=Flower_SS&url=https%3A%2F%2Fapi.xmancdn.net%2Fosubscribe.php%3Fsid%3D177358%26token%3DUdRCu8VV%26sip002%3D1&list=true"
+
+#------------------------------------------------------------------------#
+# 规则提供商 (Rule Providers)
+# 动态加载和管理规则集。
+#------------------------------------------------------------------------#
+rule-providers:
+  AWAvenue-Ads:
+    type: http
+    behavior: domain
+    format: yaml
+    path: ./rule_provider/AWAvenue-Ads.yaml
+    url: "https://ghfast.top/https://raw.githubusercontent.com/TG-Twilight/AWAvenue-Ads-Rule/refs/heads/main/Filters/AWAvenue-Ads-Rule-Clash-classical.yaml"
+    interval: 600
+
+#------------------------------------------------------------------------#
+# 代理节点 (Proxies)
+# 通常由 proxy-providers 提供，此处可留空或添加手动静态节点。
+#------------------------------------------------------------------------#
+proxies: []
+
+#------------------------------------------------------------------------#
+# 代理组 (Proxy Groups)
+# 组织和管理代理节点，实现各种策略。
+#------------------------------------------------------------------------#
+proxy-groups:
+  # --- 核心选择组 ---
+  - name: 🔰 节点选择
+    type: select
+    proxies:
+      - DIRECT
+      - ↪️ 智能测速
+      - 🇭🇰 香港
+      - 🇹🇼 台湾
+      - 🇯🇵 日本
+      - 🇺🇸 美国
+      - 🇸🇬 新加坡
+      - 🇬🇧 英国
+      - 🇩🇪 德国
+      - 🇳🇱 荷兰
+      - 🌍 其它地区
+      - 💠 全部节点
+
+  # --- 功能性分组 ---
+  - name: 🚫 广告拦截
+    type: select
+    proxies:
+      - REJECT
+      - DIRECT
+  - name: dns
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+
+  # --- 应用与服务分组 ---
+  - name: 🤖 智能助理
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: ✈️ 电报信息
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 🎵 TikTok
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - REJECT
+      - DIRECT
+  - name: 📺 油管视频
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 🇬 谷歌服务
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 🍎 苹果服务
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 🎬 奈飞视频
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: Ⓜ️ 微软服务
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 🐙 Github
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 🎮 游戏平台
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 📰 国外媒体
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 🇨🇳 国内媒体
+    type: select
+    proxies:
+      - DIRECT
+      - 🔰 节点选择
+  - name: 🎧 Spotify
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+  - name: 📺 哔哩哔哩
+    type: select
+    proxies:
+      - DIRECT
+      - 🔰 节点选择
+  - name: 🇨🇳 国内站点
+    type: select
+    proxies:
+      - DIRECT
+      - 🔰 节点选择
+  - name: 🌐 其他流量
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - DIRECT
+
+  # --- Regional URL-Test Groups (区域与智能测速组) ---
+  - name: 🇭🇰 香港
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)港|hk|hongkong|hong kong"
+  - name: 🇹🇼 台湾
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)台|tw|taiwan"
+  - name: 🇯🇵 日本
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)日本|jp|japan"
+  - name: 🇺🇸 美国
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)美|us|unitedstates|united states"
+  - name: 🇸🇬 新加坡
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)(新|sg|singapore)"
+  - name: 🇬🇧 英国
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)英国|uk|united kingdom|gb"
+  - name: 🇩🇪 德国
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)德国|de|germany"
+  - name: 🇳🇱 荷兰
+    type: url-test
+    use: [通用订阅]
+    filter: "(?i)荷兰|nl|netherlands|holland"
+  - name: 🌍 其它地区
+    type: url-test
+    use: [通用订阅]
+    filter:
+      "(?i)^(?!.*(?:🇭🇰|🇯🇵|🇺🇸|🇸🇬|🇬🇧|🇩🇪|🇳🇱|🇨🇳|港|hk|hongkong|台|tw|taiwan|日|jp|japan|新|sg|singapore|美|us|unitedstates|英|uk|united
+      kingdom|gb|德|de|germany|荷|nl|netherlands)).*"
+  - name: 💠 全部节点
+    type: url-test
+    use: [通用订阅]
+  - name: ↪️ 智能测速
+    type: url-test
+    use: [通用订阅]
+    # 延迟容忍度 (毫秒)。100 是一个相对较高的值。
+    tolerance: 100
+
+#------------------------------------------------------------------------#
+# 规则 (Rules)
+# 按顺序匹配，决定网络流量的走向。
+#------------------------------------------------------------------------#
+rules:
+  # --- 功能性规则 ---
+  - RULE-SET,AWAvenue-Ads,🚫 广告拦截
+
+  # --- 应用与服务规则 ---
+  - GEOSITE,category-ai-chat-!cn,🤖 智能助理
+  - GEOSITE,telegram,✈️ 电报信息
+  - GEOSITE,tiktok,🎵 TikTok
+  - GEOSITE,youtube,📺 油管视频
+  - GEOSITE,google,🇬 谷歌服务
+  - GEOSITE,google-cn,🇬 谷歌服务
+  - GEOSITE,apple,🍎 苹果服务
+  - GEOSITE,apple-cn,🍎 苹果服务
+  - GEOSITE,netflix,🎬 奈飞视频
+  - GEOSITE,microsoft,Ⓜ️ 微软服务
+  - GEOSITE,onedrive,Ⓜ️ 微软服务
+  - GEOSITE,github,🐙 Github
+  - GEOSITE,steam@cn,DIRECT
+  - GEOSITE,steam,🎮 游戏平台
+  - GEOSITE,epicgames,🎮 游戏平台
+  - GEOSITE,origin,🎮 游戏平台
+  - GEOSITE,uplay,🎮 游戏平台
+  - GEOSITE,rockstargames,🎮 游戏平台
+  - GEOSITE,blizzard,🎮 游戏平台
+  - GEOSITE,spotify,🎧 Spotify
+  - GEOSITE,bilibili,📺 哔哩哔哩
+  - GEOSITE,twitter,📰 国外媒体
+  - GEOSITE,facebook,📰 国外媒体
+  - GEOSITE,instagram,📰 国外媒体
+  - GEOSITE,category-news-!cn,📰 国外媒体
+  - GEOSITE,category-media-cn,🇨🇳 国内媒体
+
+  # --- GEOIP 后备规则 (在 GEOSITE 未匹配时基于 IP 判断) ---
+  - GEOIP,google,🇬 谷歌服务
+  - GEOIP,netflix,🎬 奈飞视频
+  - GEOIP,telegram,✈️ 电报信息
+  - GEOIP,twitter,📰 国外媒体
+
+  # --- 区域与回退规则 ---
+  - GEOSITE,geolocation-!cn,📰 国外媒体 # 非中国大陆地理位置的站点，作为国外媒体的补充
+  - GEOSITE,CN,🇨🇳 国内站点
+  - GEOIP,CN,🇨🇳 国内站点
+
+  # --- 本地网络规则 (局域网和特殊地址直连) ---
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+
+  # --- 最终匹配规则 ---
+  - MATCH,🌐 其他流量
