@@ -82,7 +82,7 @@
               <el-button size="small" @click="copyUrl(row)">复制 URL</el-button>
             </template>
           </el-table-column>
-          <el-table-column label="状态" min-width="100">
+          <el-table-column label="抓取状态" min-width="110">
             <template #default="{ row }">
               <StatusDot v-if="row.auto_fetch === false" kind="muted" text="本地快照" />
               <StatusDot v-else v-bind="sourceStatus(row)" />
@@ -399,7 +399,7 @@
       <el-table :data="nodesSource?.nodes || []" size="small" max-height="70vh">
         <el-table-column prop="name" label="名称" min-width="180" />
         <el-table-column prop="type" label="协议" width="100" />
-        <el-table-column label="状态" width="110">
+        <el-table-column label="测速状态" width="110">
           <template #default="{ row }">
             <StatusDot v-if="row.status === 'ok'" kind="ok" text="可用" />
             <StatusDot v-else-if="row.status === 'failed'" kind="danger" text="不可用" />

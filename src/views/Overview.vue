@@ -74,7 +74,7 @@
       <div v-else class="mp-table-wrap">
         <el-table :data="data.sources" size="small">
           <el-table-column prop="name" label="名称" min-width="120" />
-          <el-table-column label="状态" min-width="110">
+          <el-table-column label="抓取状态" min-width="110">
             <template #default="{ row }">
               <StatusDot v-bind="sourceStatus(row)" />
             </template>

@@ -64,8 +64,12 @@
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" min-width="100">
-            <template #default="{ row }"><StatusDot v-bind="sourceStatus(row)" /></template>
+          <el-table-column label="抓取状态" min-width="110">
+            <template #default="{ row }">
+              <!-- 内联规则直接写在面板里，不存在抓取 -->
+              <StatusDot v-if="row.kind === 'remote'" v-bind="sourceStatus(row)" />
+              <span v-else style="color:var(--mp-muted)">—</span>
+            </template>
           </el-table-column>
           <el-table-column label="启用" width="70">
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
