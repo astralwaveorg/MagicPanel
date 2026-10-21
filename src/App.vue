@@ -2,9 +2,9 @@
   <router-view v-if="isAuthPage" />
   <div v-else class="mp-layout">
     <aside class="mp-aside">
-      <div class="mp-brand">
-        <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel" title="返回门户首页" @click="router.push('/')">
-        <span class="mp-brand-text" title="返回概览" @click="router.push('/admin')">
+      <div class="mp-brand" title="返回 Magic Panel 首页" @click="router.push('/')">
+        <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel">
+        <span class="mp-brand-text">
           MagicPanel
           <small>代理订阅配置管理</small>
         </span>
@@ -30,9 +30,9 @@
     </aside>
 
     <el-drawer v-model="drawer" direction="ltr" size="240px" :with-header="false">
-      <div class="mp-brand">
-        <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel" title="返回门户首页" @click="drawer = false; router.push('/')">
-        <span class="mp-brand-text" title="返回概览" @click="drawer = false; router.push('/admin')">
+      <div class="mp-brand" title="返回 Magic Panel 首页" @click="drawer = false; router.push('/')">
+        <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel">
+        <span class="mp-brand-text">
           MagicPanel
           <small>代理订阅配置管理</small>
         </span>
@@ -105,10 +105,10 @@ const isAuthPage = computed(() =>
 // 侧边栏按依赖顺序排列：上游内容 → 引用它们 → 产物形态 → 配置 → 设备 → 构建发布 → 运维。
 // 高频页面同时尽量靠上，日常改策略的路径最短。
 const menu = [
-  { path: '/admin', title: '概览', icon: Odometer },
+  { path: '/admin', title: '系统状态', icon: Odometer },
   { path: '/admin/sources', title: '节点来源', icon: Connection },
   { path: '/admin/rule-providers', title: '规则来源', icon: Collection },
-  { path: '/admin/groups', title: '策略组', icon: SetUp },
+  { path: '/admin/groups', title: '策 略 组', icon: SetUp },
   { path: '/admin/rules', title: '分流规则', icon: Filter },
   { path: '/admin/targets', title: '引擎平台', icon: Monitor },
   { path: '/admin/artifact', title: '产物配置', icon: Operation },

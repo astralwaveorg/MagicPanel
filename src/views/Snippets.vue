@@ -99,7 +99,7 @@
                     placeholder="panel:&#10;  首页:&#10;    title: 家庭网络" />
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="form.note" placeholder="用途说明，会展示在门户页" />
+          <el-input v-model="form.note" placeholder="用途说明，会展示在 Magic Panel 首页" />
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.enabled">启用（停用后不参与构建）</el-checkbox>

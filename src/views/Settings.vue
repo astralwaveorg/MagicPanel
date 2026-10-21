@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">设置</h2>
-    <p class="mp-page-desc">对外地址、测速核心、门户 PIN、账号与备份。</p>
+    <p class="mp-page-desc">对外地址、测速核心、首页访问 PIN、账号与备份。</p>
 
     <div class="mp-card">
       <h3>分发设置</h3>
@@ -108,18 +108,18 @@
             <el-button plain :loading="coreBusy">本地上传安装 / 更新</el-button>
           </el-upload>
         </div>
-        <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0">
-          服务端无法访问 GitHub 时，从
+        <p class="mp-form-hint mp-nowrap-line">
+          服务端访问不了 GitHub 时，从
           <a href="https://github.com/MetaCubeX/mihomo/releases" target="_blank" rel="noopener">Mihomo 发布页</a>
-          下载与服务端平台一致的包上传（.gz / .zip / 裸二进制），自动解压校验并替换。
+          下载对应平台的包上传，自动解压替换。
         </p>
       </div>
     </div>
 
     <div class="mp-card">
-      <h3>门户展示页（/）</h3>
+      <h3>Magic Panel 首页访问</h3>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        门户页凭 4 位 PIN 进入，用于快速复制设备订阅地址；已登录维护者免 PIN。
+        首页凭 4 位 PIN 进入，用于快速复制设备订阅地址；已登录维护者免 PIN。
         PIN 与账号绑定，一人一 PIN，任一有效即可进入，撤销某人的不影响其他人。
         PIN 只是查看门槛，链接安全由地址中的高熵令牌承担；连续输错 5 次锁定 10 分钟。
       </p>
@@ -135,7 +135,7 @@
                    @click="clearPin">撤销我的 PIN</el-button>
         <span style="margin-left:12px;font-size:12.5px"
               :style="{ color: portalEnabled ? 'var(--mp-ok)' : 'var(--mp-text-secondary)' }">
-          门户页{{ portalEnabled ? '已开启' : '未开启（至少一人设置 PIN 后开启）' }}
+          Magic Panel 首页{{ portalEnabled ? '已开启' : '未开启（至少一人设置 PIN 后开启）' }}
         </span>
       </el-form>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:14px 0 0">
@@ -342,7 +342,7 @@ async function savePin() {
     if (store.user) store.user.has_portal_pin = true
     portalEnabled.value = true
     portalPin.value = ''
-    ElMessage.success('PIN 已设置，门户页地址为站点根路径 /')
+    ElMessage.success('Magic 概览访问 PIN 已设置')
     await load()
   } catch (e) {
     ElMessage.error(e.message)
@@ -353,7 +353,7 @@ async function savePin() {
 
 async function clearPin() {
   if (!await confirmBox(
-    '撤销后你的 PIN 将不能进入门户页；其他维护者的 PIN 不受影响。确定继续？', '撤销门户 PIN')) return
+    '撤销后你的 PIN 将不能进入 Magic Panel 首页；其他维护者的 PIN 不受影响。确定继续？', '撤销访问 PIN')) return
   savingPin.value = true
   try {
     await api('/api/v1/portal/my-pin', { method: 'DELETE' })

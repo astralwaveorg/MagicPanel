@@ -368,7 +368,7 @@ async function reveal(row) {
       await navigator.clipboard.writeText(resp.subscription_url)
       ElMessage.success('订阅地址已复制')
     } catch {
-      ElMessage.warning('复制失败，请到首页（门户）查看')
+      ElMessage.warning('复制失败，请到 Magic Panel 首页查看')
     }
   } catch (e) {
     ElMessage.error(e.message)

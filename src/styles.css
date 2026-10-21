@@ -72,8 +72,10 @@ html, body, #app {
   display: flex;
   align-items: center;
   gap: 10px;
+  cursor: pointer;
+  user-select: none;
 }
-.mp-brand-logo { width: 30px; height: 30px; cursor: pointer; flex-shrink: 0; }
+.mp-brand-logo { width: 30px; height: 30px; flex-shrink: 0; }
 .mp-brand-text { cursor: pointer; }
 .mp-brand small {
   display: block;
@@ -143,6 +145,9 @@ html, body, #app {
 .mp-toolbar-hint { color: var(--mp-text-secondary); font-size: 12.5px; }
 .mp-selected-hint { font-size: 13px; font-weight: 600; }
 .mp-form-hint { color: var(--mp-text-secondary); font-size: 12px; line-height: 1.6; margin-top: 2px; }
+/* 宽屏下保持一行（设置页的测速核心说明），窄屏再换行 */
+.mp-nowrap-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) { .mp-nowrap-line { white-space: normal; } }
 .mp-info-dot { color: var(--mp-text-secondary); cursor: help; margin-left: 6px; font-size: 13px; }
 .mp-dialog-desc { color: var(--mp-text-secondary); font-size: 13px; line-height: 1.7; margin: 0 0 10px; }
 .mp-pagination {

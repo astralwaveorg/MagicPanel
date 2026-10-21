@@ -359,7 +359,7 @@ async function fetchData() {
       return
     }
     if (resp.status === 404) {
-      gateError.value = '门户页未启用，请联系维护者在后台设置 PIN'
+      gateError.value = 'Magic Panel 首页未启用，请联系维护者在后台设置 PIN'
       return
     }
     if (resp.status === 429) {
@@ -420,7 +420,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* 门户页自带深色视觉，不随后台主题切换 */
+/* 首页自带深色视觉，不随后台主题切换 */
 .pt-page {
   min-height: 100vh;
   background: #0b0e1a;
