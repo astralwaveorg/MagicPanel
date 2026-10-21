@@ -83,7 +83,7 @@ def overview(user=CurrentUser):
         "devices": devices,
         "recent_audit": recent_audit,
         "health": _health_snapshot(conn, devices),
-        "note": "下载成功仅代表客户端取回了文件，不代表已加载或已生效。",
+        "note": "下载成功仅代表文件取回，不代表配置加载、VPN 启动或规则生效。",
     }
 
 

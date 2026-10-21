@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      顺序即声明顺序；按住左侧手柄可拖动排序（分页时按当前页内的顺序重排）。地区筛选为空的组保留 <strong>空组保护</strong> 占位，避免被客户端隐式改写为直连。
+      顺序即声明顺序；拖动左侧手柄排序，分页仅重排当前页。地区筛选为空的组保留 <strong>空组保护</strong>占位，防止客户端隐式改为直连。
     </p>
 
     <div class="mp-toolbar">
