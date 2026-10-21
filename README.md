@@ -21,7 +21,7 @@
 - **设备**：文件名决定下载到的配置文件名，设备名用于后台与门户展示；每台设备固定订阅地址与独立订阅环境（生产 / 测试）
 - **测速核心**：后台在线安装（自动解析最新版本）或本地上传 .gz / .zip / 裸二进制
 
-设计与行为细节见 [docs/development/MagicPanel-开发规格.md](docs/development/MagicPanel-开发规格.md)；构建与发布的产物构成、固定与动态内容、权限边界见 [docs/development/MagicPanel-构建与发布-产物构成.md](docs/development/MagicPanel-构建与发布-产物构成.md)；发布状态机重构的影响面见 [docs/development/构建发布状态机重构-影响面分析报告.md](docs/development/构建发布状态机重构-影响面分析报告.md)。
+设计与行为细节见 [docs/development/MagicPanel-开发规格.md](docs/development/MagicPanel-开发规格.md)；构建与发布的产物构成、固定与动态内容、权限边界见 [docs/development/MagicPanel-构建与发布-产物构成.md](docs/development/MagicPanel-构建与发布-产物构成.md)；发布状态机的四态与约束见 [docs/development/MagicPanel-开发规格.md](docs/development/MagicPanel-开发规格.md)。
 
 ## 开发
 

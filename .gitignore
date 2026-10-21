@@ -12,3 +12,10 @@ Stash 真实配置文件示例/
 *.log
 # 家庭网络内部文档，不进仓库
 docs/network/
+
+# 历史开发文档与一次性脚本：留在本机与 NAS 归档，不再进仓库
+docs/archive/
+# 临时目录（抓下来的配置片段等）
+tmp/
+# pytest 缓存
+.pytest_cache/
