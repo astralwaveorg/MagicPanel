@@ -301,7 +301,7 @@ def test_only_builtin_build_can_be_deleted(client):
                 json={"reason": "上测试"})
     r = client.delete(f"/api/v1/builds/{testing['id']}", headers=h)
     assert r.status_code == 400
-    assert "只有未发布过的构建可以删除" in r.json()["detail"]
+    assert "只有未发布过的构建可以手动删除" in r.json()["detail"]
 
     # PRODUCTION 不可删
     production = _create_build(client, h, "生产中")
@@ -311,7 +311,7 @@ def test_only_builtin_build_can_be_deleted(client):
                 json={"reason": "上生产"})
     r = client.delete(f"/api/v1/builds/{production['id']}", headers=h)
     assert r.status_code == 400
-    assert "只有未发布过的构建可以删除" in r.json()["detail"]
+    assert "只有未发布过的构建可以手动删除" in r.json()["detail"]
 
     # OFFLINE 不可删（归档，不是垃圾）
     offline = _create_build(client, h, "已下线")
@@ -321,7 +321,7 @@ def test_only_builtin_build_can_be_deleted(client):
                 json={"reason": "下线"})
     r = client.delete(f"/api/v1/builds/{offline['id']}", headers=h)
     assert r.status_code == 400
-    assert "只有未发布过的构建可以删除" in r.json()["detail"]
+    assert "只有未发布过的构建可以手动删除" in r.json()["detail"]
 
     # BUILT 可删
     fresh = _create_build(client, h, "没发布过")
@@ -349,7 +349,7 @@ def test_batch_delete_splits_deleted_and_blocked(client):
     data = r.json()
     assert data["deleted"] == [fresh["id"]]
     assert [b["id"] for b in data["blocked"]] == [published["id"], 999999]
-    assert "只有未发布过的构建可以删除" in data["blocked"][0]["reason"]
+    assert "只有未发布过的构建可以手动删除" in data["blocked"][0]["reason"]
     assert "不存在" in data["blocked"][1]["reason"]
 
 

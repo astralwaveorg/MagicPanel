@@ -459,7 +459,7 @@ def test_build_delete_and_release_state_reference(client):
     # 生效中的构建不能删除
     r = client.delete(f"/api/v1/builds/{first['id']}", headers=h)
     assert r.status_code == 400
-    assert "只有未发布过的构建可以删除" in r.json()["detail"]
+    assert "只有未发布过的构建可以手动删除" in r.json()["detail"]
 
     second = client.post("/api/v1/builds", headers=h, json={"note": "二"}).json()
     assert second["verify_status"] == "success"
@@ -467,7 +467,7 @@ def test_build_delete_and_release_state_reference(client):
     # 被替换的版本变成"已下线"，同样不能删（归档，不是垃圾）
     r = client.delete(f"/api/v1/builds/{first['id']}", headers=h)
     assert r.status_code == 400
-    assert "只有未发布过的构建可以删除" in r.json()["detail"]
+    assert "只有未发布过的构建可以手动删除" in r.json()["detail"]
 
     # 从未发布过的构建可以删；产物目录一并清理
     third = client.post("/api/v1/builds", headers=h, json={"note": "三"}).json()
@@ -486,7 +486,7 @@ def test_build_delete_and_release_state_reference(client):
     data = r.json()
     assert data["deleted"] == [fourth["id"]]
     assert data["blocked"][0]["id"] == second["id"]
-    assert "只有未发布过的构建可以删除" in data["blocked"][0]["reason"]
+    assert "只有未发布过的构建可以手动删除" in data["blocked"][0]["reason"]
 
 
 def test_device_display_name_and_filename(client):
@@ -1999,8 +1999,9 @@ def test_overview_reports_health_snapshot(client):
 def test_retention_prunes_builds_with_release_rows(client, monkeypatch):
     """留存清理按生命周期状态区分处理：
 
-    * 从未发布过（BUILT）的构建：整行删除；
-    * 发布过（OFFLINE）的构建：保留归档行，只清空含凭据的快照；
+    * 从未发布过（BUILT）的构建：超出窗口整行删除；
+    * 曾发布过（OFFLINE）的构建：超出「保留最近 N 个」窗口后**彻底清理**
+      （记录、产物与发布历史一起删），避免历史构建无限堆积；
     * 生效中（PRODUCTION / TESTING）的构建：永不清理。
 
     同时发布历史里的外键行必须一起删，否则整轮清理回滚。
@@ -2011,8 +2012,10 @@ def test_retention_prunes_builds_with_release_rows(client, monkeypatch):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     make_policy(client, csrf)
-    # 把留存窗口调到 2 个构建，才能在用例里触发清理
-    monkeypatch.setattr(config, "BUILD_ARTIFACT_KEEP", 2)
+    # 把两个留存窗口都调到最小，才能在用例里触发清理：
+    # 未发布过的构建留 1 个，曾发布过的留 1 个
+    monkeypatch.setattr(config, "BUILD_ARTIFACT_KEEP", 1)
+    monkeypatch.setattr(config, "PUBLISHED_BUILD_KEEP", 1)
 
     first = client.post("/api/v1/builds", headers=h, json={}).json()
     assert first["verify_status"] == "success", first
@@ -2029,16 +2032,15 @@ def test_retention_prunes_builds_with_release_rows(client, monkeypatch):
 
     result = retention.run_once()
     assert "artifacts" in result
+    assert "builds" in result
 
     with db.connect() as conn:
         # 从未发布过的构建被整行删除
         assert db.one(conn, "SELECT COUNT(*) AS c FROM builds WHERE id=?",
                       (first["id"],))["c"] == 0
-        # 发布过的构建保留归档行，只清空快照
-        row = db.one(conn, "SELECT * FROM builds WHERE id=?", (second["id"],))
-        assert row is not None
-        assert row["status"] == "OFFLINE"
-        assert row["snapshot"] == ""
+        # 已发布过但超出保留窗口的构建被彻底清理
+        assert db.one(conn, "SELECT COUNT(*) AS c FROM builds WHERE id=?",
+                      (second["id"],))["c"] == 0
         # 生效中的构建不受影响
         row = db.one(conn, "SELECT * FROM builds WHERE id=?", (third["id"],))
         assert row["status"] == "PRODUCTION" and row["snapshot"]
@@ -2051,10 +2053,38 @@ def test_retention_prunes_builds_with_release_rows(client, monkeypatch):
         assert db.one(conn, "SELECT COUNT(*) AS c FROM releases "
                             "WHERE build_id=?", (second["id"],))["c"] == 0
 
-    # 归档行仍然可以查看（快照已清空，不再含凭据）
-    detail = client.get(f"/api/v1/builds/{second['id']}", headers=h).json()
-    assert detail["status"] == "OFFLINE"
-    assert detail["snapshot"] == {}
+    # 彻底清理后连归档行都查不到
+    assert client.get(f"/api/v1/builds/{second['id']}", headers=h).status_code == 404
+
+
+def test_retention_keeps_recent_published_builds(client, monkeypatch):
+    """已发布过的构建保留最近 N 个，超出的才彻底清理。"""
+    from app import config, db
+    from app.services import retention
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    monkeypatch.setattr(config, "PUBLISHED_BUILD_KEEP", 3)
+    monkeypatch.setattr(config, "BUILD_ARTIFACT_KEEP", 50)
+
+    ids = []
+    for _ in range(5):
+        build = client.post("/api/v1/builds", headers=h, json={}).json()
+        assert build["verify_status"] == "success", build
+        ids.append(build["id"])
+        publish_to_prod(client, h, build["id"])
+
+    retention.run_once()
+
+    with db.connect() as conn:
+        alive = {int(r["id"]) for r in conn.execute("SELECT id FROM builds")}
+    # 只剩最近 3 个已发布过的构建（含当前生产版本）
+    assert alive == set(ids[-3:])
+    # 被清理掉的老构建连发布历史也没了
+    with db.connect() as conn:
+        assert db.one(conn, "SELECT COUNT(*) AS c FROM releases "
+                            "WHERE build_id=?", (ids[0],))["c"] == 0
 
 
 def test_paged_list_endpoints(client):

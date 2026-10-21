@@ -13,31 +13,41 @@ logger = logging.getLogger("magicpanel.retention")
 
 
 def _kept_build_ids(conn) -> set[int]:
-    """必须保留产物目录的构建：当前生效版本 + 最近 N 个构建。
+    """必须保留的构建。
 
-    生效版本（生产中 / 测试中）永远保留；已下线版本在留存窗口内保留，
-    超出窗口的产物会被清理——回滚到这类构建会被明确拒绝。
+    * 当前生效版本（生产中 / 测试中）：永远保留；
+    * 曾发布过的构建：保留最近 N 个（PUBLISHED_BUILD_KEEP），更早的彻底清理；
+    * 从未发布过的构建：保留最近 M 个（BUILD_ARTIFACT_KEEP）。
     """
     keep: set[int] = set()
     for row in db.all_(
             conn, "SELECT id FROM builds "
                  "WHERE status IN ('PRODUCTION','TESTING')"):
         keep.add(int(row["id"]))
+    # 曾发布过的构建：status 不再是 BUILT，或发布历史里有它
     for row in db.all_(
-            conn, "SELECT id FROM builds ORDER BY id DESC LIMIT ?",
-            (config.BUILD_ARTIFACT_KEEP,)):
+            conn, "SELECT id FROM builds WHERE status<>'BUILT' OR id IN "
+                 "(SELECT build_id FROM releases) ORDER BY id DESC LIMIT ?",
+            (config.PUBLISHED_BUILD_KEEP,)):
+        keep.add(int(row["id"]))
+    # 从未发布过的构建
+    for row in db.all_(
+            conn, "SELECT id FROM builds WHERE status='BUILT' "
+                 "ORDER BY id DESC LIMIT ?", (config.BUILD_ARTIFACT_KEEP,)):
         keep.add(int(row["id"]))
     return keep
 
 
-def prune_build_artifacts(conn) -> int:
-    """删除不再需要的构建产物目录，并回收对应的构建记录。
+def prune_build_artifacts(conn) -> tuple[int, int]:
+    """删除不再需要的构建产物目录与构建记录。
 
     留存策略按状态机区分：
     * 生产中 / 测试中：永不清理；
-    * 已下线（曾发布过）：保留归档行，但清空快照——快照里含节点凭据密文，
-      不应长期留档；产物清理后回滚会被明确拒绝；
-    * 已构建（从未发布过）：超出窗口直接删除，连同其发布历史。
+    * 曾发布过（已下线）：保留最近 PUBLISHED_BUILD_KEEP 个，更早的**彻底清理**
+      （记录、产物与发布历史一起删），避免面板里的历史构建无限堆积；
+    * 从未发布过：保留最近 BUILD_ARTIFACT_KEEP 个，超出的直接删除。
+
+    返回 (删除的产物目录数, 删除的构建记录数)。
     """
     keep = _kept_build_ids(conn)
     removed = 0
@@ -52,24 +62,16 @@ def prune_build_artifacts(conn) -> int:
                 removed += 1
             except OSError as exc:
                 logger.warning("删除构建产物目录失败 %s：%s", path, exc)
-    # 数据库里的旧构建记录同样回收（保留最近 N 条 + 当前生效版本）。
+    # 数据库里的旧构建记录同样回收。
     # releases.build_id 有外键，必须先删对应的发布历史，
     # 否则删除构建记录会触发外键约束失败，整轮清理回滚。
-    old_ids = [int(r["id"]) for r in db.all_(
-        conn, "SELECT id FROM builds ORDER BY id DESC LIMIT -1 OFFSET ?",
-        (config.BUILD_ARTIFACT_KEEP,))]
-    if old_ids:
-        marks = ",".join("?" for _ in old_ids)
-        conn.execute(
-            f"DELETE FROM releases WHERE build_id IN ({marks})", old_ids)
-        # 从未发布过的构建：整行删除
-        conn.execute(
-            f"DELETE FROM builds WHERE id IN ({marks}) AND status='BUILT'", old_ids)
-        # 已发布过的构建：保留归档行，只清空含凭据的快照
-        conn.execute(
-            f"UPDATE builds SET snapshot='' "
-            f"WHERE id IN ({marks}) AND status<>'BUILT'", old_ids)
-    return removed
+    purge = [int(r["id"]) for r in db.all_(conn, "SELECT id FROM builds ORDER BY id")
+             if int(r["id"]) not in keep]
+    if purge:
+        marks = ",".join("?" for _ in purge)
+        conn.execute(f"DELETE FROM releases WHERE build_id IN ({marks})", purge)
+        conn.execute(f"DELETE FROM builds WHERE id IN ({marks})", purge)
+    return removed, len(purge)
 
 
 def prune_audit_log(conn) -> int:
@@ -104,11 +106,11 @@ def run_once() -> dict:
     """执行一轮清理，返回各项目删除数量。"""
     with db.tx() as conn:
         stale = mark_stale_builds_failed(conn)
-        artifacts = prune_build_artifacts(conn)
+        artifacts, builds = prune_build_artifacts(conn)
         audits = prune_audit_log(conn)
         sessions = prune_sessions(conn)
-    if artifacts or audits or sessions or stale:
-        logger.info("留存清理：构建产物 %s，审计 %s，会话 %s，僵尸构建 %s",
-                    artifacts, audits, sessions, stale)
-    return {"artifacts": artifacts, "audit": audits, "sessions": sessions,
-            "stale_builds": stale}
+    if artifacts or audits or sessions or stale or builds:
+        logger.info("留存清理：构建产物 %s，构建记录 %s，审计 %s，会话 %s，僵尸构建 %s",
+                    artifacts, builds, audits, sessions, stale)
+    return {"artifacts": artifacts, "builds": builds, "audit": audits,
+            "sessions": sessions, "stale_builds": stale}

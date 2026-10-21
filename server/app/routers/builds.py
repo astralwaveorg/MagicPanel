@@ -132,8 +132,8 @@ def _delete_guard(build) -> str:
         label = releases.STATUS_LABELS[releases.BuildStatus(build["status"])]
     except ValueError:
         label = build["status"]
-    return (f"构建 #{build['id']} 当前为「{label}」，只有未发布过的构建可以删除；"
-            "已发布过的版本只能下线归档")
+    return (f"构建 #{build['id']} 当前为「{label}」，只有未发布过的构建可以手动删除；"
+            "已发布过的版本由系统自动清理（保留最近 20 个）")
 
 
 def _purge_artifacts(build_id: int) -> None:

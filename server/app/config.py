@@ -59,7 +59,8 @@ SCHEDULER_AUTOSTART = os.environ.get("MAGICPANEL_SCHEDULER", "1") != "0"
 SCHEDULER_TICK_SECONDS = max(10, int(os.environ.get("MAGICPANEL_SCHEDULER_TICK", "30")))
 RELEASE_HISTORY_LIMIT = 10       # 发布历史只保留最近 10 条（每日两次约 5 天）
 # 磁盘留存策略：构建产物与审计日志都会随时间增长，NAS 磁盘有限，必须有上限。
-BUILD_ARTIFACT_KEEP = 30        # 保留最近 30 个构建的产物目录
+BUILD_ARTIFACT_KEEP = 30        # 保留最近 30 个「从未发布过」的构建及其产物
+PUBLISHED_BUILD_KEEP = 20       # 曾发布过的构建只保留最近 20 个，更早的彻底清理
 AUDIT_LOG_KEEP = 20000          # 审计日志最多保留 2 万行
 
 SETTINGS_DEFAULTS = {

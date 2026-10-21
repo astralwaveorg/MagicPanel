@@ -199,7 +199,7 @@
     <BatchResultDialog
       v-model:visible="blockedVisible"
       title="部分构建未删除"
-      :summary="`已删除 ${deletedCount} 项；${blockedItems.length} 项因已发布过而保留`"
+      :summary="`已删除 ${deletedCount} 项；${blockedItems.length} 项因已发布过而保留` + '（系统会自动清理最近 20 个之外的版本）'"
       :items="blockedItems"
     />
   </div>
@@ -426,7 +426,7 @@ async function offlineBuild(row) {
 async function remove(row) {
   if (!await confirmBox(
     `删除构建 #${row.id}？产物文件与相关发布历史会一并删除；`
-    + '只有「已构建」状态的构建可以删除，已发布过的版本只能下线归档。',
+    + '只有「已构建」状态的构建可以手动删除；已发布过的版本由系统自动清理（保留最近 20 个，超出的会连同产物与发布历史一并删除）。',
     `删除构建 #${row.id}`, { type: 'warning', confirmButtonText: '删除' },
   )) return
   try {
@@ -442,7 +442,7 @@ async function removeSelected() {
   if (!selected.value.length) return
   if (!await confirmBox(
     `删除选中的 ${selected.value.length} 个构建？产物文件与相关发布历史会一并删除；`
-    + '已发布过的版本会保留，并列出原因。',
+    + '已发布过的版本不能手动删除（系统会自动清理最近 20 个之外的版本），这里会列出保留原因。',
     '批量删除构建', { type: 'warning', confirmButtonText: '删除' },
   )) return
   try {
