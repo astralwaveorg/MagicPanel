@@ -354,17 +354,39 @@ def test_nodes(snapshot_yaml: str) -> dict:
         names = [str(p.get("name")) for p in proxies
                  if isinstance(p, dict) and p.get("name")]
 
+        # 等核心把节点真正注册进 /proxies 再开始测。
+        # RESTful API 开始监听 ≠ 节点已加载完成：抢跑时 /proxies/<name>
+        # 会返回 404，被当成"节点不可用"——实测会让本来可用的节点随机判失败。
+        expected = set(names)
+        ready_deadline = time.monotonic() + 5
+        while expected:
+            try:
+                listing = controller.get(f"{base}/proxies", timeout=2.0).json()
+                have = set((listing.get("proxies") or {}).keys())
+            except (httpx.HTTPError, ValueError):
+                have = set()
+            if expected <= have:
+                break
+            if time.monotonic() > ready_deadline:
+                break
+            time.sleep(0.2)
+
         def probe(name: str):
             quoted = urllib.parse.quote(name, safe="")
-            try:
-                resp = controller.get(
-                    f"{base}/proxies/{quoted}/delay",
-                    params={"timeout": DELAY_TIMEOUT_MS, "url": DELAY_URL},
-                )
-                if resp.status_code == 200:
-                    return name, int(resp.json().get("delay", 0))
-            except (httpx.HTTPError, ValueError):
-                pass
+            for attempt in (0, 1):
+                try:
+                    resp = controller.get(
+                        f"{base}/proxies/{quoted}/delay",
+                        params={"timeout": DELAY_TIMEOUT_MS, "url": DELAY_URL},
+                    )
+                    if resp.status_code == 200:
+                        return name, int(resp.json().get("delay", 0))
+                    if resp.status_code != 404 or attempt:
+                        break
+                except (httpx.HTTPError, ValueError):
+                    pass
+                # 404：节点还没进列表，稍等一下再试一次
+                time.sleep(0.3)
             return name, -1
 
         results: dict[str, int] = {}
