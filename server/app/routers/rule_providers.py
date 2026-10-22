@@ -135,6 +135,10 @@ def _public_with_refs(conn, row) -> dict:
     return data
 
 
+class EnabledBody(BaseModel):
+    enabled: bool
+
+
 @router.get("/page")
 def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
                          user=CurrentUser):
@@ -260,6 +264,21 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
         )
         security.audit(conn, user["username"], "更新规则来源", "rule_provider", rp_id,
                        {"name": body.name})
+        row = _get_or_404(conn, rp_id)
+    return _public(row)
+
+
+@router.patch("/{rp_id}/enabled")
+def set_provider_enabled(rp_id: int, body: EnabledBody, user=CurrentUser):
+    """启停规则来源：只改启用状态，其它字段一个都不动。"""
+    with db.tx() as conn:
+        row = _get_or_404(conn, rp_id)
+        conn.execute("UPDATE rule_providers SET enabled=?, updated_at=? WHERE id=?",
+                     (int(body.enabled), db.now(), rp_id))
+        security.audit(
+            conn, user["username"],
+            "启用规则来源" if body.enabled else "停用规则来源",
+            "rule_provider", rp_id, {"name": row["name"]})
         row = _get_or_404(conn, rp_id)
     return _public(row)
 

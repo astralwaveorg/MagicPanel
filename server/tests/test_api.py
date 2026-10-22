@@ -322,6 +322,53 @@ def test_group_cycle_detected(client):
     assert any("循环" in e for e in build["results"]["stash-ios"]["errors"])
 
 
+def test_toggle_enabled_endpoints(client):
+    """启停接口只改 enabled，其它字段一个都不动。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    # 节点来源
+    r = client.post("/api/v1/sources", headers=h, json={
+        "name": "可停用的机场", "url": "https://a.example.com/sub?token=abc123",
+        "interval": 3600, "filter": "港"})
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    assert r.json()["enabled"] is True
+    r = client.patch(f"/api/v1/sources/{sid}/enabled", headers=h, json={"enabled": False})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["filter"] == "港" and body["interval"] == 3600   # 别的字段没动
+    r = client.patch(f"/api/v1/sources/{sid}/enabled", headers=h, json={"enabled": True})
+    assert r.json()["enabled"] is True
+
+    # 规则来源
+    r = client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "可停用的规则集", "kind": "inline", "behavior": "domain",
+        "inline_content": "payload:\n  - a.example.com\n"})
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    r = client.patch(f"/api/v1/rule-providers/{rid}/enabled", headers=h, json={"enabled": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is False
+    assert r.json()["rule_count"] == 1     # 内容没动
+
+    # 本地节点
+    r = client.post("/api/v1/local-nodes", headers=h, json={
+        "name": "可停用的节点", "node_type": "本地", "protocol": "ss",
+        "server": "hk.example.com", "port": 8388,
+        "params": {"cipher": "aes-256-gcm", "password": "pw"}})
+    assert r.status_code == 201, r.text
+    nid = r.json()["id"]
+    r = client.patch(f"/api/v1/local-nodes/{nid}/enabled", headers=h, json={"enabled": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is False
+    assert r.json()["server"] == "hk.example.com"
+
+    # 不存在的 id
+    assert client.patch("/api/v1/sources/9999/enabled", headers=h,
+                        json={"enabled": False}).status_code == 404
+
+
 def test_rule_provider_fetch_retry_and_stale_content(client, monkeypatch):
     """抓取失败会重试；重试仍失败时保留旧内容，构建照旧可用。"""
     from app.services import updater, scheduler

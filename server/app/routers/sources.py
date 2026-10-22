@@ -225,6 +225,25 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
     return _public(row)
 
 
+class EnabledBody(BaseModel):
+    enabled: bool
+
+
+@router.patch("/{source_id}/enabled")
+def set_source_enabled(source_id: int, body: EnabledBody, user=CurrentUser):
+    """启停节点来源：只改启用状态，其它字段一个都不动。"""
+    with db.tx() as conn:
+        row = _get_or_404(conn, source_id)
+        conn.execute("UPDATE sources SET enabled=?, updated_at=? WHERE id=?",
+                     (int(body.enabled), db.now(), source_id))
+        security.audit(
+            conn, user["username"],
+            "启用节点来源" if body.enabled else "停用节点来源",
+            "source", source_id, {"name": row["name"]})
+        row = _get_or_404(conn, source_id)
+    return _public(row)
+
+
 @router.delete("/{source_id}")
 def delete_source(source_id: int, force: bool = False, user=CurrentUser):
     """删除节点来源。

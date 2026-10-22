@@ -74,6 +74,10 @@ def _prepare(body: LocalNodeBody) -> tuple[dict, str]:
     return params, body.extra_yaml
 
 
+class EnabledBody(BaseModel):
+    enabled: bool
+
+
 @router.get("/schema")
 def node_schema(user=CurrentUser):
     return {
@@ -192,6 +196,21 @@ def test_node(node_id: int, user=CurrentUser):
         "status": "ok" if result["ok"] else "failed",
         "tested_at": now,
     }
+
+
+@router.patch("/{node_id}/enabled")
+def set_node_enabled(node_id: int, body: EnabledBody, user=CurrentUser):
+    """启停本地节点：只改启用状态，其它字段一个都不动。"""
+    with db.tx() as conn:
+        row = _get_or_404(conn, node_id)
+        conn.execute("UPDATE local_nodes SET enabled=?, updated_at=? WHERE id=?",
+                     (int(body.enabled), db.now(), node_id))
+        security.audit(
+            conn, user["username"],
+            "启用本地节点" if body.enabled else "停用本地节点",
+            "local_node", node_id, {"name": row["name"]})
+        row = _get_or_404(conn, node_id)
+    return _public(row)
 
 
 @router.delete("/{node_id}")

@@ -81,9 +81,6 @@
               <StatusDot v-else v-bind="sourceStatus(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="启用" width="70">
-            <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
-          </el-table-column>
           <el-table-column label="节点数" width="90" align="left">
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
@@ -135,6 +132,7 @@
                 <el-button size="small" type="info" plain @click="openNodes(row)">节点</el-button>
                 <el-button size="small" :loading="row._refreshing" @click="refresh(row)" type="primary">抓取</el-button>
                 <el-button size="small" :loading="row._testing" @click="testNodes(row)" type="success" plain>测速</el-button>
+                <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleEnabled(row)" />
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
                 <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
               </div>
@@ -171,9 +169,6 @@
               <span class="mono">{{ row.server }}:{{ row.port }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="启用" width="80">
-            <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
-          </el-table-column>
           <el-table-column label="测速状态" width="130">
             <template #default="{ row }">
               <StatusDot v-if="row.test_status === 'ok'" kind="ok"
@@ -185,6 +180,7 @@
           <el-table-column label="操作" width="230">
             <template #default="{ row }">
               <el-button size="small" :loading="testingLocal === row.id" @click="testLocal(row)" type="success" plain>测速</el-button>
+              <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleLocalEnabled(row)" />
               <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
               <el-button size="small" @click="removeLocal(row)" type="danger" plain>删除</el-button>
             </template>
@@ -457,6 +453,7 @@ import { api } from '../api'
 import { useMobile } from '../mobile'
 import { uploadCore } from '../core'
 import StatusDot from '../components/StatusDot.vue'
+import EnableToggle from '../components/EnableToggle.vue'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
@@ -769,6 +766,37 @@ async function forceRenameSource(row, body) {
     ElMessage.error(e.message)
   } finally {
     refDialog.busy = false
+  }
+}
+
+// 启停：只改启用状态，别的字段一个都不动
+async function toggleEnabled(row) {
+  row._toggling = true
+  try {
+    const updated = await api(`/api/v1/sources/${row.id}/enabled`, {
+      method: 'PATCH', body: { enabled: !row.enabled },
+    })
+    Object.assign(row, updated)
+    ElMessage.success(updated.enabled ? '已启用' : '已停用')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    row._toggling = false
+  }
+}
+
+async function toggleLocalEnabled(row) {
+  row._toggling = true
+  try {
+    const updated = await api(`/api/v1/local-nodes/${row.id}/enabled`, {
+      method: 'PATCH', body: { enabled: !row.enabled },
+    })
+    Object.assign(row, updated)
+    ElMessage.success(updated.enabled ? '已启用' : '已停用')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    row._toggling = false
   }
 }
 

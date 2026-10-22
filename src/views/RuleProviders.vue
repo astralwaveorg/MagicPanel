@@ -72,9 +72,6 @@
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="启用" width="70">
-            <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
-          </el-table-column>
           <el-table-column label="规则数" width="80" align="right">
             <template #default="{ row }">{{ row.rule_count ?? '—' }}</template>
           </el-table-column>
@@ -102,6 +99,7 @@
               <div class="op-grid">
                 <el-button size="small" :disabled="!row.has_content" @click="preview(row)" type="info" plain>内容</el-button>
                 <el-button size="small" v-if="row.kind === 'remote'" :loading="row._refreshing" @click="refresh(row)" type="primary">抓取</el-button>
+                <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleEnabled(row)" />
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
                 <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
               </div>
@@ -258,6 +256,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import StatusDot from '../components/StatusDot.vue'
+import EnableToggle from '../components/EnableToggle.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
 import Pager from '../components/Pager.vue'
@@ -355,6 +354,22 @@ const form = reactive(emptyForm())
 // 抓取走代理时的默认地址：家里 Stash 的混合端口
 const PROXY_HINT = 'http://10.0.1.8:7890'
 const currentProxy = computed(() => form.current_proxy || '')
+
+// 启停：只改启用状态，别的字段一个都不动
+async function toggleEnabled(row) {
+  row._toggling = true
+  try {
+    const updated = await api(`/api/v1/rule-providers/${row.id}/enabled`, {
+      method: 'PATCH', body: { enabled: !row.enabled },
+    })
+    Object.assign(row, updated)
+    ElMessage.success(updated.enabled ? '已启用' : '已停用')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    row._toggling = false
+  }
+}
 
 // 跳到引用了这条规则来源的分流规则，直接打开编辑弹窗
 function gotoRule(ref) {
