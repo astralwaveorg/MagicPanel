@@ -1,0 +1,49 @@
+# 文档站：docs/ 下的三份文档 → GitHub Pages
+#
+# 推 main 即自动发布，不用手动维护 gh-pages 分支。
+# 站点地址：https://astralwaveorg.github.io/MagicPanel/
+name: deploy-docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'scripts/build_docs_site.py'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一次发布只保留最新的一次构建
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 生成站点源码
+        run: python3 scripts/build_docs_site.py
+      - uses: actions/configure-pages@v5
+      - name: 用 Jekyll 构建
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs_site
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

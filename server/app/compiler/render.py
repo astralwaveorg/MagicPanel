@@ -101,7 +101,8 @@ def _provider_entry(src: dict, engine: str) -> dict:
     return entry
 
 
-def _group_entry(group: dict, engine: str, local_names: list[str] | None = None) -> dict:
+def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
+                 all_sources: list[str] | None = None) -> dict:
     entry = {"name": group["name"], "type": group["type"]}
     # 本地单节点可以排在最前（"优先美国"这类组用得上：机房节点先试，
     # 机场节点兜底）。local_nodes 本身是有序的 id 列表，顺序即优先级。
@@ -110,6 +111,9 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None)
     else:
         proxies = list(group.get("proxies") or []) + list(local_names or [])
     use = list(group.get("use_sources") or [])
+    if config.ALL_SCOPE in use:
+        # 「包含所有」：用全部启用的来源，以后新增的来源自动进来
+        use = [name for name in (all_sources or []) if name not in use]
     if group["type"] in ("url-test", "fallback", "load-balance") \
             and config.GUARD_PROXY not in proxies:
         # 放在末尾而不是开头：占位节点永远连不通（127.0.0.1:1），
@@ -203,17 +207,20 @@ def applies_to(item: dict, target_name: str, device_name: str | None = None) -> 
     """策略组 / 规则是否适用于该目标（以及该设备）。
 
     两个维度都是"收窄"关系，取交集：
-    * targets —— 适用引擎平台，为空表示适用于全部平台；
-    * devices —— 适用设备，为空表示适用于全部设备；
+    * targets —— 适用引擎平台：["*"] 表示全部平台，空列表表示不适用任何平台；
+    * devices —— 适用设备：["*"] 表示全部设备，空列表表示不适用任何设备；
       指定了设备时，只在这些设备自己的产物里出现（共享产物里剔除）。
     """
     scope = item.get("targets") or []
-    if scope and target_name not in scope:
+    if config.ALL_SCOPE not in scope and target_name not in scope:
+        # 没写 "*" 也没列这个平台（含空列表 = 不适用任何平台）
         return False
     devices = item.get("devices") or []
-    if devices:
-        return bool(device_name) and device_name in devices
-    return True
+    if config.ALL_SCOPE in devices:
+        return True
+    if not devices:
+        return False        # 空列表 = 不适用任何设备
+    return bool(device_name) and device_name in devices
 
 
 def _select_structure(snapshot: dict, target: dict, warnings: list | None,
@@ -359,7 +366,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 for node_id in (group.get("local_nodes") or [])
                 if node_id in local_enabled
             ]
-            cfg["proxy-groups"].append(_group_entry(group, engine, names))
+            cfg["proxy-groups"].append(
+                _group_entry(group, engine, names, [s["name"] for s in sources]))
 
     rps = [r for r in snapshot["rule_providers"] if r.get("enabled")]
     if rps:

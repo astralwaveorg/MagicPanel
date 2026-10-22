@@ -7,6 +7,52 @@ from conftest import auth_headers, setup_admin
 from app import db
 
 
+def test_scope_all_sentinel_means_everything(client):
+    """「包含所有」哨兵：节点来源、引擎平台、设备都按"全部"处理。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    # 第二个来源：用来验证"包含所有"能带上后来新增的来源
+    r = client.post("/api/v1/sources", headers=h, json={
+        "name": "后加机场", "url": "https://later.example.com/sub?token=xyz789"})
+    assert r.status_code == 201, r.text
+
+    # 选满全部来源 → 归一为"包含所有"
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "全选组", "type": "url-test",
+        "use_sources": ["测试机场", "后加机场"], "filter": "x"})
+    assert r.status_code == 201, r.text
+    assert r.json()["use_sources"] == ["*"]
+
+    # 不传适用范围 = 默认包含所有
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "默认组", "type": "select", "proxies": ["DIRECT"]})
+    assert r.status_code == 201, r.text
+    assert r.json()["targets"] == ["*"]
+    assert r.json()["devices"] == ["*"]
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["verify_status"] == "success", build["results"]
+    bid = build["id"]
+    artifact = client.get(
+        f"/api/v1/builds/{bid}/artifact/stash-ios", headers=h).json()["content"]
+    # 「包含所有」的组在产物里带上全部来源（含后来新增的）
+    assert "测试机场" in artifact
+    assert "后加机场" in artifact
+    assert "全选组" in artifact
+
+    # 显式传空数组 = 不适用任何平台/设备
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "空范围组", "type": "select", "proxies": ["DIRECT"],
+        "targets": [], "devices": []})
+    assert r.status_code == 201, r.text
+    assert r.json()["targets"] == []
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    artifact = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios", headers=h).json()["content"]
+    assert "空范围组" not in artifact
+
+
 def make_policy(client, csrf):
     """造一套最小可用策略：来源 + 策略组 + 兜底规则 + 目标。"""
     h = auth_headers(csrf)
@@ -1762,10 +1808,11 @@ def test_mihomo_android_keeps_process_rules():
         "groups": [{"name": "节点选择", "type": "select", "proxies": ["DIRECT"],
                     "use_sources": [], "local_nodes": [], "filter": "", "hidden": False,
                     "url": "", "interval": 600, "timeout": 8000, "tolerance": 150,
-                    "lazy": True, "strategy": ""}],
+                    "lazy": True, "strategy": "", "targets": ["*"], "devices": ["*"]}],
         "rules": [{"type": "PROCESS-NAME", "value": "com.tencent.mm", "target": "节点选择",
-                   "enabled": True},
-                  {"type": "MATCH", "value": "", "target": "节点选择", "enabled": True}],
+                   "enabled": True, "targets": ["*"], "devices": ["*"]},
+                  {"type": "MATCH", "value": "", "target": "节点选择", "enabled": True,
+                   "targets": ["*"], "devices": ["*"]}],
     }
     warnings = []
     text = render.render_target(
@@ -2263,7 +2310,7 @@ def test_batch_update_and_delete_groups(client):
     by_name = {x["name"]: x for x in g}
     assert by_name["批组0"]["use_sources"] == ["测试机场"]
     assert by_name["批组0"]["hidden"] is True
-    assert by_name["批组2"]["use_sources"] == []      # 没选中的不动
+    assert by_name["批组2"]["use_sources"] == ["*"]   # 没选中的不动（默认包含所有）
     assert by_name["批组2"]["hidden"] is False
     # 空列表 = 清空
     r = client.patch("/api/v1/groups/batch", headers=h, json={

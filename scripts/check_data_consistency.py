@@ -107,17 +107,17 @@ def main() -> int:
 
     for g in groups:
         for name in json.loads(g["targets"] or "[]"):
-            if name not in target_names:
+            if name != "*" and name not in target_names:
                 problems.append(f"策略组「{g['name']}」适用了不存在的引擎平台「{name}」")
         for name in json.loads(g["devices"] or "[]"):
-            if name not in device_names:
+            if name != "*" and name not in device_names:
                 problems.append(f"策略组「{g['name']}」适用了不存在的设备「{name}」")
         for member in json.loads(g["proxies"] or "[]"):
             if member not in group_names and member not in bc.__dict__.get(
                     "BUILTIN_TARGETS", ()) and member not in ("DIRECT", "REJECT", "PASS", "COMPATIBLE"):
                 problems.append(f"策略组「{g['name']}」的成员「{member}」不存在")
         for src in json.loads(g["use_sources"] or "[]"):
-            if src not in sources:
+            if src != "*" and src not in sources:
                 problems.append(f"策略组「{g['name']}」引用了不存在的节点来源「{src}」")
         for nid in json.loads(g["local_nodes"] or "[]"):
             if nid not in local_nodes:
@@ -130,10 +130,10 @@ def main() -> int:
                  "ORDER BY sort, id")
     for r in rules:
         for name in json.loads(r["targets"] or "[]"):
-            if name not in target_names:
+            if name != "*" and name not in target_names:
                 problems.append(f"规则「{r['type']},{r['value']}」适用了不存在的引擎平台「{name}」")
         for name in json.loads(r["devices"] or "[]"):
-            if name not in device_names:
+            if name != "*" and name not in device_names:
                 problems.append(f"规则「{r['type']},{r['value']}」适用了不存在的设备「{name}」")
         if r["target"] not in group_names and r["target"] not in (
                 "DIRECT", "REJECT", "PASS", "COMPATIBLE"):
@@ -226,17 +226,17 @@ def main() -> int:
         ds = set(json.loads(r["devices"] or "[]"))
         if not ts and not ds:
             continue
-        if ds and ts:
+        if ds and ts and "*" not in ts:
             bad = [d for d in ds if d in device_target and device_target[d] not in ts]
             if bad:
                 problems.append(
                     f"规则「{r['type']},{r['value']}」的设备 {bad} "
                     f"不在它的引擎平台范围 {sorted(ts)} 内 —— 不会生效")
-        elif ds:
+        elif ds and "*" not in ds:
             missing = [d for d in ds if d not in device_target]
             if missing:
                 problems.append(f"规则「{r['type']},{r['value']}」适用了不存在的设备 {missing}")
-        elif ts and not (ts & target_names):
+        elif ts and "*" not in ts and not (ts & target_names):
             problems.append(
                 f"规则「{r['type']},{r['value']}」的引擎平台范围 {sorted(ts)} "
                 "与现有引擎平台没有交集 —— 不会生效")
@@ -250,11 +250,14 @@ def main() -> int:
         gts, gds = gscope
         rts = set(json.loads(r["targets"] or "[]"))
         rds = set(json.loads(r["devices"] or "[]"))
-        if gds and rds and not (gds & rds):
+        # "*" 表示全部，与任何一侧都有交集
+        if (gds and rds and "*" not in gds and "*" not in rds
+                and not (gds & rds)):
             problems.append(
                 f"规则「{r['type']},{r['value']}」与目标组「{r['target']}」"
                 "的适用设备没有交集 —— 规则会被自动剔除")
-        elif gts and rts and not (gts & rts):
+        elif (gts and rts and "*" not in gts and "*" not in rts
+                and not (gts & rts)):
             problems.append(
                 f"规则「{r['type']},{r['value']}」与目标组「{r['target']}」"
                 "的适用引擎平台没有交集 —— 规则会被自动剔除")
@@ -292,6 +295,17 @@ def main() -> int:
                     f"规则「DOMAIN-SUFFIX,{r['value']}」被更早的"
                     f"「DOMAIN-SUFFIX,{p_rule['value']}」遮蔽（目标不同，可能不生效）")
             break
+
+    # 策略组引用的节点来源必须存在（"*" 表示全部来源，跳过）
+    source_names = {r["name"] for r in rows("SELECT name FROM sources")}
+    for g in groups:
+        for name in json.loads(g["use_sources"] or "[]"):
+            if name == "*":
+                continue
+            if name not in source_names:
+                problems.append(
+                    f"策略组「{g['name']}」引用了不存在的节点来源「{name}」"
+                    "——产物里的 use: 指向空的 provider，客户端拿不到该来源的节点")
 
     # 空策略组：没有任何成员
     for g in groups:

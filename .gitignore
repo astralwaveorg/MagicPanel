@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# 文档站点源码（由 scripts/build_docs_site.py 生成）
+docs_site/
 data/
 .venv/
 __pycache__/
@@ -8,7 +10,6 @@ __pycache__/
 .cache/
 server/app/static/
 .ref/
-Stash 真实配置文件示例/
 *.log
 # 家庭网络内部文档，不进仓库
 docs/network/

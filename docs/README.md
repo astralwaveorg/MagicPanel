@@ -7,7 +7,7 @@
 | [使用文档](使用文档.md) | 使用者 | 想知道某个页面怎么用、某个按钮点下去会怎样 |
 | [开发文档](开发文档.md) | 维护者、Agent | 要改代码：改哪个文件、怎么验证、怎么发上线 |
 | [配置文档](配置文档.md) | 维护者、Agent | 要改配置：哪项配置存在哪、字段是什么、去哪改、改完怎么发布 |
-| [在线阅读](https://astralwaveorg.github.io/MagicPanel/) | 所有人 | 上面三份的网页版（`gh-pages` 分支，由 `scripts/build_docs_site.sh` 生成） |
+| [在线阅读](https://astralwaveorg.github.io/MagicPanel/) | 所有人 | 上面三份的网页版。推 main 后由 `.github/workflows/pages.yml` 自动生成并发布（不需要手动维护分支） |
 
 ## 深入细节
 
@@ -38,17 +38,8 @@ python3 scripts/docs_lookup.py read https://wiki.metacubex.one/config/inbound/po
 
 ## 家庭网络方案与运行上下文
 
-这一组记录的是**迁移前**的方案与审阅结论，属于历史材料，不是当前实现。
-
-| 文档 | 用途 |
-| --- | --- |
-| [运行上下文](network/Network-Operations-Context.md) | 设备清单、访问入口、用户约束、当前事实与目标区别 |
-| [总体设计](network/Home-Proxy-Architecture.md) | Stash 选型：Windows + 两台 Mac、家庭路径、云端统一与故障隔离 |
-| [客户端选型与兼容性](network/Client-Selection-and-Compatibility.md) | 授权、Stash／Mihomo 差异、完整配置更新与验收 |
-| [Mac mini 服务与迁移方案](network/Mac-mini-LAN-Proxy-Plan.md) | 稳定端口、NAS 消费层、手动接入、切换／回退与验收 |
-| [R6S 安全稳定性审阅](network/audits/R6S-Security-Stability-Review.md) | 只读检查证据、问题优先级与待审核建议，不是整改记录 |
-| [MacBook 代理卸载记录](network/audits/MacBook-Proxy-Cleanup.md) | 本机仅保留 Stash；旧 Surge 扩展已终止，待正常重启删除 |
-| [R6S 初次检查](network/audits/R6S-Inspection.md) | 基础系统、插件与网络快照 |
+`docs/network/` 是迁移前的家庭网络方案与审阅记录，属于本机与 NAS 上的历史材料，
+按约定不进仓库（见 `.gitignore`）。需要时在开发机或 NAS 上看，不要在仓库里找。
 
 ## 归档
 

@@ -20,6 +20,9 @@ PLATFORM_LABELS = {
 
 GUARD_PROXY = "空组保护"           # 永远无法出站的占位节点，防止空策略组被客户端隐式改写
 BUILTIN_TARGETS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL"}
+# 「包含所有」哨兵：多选列表里放这个值表示"全部"（节点来源 = 所有来源，
+# 含以后新增的；引擎平台 / 设备 = 全部）。
+ALL_SCOPE = "*"
 GROUP_TYPES = {"select", "url-test", "fallback", "load-balance", "relay"}
 LB_STRATEGIES = {"consistent-hashing", "round-robin", "sticky-sessions"}
 RULE_TYPES = {

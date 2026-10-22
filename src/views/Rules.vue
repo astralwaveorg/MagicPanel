@@ -50,10 +50,9 @@
           <el-table-column prop="target" label="目标" min-width="110" />
           <el-table-column label="适用平台" min-width="150">
             <template #default="{ row }">
-              <span v-if="!row.targets || !row.targets.length">全部</span>
-              <span v-else>{{ row.targets.join('、') }}</span>
+              <span>{{ scopeText(row.targets) }}</span>
               <div v-if="row.devices && row.devices.length" class="mp-cell-sub">
-                设备：{{ row.devices.join('、') }}
+                设备：{{ scopeText(row.devices) }}
               </div>
             </template>
           </el-table-column>
@@ -100,10 +99,12 @@
             <el-option value="REJECT" label="REJECT（拒绝）" />
           </el-select>
         </el-form-item>
-        <el-form-item label="适用引擎平台（不选 = 全部）">
+        <el-form-item label="适用引擎平台">
           <MultiSelectClear :has-value="form.targets.length" @clear="form.targets = []">
             <el-select v-model="form.targets" multiple style="width:100%"
-                       placeholder="不选表示适用于全部目标">
+                       placeholder="包含所有"
+                       @change="form.targets = normalizeScope(form.targets, ALL_SCOPE)">
+              <el-option :value="ALL_SCOPE" label="包含所有" />
               <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
             </el-select>
           </MultiSelectClear>
@@ -111,10 +112,12 @@
             只在选中的引擎平台里生效；若该规则指向的策略组不适用于同一平台，规则会被自动剔除。
           </div>
         </el-form-item>
-        <el-form-item label="适用设备（不选 = 全部）">
+        <el-form-item label="适用设备">
           <MultiSelectClear :has-value="form.devices.length" @clear="form.devices = []">
             <el-select v-model="form.devices" multiple style="width:100%"
-                       placeholder="不选表示适用于全部设备">
+                       placeholder="包含所有"
+                       @change="form.devices = normalizeScope(form.devices, ALL_SCOPE)">
+              <el-option :value="ALL_SCOPE" label="包含所有" />
               <el-option v-for="d in devices" :key="d.name" :value="d.name" :label="d.name" />
             </el-select>
           </MultiSelectClear>
@@ -161,7 +164,9 @@
         <MultiSelectClear v-if="batch.useTargets"
                           :has-value="batch.targets.length" @clear="batch.targets = []">
           <el-select v-model="batch.targets" multiple style="width:100%"
-                     placeholder="不选即清空（改为适用于全部）">
+                     placeholder="包含所有"
+                     @change="batch.targets = normalizeScope(batch.targets, ALL_SCOPE)">
+            <el-option :value="ALL_SCOPE" label="包含所有" />
             <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
           </el-select>
         </MultiSelectClear>
@@ -201,6 +206,7 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
+import { ALL_SCOPE, normalizeScope, collapseIfComplete } from '../scopeOptions'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -252,11 +258,19 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
 
 const NO_RESOLVE_TYPES = ['IP-CIDR', 'IP-CIDR6', 'GEOIP', 'RULE-SET', 'SRC-IP-CIDR']
 
+// 默认一律"包含所有"：新建的规则开箱即对全部平台、全部设备生效
 const emptyForm = () => ({
   type: 'DOMAIN-SUFFIX', value: '', target: 'DIRECT', enabled: true, note: '',
-  no_resolve: false, targets: [], devices: [],
+  no_resolve: false, targets: [ALL_SCOPE], devices: [ALL_SCOPE],
 })
 const form = reactive(emptyForm())
+
+// 适用范围展示："*" 是「包含所有」，不直接显示给用户
+function scopeText(list) {
+  if (!list || !list.length) return '不适用'
+  if (list.includes(ALL_SCOPE)) return '全部'
+  return list.join('、')
+}
 const isFinal = computed(() => ['MATCH', 'FINAL'].includes(form.type))
 const canNoResolve = computed(() => NO_RESOLVE_TYPES.includes(form.type))
 
@@ -306,6 +320,9 @@ async function save() {
   saving.value = true
   try {
     const body = { ...form, value: isFinal.value ? '' : form.value }
+    // 逐项选满 = 包含所有：存成 ["*"]，以后新增的平台/设备自动包含
+    body.targets = collapseIfComplete(body.targets, targets.value.map((t) => t.name))
+    body.devices = collapseIfComplete(body.devices, devices.value.map((d) => d.name))
     if (editing.value) {
       await api(`/api/v1/rules/${editing.value.id}`, { method: 'PUT', body })
     } else {

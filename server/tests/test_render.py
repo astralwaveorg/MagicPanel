@@ -12,7 +12,9 @@ def _snapshot():
         "sources": [],
         "groups": [],
         "rule_providers": [],
-        "rules": [{"type": "MATCH", "value": "", "target": "PROXY", "enabled": True}],
+        # 适用范围显式写 "包含所有"（空列表 = 不适用任何平台/设备）
+        "rules": [{"type": "MATCH", "value": "", "target": "PROXY", "enabled": True,
+                   "targets": ["*"], "devices": ["*"]}],
         "snippets": [],
     }
 
@@ -48,9 +50,10 @@ def test_target_scoped_groups_isolate_private_local_nodes():
                                 (3, "unreferenced", "unreferenced-secret")]
     ]
     snapshot["groups"] = [
-        {"name": "shared-group", "type": "select", "local_nodes": [1]},
+        {"name": "shared-group", "type": "select", "local_nodes": [1],
+         "targets": ["*"], "devices": ["*"]},
         {"name": "private-group", "type": "select", "local_nodes": [2],
-         "targets": ["friend"]},
+         "targets": ["friend"], "devices": ["*"]},
     ]
     for engine in ("stash", "mihomo"):
         own = render.render_target(snapshot, {"name": "owner", "engine": engine})

@@ -345,6 +345,7 @@ def init_db() -> None:
         _migrate_verification_wording(conn)
         _migrate_base_config_defaults(conn)
         _migrate_device_scope(conn)
+        _migrate_scope_all_sentinel(conn)
         _migrate_device_base_config_keys(conn)
 
 
@@ -606,6 +607,26 @@ def _migrate_device_base_config_keys(conn) -> None:
                              (row["engine"], row["platform"], dev["id"]))
     conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
                  "VALUES('device_base_config_keys_v1', ?)", (now(),))
+
+
+def _migrate_scope_all_sentinel(conn) -> None:
+    """targets / devices 由"空 = 全部"改成显式的 ["*"]。
+
+    界面上"包含所有"是一个能看见、能点掉的状态，语义不再依赖
+    "空列表"这种隐含约定。节点来源的空列表保持原义：不使用任何来源。
+    """
+    for table in ("proxy_groups", "rules"):
+        for row in all_(conn, f"SELECT id, targets, devices FROM {table}"):
+            targets = json.loads(row["targets"] or "[]")
+            devices = json.loads(row["devices"] or "[]")
+            new_targets = ["*"] if not targets else targets
+            new_devices = ["*"] if not devices else devices
+            if new_targets != targets or new_devices != devices:
+                conn.execute(
+                    f"UPDATE {table} SET targets=?, devices=? WHERE id=?",
+                    (json.dumps(new_targets, ensure_ascii=False),
+                     json.dumps(new_devices, ensure_ascii=False), row["id"]),
+                )
 
 
 def _migrate_device_scope(conn) -> None:

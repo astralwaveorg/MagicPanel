@@ -8,7 +8,7 @@ MagicPanel 是个自托管的代理订阅配置服务：把机场订阅、规则
 [开发文档](docs/开发文档.md) ·
 [配置文档](docs/配置文档.md) ·
 [部署文档](docs/deployment/1Panel-Docker-部署.md) ·
-[在线阅读](https://astralwaveorg.github.io/MagicPanel/)
+[在线阅读](https://astralwaveorg.github.io/MagicPanel/)（推 main 自动发布，配置见 `.github/workflows/pages.yml`）
 
 ## 它是什么
 

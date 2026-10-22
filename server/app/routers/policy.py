@@ -17,7 +17,8 @@ class GroupBody(BaseModel):
     type: str = "select"
     hidden: bool = False
     filter: str = Field(default="", max_length=512)
-    use_sources: list[str] = Field(default_factory=list)
+    # 默认"包含所有"：不传就是全部（以后新增的来源自动包含）
+    use_sources: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
     local_nodes: list[int] = Field(default_factory=list)
     proxies: list[str] = Field(default_factory=list)
     url: str = Field(default="https://www.gstatic.com/generate_204", max_length=256)
@@ -26,8 +27,9 @@ class GroupBody(BaseModel):
     tolerance: int = Field(default=150, ge=0, le=5000)
     lazy: bool = True
     strategy: str = Field(default="", max_length=32)
-    targets: list[str] = Field(default_factory=list)  # 适用引擎平台，空 = 全部
-    devices: list[str] = Field(default_factory=list)  # 适用设备，空 = 全部
+    # 适用引擎平台 / 适用设备：默认"包含所有"，显式传空数组 = 不适用任何
+    targets: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
+    devices: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
     local_first: bool = False   # 本地单节点排在组成员最前
 
 
@@ -38,8 +40,9 @@ class RuleBody(BaseModel):
     enabled: bool = True
     note: str = Field(default="", max_length=256)
     no_resolve: bool = False
-    targets: list[str] = Field(default_factory=list)  # 适用引擎平台，空 = 全部
-    devices: list[str] = Field(default_factory=list)  # 适用设备，空 = 全部
+    # 适用引擎平台 / 适用设备：默认"包含所有"，显式传空数组 = 不适用任何
+    targets: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
+    devices: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
 
 
 def _group_public(row) -> dict:
@@ -75,7 +78,9 @@ def _check_group(body: GroupBody) -> None:
             raise HTTPException(400, f"分配策略仅支持：{'、'.join(sorted(config.LB_STRATEGIES))}")
     if body.type == "relay":
         # 链式转发顺序必须固定，不能用节点来源或过滤动态生成
-        if body.use_sources or body.filter:
+        # （"包含所有"是默认值，不算真的用了节点来源）
+        uses = [u for u in (body.use_sources or []) if u != config.ALL_SCOPE]
+        if uses or body.filter:
             raise HTTPException(400, "relay 为链式转发，仅支持固定成员，不能用节点来源或过滤")
         if len(body.proxies) + len(body.local_nodes) < 2:
             raise HTTPException(400, "relay 至少需要两个成员组成转发链")
@@ -131,6 +136,11 @@ def create_group(body: GroupBody, user=CurrentUser):
             if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (body.name,)):
                 raise HTTPException(409, "同名策略组已存在")
             _check_group_refs(conn, body)
+            body.use_sources = _collapse_if_complete(conn, body.use_sources, "sources")
+            body.targets = _collapse_if_complete(conn, body.targets, "targets")
+            body.devices = _collapse_if_complete(conn, body.devices, "devices")
+            if body.type == "relay":
+                body.use_sources = []
             local_ids = _check_local_ids(conn, body.local_nodes)
             sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups"))["s"]
             now = db.now()
@@ -169,6 +179,11 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名策略组已存在")
         _check_group_refs(conn, body)
+        body.use_sources = _collapse_if_complete(conn, body.use_sources, "sources")
+        body.targets = _collapse_if_complete(conn, body.targets, "targets")
+        body.devices = _collapse_if_complete(conn, body.devices, "devices")
+        if body.type == "relay":
+            body.use_sources = []
         local_ids = _check_local_ids(conn, body.local_nodes)
         # 改名时同步改写引用（规则目标 + 其它组的成员列表），
         # 否则引用会指向不存在的组，构建全线失败且无法发布。
@@ -322,7 +337,8 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
                     skipped.append({"id": gid, "name": row["name"],
                                     "reason": "relay 组不支持节点来源，已跳过该字段"})
                 else:
-                    keep = [s for s in body.use_sources if s in source_names]
+                    keep = [s for s in body.use_sources
+                            if s == config.ALL_SCOPE or s in source_names]
                     if len(keep) != len(body.use_sources):
                         notes.append("剔除了不存在的节点来源")
                     fields.append("use_sources=?")
@@ -559,6 +575,8 @@ def _check_device_names(conn, names: list[str]) -> None:
     与引擎平台名写错的后果一样，必须在写入时挡下来。
     """
     for name in names or []:
+        if name == config.ALL_SCOPE:
+            continue
         row = db.one(conn, "SELECT id FROM devices WHERE name=?", (name,))
         if not row:
             raise HTTPException(400, f"设备不存在：{name}")
@@ -573,6 +591,8 @@ def _check_target_names(conn, names: list[str]) -> None:
     引用写错由构建期给出明确报错（"引用了不存在的策略组"）。
     """
     for name in names or []:
+        if name == config.ALL_SCOPE:
+            continue
         row = db.one(conn, "SELECT id FROM targets WHERE name=?", (name,))
         if not row:
             raise HTTPException(400, f"引擎平台“{name}”不存在")
@@ -583,9 +603,38 @@ def _check_rule_refs(conn, body: RuleBody) -> None:
     _check_device_names(conn, body.devices)
 
 
+def _check_source_names(conn, names: list[str]) -> None:
+    """写时校验"节点来源"必须真实存在。
+
+    写错来源名时，产物里的 use: 会指向不存在的 proxy-provider，
+    客户端静默拿不到这个来源的节点——界面与构建日志都看不出异常。
+    """
+    for name in names or []:
+        if name == config.ALL_SCOPE:
+            continue
+        row = db.one(conn, "SELECT id FROM sources WHERE name=?", (name,))
+        if not row:
+            raise HTTPException(400, f"节点来源“{name}”不存在")
+
+
+def _collapse_if_complete(conn, names: list[str], table: str) -> list[str]:
+    """逐项选满 = 包含所有：把列全的列表归一为 ["*"]。
+
+    这样以后新增的来源 / 平台 / 设备会自动包含进来，
+    不必回头把列表改一遍。
+    """
+    if not names or config.ALL_SCOPE in names:
+        return names
+    existing = {r["name"] for r in db.all_(conn, f"SELECT name FROM {table}")}
+    if existing and set(names) >= existing:
+        return [config.ALL_SCOPE]
+    return names
+
+
 def _check_group_refs(conn, body: GroupBody) -> None:
     _check_target_names(conn, body.targets)
     _check_device_names(conn, body.devices)
+    _check_source_names(conn, body.use_sources)
 
 
 @router.get("/rules/page")
@@ -615,6 +664,8 @@ def create_rule(body: RuleBody, user=CurrentUser):
     try:
         with db.tx() as conn:
             _check_rule_refs(conn, body)
+            body.targets = _collapse_if_complete(conn, body.targets, "targets")
+            body.devices = _collapse_if_complete(conn, body.devices, "devices")
             sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
             now = db.now()
             cur = db.insert_unique(conn,
@@ -639,6 +690,8 @@ def update_rule(rid: int, body: RuleBody, user=CurrentUser):
     _check_rule(body)
     with db.tx() as conn:
         _check_rule_refs(conn, body)
+        body.targets = _collapse_if_complete(conn, body.targets, "targets")
+        body.devices = _collapse_if_complete(conn, body.devices, "devices")
         _get_rule(conn, rid)
         conn.execute(
             "UPDATE rules SET type=?, value=?, target=?, enabled=?, note=?, "

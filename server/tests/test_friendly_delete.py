@@ -24,6 +24,17 @@ def _source(client, h, name="机场A"):
     return r.json()
 
 
+def _second_source(client, h):
+    """再补一个来源：只有"选了一部分"的组才会被当成引用了具体来源。
+
+    选满全部来源的组会被归一成"包含所有"，那是不绑定具体来源的。
+    """
+    r = client.post("/api/v1/sources", headers=h, json={
+        "name": "机场B", "url": "https://b.example.com/sub?token=def456"})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
 def _group(client, h, name, **kw):
     body = {"name": name, "type": "select", "proxies": ["DIRECT"], **kw}
     r = client.post("/api/v1/groups", headers=h, json=body)
@@ -68,6 +79,7 @@ def test_source_delete_reports_references_then_force_detaches(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     src = _source(client, h)
+    _second_source(client, h)
     _group(client, h, "组一", use_sources=[src["name"]])
     _group(client, h, "组二", use_sources=[src["name"]])
 
@@ -83,7 +95,8 @@ def test_source_delete_reports_references_then_force_detaches(client):
     r = client.delete(f"/api/v1/sources/{src['id']}?force=1", headers=h)
     assert r.status_code == 200, r.text
     assert set(r.json()["detached_groups"]) == {"组一", "组二"}
-    assert client.get("/api/v1/sources", headers=h).json() == []
+    # 另一个来源还在（组只引用了其中一个，不算"包含所有"）
+    assert [x["name"] for x in client.get("/api/v1/sources", headers=h).json()] == ["机场B"]
     groups = {g["name"]: g for g in client.get("/api/v1/groups", headers=h).json()}
     assert groups["组一"]["use_sources"] == []
     assert groups["组二"]["use_sources"] == []
@@ -94,6 +107,7 @@ def test_source_delete_force_warns_when_group_becomes_empty(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     src = _source(client, h)
+    _second_source(client, h)
     _group(client, h, "空组", use_sources=[src["name"]], proxies=[])
     r = client.delete(f"/api/v1/sources/{src['id']}?force=1", headers=h)
     assert r.status_code == 200, r.text
@@ -104,6 +118,7 @@ def test_source_batch_delete_force(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     src = _source(client, h)
+    _second_source(client, h)
     _group(client, h, "组一", use_sources=[src["name"]])
 
     r = client.post("/api/v1/sources/batch/delete", headers=h,

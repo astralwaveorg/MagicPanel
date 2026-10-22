@@ -43,10 +43,9 @@
           <el-table-column prop="type" label="类型" width="90" />
           <el-table-column label="适用平台" min-width="150">
             <template #default="{ row }">
-              <span v-if="!row.targets || !row.targets.length">全部</span>
-              <span v-else>{{ row.targets.join('、') }}</span>
+              <span>{{ scopeText(row.targets) }}</span>
               <div v-if="row.devices && row.devices.length" class="mp-cell-sub">
-                设备：{{ row.devices.join('、') }}
+                设备：{{ scopeText(row.devices) }}
               </div>
             </template>
           </el-table-column>
@@ -57,7 +56,10 @@
             <template #default="{ row }">{{ row.proxies.join('、') || '—' }}</template>
           </el-table-column>
           <el-table-column label="节点来源" min-width="140">
-            <template #default="{ row }">{{ row.use_sources.join('、') || '—' }}</template>
+            <template #default="{ row }">
+              <span v-if="hasAllScope(row.use_sources)">全部来源（含新增）</span>
+              <span v-else>{{ row.use_sources.join('、') || '—' }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="本地节点" min-width="160">
             <template #default="{ row }">
@@ -108,10 +110,12 @@
             </el-select>
           </MultiSelectClear>
         </el-form-item>
-        <el-form-item label="适用引擎平台（不选 = 全部）">
+        <el-form-item label="适用引擎平台">
           <MultiSelectClear :has-value="form.targets.length" @clear="form.targets = []">
             <el-select v-model="form.targets" multiple style="width:100%"
-                       placeholder="不选表示适用于全部目标">
+                       placeholder="包含所有"
+                       @change="form.targets = normalizeScope(form.targets, ALL_SCOPE)">
+              <el-option :value="ALL_SCOPE" label="包含所有" />
               <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
             </el-select>
           </MultiSelectClear>
@@ -119,10 +123,12 @@
             只在选中的引擎平台里出现该策略组；指向它的规则会随之生效。
           </div>
         </el-form-item>
-        <el-form-item label="适用设备（不选 = 全部）">
+        <el-form-item label="适用设备">
           <MultiSelectClear :has-value="form.devices.length" @clear="form.devices = []">
             <el-select v-model="form.devices" multiple style="width:100%"
-                       placeholder="不选表示适用于全部设备">
+                       placeholder="包含所有"
+                       @change="form.devices = normalizeScope(form.devices, ALL_SCOPE)">
+              <el-option :value="ALL_SCOPE" label="包含所有" />
               <el-option v-for="d in devices" :key="d.name" :value="d.name" :label="d.name" />
             </el-select>
           </MultiSelectClear>
@@ -152,10 +158,17 @@
         <template v-if="form.type !== 'relay'">
           <el-form-item label="节点来源（从来源中取节点，可多选）">
             <MultiSelectClear :has-value="form.use_sources.length" @clear="form.use_sources = []">
-              <el-select v-model="form.use_sources" multiple style="width:100%">
+              <el-select v-model="form.use_sources" multiple style="width:100%"
+                         placeholder="包含所有来源"
+                         @change="form.use_sources = normalizeScope(form.use_sources, ALL_SCOPE)">
+                <el-option :value="ALL_SCOPE" label="包含所有来源（含以后新增的）" />
                 <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
               </el-select>
             </MultiSelectClear>
+            <div class="mp-form-hint">
+              选了「包含所有来源」，以后新增的节点来源会自动进来，不用回来改这里；
+              不选则这个组不取任何来源的节点（成员只由「包含策略」和「本地节点」决定）。
+            </div>
           </el-form-item>
           <el-form-item label="过滤正则（仅保留匹配的节点，可选）">
             <el-input v-model="form.filter" class="mono" />
@@ -244,7 +257,9 @@
         <MultiSelectClear v-if="batch.useTargets"
                           :has-value="batch.targets.length" @clear="batch.targets = []">
           <el-select v-model="batch.targets" multiple style="width:100%"
-                     placeholder="不选即清空（改为适用于全部）">
+                     placeholder="包含所有"
+                     @change="batch.targets = normalizeScope(batch.targets, ALL_SCOPE)">
+            <el-option :value="ALL_SCOPE" label="包含所有" />
             <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
           </el-select>
         </MultiSelectClear>
@@ -268,7 +283,9 @@
         <MultiSelectClear v-if="batch.useSources"
                           :has-value="batch.use_sources.length" @clear="batch.use_sources = []">
           <el-select v-model="batch.use_sources" multiple style="width:100%"
-                     placeholder="留空即清空">
+                     placeholder="包含所有来源"
+                     @change="batch.use_sources = normalizeScope(batch.use_sources, ALL_SCOPE)">
+            <el-option :value="ALL_SCOPE" label="包含所有来源（含以后新增的）" />
             <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
           </el-select>
         </MultiSelectClear>
@@ -301,6 +318,7 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
+import { ALL_SCOPE, normalizeScope, hasAllScope, collapseIfComplete } from '../scopeOptions'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -349,13 +367,21 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
   await load()
 })
 
+// 默认一律"包含所有"：新建的组/规则开箱即对全部平台、全部设备生效
 const emptyForm = () => ({
-  name: '', type: 'select', hidden: false, filter: '', use_sources: [],
+  name: '', type: 'select', hidden: false, filter: '', use_sources: [ALL_SCOPE],
   local_nodes: [], proxies: [], local_first: false,
   url: 'https://www.gstatic.com/generate_204', interval: 600, timeout: 8000,
-  tolerance: 150, lazy: true, strategy: '', targets: [], devices: [],
+  tolerance: 150, lazy: true, strategy: '', targets: [ALL_SCOPE], devices: [ALL_SCOPE],
 })
 const form = reactive(emptyForm())
+
+// 适用范围展示："*" 是「包含所有」，不直接显示给用户
+function scopeText(list) {
+  if (!list || !list.length) return '不适用'
+  if (list.includes(ALL_SCOPE)) return '全部'
+  return list.join('、')
+}
 
 const hasHealthCheck = computed(() =>
   ['url-test', 'fallback', 'load-balance', 'relay'].includes(form.type),
@@ -426,6 +452,10 @@ async function save() {
   try {
     // 分配策略只对 load-balance 有意义，其余类型必须清空，否则后端直接拒绝
     const body = { ...form, strategy: form.type === 'load-balance' ? form.strategy : '' }
+    // 逐项选满 = 包含所有：存成 ["*"]，以后新增的来源/平台/设备自动包含
+    body.use_sources = collapseIfComplete(body.use_sources, sources.value.map((s) => s.name))
+    body.targets = collapseIfComplete(body.targets, targets.value.map((t) => t.name))
+    body.devices = collapseIfComplete(body.devices, devices.value.map((d) => d.name))
     if (editing.value) {
       await api(`/api/v1/groups/${editing.value.id}`, { method: 'PUT', body })
     } else {

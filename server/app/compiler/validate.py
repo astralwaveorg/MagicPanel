@@ -45,6 +45,8 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
             else:
                 refs.append(p)
         for u in g.get("use_sources") or []:
+            if u == config.ALL_SCOPE:
+                continue          # 「包含所有」由渲染时展开，不做具体校验
             if u not in sources:
                 errors.append(f"策略组“{g['name']}”引用了不可用节点来源“{u}”")
         enabled_local: list[int] = []
@@ -57,7 +59,11 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
                     f"策略组“{g['name']}”引用了已停用的本地节点“{node['name']}”")
             else:
                 enabled_local.append(node_id)
-        if not (g.get("proxies") or g.get("use_sources") or enabled_local):
+        # "包含所有"要按实际能取到的来源算：没有任何来源时它等于空
+        uses = [u for u in (g.get("use_sources") or []) if u != config.ALL_SCOPE]
+        if config.ALL_SCOPE in (g.get("use_sources") or []):
+            uses = list(sources)
+        if not (g.get("proxies") or uses or enabled_local):
             errors.append(f"策略组“{g['name']}”为空：既无成员也无节点来源")
         if g["type"] == "relay" and len(g.get("proxies") or []) + len(enabled_local) < 2:
             errors.append(f"relay 策略组“{g['name']}”至少需要两个可用成员")
