@@ -91,7 +91,7 @@ npm run dev        # 前端 127.0.0.1:7100，API 127.0.0.1:8000，已代理 /api
 
 ## 仓库结构
 
-```
+```text
 server/app/            后端
   routers/              HTTP 接口（按业务分文件）
   services/             抓取、测速、发布、调度、备份
