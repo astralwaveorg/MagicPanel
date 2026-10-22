@@ -287,7 +287,11 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
     finals = [r for r in rules if r["type"] in ("MATCH", "FINAL")]
     if finals:
         rest = [r for r in rules if r["type"] not in ("MATCH", "FINAL")]
-        moved = len(rules) - len(rest) - len(finals)
+        # 原本排在兜底之后的规则：客户端永远匹配不到，挪到兜底前才生效
+        first_fb = next((i for i, r in enumerate(rules)
+                         if r["type"] in ("MATCH", "FINAL")), len(rules))
+        moved = sum(1 for r in rules[first_fb:]
+                    if r["type"] not in ("MATCH", "FINAL"))
         rules = rest + finals
         if warnings is not None:
             if moved:

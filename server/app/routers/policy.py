@@ -603,6 +603,44 @@ def _check_rule_refs(conn, body: RuleBody) -> None:
     _check_device_names(conn, body.devices)
 
 
+# 兜底规则类型：命中即结束，其后的规则永远匹配不到
+FALLBACK_TYPES = ("MATCH", "FINAL")
+
+
+def _rule_insert_sort(conn, is_fallback: bool) -> int:
+    """新规则的排序位。
+
+    普通规则：插在兜底规则之前。客户端是"从上往下第一条命中即生效"，
+    撞到兜底（MATCH/FINAL）就结束了，排在其后的规则永远匹配不到。
+
+    兜底规则：追加到末尾。客户端只认第一条兜底，多一条不改变行为
+    （编译器会给出"客户端只认第一条"的告警），追加最可预期。
+
+    排序键是整数：兜底与其前驱之间有空位就占用空位；没有空位时，
+    把兜底及之后的规则整体后移一位，空出来的位置就是新的排序位。
+    """
+    if is_fallback:
+        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
+    fb = db.one(conn, "SELECT MIN(sort) AS s FROM rules "
+                     "WHERE type IN ('MATCH','FINAL')")
+    pos = fb["s"] if fb else None
+    if pos is None:
+        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
+    prev = db.one(conn, "SELECT MAX(sort) AS s FROM rules WHERE sort < ?", (pos,))
+    if prev and prev["s"] is not None and pos - prev["s"] >= 2:
+        return prev["s"] + 1
+    # 整体后移：sort >= pos 的全部 +1，与原值集合不会撞车（整体后移是单射）
+    conn.execute("UPDATE rules SET sort = sort + 1 WHERE sort >= ?", (pos,))
+    return pos
+
+
+def _fallbacks_last(ids: list[int], rows: dict) -> list[int]:
+    """把兜底规则挪到这组顺序的最后，其余规则相对顺序不变。"""
+    normal = [i for i in ids if rows[i]["type"] not in FALLBACK_TYPES]
+    finals = [i for i in ids if rows[i]["type"] in FALLBACK_TYPES]
+    return normal + finals
+
+
 def _check_source_names(conn, names: list[str]) -> None:
     """写时校验"节点来源"必须真实存在。
 
@@ -696,7 +734,7 @@ def create_rule(body: RuleBody, user=CurrentUser):
             _check_rule_refs(conn, body)
             body.targets = _collapse_if_complete(conn, body.targets, "targets")
             body.devices = _collapse_if_complete(conn, body.devices, "devices")
-            sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
+            sort = _rule_insert_sort(conn, body.type in FALLBACK_TYPES)
             now = db.now()
             cur = db.insert_unique(conn,
                 "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
@@ -753,10 +791,11 @@ def reorder_rules(ids: list[int], user=CurrentUser):
     with db.tx() as conn:
         if len(set(ids)) != len(ids):
             raise HTTPException(400, "排序列表里有重复项")
-        known = {r["id"] for r in db.all_(conn, "SELECT id FROM rules")}
-        if any(i not in known for i in ids):
+        rows = {r["id"]: r for r in db.all_(conn, "SELECT id, type FROM rules")}
+        if any(i not in rows for i in ids):
             raise HTTPException(400, "排序列表包含不存在的记录")
-        if not db.reorder_subset(conn, "rules", ids):
+        # 拖拽也不能把规则排到兜底后面：兜底之后的规则永远匹配不到
+        if not db.reorder_subset(conn, "rules", _fallbacks_last(ids, rows)):
             raise HTTPException(400, "排序未生效")
         security.audit(conn, user["username"], "调整分流规则顺序", "rule", "")
     return {"ok": True}
