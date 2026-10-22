@@ -239,7 +239,11 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 - MTProto 代理（Telegram，Stash 官方 https://stash.wiki/features/mtproto）：以预设形式提供
   （`mtproto.port` / `mtproto.secret` / `mtproto.ipv6` / `mtproto.dc-config-url`），
   放在「设备独立配置」层——哪台设备要用就给它加一份，密钥套用时现场生成（32 位十六进制），
-  不想用时删掉该层的 `mtproto` 段即可。分流用 `PROTOCOL,MTPROTO,<策略组>` 规则匹配
+  不想用时删掉该层的 `mtproto` 段即可。
+  **只对 Stash 有效**：MTProto 服务端是 Stash 客户端自己的能力，
+  Mihomo 内核没有这项（写入该键虽能被内核忽略，但不会生效），因此 Mihomo 设备不加。
+  官方文档标注的能力范围是 Stash iOS/tvOS 3.7+ 与 macOS 4.4+；
+  Android / Windows 的早期版本会忽略该段，不影响配置加载。分流用 `PROTOCOL,MTPROTO,<策略组>` 规则匹配
   （Stash 规则类型白名单已含 `PROTOCOL`）。
 - 引擎平台 = 引擎 + 平台，同一对只允许存在一个（写入时硬校验）。要区分不同的人/设备，不要复制引擎平台：策略组与规则用「适用设备」，客户端参数用「产物配置 → 设备独立配置」。
 - “审计日志”页支持勾选批量删除与一键清空。
