@@ -22,6 +22,8 @@ class RuleProviderBody(BaseModel):
     interval: int = Field(default=86400, ge=600, le=604800)
     client_interval: int = Field(default=0, ge=0, le=604800)
     enabled: bool = True
+    # 抓取走代理：服务端出不去规则站时经指定代理中转；留空表示直连
+    proxy_url: str | None = Field(default=None, max_length=512)
 
 
 class BatchIds(BaseModel):
@@ -45,6 +47,9 @@ def _public(row) -> dict:
         "interval": row["interval"],
         "client_interval": row["client_interval"],
         "enabled": bool(row["enabled"]),
+        "use_proxy": bool(row["proxy_url_enc"] or ""),
+        "proxy_url_masked": (security.mask_url(security.decrypt_text(row["proxy_url_enc"]))
+                             if row["proxy_url_enc"] else ""),
         "last_status": row["last_status"],
         "last_error": row["last_error"],
         "last_fetched_at": row["last_fetched_at"],
@@ -148,11 +153,13 @@ def create_provider(body: RuleProviderBody, user=CurrentUser):
         cur = conn.execute(
             "INSERT INTO rule_providers(name, behavior, format, kind, url, "
             "inline_content, interval, client_interval, enabled, content, "
-            "rule_count, sha256, last_status, last_fetched_at, created_at, "
-            "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "rule_count, sha256, last_status, last_fetched_at, proxy_url_enc, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.behavior, body.format, body.kind, body.url,
              body.inline_content, body.interval, body.client_interval,
-             int(body.enabled), content, count, sha, status, fetched, now, now),
+             int(body.enabled), content, count, sha, status, fetched,
+             security.encrypt_text(body.proxy_url) if body.proxy_url else "",
+             now, now),
         )
         security.audit(conn, user["username"], "新增规则来源", "rule_provider",
                        cur.lastrowid, {"name": body.name})
@@ -196,6 +203,10 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
         status = old["last_status"]
         fetched = old["last_fetched_at"]
         attempt = old["last_attempt_at"]
+        # proxy_url 留空表示不改；要改成直连传空字符串
+        proxy_enc = old["proxy_url_enc"]
+        if body.proxy_url is not None:
+            proxy_enc = security.encrypt_text(body.proxy_url) if body.proxy_url else ""
         if body.kind == "inline":
             content = body.inline_content
             count = fetcher.count_rules(content.encode(), body.behavior)
@@ -210,11 +221,11 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
             "UPDATE rule_providers SET name=?, behavior=?, format=?, kind=?, url=?, "
             "inline_content=?, interval=?, client_interval=?, enabled=?, content=?, "
             "rule_count=?, sha256=?, last_status=?, last_fetched_at=?, "
-            "last_attempt_at=?, updated_at=? WHERE id=?",
+            "last_attempt_at=?, proxy_url_enc=?, updated_at=? WHERE id=?",
             (body.name, body.behavior, body.format, body.kind, body.url,
              body.inline_content, body.interval, body.client_interval,
              int(body.enabled), content, count, sha, status, fetched, attempt,
-             db.now(), rp_id),
+             proxy_enc, db.now(), rp_id),
         )
         security.audit(conn, user["username"], "更新规则来源", "rule_provider", rp_id,
                        {"name": body.name})

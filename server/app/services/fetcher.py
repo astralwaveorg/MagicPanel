@@ -63,15 +63,20 @@ def _check_url(url: str, allow_private: bool) -> None:
                 "（如需允许请在来源上开启内网访问）")
 
 
-def fetch(url: str, ua: str = config.DEFAULT_UA, allow_private: bool = False) -> bytes:
-    """抓取远程内容：逐跳校验重定向、流式限制体积。"""
+def fetch(url: str, ua: str = config.DEFAULT_UA, allow_private: bool = False,
+          proxy: str = "") -> bytes:
+    """抓取远程内容：逐跳校验重定向、流式限制体积。
+
+    proxy 非空时经该代理出网（例如服务端出不去机场订阅站时走 Stash）。
+    """
     current = url
-    # 不继承进程环境中的代理变量，保证抓取路径确定
+    # 不继承进程环境中的代理变量，保证抓取路径确定（proxy 参数是显式指定的）
     with httpx.Client(
         timeout=config.FETCH_TIMEOUT,
         follow_redirects=False,
         headers={"User-Agent": ua},
         trust_env=False,
+        proxy=proxy or None,
     ) as client:
         for _ in range(4):          # 最多 3 次跳转
             _check_url(current, allow_private)

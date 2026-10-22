@@ -287,6 +287,11 @@ def init_db() -> None:
                        "auto_test INTEGER NOT NULL DEFAULT 1")
         _ensure_column(conn, "rule_providers", "last_attempt_at",
                        "last_attempt_at TEXT")
+        # 抓取走代理：服务端出不去机场/规则站时，经指定代理中转
+        _ensure_column(conn, "sources", "proxy_url_enc",
+                       "proxy_url_enc TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "rule_providers", "proxy_url_enc",
+                       "proxy_url_enc TEXT NOT NULL DEFAULT ''")
         # 客户端更新间隔：客户端拉取子资源的周期；0 表示跟随抓取间隔
         _ensure_column(conn, "sources", "client_interval",
                        "client_interval INTEGER NOT NULL DEFAULT 0")

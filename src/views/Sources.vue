@@ -356,6 +356,19 @@
             允许访问内网地址（仅订阅确位于内网时开启，存在 SSRF 风险）
           </el-checkbox>
         </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="form.use_proxy">
+            抓取走代理（服务端直连抓不到这个订阅时，经指定代理中转）
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item v-if="form.use_proxy" label="代理地址">
+          <el-input v-model="form.proxy_url" class="mono"
+                    :placeholder="PROXY_HINT" />
+          <div class="mp-form-hint" style="margin-top:6px">
+            <template v-if="currentProxy">当前：{{ currentProxy }}　</template>
+            留空表示使用默认地址 {{ PROXY_HINT }}；需要直连就取消上面的勾选。
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
@@ -512,8 +525,13 @@ const emptyForm = () => ({
   interval: 21600, test_interval: 21600, client_interval: 0,
   auto_fetch: true, auto_test: true,
   allow_private: false, filter_unavailable: false,
+  use_proxy: false, proxy_url: '', current_proxy: '',
 })
 const form = reactive(emptyForm())
+
+// 抓取走代理时的默认地址：家里 Stash 的混合端口
+const PROXY_HINT = 'http://10.0.1.8:7890'
+const currentProxy = computed(() => form.current_proxy || '')
 
 const intervalHint = computed(() => {
   if (form.auto_fetch && form.auto_test) {
@@ -695,6 +713,9 @@ function openEdit(row) {
     auto_test: row.auto_test !== false,
     allow_private: row.allow_private,
     filter_unavailable: row.filter_unavailable,
+    use_proxy: !!row.use_proxy,
+    proxy_url: '',
+    current_proxy: row.proxy_url_masked || '',
   } : {})
   dialog.value = true
 }
@@ -704,10 +725,16 @@ async function save() {
   if (!editing.value && !form.url) return ElMessage.warning('请填写订阅地址')
   saving.value = true
   try {
-    if (editing.value) {
-      await api(`/api/v1/sources/${editing.value.id}`, { method: 'PUT', body: form })
+    const body = { ...form }
+    if (body.use_proxy) {
+      body.proxy_url = (body.proxy_url || '').trim() || PROXY_HINT
     } else {
-      await api('/api/v1/sources', { method: 'POST', body: form })
+      body.proxy_url = ''
+    }
+    if (editing.value) {
+      await api(`/api/v1/sources/${editing.value.id}`, { method: 'PUT', body })
+    } else {
+      await api('/api/v1/sources', { method: 'POST', body })
     }
     dialog.value = false
     ElMessage.success('已保存')

@@ -27,6 +27,8 @@ class SourceBody(BaseModel):
     auto_test: bool = True
     allow_private: bool = False
     filter_unavailable: bool = False
+    # 抓取走代理：服务端出不去机场订阅站时经指定代理中转；留空表示直连
+    proxy_url: str | None = Field(default=None, max_length=512)
 
 
 class BatchIds(BaseModel):
@@ -64,6 +66,9 @@ def _public(row, with_meta: bool = True) -> dict:
         "auto_test": bool(row["auto_test"]),
         "allow_private": bool(row["allow_private"]),
         "filter_unavailable": bool(row["filter_unavailable"]),
+        "use_proxy": bool(row["proxy_url_enc"] or ""),
+        "proxy_url_masked": (security.mask_url(security.decrypt_text(row["proxy_url_enc"]))
+                             if row["proxy_url_enc"] else ""),
         "tested_at": row["tested_at"],
         "test_attempt_at": row["test_attempt_at"],
         "last_status": row["last_status"],
@@ -154,12 +159,14 @@ def create_source(body: SourceBody, user=CurrentUser):
             cur = db.insert_unique(conn,
                 "INSERT INTO sources(name, url_enc, enabled, filter, ua, interval, "
                 "client_interval, test_interval, auto_fetch, auto_test, allow_private, "
-                "filter_unavailable, created_at, updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "filter_unavailable, proxy_url_enc, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (body.name, security.encrypt_text(body.url), int(body.enabled),
                  body.filter, body.ua, body.interval, body.client_interval,
                  body.test_interval, int(body.auto_fetch), int(body.auto_test),
-                 int(body.allow_private), int(body.filter_unavailable), now, now),
+                 int(body.allow_private), int(body.filter_unavailable),
+                 security.encrypt_text(body.proxy_url) if body.proxy_url else "",
+                 now, now),
             )
             security.audit(conn, user["username"], "新增节点来源", "source", cur.lastrowid,
                            {"name": body.name})
@@ -197,15 +204,19 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
         url_enc = row["url_enc"]
         if body.url:
             url_enc = security.encrypt_text(body.url)
+        # proxy_url 留空表示不改；要改成直连传空字符串
+        proxy_enc = row["proxy_url_enc"]
+        if body.proxy_url is not None:
+            proxy_enc = security.encrypt_text(body.proxy_url) if body.proxy_url else ""
         conn.execute(
             "UPDATE sources SET name=?, url_enc=?, enabled=?, filter=?, ua=?, "
             "interval=?, client_interval=?, test_interval=?, auto_fetch=?, "
-            "auto_test=?, allow_private=?, filter_unavailable=?, updated_at=? "
-            "WHERE id=?",
+            "auto_test=?, allow_private=?, filter_unavailable=?, proxy_url_enc=?, "
+            "updated_at=? WHERE id=?",
             (body.name, url_enc, int(body.enabled), body.filter, body.ua,
              body.interval, body.client_interval, body.test_interval,
              int(body.auto_fetch), int(body.auto_test), int(body.allow_private),
-             int(body.filter_unavailable), db.now(), source_id),
+             int(body.filter_unavailable), proxy_enc, db.now(), source_id),
         )
         security.audit(conn, user["username"], "更新节点来源", "source", source_id,
                        {"name": body.name, "url_changed": bool(body.url),

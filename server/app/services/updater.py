@@ -82,6 +82,8 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
             url = security.decrypt_text(row["url_enc"])
             ua = row["ua"]
             allow_private = bool(row["allow_private"])
+            proxy = (security.decrypt_text(row["proxy_url_enc"])
+                     if row["proxy_url_enc"] else "")
             name = row["name"]
             now = db.now()
             conn.execute(
@@ -93,7 +95,8 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
         body = None
         nodes: list = []
         try:
-            body = fetcher.fetch(url, ua=ua, allow_private=allow_private)
+            body = fetcher.fetch(url, ua=ua, allow_private=allow_private,
+                                 proxy=proxy)
             nodes = fetcher.parse_nodes(body)
         except Exception as exc:  # 含 httpx.InvalidURL 等非 FetchError 异常
             error = _error_text(exc)
@@ -216,6 +219,8 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
                 raise InvalidOperation("内联规则来源无需抓取")
             url = row["url"]
             behavior = row["behavior"]
+            proxy = (security.decrypt_text(row["proxy_url_enc"])
+                     if row["proxy_url_enc"] else "")
             name = row["name"]
             now = db.now()
             conn.execute(
@@ -227,7 +232,7 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
         body = None
         count = 0
         try:
-            body = fetcher.fetch(url)
+            body = fetcher.fetch(url, proxy=proxy)
             count = fetcher.count_rules(body, behavior)
         except Exception as exc:
             error = _error_text(exc)

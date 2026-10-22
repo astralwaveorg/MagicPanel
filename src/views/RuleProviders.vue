@@ -157,6 +157,18 @@
         <el-form-item>
           <el-checkbox v-model="form.enabled">启用</el-checkbox>
         </el-form-item>
+        <el-form-item v-if="form.kind === 'remote'">
+          <el-checkbox v-model="form.use_proxy">
+            抓取走代理（服务端直连抓不到这个规则集时，经指定代理中转）
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item v-if="form.kind === 'remote' && form.use_proxy" label="代理地址">
+          <el-input v-model="form.proxy_url" class="mono" :placeholder="PROXY_HINT" />
+          <div class="mp-form-hint" style="margin-top:6px">
+            <template v-if="currentProxy">当前：{{ currentProxy }}　</template>
+            留空表示使用默认地址 {{ PROXY_HINT }}；需要直连就取消上面的勾选。
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
@@ -311,8 +323,13 @@ watch(filteredRows, (list) => {
 const emptyForm = () => ({
   name: '', behavior: 'domain', format: 'yaml', kind: 'remote', client_interval: 0,
   url: '', inline_content: '', interval: 86400, enabled: true,
+  use_proxy: false, proxy_url: '', current_proxy: '',
 })
 const form = reactive(emptyForm())
+
+// 抓取走代理时的默认地址：家里 Stash 的混合端口
+const PROXY_HINT = 'http://10.0.1.8:7890'
+const currentProxy = computed(() => form.current_proxy || '')
 
 async function load() {
   loading.value = true
@@ -343,6 +360,7 @@ async function openEdit(row) {
     name: row.name, behavior: row.behavior, format: row.format, kind: row.kind,
     client_interval: row.client_interval,
     url: row.url, inline_content: '', interval: row.interval, enabled: row.enabled,
+    use_proxy: !!row.use_proxy, proxy_url: '', current_proxy: row.proxy_url_masked || '',
   } : {})
   dialog.value = true
   if (row && row.kind === 'inline') {
@@ -360,6 +378,11 @@ async function save() {
   saving.value = true
   try {
     const body = { ...form }
+    if (body.use_proxy) {
+      body.proxy_url = (body.proxy_url || '').trim() || PROXY_HINT
+    } else {
+      body.proxy_url = ''
+    }
     if (editing.value) {
       if (body.kind === 'inline' && !body.inline_content) {
         const current = await api(`/api/v1/rule-providers/${editing.value.id}/content`)
