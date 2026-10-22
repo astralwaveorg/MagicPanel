@@ -177,12 +177,14 @@
               <span v-else style="color:var(--mp-muted)">未测速</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="230">
+          <el-table-column label="操作" width="168">
             <template #default="{ row }">
-              <el-button size="small" :loading="testingLocal === row.id" @click="testLocal(row)" type="success" plain>测速</el-button>
-              <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleLocalEnabled(row)" />
-              <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
-              <el-button size="small" @click="removeLocal(row)" type="danger" plain>删除</el-button>
+              <div class="op-grid op-grid-2">
+                <el-button size="small" :loading="testingLocal === row.id" @click="testLocal(row)" type="success" plain>测速</el-button>
+                <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleLocalEnabled(row)" />
+                <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
+                <el-button size="small" @click="removeLocal(row)" type="danger" plain>删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -1165,6 +1167,8 @@ function openNodes(row) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
+/* 一行两个：本地节点的操作列按两列排，列宽可以收窄 */
+.op-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .op-grid .el-button {
   width: 100%;
   margin: 0;
