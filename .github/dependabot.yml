@@ -1,0 +1,32 @@
+# 依赖更新策略：
+#   npm —— 只在现有版本范围内更新 lock 文件，不跨大版本。
+#          跨大版本会牵动构建链（例如 vite 8 与 @vitejs/plugin-vue 5 不兼容，
+#          npm ci 直接失败），这种升级由人工验证后再改。
+#   pip —— 同理，只做补丁与小版本更新。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Shanghai
+    versioning-strategy: lockfile-only
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(npm)"
+    labels: [dependencies]
+
+  - package-ecosystem: pip
+    directory: "/server"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: Asia/Shanghai
+    versioning-strategy: increase-if-necessary
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(pip)"
+    labels: [dependencies]

@@ -1,0 +1,25 @@
+# 每次推送都跑一遍基础检查：
+#   1. 仓库里不能混入凭据与运行数据（公开仓库，泄露不可逆）
+#   2. 引擎默认配置的每个键都要能在官方文档里找到出处
+#   3. 后端测试必须全绿
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 扫描仓库里的凭据与运行数据
+        run: python3 scripts/check_secrets.py
+      - name: 安装后端依赖
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r server/requirements.txt pytest
+      - name: 核对引擎默认配置的每个键都有官方出处
+        run: python3 scripts/check_engine_defaults.py
+      - name: 跑后端测试
+        run: cd server && python3 -m pytest tests -q
