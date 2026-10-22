@@ -7,6 +7,7 @@
 # 用法：
 #   scripts/fetch_geo_data.sh                # 默认版本（与已安装核心一致）+ 默认代理
 #   PROXY=http://10.0.1.8:7890 scripts/fetch_geo_data.sh
+# 默认代理是 Mac mini 上的 Stash 混合端口；下载跑在本机，写 127.0.0.1:7890 也一样。
 set -euo pipefail
 
 NAS_HOST="${NAS_HOST:-archon@10.0.1.2}"

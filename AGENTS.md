@@ -7,6 +7,7 @@
 | 改界面、改后端逻辑 | [开发文档](docs/开发文档.md) |
 | 改配置（规则、策略组、引擎平台、设备独立配置、功能模块） | [配置文档](docs/配置文档.md) |
 | 回答"这个页面怎么用" | [使用文档](docs/使用文档.md) |
+| 查内网地址、代理端口、哪台机器在跑什么 | [环境与地址速查](docs/reference/环境与地址.md) |
 
 **第一次接手本项目**（新 Agent、换机器、隔了很久再来）：先读
 [Agent 交接提示词](docs/reference/Agent-交接提示词.md)，里面写清了架构、硬性约束、
@@ -32,6 +33,9 @@ cd server && ../.venv/bin/python -m pytest tests -q     # 后端测试
 npm run build                                           # 前端构建
 .venv/bin/python scripts/check_secrets.py               # 凭据扫描
 DEPLOY_PROXY=http://10.0.1.8:7890 bash scripts/deploy.sh   # 发布（脚本自带数据自检与域名验证）
+# DEPLOY_PROXY 会注入到 NAS 端的 docker build（构建时要拉 npm/pip 包），
+# 所以必须写 Mac mini 的内网地址 10.0.1.8，不能写 127.0.0.1
+# （见 docs/reference/环境与地址.md）
 ```
 
 配置类改动还要**重新构建发布**才生效（只有设备独立配置例外，分发时实时叠加）。

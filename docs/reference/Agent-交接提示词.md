@@ -17,6 +17,24 @@
 技术栈：FastAPI + SQLite(WAL) + Vue3 + Element Plus，界面是中文，部署在 NAS。
 线上地址 `https://magichub.top:8443`（管理端 `/admin`，门户 `/`）。
 
+### 先分清两台机器
+
+这是最容易搞混的一点，动手前先记住：
+
+| 机器 | 地址 | 跑什么 |
+| --- | --- | --- |
+| Mac mini（开发机，**也是代理机**） | `10.0.1.8` | Stash 混合端口 `7890`；仓库克隆在这台机器上 |
+| NAS（主机名 `Altair`） | `10.0.1.2` | 面板容器 `magicpanel`；**所有服务端的事都在这里** |
+
+- **抓取订阅、抓规则集、测速、构建、发布**——都发生在 NAS 容器里。
+- 因此 `proxy_url` 这类「服务端用」的代理字段必须填 `http://10.0.1.8:7890`
+  （Mac mini 的内网地址）。填 `127.0.0.1` 会连到 NAS 自己，实测 connection refused，抓取全挂。
+- **在开发机上跑的脚本**（`release.sh` / `fetch_geo_data.sh`）用 `127.0.0.1:7890`
+  或 `10.0.1.8:7890` 都行；但 `deploy.sh` 的 `DEPLOY_PROXY` 是注入 **NAS 端构建过程**的，
+  必须用 `10.0.1.8`。
+
+完整地址表、端口归属与自检命令见 [环境与地址速查](环境与地址.md)。
+
 ---
 
 ## 第一步：先读，别先改
@@ -105,7 +123,8 @@ official-example/ 官方配置样例，核对引擎默认配置用
 1. **走 API**（推荐，有校验有审计）：用管理端账号登录拿 session + CSRF，然后
    `POST/PUT/DELETE https://magichub.top:8443/api/v1/...`。账号密码问用户要，别猜。
 2. **直接改库**（批量整理时更省事）：线上库在 NAS 的容器里
-   `ssh archon@10.0.1.2` → 容器 `magicpanel` → `/app/data/magicpanel.db`。
+   `ssh archon@10.0.1.2` → 容器 `magicpanel` → `/app/data/magicpanel.db`
+   （`archon` 是用户名，NAS 的主机名是 `Altair`）。
    改完必须跑 `python3 scripts/check_data_consistency.py`，确认"引用完整、命名统一、
    无冗余覆盖、结构键未被越权写入"。**不要手动 `ALTER TABLE`。**
 
@@ -142,6 +161,9 @@ npm run build                                             # 前端产物输出�
 .venv/bin/python scripts/check_secrets.py                 # 凭据扫描
 DEPLOY_PROXY=http://10.0.1.8:7890 bash scripts/deploy.sh # 发布（自带数据自检与域名验证）
 ```
+
+`DEPLOY_PROXY` 指向 Mac mini 上的 Stash 混合端口。它是通过 ssh 注入到 **NAS 端构建过程**的
+（构建时要拉 npm/pip 包），必须写内网地址 `10.0.1.8`；写 `127.0.0.1` 会让 NAS 连自己、拉包失败。
 
 首次 clone 先装依赖：`python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt && npm install`
 

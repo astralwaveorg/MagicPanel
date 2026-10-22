@@ -188,6 +188,7 @@
           <div class="mp-form-hint" style="margin-top:6px">
             <template v-if="currentProxy">当前：{{ currentProxy }}　</template>
             留空表示使用默认地址 {{ PROXY_HINT }}；需要直连就取消上面的勾选。
+            面板跑在 NAS 上，这里要填 Mac mini 的内网地址，不要写 127.0.0.1。
           </div>
         </el-form-item>
       </el-form>
@@ -351,7 +352,9 @@ const emptyForm = () => ({
 })
 const form = reactive(emptyForm())
 
-// 抓取走代理时的默认地址：家里 Stash 的混合端口
+// 抓取走代理时的默认地址：Mac mini 上的 Stash 混合端口。
+// 面板跑在 NAS 上、抓取也是从 NAS 出网，所以这里必须写 Mac mini 的内网地址；
+// 写 127.0.0.1 会连到 NAS 自己（实测 connection refused）。
 const PROXY_HINT = 'http://10.0.1.8:7890'
 const currentProxy = computed(() => form.current_proxy || '')
 

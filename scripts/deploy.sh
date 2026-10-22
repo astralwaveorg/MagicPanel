@@ -79,6 +79,8 @@ PREV_IMAGE=$(ssh -o BatchMode=yes "$NAS_HOST" \
   "docker inspect --format '{{.Image}}' magicpanel 2>/dev/null || echo ''" || true)
 # 刚重启时 NAS 的外网可能还没恢复，npm/pip 拉包会失败；
 # 需要时用 DEPLOY_PROXY=http://host:port 走局域网代理。
+# 代理跑在 Mac mini 上（10.0.1.8:7890，Stash 混合端口），这里必须写内网地址——
+# 写 127.0.0.1 会让 NAS 连自己，拉包照样失败。
 if [ -n "${DEPLOY_PROXY:-}" ]; then
   echo "使用构建代理：$DEPLOY_PROXY"
   ssh -o BatchMode=yes "$NAS_HOST" \

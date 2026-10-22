@@ -4,6 +4,7 @@
 #   版本号省略时在上一个标签基础上递增补丁位（首个标签为 v1.0.0）
 # 配置 GITHUB_TOKEN 后自动创建 Release 并上传产物；否则推送标签后给出创建链接。
 # GitHub API 访问不通时自动尝试 GH_PROXY（默认 http://10.0.1.8:7890）。
+# 代理是 Mac mini 上的 Stash 混合端口；这个 curl 跑在本机，写 127.0.0.1:7890 也一样。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

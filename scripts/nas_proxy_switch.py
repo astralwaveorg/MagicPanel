@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""NAS explicit proxy manager. Run as root; never changes gateways or DNS."""
+"""NAS explicit proxy manager. Run as root; never changes gateways or DNS.
+
+这里的 10.0.1.8 是 Mac mini（家里跑 Stash / Surge 的那台机器）的内网地址：
+NAS 要通过它出网，所以只能写内网地址，写 127.0.0.1 等于让 NAS 连自己。
+端口 6152 / 6153 是 Surge 的「允许来自局域网的连接」端口。
+详见 docs/reference/环境与地址.md。
+"""
 import argparse, contextlib, fcntl, hashlib, json, os, re, shutil, socket, subprocess, sys, time, urllib.request
 from pathlib import Path
 
