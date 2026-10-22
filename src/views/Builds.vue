@@ -89,14 +89,14 @@
           <el-table-column label="创建时间" min-width="150">
             <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
           </el-table-column>
-          <el-table-column prop="created_by" label="创建人" width="100" />
-          <el-table-column label="策略摘要" min-width="135">
+          <el-table-column v-if="!isMobile" prop="created_by" label="创建人" width="100" />
+          <el-table-column v-if="!isMobile" label="策略摘要" min-width="135">
             <template #default="{ row }"><span class="mono">{{ shortSha(row.policy_sha) }}</span></template>
           </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="240">
+          <el-table-column prop="note" label="备注" :min-width="isMobile ? 160 : 240">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="240" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" :width="isMobile ? 150 : 240" fixed="right">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="openDetail(row)" type="info" plain>详情</el-button>
@@ -151,15 +151,18 @@
         </p>
         <el-alert v-if="detail.verify_status !== 'success'" type="error" :closable="false"
                   title="存在未通过的校验，不能发布" style="margin-bottom:12px" />
-        <div v-for="(result, name) in detail.results" :key="name" class="mp-card">
-          <h3 style="display:flex;align-items:center;gap:10px">
-            <span class="mono">{{ name }}</span>
-            <StatusDot :kind="result.ok ? 'ok' : 'danger'"
-                       :text="result.ok ? result.verification : '未通过'" />
-            <span style="flex:1"></span>
-            <el-button v-if="result.ok" @click="previewArtifact(name)" type="info" plain>预览产物</el-button>
-            <el-button @click="openDiff(name)" type="primary" plain>与上一构建对比</el-button>
-          </h3>
+        <div v-for="(result, name) in detail.results" :key="name" class="mp-card mp-artifact">
+          <div class="mp-artifact-head">
+            <h3 class="mp-artifact-title">
+              <span class="mono mp-artifact-name">{{ name }}</span>
+              <StatusDot :kind="result.ok ? 'ok' : 'danger'"
+                         :text="result.ok ? result.verification : '未通过'" />
+            </h3>
+            <div class="mp-artifact-actions">
+              <el-button v-if="result.ok" @click="previewArtifact(name)" type="info" plain>预览产物</el-button>
+              <el-button @click="openDiff(name)" type="primary" plain>与上一构建对比</el-button>
+            </div>
+          </div>
           <div style="font-size:12.5px;color:var(--mp-text-secondary)">
             {{ result.engine }} / {{ PLATFORM_LABELS[result.platform] || result.platform }} ·
             {{ result.size }} 字节 · 摘要 <span class="mono">{{ shortSha(result.sha256) }}</span>
@@ -460,6 +463,38 @@ async function removeSelected() {
 </script>
 
 <style scoped>
+/* 详情抽屉里的产物卡片：标题一行、按钮一行，窄屏时按钮独占一行 */
+.mp-artifact-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mp-artifact-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+.mp-artifact-name {
+  white-space: nowrap;      /* 目标名不能被挤成一列竖排 */
+  font-weight: 600;
+}
+.mp-artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+.mp-artifact-actions .el-button { margin-left: 0; }
+@media (max-width: 768px) {
+  .mp-artifact-head { flex-direction: column; align-items: stretch; }
+  .mp-artifact-actions { margin-left: 0; }
+  .mp-artifact-actions .el-button { flex: 1 1 0; min-width: 0; }
+}
+
 .op-grid {
   display: flex;
   flex-wrap: wrap;
@@ -473,7 +508,7 @@ async function removeSelected() {
 .op-grid .el-button + .el-button { margin-left: 0; }
 @media (max-width: 640px) {
   .op-grid { gap: 4px; }
-  .op-grid .el-button { font-size: 12px; }
+  .op-grid .el-button { font-size: 12px; padding-left: 6px; padding-right: 6px; }
 }
 .release-list {
   display: flex;
