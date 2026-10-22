@@ -6,19 +6,25 @@
         <img class="pt-gate-logo" src="/logo.svg" alt="MagicPanel">
         <div class="pt-logo">MagicPanel</div>
         <p class="pt-gate-desc">输入 PIN（4 位；历史 6 位仍可用）查看订阅与资源</p>
-        <input
-          ref="pinInput"
-          v-model="pin"
-          class="pt-pin"
-          type="password"
-          inputmode="numeric"
-          pattern="\d{4}"
-          maxlength="6"
-          autocomplete="off"
-          placeholder="····"
-          :disabled="locked"
-          @input="onPinInput"
-        >
+        <!-- 用 form 包起来：回车即提交，浏览器也能把密码框和表单关联起来 -->
+        <form class="pt-pin-form" @submit.prevent="submitPin">
+          <input
+            ref="pinInput"
+            v-model="pin"
+            class="pt-pin"
+            type="password"
+            inputmode="numeric"
+            pattern="\d{4}"
+            maxlength="6"
+            autocomplete="off"
+            placeholder="····"
+            :disabled="locked"
+            @input="onPinInput"
+          >
+          <button type="submit" class="pt-pin-submit" :disabled="locked || pin.length < 4">
+            进入
+          </button>
+        </form>
         <p v-if="gateError" class="pt-gate-error">{{ gateError }}</p>
         <p v-if="locked" class="pt-gate-error">已锁定，{{ lockRemain }} 秒后重试</p>
         <button class="pt-gate-login" @click="goLogin">维护者登录</button>
@@ -382,6 +388,10 @@ async function fetchData() {
   }
 }
 
+function submitPin() {
+  if (pin.value.length >= 4) fetchData()
+}
+
 function onPinInput() {
   pin.value = pin.value.replace(/\D/g, '').slice(0, 6)
   // 4 位是当前规范；历史 6 位 PIN 仍然允许输入（散列照旧校验）
@@ -473,6 +483,7 @@ onMounted(async () => {
 .pt-gate-desc { color: #9aa0b5; font-size: 13px; margin: 10px 0 22px; }
 .pt-pin {
   width: 180px;
+  max-width: 100%;
   padding: 12px 0;
   text-align: center;
   font-size: 26px;
@@ -714,3 +725,24 @@ onMounted(async () => {
   .pt-main { padding: 0 14px 44px; }
 }
 </style>
+
+/* PIN 输入：form 布局，按钮跟输入框并排 */
+.pt-pin-form {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin: 0;
+}
+.pt-pin-form { width: 100%; max-width: 280px; margin: 0 auto; }
+.pt-pin-form .pt-pin { flex: 1 1 auto; min-width: 0; width: auto; }
+.pt-pin-submit {
+  flex: 0 0 auto;
+  border: 1px solid var(--mp-border);
+  border-radius: 8px;
+  background: var(--mp-primary);
+  color: #fff;
+  font-size: 14px;
+  padding: 0 16px;
+  cursor: pointer;
+}
+.pt-pin-submit:disabled { opacity: .5; cursor: not-allowed; }
