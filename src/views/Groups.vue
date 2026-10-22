@@ -111,30 +111,19 @@
           </MultiSelectClear>
         </el-form-item>
         <el-form-item label="适用引擎平台">
-          <MultiSelectClear :has-value="form.targets.length" @clear="form.targets = []">
-            <el-select v-model="form.targets" multiple style="width:100%"
-                       placeholder="包含所有"
-                       @change="form.targets = normalizeScope(form.targets, ALL_SCOPE)">
-              <el-option :value="ALL_SCOPE" label="包含所有" />
-              <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
-            </el-select>
-          </MultiSelectClear>
+          <ScopeSelect v-model="form.targets" all-label="包含所有引擎平台"
+                       :options="targetNames" />
           <div class="mp-form-hint">
             只在选中的引擎平台里出现该策略组；指向它的规则会随之生效。
+            选「包含所有引擎平台」表示所有平台都出现。
           </div>
         </el-form-item>
         <el-form-item label="适用设备">
-          <MultiSelectClear :has-value="form.devices.length" @clear="form.devices = []">
-            <el-select v-model="form.devices" multiple style="width:100%"
-                       placeholder="包含所有"
-                       @change="form.devices = normalizeScope(form.devices, ALL_SCOPE)">
-              <el-option :value="ALL_SCOPE" label="包含所有" />
-              <el-option v-for="d in devices" :key="d.name" :value="d.name" :label="d.name" />
-            </el-select>
-          </MultiSelectClear>
+          <ScopeSelect v-model="form.devices" all-label="包含所有设备"
+                       :options="deviceNames" />
           <div class="mp-form-hint">
             个性化放这里：选了设备后，这个策略组只出现在这些设备自己的产物里，
-            同平台的其他设备不受影响。
+            同平台的其他设备不受影响；选「包含所有设备」表示所有设备。
           </div>
         </el-form-item>
         <el-form-item label="本地节点（单节点，可多选）">
@@ -157,17 +146,12 @@
         </el-form-item>
         <template v-if="form.type !== 'relay'">
           <el-form-item label="节点来源（从来源中取节点，可多选）">
-            <MultiSelectClear :has-value="form.use_sources.length" @clear="form.use_sources = []">
-              <el-select v-model="form.use_sources" multiple style="width:100%"
-                         placeholder="包含所有来源"
-                         @change="form.use_sources = normalizeScope(form.use_sources, ALL_SCOPE)">
-                <el-option :value="ALL_SCOPE" label="包含所有来源（含以后新增的）" />
-                <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
-              </el-select>
-            </MultiSelectClear>
+            <ScopeSelect v-model="form.use_sources" all-label="包含所有来源（含以后新增的）"
+                         :options="sourceNames" />
             <div class="mp-form-hint">
-              选了「包含所有来源」，以后新增的节点来源会自动进来，不用回来改这里；
-              不选则这个组不取任何来源的节点（成员只由「包含策略」和「本地节点」决定）。
+              选了「包含所有来源（含以后新增的）」，以后新增的节点来源会自动进来，
+              不用回来改这里；不选则这个组不取任何来源的节点
+              （成员只由「包含策略」和「本地节点」决定）。
             </div>
           </el-form-item>
           <el-form-item label="过滤正则（仅保留匹配的节点，可选）">
@@ -254,15 +238,8 @@
         <el-form-item>
           <el-checkbox v-model="batch.useTargets">修改适用引擎平台</el-checkbox>
         </el-form-item>
-        <MultiSelectClear v-if="batch.useTargets"
-                          :has-value="batch.targets.length" @clear="batch.targets = []">
-          <el-select v-model="batch.targets" multiple style="width:100%"
-                     placeholder="包含所有"
-                     @change="batch.targets = normalizeScope(batch.targets, ALL_SCOPE)">
-            <el-option :value="ALL_SCOPE" label="包含所有" />
-            <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
-          </el-select>
-        </MultiSelectClear>
+        <ScopeSelect v-if="batch.useTargets" v-model="batch.targets"
+                     all-label="包含所有引擎平台" :options="targetNames" />
 
         <el-form-item>
           <el-checkbox v-model="batch.useLocalNodes">修改本地节点</el-checkbox>
@@ -280,15 +257,8 @@
         <el-form-item>
           <el-checkbox v-model="batch.useSources">修改节点来源</el-checkbox>
         </el-form-item>
-        <MultiSelectClear v-if="batch.useSources"
-                          :has-value="batch.use_sources.length" @clear="batch.use_sources = []">
-          <el-select v-model="batch.use_sources" multiple style="width:100%"
-                     placeholder="包含所有来源"
-                     @change="batch.use_sources = normalizeScope(batch.use_sources, ALL_SCOPE)">
-            <el-option :value="ALL_SCOPE" label="包含所有来源（含以后新增的）" />
-            <el-option v-for="s in sources" :key="s.name" :label="s.name" :value="s.name" />
-          </el-select>
-        </MultiSelectClear>
+        <ScopeSelect v-if="batch.useSources" v-model="batch.use_sources"
+                     all-label="包含所有来源（含以后新增的）" :options="sourceNames" />
 
         <el-form-item>
           <el-checkbox v-model="batch.useFilter">修改过滤正则</el-checkbox>
@@ -318,11 +288,12 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
-import { ALL_SCOPE, normalizeScope, hasAllScope, collapseIfComplete } from '../scopeOptions'
+import { ALL_SCOPE, hasAllScope, collapseIfComplete } from '../scopeOptions'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import MultiSelectClear from '../components/MultiSelectClear.vue'
+import ScopeSelect from '../components/ScopeSelect.vue'
 import ErrorState from '../components/ErrorState.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 
@@ -375,6 +346,11 @@ const emptyForm = () => ({
   tolerance: 150, lazy: true, strategy: '', targets: [ALL_SCOPE], devices: [ALL_SCOPE],
 })
 const form = reactive(emptyForm())
+
+// 给 ScopeSelect 用的名称列表
+const targetNames = computed(() => targets.value.map((t) => t.name))
+const deviceNames = computed(() => devices.value.map((d) => d.name))
+const sourceNames = computed(() => sources.value.map((x) => x.name))
 
 // 适用范围展示："*" 是「包含所有」，不直接显示给用户
 function scopeText(list) {

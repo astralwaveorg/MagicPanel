@@ -184,7 +184,6 @@
 
           <!-- 当前层级编辑 -->
           <template v-if="!readonly">
-            <h3 class="mp-section-title">编辑配置</h3>
             <el-form :model="doc" label-position="top">
               <template v-for="group in groupOrder" :key="group">
                 <div v-if="fieldsOf(group).length" style="margin-bottom:16px">

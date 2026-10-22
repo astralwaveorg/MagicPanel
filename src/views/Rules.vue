@@ -136,30 +136,19 @@
           </el-select>
         </el-form-item>
         <el-form-item label="适用引擎平台">
-          <MultiSelectClear :has-value="form.targets.length" @clear="form.targets = []">
-            <el-select v-model="form.targets" multiple style="width:100%"
-                       placeholder="包含所有"
-                       @change="form.targets = normalizeScope(form.targets, ALL_SCOPE)">
-              <el-option :value="ALL_SCOPE" label="包含所有" />
-              <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
-            </el-select>
-          </MultiSelectClear>
+          <ScopeSelect v-model="form.targets" all-label="包含所有引擎平台"
+                       :options="targetNames" />
           <div class="mp-form-hint">
-            只在选中的引擎平台里生效；若该规则指向的策略组不适用于同一平台，规则会被自动剔除。
+            只在选中的引擎平台里生效；选「包含所有引擎平台」表示所有平台都生效。
+            若该规则指向的策略组不适用于同一平台，规则会被自动剔除。
           </div>
         </el-form-item>
         <el-form-item label="适用设备">
-          <MultiSelectClear :has-value="form.devices.length" @clear="form.devices = []">
-            <el-select v-model="form.devices" multiple style="width:100%"
-                       placeholder="包含所有"
-                       @change="form.devices = normalizeScope(form.devices, ALL_SCOPE)">
-              <el-option :value="ALL_SCOPE" label="包含所有" />
-              <el-option v-for="d in devices" :key="d.name" :value="d.name" :label="d.name" />
-            </el-select>
-          </MultiSelectClear>
+          <ScopeSelect v-model="form.devices" all-label="包含所有设备"
+                       :options="deviceNames" />
           <div class="mp-form-hint">
             个性化放这里：选了设备后，这条规则只出现在这些设备自己的产物里，
-            同平台的其他设备不受影响。
+            同平台的其他设备不受影响；选「包含所有设备」表示所有设备。
           </div>
         </el-form-item>
         <el-form-item label="备注（可选）">
@@ -197,15 +186,8 @@
         <el-form-item>
           <el-checkbox v-model="batch.useTargets">修改适用引擎平台</el-checkbox>
         </el-form-item>
-        <MultiSelectClear v-if="batch.useTargets"
-                          :has-value="batch.targets.length" @clear="batch.targets = []">
-          <el-select v-model="batch.targets" multiple style="width:100%"
-                     placeholder="包含所有"
-                     @change="batch.targets = normalizeScope(batch.targets, ALL_SCOPE)">
-            <el-option :value="ALL_SCOPE" label="包含所有" />
-            <el-option v-for="t in targets" :key="t.name" :value="t.name" :label="t.name" />
-          </el-select>
-        </MultiSelectClear>
+        <ScopeSelect v-if="batch.useTargets" v-model="batch.targets"
+                     all-label="包含所有引擎平台" :options="targetNames" />
 
         <el-form-item>
           <el-checkbox v-model="batch.useEnabled">修改启用状态</el-checkbox>
@@ -238,16 +220,17 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
-import { ALL_SCOPE, normalizeScope, collapseIfComplete } from '../scopeOptions'
+import { ALL_SCOPE, collapseIfComplete } from '../scopeOptions'
 import { Search } from '@element-plus/icons-vue'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
-import MultiSelectClear from '../components/MultiSelectClear.vue'
+import ScopeSelect from '../components/ScopeSelect.vue'
 import ErrorState from '../components/ErrorState.vue'
 
 // 与后端 config.RULE_TYPES 保持一致（少一种就会导致该类型根本建不出来）
@@ -257,6 +240,8 @@ const ruleTypes = [
   'SRC-IP-CIDR', 'DST-PORT', 'PROCESS-NAME', 'MATCH',
 ]
 
+const route = useRoute()
+const router = useRouter()
 const rows = ref([])
 const isMobile = useMobile()
 const selected = ref([])
@@ -339,6 +324,8 @@ function scopeText(list) {
   if (list.includes(ALL_SCOPE)) return '全部'
   return list.join('、')
 }
+const targetNames = computed(() => targets.value.map((t) => t.name))
+const deviceNames = computed(() => devices.value.map((d) => d.name))
 const isFinal = computed(() => ['MATCH', 'FINAL'].includes(form.type))
 const canNoResolve = computed(() => NO_RESOLVE_TYPES.includes(form.type))
 
@@ -382,8 +369,25 @@ async function load() {
   }
   await sorter.init()
 }
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await openFromQuery()
+})
 onBeforeUnmount(sorter.destroy)
+
+// 支持从别处跳过来直接编辑某条规则：/admin/rules?edit=123
+async function openFromQuery() {
+  const id = Number(route.query.edit)
+  if (!id) return
+  const all = await api('/api/v1/rules')
+  const row = all.find((r) => r.id === id)
+  if (!row) {
+    ElMessage.warning('这条规则已经不存在了')
+    return
+  }
+  openEdit(row)
+  router.replace({ path: '/admin/rules' })
+}
 
 function openEdit(row) {
   editing.value = row || null

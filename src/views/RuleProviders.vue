@@ -64,6 +64,11 @@
             <template #default="{ row }">
               <!-- 内联规则直接写在面板里，不存在抓取 -->
               <StatusDot v-if="row.kind === 'remote'" v-bind="sourceStatus(row)" />
+              <el-tooltip v-if="row.kind === 'remote' && row.last_status === 'failed' && row.rule_count"
+                         :content="`抓取失败，客户端继续用上次抓到的内容（${row.rule_count} 条）`"
+                         placement="top">
+                <span class="mp-cell-sub">仍用上次内容</span>
+              </el-tooltip>
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
@@ -75,6 +80,16 @@
           </el-table-column>
           <el-table-column label="摘要" min-width="130">
             <template #default="{ row }"><span class="mono mp-nowrap">{{ shortSha(row.sha256) }}</span></template>
+          </el-table-column>
+          <el-table-column label="被引用" min-width="170">
+            <template #default="{ row }">
+              <span v-if="!row.referenced_by || !row.referenced_by.length" class="mp-cell-sub">—</span>
+              <el-link v-for="ref in (row.referenced_by || [])" :key="ref.id"
+                       type="primary" class="mp-ref-link" :title="`跳到引用它的分流规则：${ref.target}`"
+                       @click="gotoRule(ref)">
+                {{ ref.target }}<span v-if="!ref.enabled">（已停用）</span>
+              </el-link>
+            </template>
           </el-table-column>
           <el-table-column label="抓取间隔" width="110" align="right">
             <template #default="{ row }">{{ row.kind === 'inline' ? '—' : row.interval }}</template>
@@ -237,6 +252,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
@@ -257,6 +273,7 @@ const INTERVAL_PRESETS = [
   { label: '7 天', value: 604800 },
 ]
 
+const router = useRouter()
 const rows = ref([])
 const isMobile = useMobile()
 const total = ref(0)
@@ -338,6 +355,11 @@ const form = reactive(emptyForm())
 // 抓取走代理时的默认地址：家里 Stash 的混合端口
 const PROXY_HINT = 'http://10.0.1.8:7890'
 const currentProxy = computed(() => form.current_proxy || '')
+
+// 跳到引用了这条规则来源的分流规则，直接打开编辑弹窗
+function gotoRule(ref) {
+  router.push({ path: '/admin/rules', query: { edit: String(ref.id) } })
+}
 
 async function load() {
   loading.value = true

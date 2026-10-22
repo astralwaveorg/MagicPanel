@@ -69,6 +69,32 @@ def _core_available() -> bool:
     return bool(status.get("available"))
 
 
+# 定时抓取失败后的重试次数与间隔（秒）
+FETCH_RETRY_TIMES = 3
+FETCH_RETRY_DELAY = 5
+
+
+def _fetch_with_retry(fetch, label: str):
+    """定时抓取失败时重试，最多 FETCH_RETRY_TIMES 次。
+
+    抓取失败往往来自网络抖动（超时、对方临时限流），重试一次多半就好了；
+    重试期间旧快照保持不变，客户端继续用上一份可用数据。
+    最后一次仍失败就把错误抛给调用方，由调用方记入运行摘要。
+    """
+    import time
+    last_exc = None
+    for attempt in range(1, FETCH_RETRY_TIMES + 1):
+        try:
+            return fetch()
+        except Exception as exc:
+            last_exc = exc
+            if attempt < FETCH_RETRY_TIMES:
+                logger.warning("%s 失败（第 %d/%d 次）：%s，将重试",
+                               label, attempt, FETCH_RETRY_TIMES, exc)
+                time.sleep(FETCH_RETRY_DELAY)
+    raise last_exc
+
+
 def _run_source_fetch(summary: dict, now: datetime, force: bool = False) -> None:
     with db.connect() as conn:
         rows = db.all_(
@@ -82,7 +108,11 @@ def _run_source_fetch(summary: dict, now: datetime, force: bool = False) -> None
         if not force and last and not _due(last, row["interval"], now):
             continue
         try:
-            updater.refresh_source(row["id"], AUTO_OPERATOR, automatic=True)
+            _fetch_with_retry(
+                lambda rid=row["id"]: updater.refresh_source(
+                    rid, AUTO_OPERATOR, automatic=True),
+                f"自动抓取节点来源 {row['name']}",
+            )
             summary["sources_fetched"] += 1
         except Exception as exc:  # 单个来源失败不影响其他项目
             summary["sources_failed"] += 1
@@ -140,7 +170,11 @@ def _run_rule_fetch(summary: dict, now: datetime, force: bool = False) -> None:
         if not force and last and not _due(last, row["interval"], now):
             continue
         try:
-            updater.refresh_provider(row["id"], AUTO_OPERATOR, automatic=True)
+            _fetch_with_retry(
+                lambda rid=row["id"]: updater.refresh_provider(
+                    rid, AUTO_OPERATOR, automatic=True),
+                f"自动抓取规则来源 {row['name']}",
+            )
             summary["rules_fetched"] += 1
         except Exception as exc:
             summary["rules_failed"] += 1

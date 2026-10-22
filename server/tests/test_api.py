@@ -322,6 +322,98 @@ def test_group_cycle_detected(client):
     assert any("循环" in e for e in build["results"]["stash-ios"]["errors"])
 
 
+def test_rule_provider_fetch_retry_and_stale_content(client, monkeypatch):
+    """抓取失败会重试；重试仍失败时保留旧内容，构建照旧可用。"""
+    from app.services import updater, scheduler
+
+    # 1) 重试：失败三次后放弃
+    calls = []
+
+    def failing():
+        calls.append(1)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(scheduler, "FETCH_RETRY_DELAY", 0)
+    with pytest.raises(RuntimeError):
+        scheduler._fetch_with_retry(failing, "测试")
+    assert len(calls) == scheduler.FETCH_RETRY_TIMES == 3
+
+    # 成功的不重试
+    ok_calls = []
+    scheduler._fetch_with_retry(lambda: ok_calls.append(1) or "ok", "测试")
+    assert len(ok_calls) == 1
+
+    # 2) 抓取失败保留旧内容
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    r = client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "旧规则集", "kind": "remote", "behavior": "domain",
+        "url": "https://example.com/rules.yaml"})
+    assert r.status_code == 201, r.text
+
+    body = b"payload:\n  - a.example.com\n"
+    monkeypatch.setattr(updater.fetcher, "fetch", lambda *a, **k: body)
+    monkeypatch.setattr(updater.fetcher, "count_rules", lambda *a, **k: 1)
+    updater.refresh_provider(r.json()["id"], "tester")
+    assert client.get("/api/v1/rule-providers", headers=h).json()[0]["rule_count"] == 1
+
+    # 接着抓取失败：内容不变，状态标成失败
+    def boom(*a, **k):
+        raise RuntimeError("网络不通")
+    monkeypatch.setattr(updater.fetcher, "fetch", boom)
+    with pytest.raises(Exception):
+        updater.refresh_provider(r.json()["id"], "tester")
+    row = client.get("/api/v1/rule-providers", headers=h).json()[0]
+    assert row["last_status"] == "failed"
+    assert row["rule_count"] == 1          # 旧内容还在
+    assert row["referenced_by"] == []      # 没有规则引用它
+
+    # 3) 引用清单
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "RULE-SET", "value": "旧规则集", "target": "DIRECT"})
+    row = client.get("/api/v1/rule-providers", headers=h).json()[0]
+    assert [x["target"] for x in row["referenced_by"]] == ["DIRECT"]
+    assert row["referenced_by"][0]["id"] > 0
+
+
+def test_rule_provider_failure_still_built(client, monkeypatch):
+    """抓取失败的规则来源仍然进产物：客户端继续用上一份内容。"""
+    from app.services import updater
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    r = client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "会失败的规则集", "kind": "remote", "behavior": "domain",
+        "url": "https://example.com/rules.yaml"})
+    assert r.status_code == 201, r.text
+    body = b"payload:\n  - b.example.com\n"
+    monkeypatch.setattr(updater.fetcher, "fetch", lambda *a, **k: body)
+    monkeypatch.setattr(updater.fetcher, "count_rules", lambda *a, **k: 1)
+    updater.refresh_provider(r.json()["id"], "tester")
+
+    def boom(*a, **k):
+        raise RuntimeError("网络不通")
+    monkeypatch.setattr(updater.fetcher, "fetch", boom)
+    with pytest.raises(Exception):
+        updater.refresh_provider(r.json()["id"], "tester")
+
+    # 建一条引用它的规则，构建应当成功且产物里带上这个规则来源
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "RULE-SET", "value": "会失败的规则集", "target": "DIRECT"})
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-ios", "engine": "stash", "platform": "ios"})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "节点选择", "type": "select", "proxies": ["DIRECT"]})
+    client.post("/api/v1/rules", headers=h, json={
+        "type": "MATCH", "target": "DIRECT"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["verify_status"] == "success", build["results"]
+    artifact = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios", headers=h).json()["content"]
+    assert "会失败的规则集" in artifact
+    assert "RULE-SET,会失败的规则集" in artifact
+
+
 def test_rule_provider_inline_and_feed(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)

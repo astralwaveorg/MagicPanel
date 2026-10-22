@@ -104,6 +104,37 @@ def _delete_one(conn, row, operator: str,
                     "removed_rules": [r["id"] for r in (removed_rules or [])]})
 
 
+def _referencing_rules(conn, names: list[str]) -> dict:
+    """找出引用了这些规则来源的分流规则：名字 → [{id, type, value, target}]。
+
+    规则来源改名时也要跟着改引用，这里给出完整清单，
+    前端可以直接点进对应的分流规则里改。
+    """
+    if not names:
+        return {}
+    marks = ",".join("?" for _ in names)
+    rows = db.all_(
+        conn,
+        f"SELECT id, type, value, target, enabled FROM rules "
+        f"WHERE type='RULE-SET' AND value IN ({marks}) ORDER BY sort, id",
+        list(names),
+    )
+    result: dict = {}
+    for r in rows:
+        result.setdefault(r["value"], []).append({
+            "id": r["id"], "type": r["type"], "value": r["value"],
+            "target": r["target"], "enabled": bool(r["enabled"]),
+        })
+    return result
+
+
+def _public_with_refs(conn, row) -> dict:
+    data = _public(row)
+    refs = _referencing_rules(conn, [row["name"]]).get(row["name"], [])
+    data["referenced_by"] = refs
+    return data
+
+
 @router.get("/page")
 def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
                          user=CurrentUser):
@@ -114,7 +145,7 @@ def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
             where = "WHERE name LIKE ?"
             args = [f"%{keyword}%"]
         data = db.paged(conn, "rule_providers", where, args, "id", limit, offset)
-    data["items"] = [_public(r) for r in data["items"]]
+        data["items"] = [_public_with_refs(conn, r) for r in data["items"]]
     return data
 
 
@@ -122,7 +153,7 @@ def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
 def list_providers(user=CurrentUser):
     with db.connect() as conn:
         rows = db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
-    return [_public(r) for r in rows]
+        return [_public_with_refs(conn, r) for r in rows]
 
 
 @router.get("/{rp_id}/content")

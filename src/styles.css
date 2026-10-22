@@ -357,3 +357,12 @@ html, body, #app {
   .mp-filter-select { width: auto; flex: 1 1 calc(50% - 4px); }
   .mp-filter-bar .mp-toolbar-hint { width: 100%; }
 }
+
+/* 规则来源的"被引用"列：每个引用一行，可点进对应分流规则 */
+.mp-ref-link {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.6;
+  height: auto;
+  margin-bottom: 2px;
+}

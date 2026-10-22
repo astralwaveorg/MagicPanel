@@ -45,5 +45,9 @@ export function buildStatusTagEffect(status) {
 export function sourceStatus(s) {
   if (!s.last_status || s.last_status === 'never') return { kind: 'muted', text: '从未抓取' }
   if (s.last_status === 'ok') return { kind: 'ok', text: '抓取成功' }
-  return { kind: 'danger', text: '抓取失败' }
+  // 抓取失败不影响已经抓到的内容：构建照旧用上一份快照
+  const tip = s.rule_count
+    ? '抓取失败（仍用上次抓到的内容）'
+    : '抓取失败（还没有内容）'
+  return { kind: 'danger', text: '抓取失败', tip }
 }
