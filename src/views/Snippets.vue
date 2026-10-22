@@ -3,7 +3,7 @@
     <h2 class="mp-page-title">功能模块</h2>
     <p class="mp-page-desc">
       用于补充脚本、复写、面板等 YAML 片段，构建时按引擎合并至目标配置。
-      合并规则：字典递归合并、列表追加、标量覆盖；目标扩展最后生效，优先级最高。
+      合并规则：字典递归合并、列表追加、标量覆盖；平台扩展最后生效，优先级最高。
     </p>
 
     <div class="mp-toolbar">
@@ -28,7 +28,7 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table :data="filtered" v-loading="loading">
+        <el-table :data="filtered" v-loading="loading" size="small">
           <el-table-column prop="name" label="名称" min-width="130" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="分类" width="90">
             <template #default="{ row }">{{ CATEGORY_LABELS[row.category] || row.category }}</template>
@@ -36,7 +36,7 @@
           <el-table-column label="适用引擎" width="100">
             <template #default="{ row }">{{ ENGINE_LABELS[row.engine] || row.engine }}</template>
           </el-table-column>
-          <el-table-column label="启用" width="70">
+          <el-table-column label="启用" width="80">
             <template #default="{ row }">
               <span class="mp-status">
                 <i class="mp-dot" :class="row.enabled ? 'ok' : 'muted'" />
@@ -44,16 +44,18 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="sort" label="顺序" width="70" align="right" />
+          <el-table-column prop="sort" label="顺序" width="80" align="right" />
           <el-table-column prop="note" label="备注" min-width="140" show-overflow-tooltip />
           <el-table-column label="更新时间" min-width="130">
             <template #default="{ row }">{{ fmtTime(row.updated_at) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="210" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="180" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <el-button size="small" @click="preview(row)" type="info" plain>内容</el-button>
-              <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              <div class="op-grid">
+                <el-button size="small" @click="preview(row)" type="info" plain>内容</el-button>
+                <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>

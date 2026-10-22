@@ -32,7 +32,7 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="顺序" :width="isMobile ? 56 : 96" align="center">
@@ -74,7 +74,7 @@
           <el-table-column label="最近来源 IP" min-width="120">
             <template #default="{ row }"><span class="mono">{{ row.last_pull_ip || '—' }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="290" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="reveal(row)" type="info" plain>复制地址</el-button>
@@ -405,8 +405,3 @@ async function remove(row) {
 }
 </script>
 
-<style scoped>
-/* 操作列 2×2 排列，覆盖 Element Plus 相邻按钮默认间距 */
-.op-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.op-grid .el-button { margin: 0; }
-</style>

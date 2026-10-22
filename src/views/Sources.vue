@@ -126,7 +126,7 @@
           <el-table-column label="过滤不可用" width="100" align="center">
             <template #default="{ row }">{{ row.filter_unavailable ? '开启' : '关闭' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="252" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" type="info" plain @click="openNodes(row)">节点</el-button>
@@ -177,9 +177,9 @@
               <span v-else style="color:var(--mp-muted)">未测速</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="168">
+          <el-table-column label="操作" width="168" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <div class="op-grid op-grid-2">
+              <div class="op-grid">
                 <el-button size="small" :loading="testingLocal === row.id" @click="testLocal(row)" type="success" plain>测速</el-button>
                 <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleLocalEnabled(row)" />
                 <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
@@ -1160,23 +1160,3 @@ function openNodes(row) {
   nodesDrawer.value = true
 }
 </script>
-
-<style scoped>
-.op-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-/* 一行两个：本地节点的操作列按两列排，列宽可以收窄 */
-.op-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.op-grid .el-button {
-  width: 100%;
-  margin: 0;
-  padding-left: 4px;
-  padding-right: 4px;
-}
-@media (max-width: 640px) {
-  .op-grid { gap: 4px; }
-  .op-grid .el-button { font-size: 12px; }
-}
-</style>

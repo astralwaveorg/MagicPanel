@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | Mihomo | [本地配置导航](Mihomo-Config-Navigation.md)／[官方配置区](https://wiki.metacubex.one/config/) | Android、Linux、macOS 的路由、接口与权限条件分别核对。 |
 | Stash | [本地全站导航](Stash-Wiki-Navigation.md)／[官方文档](https://stash.wiki/) | Mihomo 扩展字段不能视为 Stash 自动支持。 |
-| Surge | [官方手册](https://manual.nssurge.com/) | 当前检索工具未建立 Surge 索引；使用浏览器或网页工具读取对应官方章节。 |
+| Surge | [官方手册](https://manual.nssurge.com/) | 本工具不支持 Surge（`--product` 只接受 `mihomo` / `stash`），需用浏览器或网页工具读取对应官方章节。 |
 | 订阅转换模板／生成脚本 | 转换工具官方说明 + 输出目标的官方文档 | 同时核对模板语法和最终生成字段。 |
 
 ## 本地检索与定向读取

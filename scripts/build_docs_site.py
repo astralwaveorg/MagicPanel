@@ -20,6 +20,7 @@ import shutil
 import sys
 
 REPO = "astralwaveorg/MagicPanel"
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # 源文档 → (站点文件名, 页面标题)
 PAGES = [
@@ -46,13 +47,21 @@ markdown: kramdown
 """
 
 
-def rewrite(target: str) -> str:
+def rewrite(target: str, src_dir: pathlib.Path) -> str:
     """站内互链换成站点文件名；仓库内其它文档跳到 GitHub 原文。"""
     name = target.rsplit("/", 1)[-1]
     if name in PAGE_MAP:
         return PAGE_MAP[name]
-    path = target[3:] if target.startswith("../") else target
-    return f"https://github.com/{REPO}/blob/main/docs/{path}"
+    # 仓库内相对路径：按源文档所在目录解析，指向仓库里的真实位置
+    # （`../AGENTS.md` 在仓库根，不能拼成 docs/AGENTS.md）
+    if target.startswith(("http://", "https://", "#")):
+        return target
+    resolved = (src_dir / target).resolve()
+    try:
+        rel = resolved.relative_to(REPO_ROOT)
+    except ValueError:
+        return target
+    return f"https://github.com/{REPO}/blob/main/{rel.as_posix()}"
 
 
 def build(out_dir: pathlib.Path) -> int:
@@ -74,7 +83,7 @@ def build(out_dir: pathlib.Path) -> int:
         if not path.exists():
             print(f"缺少源文档：{src}", file=sys.stderr)
             return 1
-        body = LINK_RE.sub(lambda m: f"]({rewrite(m.group(1))})",
+        body = LINK_RE.sub(lambda m: f"]({rewrite(m.group(1), path.parent)})",
                            path.read_text(encoding="utf-8"))
         front = f"---\ntitle: {title}\nlayout: default\n---\n\n{NAV}\n\n"
         (out_dir / dst).write_text(front + body, encoding="utf-8")

@@ -65,7 +65,7 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
@@ -95,16 +95,18 @@
           <el-table-column label="no-resolve" width="100" align="center">
             <template #default="{ row }">{{ row.no_resolve ? '是' : '—' }}</template>
           </el-table-column>
-          <el-table-column label="启用" width="70">
+          <el-table-column label="启用" width="80">
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
           </el-table-column>
           <el-table-column prop="note" label="备注" min-width="140">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="150">
+          <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              <div class="op-grid">
+                <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -537,22 +539,3 @@ async function removeSelected() {
 }
 </script>
 
-<style scoped>
-.order-cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.drag-handle {
-  cursor: grab;
-  color: var(--mp-muted);
-  font-size: 15px;
-  line-height: 1;
-  padding: 4px 3px;
-  margin-right: 2px;
-  user-select: none;
-  touch-action: none;
-}
-.drag-handle:active { cursor: grabbing; }
-.order-cell .el-button { margin: 0; padding: 4px 2px; }
-</style>

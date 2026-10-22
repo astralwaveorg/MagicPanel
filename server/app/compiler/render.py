@@ -6,10 +6,10 @@
 因此构建产物与 builds 快照都包含本地节点凭据，不能公开分发。
 
 差异化维度（自下而上叠加）：
-① 基础配置：引擎默认 → 目标级覆盖
+① 产物配置：引擎默认配置 → 引擎平台配置 → 设备独立配置
 ② 结构内容：策略组与分流规则按「适用目标」过滤，并按平台能力剔除必然无效的规则
 ③ 功能模块：按引擎过滤
-④ 目标扩展：目标 extra_yaml
+④ 平台扩展：引擎平台 extra_yaml
 （⑤ 设备级覆盖在分发层叠加，见 routers/feed.py）
 """
 import urllib.parse
@@ -320,7 +320,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     传入设备 = 渲染这台设备自己的产物（含只属于它的策略组与规则）。
     """
     engine = target["engine"]
-    # ① 基础配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
+    # ① 产物配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
     layers = [("引擎默认配置", base_config_service.default_doc(engine))]
     platform = target.get("platform") or ""
     general_base = (snapshot.get("base") or {}).get(f"{engine}|{platform}")
@@ -381,7 +381,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     cfg["rules"] = pinned + personal + [_rule_line(r) for r in rules]
 
     # Stash 由客户端接管 DNS；Mihomo 需要显式 dns 段。
-    # 用户在基础配置里写了 dns 则逐项覆盖默认值（列表以用户为准）。
+    # 用户在产物配置里写了 dns 则逐项覆盖默认值（列表以用户为准）。
     user_dns = base.get("dns") or {}
     if engine == "mihomo":
         cfg["dns"] = _merge_dns(DNS_MIHOOMO, user_dns)
@@ -394,7 +394,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         dns["fake-ip-filter"] = fake_ip_filter
         cfg["dns"] = dns
 
-    # 功能模块按引擎合并，目标扩展最后应用、优先级最高
+    # 功能模块按引擎合并，平台扩展最后应用、优先级最高
     for snip in snapshot.get("snippets", []):
         if snip["engine"] in (engine, "all"):
             _merge(cfg, yaml.safe_load(snip["content"]) or {})

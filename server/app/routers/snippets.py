@@ -1,7 +1,7 @@
 """功能模块：脚本、复写、面板等按引擎归类的配置片段。
 
 内容为 YAML 映射片段，构建时按引擎合并进目标配置：
-字典递归合并、列表追加、标量覆盖，目标扩展（extra_yaml）最后应用。
+字典递归合并、列表追加、标量覆盖，平台扩展（extra_yaml）最后应用。
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field

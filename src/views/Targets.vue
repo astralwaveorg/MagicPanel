@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">引擎平台</h2>
     <p class="mp-page-desc">
-      每个目标对应一类客户端（引擎 + 平台）。同一策略按目标编译为对应方言；目标扩展用于处理平台差异，按整键覆盖。按住左侧手柄拖动排序；分页时仅重排当前页。
+      每个目标对应一类客户端（引擎 + 平台）。同一策略按目标编译为对应方言；平台扩展用于处理平台差异，按整键覆盖。按住左侧手柄拖动排序；分页时仅重排当前页。
     </p>
 
     <div class="mp-toolbar">
@@ -20,7 +20,7 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id">
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small">
           <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
@@ -45,10 +45,12 @@
           <el-table-column label="平台扩展" min-width="120">
             <template #default="{ row }">{{ row.extra_yaml ? '有（字典递归 / 列表追加）' : '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="150">
+          <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              <div class="op-grid">
+                <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -105,7 +107,7 @@
         </el-form-item>
         <el-form-item>
           <template #label>
-            <span>目标扩展（YAML 映射；字典递归合并、列表追加、标量覆盖）</span>
+            <span>平台扩展（YAML 映射；字典递归合并、列表追加、标量覆盖）</span>
             <span class="mp-field-hint">{{ engineHint }}</span>
           </template>
           <div class="mp-template-bar">
@@ -342,22 +344,3 @@ async function onRefConfirm() {
 }
 </script>
 
-<style scoped>
-.order-cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.drag-handle {
-  cursor: grab;
-  color: var(--mp-muted);
-  font-size: 15px;
-  line-height: 1;
-  padding: 4px 3px;
-  margin-right: 2px;
-  user-select: none;
-  touch-action: none;
-}
-.drag-handle:active { cursor: grabbing; }
-.order-cell .el-button { margin: 0; padding: 4px 2px; }
-</style>

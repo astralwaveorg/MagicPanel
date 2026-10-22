@@ -45,15 +45,15 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="pagedRows" v-loading="loading" row-key="id"
+        <el-table ref="tableRef" :data="pagedRows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column prop="name" label="名称" min-width="110" :fixed="isMobile ? false : 'left'" />
-          <el-table-column label="类型" width="80">
+          <el-table-column label="类型" width="90">
             <template #default="{ row }">{{ row.kind === 'remote' ? '远程' : '内联' }}</template>
           </el-table-column>
           <el-table-column prop="behavior" label="行为" width="90" />
-          <el-table-column prop="format" label="格式" width="80" />
+          <el-table-column prop="format" label="格式" width="90" />
           <el-table-column label="URL" width="110">
             <template #default="{ row }">
               <el-button v-if="row.kind === 'remote' && row.url" size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
@@ -72,7 +72,7 @@
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="规则数" width="80" align="right">
+          <el-table-column label="规则数" width="90" align="right">
             <template #default="{ row }">{{ row.rule_count ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="摘要" min-width="130">
@@ -94,7 +94,7 @@
           <el-table-column label="最近成功" min-width="160">
             <template #default="{ row }"><span class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="192" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" :disabled="!row.has_content" @click="preview(row)" type="info" plain>内容</el-button>
@@ -692,21 +692,6 @@ async function preview(row) {
 </script>
 
 <style scoped>
-.op-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-.op-grid .el-button {
-  width: 100%;
-  margin: 0;
-  padding-left: 4px;
-  padding-right: 4px;
-}
-@media (max-width: 640px) {
-  .op-grid { gap: 4px; }
-  .op-grid .el-button { font-size: 12px; }
-}
 .mp-pagination {
   display: flex;
   justify-content: flex-end;

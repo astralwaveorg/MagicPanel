@@ -1,4 +1,4 @@
-"""产物基础配置：多级联动的顶层键文档。
+"""产物配置：多级联动的顶层键文档。
 
 层级（后者覆盖前者）：
 ① 引擎默认配置：引擎内置的能力基线，随程序发布，可直接改；
@@ -9,7 +9,7 @@
 没有被显式改过的键会自动跟随；"恢复默认"= 清空本层差异。
 
 结构化内容（proxies / proxy-groups / rules 等）由各自的业务页面维护，
-基础配置各层都不允许覆盖。
+产物配置各层都不允许覆盖。
 """
 from copy import deepcopy
 
@@ -22,7 +22,7 @@ from deepmerge.strategy import type_conflict as TypeConflictStrategy
 
 ENGINES = ("stash", "mihomo")
 
-# 结构化内容由业务页面维护，基础配置与目标扩展都不允许覆盖
+# 结构化内容由业务页面维护，产物配置与平台扩展都不允许覆盖
 PROTECTED_KEYS = {
     "proxies": "节点由“节点来源 / 本地单节点”维护",
     "proxy-providers": "远程代理集由“节点来源”维护",
@@ -345,27 +345,27 @@ def scope_layers(engine: str, platform: str = "", device_id: int = 0,
 def parse_content(content: str) -> dict:
     """解析 YAML 文本；必须是映射。"""
     if content is None or not content.strip():
-        raise ValueError("基础配置不能为空")
+        raise ValueError("产物配置不能为空")
     try:
         data = yaml.safe_load(content)
     except yaml.YAMLError as exc:
         raise ValueError(f"YAML 解析失败：{exc}") from exc
     if data is None:
-        raise ValueError("基础配置不能为空")
+        raise ValueError("产物配置不能为空")
     if not isinstance(data, dict):
-        raise ValueError("基础配置必须是键值映射")
+        raise ValueError("产物配置必须是键值映射")
     return data
 
 
 def validate_doc(doc: dict, device_scope: bool = False) -> None:
-    """校验基础配置；不合法时抛 ValueError（中文提示）。"""
+    """校验产物配置；不合法时抛 ValueError（中文提示）。"""
     for key in doc:
         if key in PROTECTED_KEYS:
-            raise ValueError(f"基础配置不能包含“{key}”：{PROTECTED_KEYS[key]}")
+            raise ValueError(f"产物配置不能包含“{key}”：{PROTECTED_KEYS[key]}")
         if device_scope and key in DEVICE_FORBIDDEN_KEYS:
             raise ValueError(DEVICE_FORBIDDEN_KEYS[key])
         if not isinstance(key, str) or not key.strip():
-            raise ValueError("基础配置的键名非法")
+            raise ValueError("产物配置的键名非法")
     if "mode" in doc and doc["mode"] not in MODE_VALUES:
         raise ValueError(f"mode 仅支持：{'、'.join(MODE_VALUES)}")
     if "log-level" in doc and doc["log-level"] not in LOG_LEVELS:

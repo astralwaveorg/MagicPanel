@@ -36,6 +36,21 @@ python3 scripts/docs_lookup.py read https://wiki.metacubex.one/config/inbound/po
 
 缓存位于 `.cache/official-docs/`，临时与缓存文件被 Git 忽略；导航、索引、查阅工具属于应提交的维护资源。
 
+## 依赖更新
+
+`.github/dependabot.yml` 每周一自动提 PR：
+
+| 生态 | 范围 | 策略 |
+| --- | --- | --- |
+| npm | 仓库根目录 | 只更新 lock 文件，**不跨大版本**（跨大版本会牵动构建链，需人工验证） |
+| pip | `server/` | 只做补丁与小版本更新 |
+| GitHub Actions | — | **不自动升级**，需要时手工改 `.github/workflows/*.yml` |
+
+## 文档站什么时候重建
+
+`.github/workflows/pages.yml` 只在 `docs/**`、`scripts/build_docs_site.py`、`.github/workflows/pages.yml` 变化时触发。
+改根目录 `README.md` 或 `AGENTS.md` **不会**触发文档站重建——这两份文件不在站点里。
+
 ## 家庭网络方案与运行上下文
 
 `docs/network/` 是迁移前的家庭网络方案与审阅记录，属于本机与 NAS 上的历史材料，

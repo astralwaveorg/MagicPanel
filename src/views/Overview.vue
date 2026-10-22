@@ -184,7 +184,7 @@
             <template #default="{ row }">{{ fmtTime(row.at) }}</template>
           </el-table-column>
           <el-table-column prop="actor" label="操作人" width="110" />
-          <el-table-column prop="action" label="操作" min-width="140" />
+          <el-table-column prop="action" label="动作" min-width="140" />
         </el-table>
       </div>
     </div>

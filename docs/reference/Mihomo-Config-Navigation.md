@@ -151,10 +151,12 @@ python3 scripts/docs_lookup.py read https://wiki.metacubex.one/config/dns/ --sec
 
 ## 本仓库对应关系
 
-- `clash/mihomo/config.yaml`、`clash/mihomo/config-android.yaml`、`clash/box4magisk/`：确认实际内核与版本后查 Mihomo 文档；Android／Linux／macOS 的 TUN 和权限条件分别核对。
-- `clash/config.yaml`、`clash/templates/`：先确认订阅转换器与目标客户端；目录名为 Clash 不代表所有字段都通用。
-- `clash/Stash-iOS.yaml`：以 [Stash 导航](Stash-Wiki-Navigation.md)对应官方页为准，不能直接套用 Mihomo 扩展字段。
-- `clash/rules/`：区分规则集合文件、主配置声明及其 `behavior`／`format`，不是所有 YAML 都是完整配置。
+本仓库不存放 Clash／Mihomo 的配置文件与规则集合，样例以官方文档与 `official-example/` 为准。核对时：
+
+- 先确认实际使用的内核与版本，再查 Mihomo 文档；Android／Linux／macOS 的 TUN 和权限条件分别核对。
+- 目录名或文件名带 "Clash" 不代表所有字段都通用；订阅转换器的输出要按目标客户端核对。
+- 涉及 Stash 时以 [Stash 导航](Stash-Wiki-Navigation.md)对应官方页为准，不能直接套用 Mihomo 扩展字段。
+- 规则集合文件与主配置里的 `rule-providers` 声明要分开看，注意各自的 `behavior`／`format`，不是所有 YAML 都是完整配置。
 
 ## 补充官方入口与维护方法
 

@@ -14,7 +14,7 @@
     />
     <el-table :data="items" size="small" max-height="320">
       <el-table-column prop="name" label="名称" min-width="120" />
-      <el-table-column prop="reason" label="未处理原因" min-width="280" />
+      <el-table-column prop="reason" label="未处理原因" min-width="240" />
     </el-table>
     <template #footer>
       <el-button type="primary" @click="$emit('update:visible', false)">知道了</el-button>

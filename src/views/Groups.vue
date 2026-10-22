@@ -27,7 +27,7 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
@@ -49,10 +49,10 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="隐藏" width="70">
+          <el-table-column label="隐藏" width="80">
             <template #default="{ row }">{{ row.hidden ? '隐藏' : '显示' }}</template>
           </el-table-column>
-          <el-table-column label="包含策略" min-width="380">
+          <el-table-column label="包含策略" min-width="240">
             <template #default="{ row }">{{ row.proxies.join('、') || '—' }}</template>
           </el-table-column>
           <el-table-column label="节点来源" min-width="140">
@@ -66,10 +66,12 @@
               {{ localNodeNames(row.local_nodes) || '—' }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="150">
+          <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              <div class="op-grid">
+                <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -619,23 +621,3 @@ async function forceBatchDelete(ids) {
 }
 </script>
 
-<style scoped>
-.order-cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-}
-.drag-handle {
-  cursor: grab;
-  color: var(--mp-muted);
-  font-size: 15px;
-  line-height: 1;
-  padding: 4px 3px;
-  margin-right: 2px;
-  user-select: none;
-  touch-action: none;
-}
-.drag-handle:active { cursor: grabbing; }
-.order-cell .el-button { margin: 0; padding: 4px 2px; }
-</style>

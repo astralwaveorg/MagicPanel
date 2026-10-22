@@ -96,7 +96,7 @@
     </div>
 
     <div class="mp-card">
-      <h3>运行记录（最新10次）</h3>
+      <h3>运行记录（最新 20 次）</h3>
       <EmptyState v-if="!runs.length" reason="还没有运行记录。" />
       <div v-else class="mp-table-wrap">
         <el-table :data="runs" size="small">
@@ -114,7 +114,7 @@
           <el-table-column label="操作人" width="110">
             <template #default="{ row }">{{ row.summary?.actor || '—' }}</template>
           </el-table-column>
-          <el-table-column label="结果" min-width="380">
+          <el-table-column label="结果" min-width="300" show-overflow-tooltip>
             <template #default="{ row }">{{ resultText(row.summary) }}</template>
           </el-table-column>
         </el-table>
@@ -122,7 +122,7 @@
     </div>
 
     <div class="mp-card">
-      <h3>最近自动发布（最新10次）</h3>
+      <h3>最近自动发布（最新 20 次）</h3>
       <EmptyState v-if="!releases.length" reason="还没有自动发布记录。" />
       <div v-else class="mp-table-wrap">
         <el-table :data="releases" size="small">

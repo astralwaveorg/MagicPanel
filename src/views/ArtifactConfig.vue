@@ -83,28 +83,32 @@
             <strong>引擎默认配置是所有客户端的基础</strong>：修改将影响该引擎下的全部客户端，
             并被下层引擎平台配置与设备独立配置继承。保存时仅记录改动项，支持随时「恢复默认」。
           </el-alert>
-          <el-alert v-else-if="state && !state.overlay" type="info" :closable="false" show-icon
+          <el-alert v-else-if="!changedCount" type="info" :closable="false" show-icon
                     style="margin-bottom:12px">
             当前层级暂无改动，完全继承上层。保存时仅记录改动项。
           </el-alert>
           <el-alert v-else type="success" :closable="false" show-icon
                     style="margin-bottom:12px">
-            当前层级已改动 {{ Object.keys(state.overlay || {}).length }} 个键，其余继承上层。
+            当前层级已改动 {{ changedCount }} 个键（蓝色为新增，橙色为覆盖），其余继承上层。
           </el-alert>
 
-          <!-- 生效配置：可点击编辑 -->
-          <h3 class="mp-section-title">生效配置</h3>
+          <!-- 生效配置：可点击编辑；本层改动过的键用颜色标出 -->
           <div class="mp-effective-toolbar">
             <el-button v-if="!readonly" size="small" @click="openAddParam" type="primary">新增参数</el-button>
             <span class="mp-toolbar-hint">
               点击「值」即可编辑。修改仅对当前层级生效，保存时仅记录改动项。
             </span>
+            <span class="mp-legend">
+              <span class="mp-legend-item is-added">本层新增</span>
+              <span class="mp-legend-item is-overridden">本层覆盖</span>
+            </span>
           </div>
           <!-- 窄屏：表格会把"值"挤到屏幕外，改成卡片列表（键在上、值在下） -->
           <div v-if="isMobile" class="mp-effective-list">
-            <div v-for="row in effectiveRows" :key="row.path" class="mp-effective-item">
+            <div v-for="row in effectiveRows" :key="row.path" class="mp-effective-item"
+                 :class="changeClass(row)">
               <div class="mp-effective-item-head">
-                <span class="mono mp-effective-key">{{ row.path }}</span>
+                <span class="mono mp-effective-key" :class="changeClass(row)">{{ row.path }}</span>
                 <el-tag size="small" :type="row.source === layerLabel ? 'primary' : 'info'"
                         effect="plain">{{ row.source }}</el-tag>
               </div>
@@ -127,16 +131,16 @@
           </div>
 
           <el-table v-else :data="effectiveRows" size="small" class="mp-effective-table"
-                    row-key="path">
+                    row-key="path" :row-class-name="rowClass">
             <el-table-column label="键" min-width="210">
               <template #default="{ row }">
-                <span class="mono mp-effective-key"
+                <span class="mono mp-effective-key" :class="changeClass(row)"
                       :style="{ paddingLeft: (row.depth * 16) + 'px' }">
                   <span v-if="row.depth" class="mp-effective-branch">└</span>{{ row.key }}
                 </span>
               </template>
             </el-table-column>
-            <el-table-column label="值" min-width="320">
+            <el-table-column label="值" min-width="260">
               <template #default="{ row }">
                 <template v-if="editingPath === row.path">
                   <el-input v-if="row.simple" v-model="editText" size="small" class="mono"
@@ -165,22 +169,6 @@
               </template>
             </el-table-column>
           </el-table>
-
-          <!-- 当前层级改动：这一层改了哪些键 -->
-          <template v-if="!readonly">
-            <h3 class="mp-section-title">当前层级改动</h3>
-            <div v-if="!overlayRows.length" class="mp-form-hint">
-              当前层级暂无改动，全部继承上层配置。
-            </div>
-            <div v-else class="mp-overlay-list">
-              <div v-for="row in overlayRows" :key="row.path" class="mp-overlay-item">
-                <span class="mono mp-effective-key"
-                      :style="{ paddingLeft: (row.depth * 16) + 'px' }">{{ row.path }}</span>
-                <span class="mono mp-overlay-value">{{ row.display }}</span>
-                <el-button size="small" text @click="revertKey(row)" type="warning">恢复继承</el-button>
-              </div>
-            </div>
-          </template>
 
           <!-- 当前层级编辑 -->
           <template v-if="!readonly">
@@ -430,32 +418,54 @@ function flattenDoc(obj, prefix = '', depth = 0, out = []) {
   return out
 }
 
+// 基线：上层生效值（引擎默认配置层则是程序内置的默认值）。
+// 本层保存的就是"相对基线的差异"，所以拿它对比就能看出哪些键是本层动过的。
+const baseline = computed(() => state.value?.inherited || {})
+
 const effectiveRows = computed(() => {
-  const eff = state.value?.effective || {}
   const leafSrc = state.value?.leaf_sources || {}
   const topSrc = state.value?.sources || {}
-  return flattenDoc(eff).map((row) => ({
-    ...row,
-    simple: row.value === null || typeof row.value !== 'object',
-    display: row.isDict ? `{ ${Object.keys(row.value).length} 项 }` : formatValue(row.value),
-    source: leafSrc[row.path] || topSrc[row.key] || '引擎默认配置',
-    overridden: isOverridden(row.path),
-  }))
+  const base = baseline.value
+  // 以编辑缓冲区为准：改完立刻能看到，不用等保存
+  const rows = flattenDoc(doc)
+  const seen = new Set(rows.map((r) => r.path))
+  // 被删掉的键仍然要显示：它已经回到基线值，不该凭空消失
+  for (const r of flattenDoc(base)) {
+    if (!seen.has(r.path)) rows.push({ ...r, restored: true })
+  }
+  return rows.map((row) => {
+    const changed = isOverridden(row.path)
+    return {
+      ...row,
+      simple: row.value === null || typeof row.value !== 'object',
+      display: row.isDict ? `{ ${Object.keys(row.value).length} 项 }` : formatValue(row.value),
+      source: leafSrc[row.path] || topSrc[row.key] || '引擎默认配置',
+      overridden: changed,
+      // 本层新增（基线里没有这个键）/ 本层覆盖（基线里有但值不同）
+      change: changed && !row.isDict
+        ? (getPath(base, row.path) === undefined ? 'added' : 'overridden')
+        : '',
+    }
+  })
 })
 
-// 当前层级覆盖：这一层实际改掉的键（存下来的差异）
-const overlayRows = computed(() => {
-  const ov = state.value?.overlay || {}
-  return flattenDoc(ov).map((row) => ({
-    ...row,
-    display: row.isDict ? '{ … }' : formatValue(row.value),
-  }))
-})
+const changedCount = computed(() => effectiveRows.value.filter((r) => r.change).length)
+
+// 行底色 + 文字颜色：一眼看出哪些是本层动过的
+function changeClass(row) {
+  if (row.change === 'added') return 'is-added'
+  if (row.change === 'overridden') return 'is-overridden'
+  return ''
+}
+
+function rowClass({ row }) {
+  return row.change ? `mp-row-${row.change}` : ''
+}
 
 function isOverridden(path) {
   const cur = getPath(doc, path)
   if (cur === undefined) return false
-  const inherited = getPath(state.value?.inherited || {}, path)
+  const inherited = getPath(baseline.value, path)
   return JSON.stringify(cur) !== JSON.stringify(inherited)
 }
 
@@ -621,7 +631,7 @@ function toYaml(obj) {
 function parseYaml(text) {
   const data = yamlLoad(text)
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('基础配置必须是键值映射')
+    throw new Error('产物配置必须是键值映射')
   }
   return data
 }
@@ -773,7 +783,7 @@ async function apply() {
       method: 'POST',
       body: {
         engine: s.engine, platform: s.platform, device_id: s.device_id,
-        content: raw.value, env: env.value, note: '更新基础配置',
+        content: raw.value, env: env.value, note: '更新产物配置',
       },
     })
     ElMessage.success(`已构建 #${r.build_id} 并发布到${ENV_LABELS[env.value] || env.value}`)
@@ -955,23 +965,42 @@ onMounted(async () => {
   gap: 6px;
   margin-top: 4px;
 }
-.mp-overlay-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.mp-overlay-item {
-  display: flex;
+
+/* 本层改动过的键：蓝色=新增，橙色=覆盖 */
+.mp-legend {
+  display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 8px;
-  border: 1px solid var(--el-border-color-lighter, #eee);
-  border-radius: 4px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--mp-text-secondary);
 }
-.mp-overlay-value {
-  flex: 1;
-  min-width: 0;
-  word-break: break-all;
-  color: var(--mp-text-dim, #888);
+.mp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
+.mp-legend-item::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.mp-legend-item.is-added::before { background: var(--el-color-primary); }
+.mp-legend-item.is-overridden::before { background: var(--el-color-warning); }
+
+.mp-effective-key.is-added { color: var(--el-color-primary); }
+.mp-effective-key.is-overridden { color: var(--el-color-warning); }
+.mp-effective-item.is-added {
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+}
+.mp-effective-item.is-overridden {
+  border-color: var(--el-color-warning-light-5);
+  background: var(--el-color-warning-light-9);
+}
+
+/* 表格行底色：改动过的行淡染一下，扫一眼就能看到 */
+.mp-effective-table :deep(.mp-row-added) { background: var(--el-color-primary-light-9); }
+.mp-effective-table :deep(.mp-row-overridden) { background: var(--el-color-warning-light-9); }
 </style>

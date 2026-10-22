@@ -169,7 +169,18 @@ html, body, #app {
 }
 /* 顺序单元格：拖拽手柄 + ↑↓ */
 .order-cell { display: flex; align-items: center; justify-content: center; gap: 0; }
-.order-cell .el-button { margin: 0; }
+.order-cell .el-button { margin: 0; padding: 4px 2px; }
+.drag-handle {
+  cursor: grab;
+  color: var(--mp-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 3px;
+  margin-right: 2px;
+  user-select: none;
+  touch-action: none;
+}
+.drag-handle:active { cursor: grabbing; }
 .mp-drag-ghost { opacity: 0.35; }
 .mp-drag-chosen { background: var(--mp-surface-2); }
 .mp-nowrap { white-space: nowrap; }
@@ -178,6 +189,24 @@ html, body, #app {
 .mp-preset-row .el-button { margin: 0; }
 
 .mp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* 操作列：一行最多两个按钮，铺满整格；落单的最后一个横跨整行 */
+.op-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.op-grid .el-button {
+  width: 100%;
+  margin: 0;
+  padding: 5px 8px;
+}
+.op-grid .el-button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+/* 表格密度：紧凑档再收紧一点，行高约 30px */
+.el-table--small { font-size: 13px; }
+.el-table--small th.el-table__cell { font-size: 12.5px; padding: 6px 0; }
+.el-table--small td.el-table__cell { padding: 6px 0; }
 
 /* 状态点：与文字共同编码状态 */
 .mp-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -299,9 +328,15 @@ html, body, #app {
   .el-table { font-size: 13px; }
   .el-table th.el-table__cell { font-size: 12px; padding: 8px 0; }
   .el-table td.el-table__cell { padding: 8px 0; }
+  .el-table--small th.el-table__cell { padding: 5px 0; }
+  .el-table--small td.el-table__cell { padding: 5px 0; }
   .el-table .cell { line-height: 1.45; }
   .el-table__body tr > td:first-child { padding-left: 10px; }
   .mp-table-wrap { margin: 0 -12px; padding: 0 12px; }
+  /* 表格里的按钮保持紧凑，别把行撑高 */
+  .el-table .el-button--small { min-height: 30px; padding: 4px 7px; }
+  .op-grid { gap: 4px; }
+  .op-grid .el-button { padding: 4px 6px; font-size: 11px; }
 
   /* 弹窗：接近全屏，底部按钮并排铺满 */
   .el-dialog { width: 94vw !important; margin-top: 5vh !important; max-height: 90vh; }

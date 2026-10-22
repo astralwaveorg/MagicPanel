@@ -75,12 +75,12 @@
       </div>
       <el-table v-if="webdavFiles.length" :data="webdavFiles" size="small"
                 style="margin-top:12px">
-        <el-table-column prop="name" label="远端文件" min-width="220" class="mono" />
+        <el-table-column prop="name" label="远端文件" min-width="200" class="mono" />
         <el-table-column label="大小" width="110" align="right">
           <template #default="{ row }">{{ (row.size / 1024 / 1024).toFixed(1) }} MB</template>
         </el-table-column>
         <el-table-column prop="modified" label="修改时间" min-width="180" />
-        <el-table-column label="操作" width="120" align="right">
+        <el-table-column label="操作" width="100" align="right">
           <template #default="{ row }">
             <el-button v-if="row.name.endsWith('.db')" size="small" @click="restoreWebdav(row)" type="warning" plain>恢复</el-button>
           </template>
@@ -173,7 +173,7 @@
       </p>
       <div class="mp-table-wrap">
         <el-table :data="users" size="small">
-          <el-table-column label="头像" width="60" align="center">
+          <el-table-column label="头像" width="72" align="center">
             <template #default="{ row }"><UserAvatar :user="row" :size="26" /></template>
           </el-table-column>
           <el-table-column prop="username" label="用户名" min-width="120" />

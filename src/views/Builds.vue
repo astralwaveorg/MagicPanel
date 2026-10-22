@@ -67,7 +67,7 @@
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="构建" width="90">
@@ -93,10 +93,10 @@
           <el-table-column v-if="!isMobile" label="策略摘要" min-width="135">
             <template #default="{ row }"><span class="mono">{{ shortSha(row.policy_sha) }}</span></template>
           </el-table-column>
-          <el-table-column prop="note" label="备注" :min-width="isMobile ? 160 : 240">
+          <el-table-column prop="note" label="备注" :min-width="isMobile ? 160 : 200">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" :width="isMobile ? 150 : 240" fixed="right">
+          <el-table-column label="操作" :width="isMobile ? 150 : 190" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="openDetail(row)" type="info" plain>详情</el-button>
@@ -495,21 +495,6 @@ async function removeSelected() {
   .mp-artifact-actions .el-button { flex: 1 1 0; min-width: 0; }
 }
 
-.op-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.op-grid .el-button {
-  margin: 0;
-  padding-left: 4px;
-  padding-right: 4px;
-}
-.op-grid .el-button + .el-button { margin-left: 0; }
-@media (max-width: 640px) {
-  .op-grid { gap: 4px; }
-  .op-grid .el-button { font-size: 12px; padding-left: 6px; padding-right: 6px; }
-}
 .release-list {
   display: flex;
   flex-direction: column;

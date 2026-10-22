@@ -61,6 +61,7 @@ docker compose ps          # STATUS 应为 healthy
 ### 裸机运行
 
 ```bash
+npm install && npm run build                  # 前端产物要编进包里
 ./scripts/package.sh                          # 产出 dist/magicpanel-<时间戳>.tar.gz
 tar xzf dist/magicpanel-*.tar.gz && cd magicpanel
 ./run.sh                                      # 自动建虚拟环境装依赖，监听 127.0.0.1:8000
@@ -82,10 +83,10 @@ npm run dev        # 前端 127.0.0.1:7100，API 127.0.0.1:8000，已代理 /api
 
 设备拉到的 `config.yaml` 由四层合并而成，优先级由低到高：
 
-1. **基础配置** —— 产物配置页维护的三层：引擎默认配置 → 引擎平台配置 → 设备独立配置
+1. **产物配置** —— 引擎默认配置 → 引擎平台配置 → 设备独立配置，三层各自只存改动过的部分
 2. **结构化内容** —— 节点、策略组、分流规则，由各自页面维护，任何配置层都不许覆盖
 3. **功能模块** —— 启用的 YAML 片段，与引擎匹配后深度合并（字典递归、列表追加）
-4. **引擎平台扩展** —— 单个引擎平台自己的片段，最后应用
+4. **平台扩展** —— 单个引擎平台自己的片段，最后应用
 
 订阅地址带令牌，令牌可随时轮换；旧地址立即失效，客户端换新地址即可。
 
@@ -119,11 +120,13 @@ npm run build                                            # 前端产物（输出
 ./scripts/release.sh [版本]    # 打包 → 打标签推送 → 配了 GITHUB_TOKEN 时自动建 Release
 ```
 
+`release.sh` 要求工作区是干净的（改动先提交），并会自己跑一遍后端测试。
+
 代码改完只是让面板跑新代码，**订阅内容要生效还得在「构建发布」里发一版**。
 
 ## 安卓客户端
 
-管理端的 Android 原壳（Kotlin + WebView），源码在 `android/`，产物 `dist/MagicPanel-1.0.2.apk`。
+管理端的 Android 原壳（Kotlin + WebView），源码在 `android/`，产物 `dist/MagicPanel-1.0.2.apk`（`dist/` 不入库，需自行构建）。
 
 - 回到门户首页：点侧边栏的 logo 标题
 - 刷新走工具栏按钮，不用下拉手势

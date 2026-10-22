@@ -12,7 +12,7 @@ export const SNIPPET_PRESETS = [
     name: 'IPv6 支持',
     category: 'general',
     engine: 'all',
-    note: '允许 IPv6 解析与连接；基础配置里写的是 ipv6: false，本模块优先级更高。',
+    note: '允许 IPv6 解析与连接；产物配置里写的是 ipv6: false，本模块优先级更高。',
     content: `ipv6: true
 `,
   },

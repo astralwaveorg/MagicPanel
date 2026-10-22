@@ -58,7 +58,7 @@ def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
 
 
 def _device_overlay(conn, device) -> str:
-    """取该设备的专属基础配置（设备专属作用域），没有则为空。"""
+    """取该设备的独立配置（设备作用域），没有则为空。"""
     target = db.one(conn, "SELECT engine, platform FROM targets WHERE id=?",
                     (device["target_id"],))
     if not target:

@@ -48,12 +48,12 @@ def _check_target(body: TargetBody) -> None:
         try:
             overlay = yaml.safe_load(body.extra_yaml)
         except yaml.YAMLError as exc:
-            raise HTTPException(400, f"目标扩展 YAML 解析失败：{exc}")
+            raise HTTPException(400, f"平台扩展 YAML 解析失败：{exc}")
         if overlay is not None and not isinstance(overlay, dict):
-            raise HTTPException(400, "目标扩展必须是 YAML 映射（键值结构）")
+            raise HTTPException(400, "平台扩展必须是 YAML 映射（键值结构）")
         for key, reason in base_config_service.PROTECTED_KEYS.items():
             if overlay and key in overlay:
-                raise HTTPException(400, f"目标扩展不能包含“{key}”：{reason}")
+                raise HTTPException(400, f"平台扩展不能包含“{key}”：{reason}")
 
 
 def _target_public(row) -> dict:
@@ -511,7 +511,7 @@ def batch_delete_devices(body: BatchDeviceIds, user=CurrentUser):
                 missing.append(did)
                 continue
             conn.execute("DELETE FROM devices WHERE id=?", (did,))
-            # 设备专属基础配置一并清理，否则会成为孤儿行进入构建快照
+            # 设备独立配置一并清理，否则会成为孤儿行进入构建快照
             conn.execute("DELETE FROM base_configs WHERE device_id=?", (did,))
             deleted.append(did)
             security.audit(conn, user["username"], "批量删除设备（令牌同时失效）",
@@ -555,7 +555,7 @@ def delete_device(did: int, user=CurrentUser):
     with db.tx() as conn:
         row = _get_device(conn, did)
         conn.execute("DELETE FROM devices WHERE id=?", (did,))
-        # 设备专属基础配置一并清理，否则会成为孤儿行进入构建快照
+        # 设备独立配置一并清理，否则会成为孤儿行进入构建快照
         conn.execute("DELETE FROM base_configs WHERE device_id=?", (did,))
         security.audit(conn, user["username"], "删除设备（令牌同时失效）", "device",
                        did, {"name": row["name"]})

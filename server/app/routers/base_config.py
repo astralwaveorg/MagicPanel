@@ -1,4 +1,4 @@
-"""产物基础配置：引擎默认配置 → 引擎平台配置 → 设备独立配置 的多级联动。
+"""产物配置：引擎默认配置 → 引擎平台配置 → 设备独立配置 的多级联动。
 
 层级语义（后者覆盖前者）：
 ① 引擎默认配置：引擎内置的能力基线，随程序发布，可直接改；
@@ -137,7 +137,7 @@ def _save_scope(conn, engine: str, platform: str, device_id: int,
         "updated_at=excluded.updated_at",
         (engine, key_platform, key_device, text, db.now()))
     label = f"{engine}:{platform or '通用'}:{device_id or 0}"
-    security.audit(conn, operator, "更新基础配置", "base_config", label,
+    security.audit(conn, operator, "更新产物配置", "base_config", label,
                    {"keys": sorted(normalized.keys())})
     return normalized
 
@@ -218,6 +218,20 @@ def list_scopes(user=CurrentUser):
     return {"scopes": scopes}
 
 
+def _baseline(engine: str, plat: str, dev_id: int, layers) -> dict:
+    """本层的比较基线：本层保存的差异是"相对基线"的差异。
+
+    引擎默认配置层没有上层可比，比的是程序内置的默认值；
+    其余两层比的是上层合并后的生效值。
+    """
+    if not plat and not dev_id:
+        return base_config_service.default_doc(engine)
+    if len(layers) > 1:
+        inherited, _ = base_config_service.cascade(layers[:-1])
+        return inherited
+    return {}
+
+
 @router.get("")
 def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 0,
                     user=CurrentUser):
@@ -229,7 +243,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         _, overlay, updated_at = _load_scope(conn, engine, plat, dev_id)
         layer_scopes = _layer_scopes(conn, engine, plat, dev_id)
     layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-    inherited, _ = base_config_service.cascade(layers[:-1]) if len(layers) > 1 else ({}, {})
+    inherited = _baseline(engine, plat, dev_id, layers)
     effective, sources = base_config_service.cascade(layers)
     return {
         "engine": engine,
@@ -260,19 +274,15 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         docs = _all_docs(conn)
         _, _, updated_at = _load_scope(conn, engine, plat, dev_id)
         if body.updated_at and updated_at and body.updated_at != updated_at:
-            raise HTTPException(409, "基础配置已被其他维护者修改，请刷新后再保存")
+            raise HTTPException(409, "产物配置已被其他维护者修改，请刷新后再保存")
         try:
             effective = base_config_service.parse_content(body.content)
             base_config_service.validate_doc(effective, device_scope=bool(dev_id))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-        if not plat and not dev_id:
-            # 引擎默认配置：与"程序默认值"求差异，只把改动过的键存下来
-            inherited = base_config_service.default_doc(engine)
-        else:
-            inherited, _ = (base_config_service.cascade(layers[:-1])
-                            if len(layers) > 1 else ({}, {}))
+        # 引擎默认配置：与"程序默认值"求差异，只把改动过的键存下来
+        inherited = _baseline(engine, plat, dev_id, layers)
         # 设备独立配置层是"个性化"语义：列表存新增项（追加），
         # 其余两层是"这一层的完整配置"语义：列表存整份（替换）。
         lists = (base_config_service.LIST_APPEND if dev_id
@@ -291,6 +301,7 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         "engine": engine,
         "platform": plat,
         "device_id": dev_id,
+        "inherited": _baseline(engine, plat, dev_id, layers),
         "overlay": stored,
         "effective": effective,
         "sources": sources,
@@ -322,6 +333,7 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
                            "base_config", f"{engine}:内置", {})
             return {
                 "ok": True, "engine": engine, "platform": plat, "device_id": dev_id,
+                "inherited": _baseline(engine, plat, dev_id, layers),
                 "overlay": overlay, "effective": effective, "sources": sources,
                 "leaf_sources": base_config_service.leaf_sources(layers),
                 "content": base_config_service.to_yaml(effective),
@@ -349,9 +361,11 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
         "engine": engine,
         "platform": plat,
         "device_id": dev_id,
+        "inherited": _baseline(engine, plat, dev_id, layers),
         "overlay": overlay,
         "effective": effective,
         "sources": sources,
+        "leaf_sources": base_config_service.leaf_sources(layers),
         "content": base_config_service.to_yaml(effective),
         "updated_at": "",
         "is_default": True,
@@ -419,16 +433,18 @@ def apply(body: ApplyBody, user=CurrentUser):
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-        inherited, _ = (base_config_service.cascade(layers[:-1])
-                        if len(layers) > 1 else ({}, {}))
-        overlay = base_config_service.diff_overlay(inherited, effective)
+        # 与「保存」同一条规则：相对基线求差异，设备层列表只存新增项
+        inherited = _baseline(engine, plat, dev_id, layers)
+        lists = (base_config_service.LIST_APPEND if dev_id
+                 else base_config_service.LIST_REPLACE)
+        overlay = base_config_service.diff_overlay(inherited, effective, lists)
         base_config_service.validate_doc(overlay, device_scope=bool(dev_id))
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])
     try:
         build_id, status = builds.create_build(
-            user["username"], note=body.note or "更新基础配置")
+            user["username"], note=body.note or "更新产物配置")
     except builds.BuildError as exc:
         raise HTTPException(400, str(exc))
     if status != "success":
@@ -439,7 +455,7 @@ def apply(body: ApplyBody, user=CurrentUser):
         with db.tx(immediate=True) as conn:
             build = builds._get_build(conn, build_id)
             result = releases.publish_build(
-                conn, build, user["username"], body.note or "更新基础配置",
+                conn, build, user["username"], body.note or "更新产物配置",
                 releases.Env(body.env))
     except releases.ReleaseError as exc:
         raise HTTPException(400, str(exc))
