@@ -1,11 +1,11 @@
 <template>
   <div>
     <h2 class="mp-page-title">自动发布</h2>
-    <p class="mp-page-desc">
-      服务端按各来源的间隔自动抓取上游、按测速间隔自动测速；策略变化时按设定间隔创建构建并发布。
-      发布历史只保留最近 10 条，完整操作记录仍可在审计日志中追溯。
-      “立即手动发布”会忽略到期时间，强制执行一轮抓取、测速和构建检查。
-    </p>
+    <ul class="mp-page-desc mp-desc-list">
+      <li>服务端按各来源的间隔自动抓取上游、按测速间隔自动测速</li>
+      <li>策略变化时按设定间隔创建构建并发布</li>
+      <li>“立即手动发布”会忽略到期时间，强制执行一轮抓取、测速和构建检查</li>
+    </ul>
 
     <div class="mp-card">
       <div class="mp-toolbar" style="margin-bottom:12px">
@@ -54,7 +54,7 @@
             </el-form-item>
           </el-form>
           <p class="mp-form-hint">
-            每个来源的抓取/测速间隔在对应的来源页面配置，支持批量修改。测速需要已安装 Mihomo 核心。
+            每个来源的抓取/测速间隔在对应的来源页面配置，支持批量修改。
           </p>
           <div class="mp-auto-links">
             <el-button size="small" @click="router.push('/admin/sources')">节点来源</el-button>
@@ -96,7 +96,7 @@
     </div>
 
     <div class="mp-card">
-      <h3>最近运行（最多 10 次）</h3>
+      <h3>运行记录（最新10次）</h3>
       <EmptyState v-if="!runs.length" reason="还没有运行记录。" />
       <div v-else class="mp-table-wrap">
         <el-table :data="runs" size="small">
@@ -122,7 +122,7 @@
     </div>
 
     <div class="mp-card">
-      <h3>最近自动发布（最多 10 条）</h3>
+      <h3>最近自动发布（最新10次）</h3>
       <EmptyState v-if="!releases.length" reason="还没有自动发布记录。" />
       <div v-else class="mp-table-wrap">
         <el-table :data="releases" size="small">
@@ -230,7 +230,7 @@ async function load() {
   try {
     const [s, st, rel, runList] = await Promise.all([
       api('/api/v1/settings'), api('/api/v1/automation/status'),
-      api('/api/v1/releases?auto_only=true'), api('/api/v1/automation/runs?limit=10'),
+      api('/api/v1/releases?auto_only=true'), api('/api/v1/automation/runs?limit=20'),
     ])
     applySettings(s)
     status.value = st
@@ -247,7 +247,7 @@ async function refreshStatus() {
     const [st, rel, runList] = await Promise.all([
       api('/api/v1/automation/status'),
       api('/api/v1/releases?auto_only=true'),
-      api('/api/v1/automation/runs?limit=10'),
+      api('/api/v1/automation/runs?limit=20'),
     ])
     status.value = st
     releases.value = rel

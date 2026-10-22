@@ -123,6 +123,10 @@ html, body, #app {
 
 .mp-page-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
 .mp-page-desc { color: var(--mp-text-secondary); font-size: 13px; margin: 0 0 16px; }
+/* 页面说明的列表变体 */
+.mp-desc-list { padding-left: 20px; list-style: disc; }
+.mp-desc-list li { margin-bottom: 4px; }
+.mp-desc-list li:last-child { margin-bottom: 0; }
 
 .mp-card {
   background: var(--mp-surface);

@@ -564,18 +564,18 @@ def test_source_refresh_failure_is_persisted(client, monkeypatch):
 
 
 def test_release_history_retention(client):
-    """发布历史只保留最近 10 条。"""
+    """发布历史只保留最近 20 条。"""
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
     # 每次发布都会写一条历史；状态机不允许把同一个构建重复发布到同一环境，
-    # 所以用多个构建凑够 12 条（每个构建"先测试、后生产"两条）。
-    for i in range(6):
+    # 所以用多个构建凑够 22 条（每个构建"先测试、后生产"两条）。
+    for i in range(11):
         build = client.post("/api/v1/builds", headers=h,
                             json={"note": f"版本{i}"}).json()
         publish_to_prod(client, h, build["id"], reason=f"第{i}版")
     releases = client.get("/api/v1/releases").json()
-    assert len(releases) == 10
+    assert len(releases) == 20
     # 动作是 publish / rollback / offline，不再是 promote
     assert {r["action"] for r in releases} == {"publish"}
     assert {r["env"] for r in releases} == {"testing", "production"}
@@ -584,7 +584,7 @@ def test_release_history_retention(client):
     from app import db
     with db.connect() as conn:
         count = db.one(conn, "SELECT COUNT(*) AS c FROM releases")["c"]
-    assert count == 10
+    assert count == 20
 
 
 def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
