@@ -76,7 +76,9 @@
           <el-table-column label="摘要" min-width="130">
             <template #default="{ row }"><span class="mono mp-nowrap">{{ shortSha(row.sha256) }}</span></template>
           </el-table-column>
-          <el-table-column label="抓取间隔" width="110" align="right" prop="interval" />
+          <el-table-column label="抓取间隔" width="110" align="right">
+            <template #default="{ row }">{{ row.kind === 'inline' ? '—' : row.interval }}</template>
+          </el-table-column>
           <el-table-column label="最近成功" min-width="160">
             <template #default="{ row }"><span class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span></template>
           </el-table-column>
@@ -132,7 +134,7 @@
                     placeholder="payload:&#10;  - example.com" />
         </el-form-item>
         <el-row :gutter="12">
-          <el-col :span="12">
+          <el-col :span="form.kind === 'remote' ? 12 : 24">
             <el-form-item label="格式">
               <el-select v-model="form.format" style="width:100%">
                 <el-option value="yaml" label="yaml" />
@@ -141,7 +143,8 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <!-- 内联内容由本机维护，没有抓取这回事 -->
+          <el-col v-if="form.kind === 'remote'" :span="12">
             <el-form-item label="抓取间隔（秒）">
               <el-input-number v-model="form.interval" :min="600" :max="604800" style="width:100%" />
             </el-form-item>
@@ -149,9 +152,14 @@
         </el-row>
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="客户端更新间隔（秒，0 = 跟随抓取间隔）">
+            <el-form-item :label="form.kind === 'remote'
+              ? '客户端更新间隔（秒，0 = 跟随抓取间隔）'
+              : '客户端更新间隔（秒）'">
               <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
             </el-form-item>
+            <div v-if="form.kind === 'inline'" class="mp-form-hint">
+              内联内容由本机维护：改完保存，构建时即刻生效，客户端按上面的间隔重新拉取。
+            </div>
           </el-col>
         </el-row>
         <el-form-item>

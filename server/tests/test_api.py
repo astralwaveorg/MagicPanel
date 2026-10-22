@@ -52,6 +52,56 @@ def test_scope_all_sentinel_means_everything(client):
     assert "空范围组" not in artifact
 
 
+def test_rules_page_filters(client):
+    """规则分页支持搜索与筛选，并给出未筛选时的总数。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    # 造几条特征各异的规则
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "DOMAIN-SUFFIX", "value": "shop.example.com",
+        "target": "DIRECT", "note": "购物站点"})
+    assert r.status_code == 201, r.text
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "IP-CIDR", "value": "10.0.0.0/8", "target": "DIRECT",
+        "enabled": False, "targets": ["stash-ios"], "devices": ["*"]})
+    assert r.status_code == 201, r.text
+
+    def page(qs=""):
+        resp = client.get(f"/api/v1/rules/page?limit=50{qs}", headers=h)
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    all_rows = page()
+    assert all_rows["total"] == all_rows["total_all"] >= 4
+
+    # 关键词：匹配值 / 目标 / 备注 / 类型
+    assert [x["value"] for x in page("&keyword=shop")["items"]] == ["shop.example.com"]
+    assert [x["value"] for x in page("&keyword=购物")["items"]] == ["shop.example.com"]
+    assert [x["value"] for x in page("&keyword=IP-CIDR")["items"]] == ["10.0.0.0/8"]
+
+    # 类型 / 目标 / 启用状态
+    assert all(x["type"] == "IP-CIDR" for x in page("&rtype=IP-CIDR")["items"])
+    assert all(x["target"] == "DIRECT" for x in page("&target=DIRECT")["items"])
+    off = page("&enabled=0")
+    assert [x["value"] for x in off["items"]] == ["10.0.0.0/8"]
+    assert off["total_all"] == all_rows["total_all"]
+
+    # 适用范围
+    glob = page("&scope=global")
+    assert all(x["targets"] == ["*"] and x["devices"] == ["*"] for x in glob["items"])
+    plat = page("&scope=platform")
+    assert [x["value"] for x in plat["items"]] == ["10.0.0.0/8"]
+    dev = page("&scope=device")
+    assert all(x["devices"] != ["*"] for x in dev["items"])
+
+    # 条件叠加
+    both = page("&keyword=10.0&scope=platform")
+    assert [x["value"] for x in both["items"]] == ["10.0.0.0/8"]
+    assert page("&keyword=不存在的关键词")["total"] == 0
+    assert page("&keyword=不存在的关键词")["total_all"] == all_rows["total_all"]
+
+
 def make_policy(client, csrf):
     """造一套最小可用策略：来源 + 策略组 + 兜底规则 + 目标。"""
     h = auth_headers(csrf)

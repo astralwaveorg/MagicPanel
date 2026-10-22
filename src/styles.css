@@ -346,3 +346,14 @@ html, body, #app {
   color: var(--mp-text-secondary);
   margin-top: 2px;
 }
+
+/* 规则页筛选条：搜索框 + 四个筛选下拉 + 计数 */
+.mp-filter-bar { margin-bottom: 12px; }
+.mp-filter-search { width: 280px; }
+.mp-filter-select { width: 160px; }
+@media (max-width: 767px) {
+  /* 窄屏一行放不下四个下拉：两个一行，别把表格挤到屏幕外 */
+  .mp-filter-search { width: 100%; flex: 1 1 100%; }
+  .mp-filter-select { width: auto; flex: 1 1 calc(50% - 4px); }
+  .mp-filter-bar .mp-toolbar-hint { width: 100%; }
+}

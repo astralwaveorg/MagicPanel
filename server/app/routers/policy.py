@@ -639,15 +639,45 @@ def _check_group_refs(conn, body: GroupBody) -> None:
 
 @router.get("/rules/page")
 def list_rules_paged(limit: int = 50, offset: int = 0, keyword: str = "",
-                     user=CurrentUser):
-    """分流规则分页列表（keyword 匹配匹配值或目标）。"""
+                     rtype: str = "", target: str = "", enabled: str = "",
+                     scope: str = "", user=CurrentUser):
+    """分流规则分页列表。
+
+    keyword 匹配匹配值、目标、备注或类型；rtype/target/enabled 精确匹配；
+    scope 限定适用范围：
+      all      全部规则
+      global   适用于所有平台与设备（targets 与 devices 都是「包含所有」）
+      platform 限定了引擎平台
+      device   限定了设备
+    """
     with db.connect() as conn:
-        where, args = "", []
+        where, args = [], []
         if keyword:
-            where = "WHERE value LIKE ? OR target LIKE ?"
-            args = [f"%{keyword}%", f"%{keyword}%"]
-        data = db.paged(conn, "rules", where, args, "sort, id", limit, offset)
-    data["items"] = [_rule_public(r) for r in data["items"]]
+            like = f"%{keyword}%"
+            where.append("(value LIKE ? OR target LIKE ? OR note LIKE ? OR type LIKE ?)")
+            args += [like, like, like, like]
+        if rtype:
+            where.append("type = ?")
+            args.append(rtype)
+        if target:
+            where.append("target = ?")
+            args.append(target)
+        if enabled in ("0", "1"):
+            where.append("enabled = ?")
+            args.append(1 if enabled == "1" else 0)
+        if scope == "global":
+            where.append("COALESCE(json_extract(targets, '$[0]'), '') = '*' "
+                         "AND COALESCE(json_extract(devices, '$[0]'), '') = '*'")
+        elif scope == "platform":
+            where.append("COALESCE(json_extract(targets, '$[0]'), '') != '*'")
+        elif scope == "device":
+            where.append("COALESCE(json_extract(devices, '$[0]'), '') != '*'")
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        data = db.paged(conn, "rules", clause, args, "sort, id", limit, offset)
+        data["items"] = [_rule_public(r) for r in data["items"]]
+        # 一并给出未筛选时的总数，界面好写"筛选出 N 条（共 M 条）"
+        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM rules")["c"]
+    data["total_all"] = total_all
     return data
 
 

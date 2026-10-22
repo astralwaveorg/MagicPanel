@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">分流规则</h2>
     <p class="mp-page-desc">
-      规则按声明顺序自上而下首次匹配，最后一条须为 MATCH 兜底。按住左侧手柄拖动排序；分页时仅重排当前页，调整后于下一次构建生效。
+      规则按声明顺序自上而下首次匹配，最后一条须为 MATCH 兜底。按住左侧手柄拖动排序；分页时仅重排当前页，调整后于下一次构建生效。筛选后规则在列表里并不相邻，此时暂停排序以免打乱整体顺序。
     </p>
 
     <div class="mp-toolbar">
@@ -19,13 +19,49 @@
       <el-button @click="openEdit()" type="primary">添加规则</el-button>
     </div>
 
+    <div class="mp-toolbar mp-filter-bar">
+      <div class="left">
+        <el-input
+          v-model="query"
+          class="mp-filter-search"
+          placeholder="搜索匹配值 / 目标 / 备注 / 类型"
+          clearable
+          :prefix-icon="Search"
+          @input="onQueryInput"
+        />
+        <el-select v-model="filters.rtype" class="mp-filter-select" placeholder="全部类型"
+                   clearable @change="applyFilter">
+          <el-option v-for="t in ruleTypes" :key="t" :value="t" :label="t" />
+        </el-select>
+        <el-select v-model="filters.target" class="mp-filter-select" placeholder="全部目标"
+                   clearable filterable @change="applyFilter">
+          <el-option v-for="g in groups" :key="g.name" :value="g.name" :label="g.name" />
+          <el-option value="DIRECT" label="DIRECT（直连）" />
+          <el-option value="REJECT" label="REJECT（拒绝）" />
+        </el-select>
+        <el-select v-model="filters.enabled" class="mp-filter-select" placeholder="全部状态"
+                   clearable @change="applyFilter">
+          <el-option value="1" label="启用" />
+          <el-option value="0" label="停用" />
+        </el-select>
+        <el-select v-model="filters.scope" class="mp-filter-select" placeholder="全部适用范围"
+                   clearable @change="applyFilter">
+          <el-option value="global" label="适用于所有平台与设备" />
+          <el-option value="platform" label="限定了引擎平台" />
+          <el-option value="device" label="限定了设备" />
+        </el-select>
+        <el-button v-if="hasFilter" link @click="clearFilters">清空筛选</el-button>
+      </div>
+      <span class="mp-toolbar-hint">{{ countText }}</span>
+    </div>
+
     <ErrorState v-if="error" :error="error" @retry="load" />
 
 
     <EmptyState
       v-if="!rows.length"
-      reason="还没有分流规则。"
-      next="点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。"
+      :reason="hasFilter ? '没有符合筛选条件的规则。' : '还没有分流规则。'"
+      :next="hasFilter ? '换个关键词，或点上方“清空筛选”看全部规则。' : '点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。'"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -35,9 +71,9 @@
           <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
-                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
-                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
-                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
+                <span v-if="!hasFilter" class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+                <el-button text size="small" :disabled="hasFilter || $index === 0" @click="move($index, -1)">↑</el-button>
+                <el-button text size="small" :disabled="hasFilter || $index === rows.length - 1" @click="move($index, 1)">↓</el-button>
               </div>
             </template>
           </el-table-column>
@@ -207,6 +243,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { ALL_SCOPE, normalizeScope, collapseIfComplete } from '../scopeOptions'
+import { Search } from '@element-plus/icons-vue'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -233,8 +270,39 @@ const batch = reactive({
   useNoResolve: false, no_resolve: false,
 })
 const total = ref(0)
+const totalAll = ref(0)
 const page = ref(1)
 const limit = ref(50)
+
+// 搜索与筛选：规则条数多，定位靠翻页太慢
+const query = ref('')
+const filters = reactive({ rtype: '', target: '', enabled: '', scope: '' })
+const hasFilter = computed(() => !!query.value.trim() ||
+  !!(filters.rtype || filters.target || filters.enabled || filters.scope))
+const countText = computed(() => {
+  if (!hasFilter.value) return `共 ${totalAll.value} 条`
+  return `筛选出 ${total.value} 条，共 ${totalAll.value} 条；筛选状态下不能拖动排序`
+})
+
+let queryTimer = null
+function onQueryInput() {
+  clearTimeout(queryTimer)
+  queryTimer = setTimeout(applyFilter, 300)
+}
+
+function applyFilter() {
+  page.value = 1
+  load()
+}
+
+function clearFilters() {
+  query.value = ''
+  filters.rtype = ''
+  filters.target = ''
+  filters.enabled = ''
+  filters.scope = ''
+  applyFilter()
+}
 const groups = ref([])
 const ruleProviders = ref([])
 const targets = ref([])
@@ -284,13 +352,24 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
+    const params = new URLSearchParams({
+      limit: String(limit.value),
+      offset: String((page.value - 1) * limit.value),
+    })
+    const kw = query.value.trim()
+    if (kw) params.set('keyword', kw)
+    if (filters.rtype) params.set('rtype', filters.rtype)
+    if (filters.target) params.set('target', filters.target)
+    if (filters.enabled) params.set('enabled', filters.enabled)
+    if (filters.scope) params.set('scope', filters.scope)
     const [paged, gs, rps, targetList, deviceList] = await Promise.all([
-      api(`/api/v1/rules/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api(`/api/v1/rules/page?${params.toString()}`),
       api('/api/v1/groups'), api('/api/v1/rule-providers'),
       api('/api/v1/targets'), api('/api/v1/devices'),
     ])
     rows.value = paged.items
     total.value = paged.total
+    totalAll.value = paged.total_all ?? paged.total
     groups.value = gs
     ruleProviders.value = rps.filter((p) => p.enabled)
     targets.value = targetList
