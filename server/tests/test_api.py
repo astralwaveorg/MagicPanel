@@ -4,7 +4,6 @@ import urllib.parse
 import pytest
 
 from conftest import auth_headers, setup_admin
-from app import db
 
 
 def test_scope_all_sentinel_means_everything(client):

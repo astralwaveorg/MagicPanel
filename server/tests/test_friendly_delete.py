@@ -14,8 +14,6 @@ import pytest
 
 from conftest import auth_headers, setup_admin
 
-from app import db
-
 
 def _source(client, h, name="机场A"):
     r = client.post("/api/v1/sources", headers=h, json={
@@ -254,6 +252,10 @@ def test_force_delete_leaves_no_dangling_references(client):
     client.delete(f"/api/v1/sources/{src['id']}?force=1", headers=h)
     client.delete(f"/api/v1/local-nodes/{node['id']}?force=1", headers=h)
     client.delete(f"/api/v1/rule-providers/{rp['id']}?force=1", headers=h)
+
+    # 必须在用例内部导入 app.db：模块级导入拿到的是采集阶段的旧实例，
+    # 里面的数据目录指向仓库的 data/，不是本用例的临时目录
+    from app import db
 
     with db.connect() as conn:
         # 规则来源没了，RULE-SET 规则也不该残留
