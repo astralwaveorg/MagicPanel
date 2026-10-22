@@ -43,10 +43,18 @@
           <el-table-column prop="type" label="类型" width="90" />
           <el-table-column label="适用平台" min-width="150">
             <template #default="{ row }">
-              <span>{{ scopeText(row.targets) }}</span>
-              <div v-if="row.devices && row.devices.length" class="mp-cell-sub">
-                设备：{{ scopeText(row.devices) }}
-              </div>
+              <!-- 列里只给一行摘要，完整清单靠悬浮提示，避免行高被撑开 -->
+              <el-tooltip placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-scope-tip">
+                    <div>平台：{{ scopeText(row.targets) }}</div>
+                    <div v-if="row.devices && row.devices.length">
+                      设备：{{ scopeText(row.devices) }}
+                    </div>
+                  </div>
+                </template>
+                <span class="mp-scope-brief">{{ scopeBrief(row.targets, row.devices) }}</span>
+              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="隐藏" width="80">
@@ -291,6 +299,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { ALL_SCOPE, hasAllScope, collapseIfComplete } from '../scopeOptions'
+import { scopeBrief } from '../format'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'

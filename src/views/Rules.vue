@@ -86,10 +86,18 @@
           <el-table-column prop="target" label="目标" min-width="110" />
           <el-table-column label="适用平台" min-width="150">
             <template #default="{ row }">
-              <span>{{ scopeText(row.targets) }}</span>
-              <div v-if="row.devices && row.devices.length" class="mp-cell-sub">
-                设备：{{ scopeText(row.devices) }}
-              </div>
+              <!-- 列里只给一行摘要，完整清单靠悬浮提示，避免行高被撑开 -->
+              <el-tooltip placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-scope-tip">
+                    <div>平台：{{ scopeText(row.targets) }}</div>
+                    <div v-if="row.devices && row.devices.length">
+                      设备：{{ scopeText(row.devices) }}
+                    </div>
+                  </div>
+                </template>
+                <span class="mp-scope-brief">{{ scopeBrief(row.targets, row.devices) }}</span>
+              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="no-resolve" width="100" align="center">
@@ -99,7 +107,16 @@
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
           </el-table-column>
           <el-table-column prop="note" label="备注" min-width="140">
-            <template #default="{ row }">{{ row.note || '—' }}</template>
+            <template #default="{ row }">
+              <!-- 备注最多显示 8 个字，超出省略；完整内容靠悬浮提示 -->
+              <el-tooltip v-if="row.note" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-note-tip">{{ row.note }}</div>
+                </template>
+                <span class="mp-note-brief">{{ noteBrief(row.note) }}</span>
+              </el-tooltip>
+              <span v-else style="color:var(--mp-muted)">—</span>
+            </template>
           </el-table-column>
           <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
@@ -228,6 +245,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { ALL_SCOPE, collapseIfComplete } from '../scopeOptions'
+import { noteBrief, scopeBrief } from '../format'
 import { Search } from '@element-plus/icons-vue'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'

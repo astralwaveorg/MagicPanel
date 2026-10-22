@@ -382,6 +382,24 @@ html, body, #app {
   margin-top: 2px;
 }
 
+/* 适用范围 / 备注：列里只显示一行摘要，完整内容靠悬浮提示 */
+.mp-scope-brief,
+.mp-note-brief {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mp-scope-tip,
+.mp-note-tip {
+  max-width: 360px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-word;
+}
+
 /* 规则页筛选条：搜索框 + 四个筛选下拉 + 计数 */
 .mp-filter-bar { margin-bottom: 12px; }
 .mp-filter-search { width: 280px; }
