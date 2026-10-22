@@ -282,20 +282,26 @@ def create_build(operator: str, note: str = "",
             warnings = list(policy_warnings)
             text = ""
             verification = "未通过"
+            core_checked = False
             try:
                 text = render.render_target(snapshot, target, warnings, device=device)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:
                 errors.append(f"渲染失败：{exc}")
+            # Mihomo 目标在核心可用时追加官方配置检查（mihomo -t）
             if not errors and target["engine"] == "mihomo":
                 checked, core_error = tester.validate_config(text)
                 if checked:
+                    core_checked = True
                     if core_error:
                         errors.append(core_error)
                     else:
                         verification = "核心校验通过（mihomo -t）"
             if not errors and not verification.startswith("核心"):
-                verification = "静态通过"
+                # Stash 无官方无头校验工具；核心缺失时 Mihomo 也只有静态校验
+                verification = ("静态通过（未做核心校验）"
+                                if target["engine"] == "mihomo" and not core_checked
+                                else "静态通过")
             if errors:
                 overall = "failed"
                 verification = "未通过"
@@ -317,6 +323,9 @@ def create_build(operator: str, note: str = "",
                 "sha256": security.sha256_text(text) if text else "",
                 "size": len(text.encode()),
                 "verification": verification,
+                # 必须与平台产物一样写出来：自动发布的闸门据此判断
+                # Mihomo 目标到底做没做核心校验，缺字段会被误判成"没校验"。
+                "core_checked": core_checked,
             }
     with db.tx() as conn:
         conn.execute(

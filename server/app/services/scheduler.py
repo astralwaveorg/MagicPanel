@@ -223,6 +223,22 @@ def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
     return not missing, missing, skipped
 
 
+def _unchecked_core_targets(results: dict) -> list[str]:
+    """找出"没做核心校验"的 Mihomo 目标。
+
+    判据不能只看 core_checked 字段：历史构建的设备专属产物没有写这个字段，
+    取不到就是 None（falsy），会被误判成"没做核心校验"，
+    结果明明校验通过的产物一直发不出去。
+    以 verification 为准：只有明确写着"核心校验通过"才放行。
+    """
+    return [
+        name for name, item in (results or {}).items()
+        if item.get("engine") == "mihomo"
+        and item.get("core_checked") is not True
+        and "核心校验通过" not in (item.get("verification") or "")
+    ]
+
+
 def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     """自动构建与发布：读策略（只读）→ 构建（自管事务）→ 发布（短事务）。
 
@@ -299,10 +315,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
         with db.connect() as conn:
             row = db.one(conn, "SELECT results FROM builds WHERE id=?", (build_id,))
         results = json.loads(row["results"] or "{}")
-        unchecked = [
-            name for name, item in results.items()
-            if item.get("engine") == "mihomo" and not item.get("core_checked")
-        ] if _core_available() else []
+        unchecked = _unchecked_core_targets(results) if _core_available() else []
         if unchecked:
             summary["build_error"] = (
                 "以下 Mihomo 目标未做核心校验（mihomo -t），已跳过自动发布："
