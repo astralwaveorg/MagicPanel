@@ -382,9 +382,10 @@ html, body, #app {
   margin-top: 2px;
 }
 
-/* 适用范围 / 备注：列里只显示一行摘要，完整内容靠悬浮提示 */
+/* 适用范围 / 备注 / 清单：列里只显示一行摘要，完整内容靠悬浮提示 */
 .mp-scope-brief,
-.mp-note-brief {
+.mp-note-brief,
+.mp-list-brief {
   display: inline-block;
   max-width: 100%;
   vertical-align: middle;
@@ -393,7 +394,8 @@ html, body, #app {
   text-overflow: ellipsis;
 }
 .mp-scope-tip,
-.mp-note-tip {
+.mp-note-tip,
+.mp-list-tip {
   max-width: 360px;
   line-height: 1.6;
   white-space: normal;

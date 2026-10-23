@@ -60,18 +60,47 @@
           <el-table-column label="隐藏" width="80">
             <template #default="{ row }">{{ row.hidden ? '隐藏' : '显示' }}</template>
           </el-table-column>
-          <el-table-column label="包含策略" min-width="240">
-            <template #default="{ row }">{{ row.proxies.join('、') || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="节点来源" min-width="140">
+          <el-table-column label="包含策略" width="160">
             <template #default="{ row }">
-              <span v-if="hasAllScope(row.use_sources)">全部来源（含新增）</span>
-              <span v-else>{{ row.use_sources.join('、') || '—' }}</span>
+              <!-- 列里只给一行摘要，完整清单靠悬浮提示，避免行高被撑开 -->
+              <el-tooltip v-if="row.proxies && row.proxies.length" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-list-tip">
+                    <div v-for="(p, i) in row.proxies" :key="i">{{ i + 1 }}. {{ p }}</div>
+                  </div>
+                </template>
+                <span class="mp-list-brief">{{ proxiesBrief(row.proxies) }}</span>
+              </el-tooltip>
+              <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="本地节点" min-width="160">
+          <el-table-column label="节点来源" width="120">
             <template #default="{ row }">
-              {{ localNodeNames(row.local_nodes) || '—' }}
+              <el-tooltip v-if="row.use_sources && row.use_sources.length" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-list-tip">
+                    <div v-if="hasAllScope(row.use_sources)">全部来源（含以后新增的）</div>
+                    <template v-else>
+                      <div v-for="(s, i) in row.use_sources" :key="i">{{ s }}</div>
+                    </template>
+                  </div>
+                </template>
+                <span class="mp-list-brief">{{ sourceBrief(row.use_sources) }}</span>
+              </el-tooltip>
+              <span v-else style="color:var(--mp-muted)">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="本地节点" width="120">
+            <template #default="{ row }">
+              <el-tooltip v-if="row.local_nodes && row.local_nodes.length" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-list-tip">
+                    <div v-for="(n, i) in localNodeList(row.local_nodes)" :key="i">{{ i + 1 }}. {{ n }}</div>
+                  </div>
+                </template>
+                <span class="mp-list-brief">{{ localNodeBrief(row.local_nodes) }}</span>
+              </el-tooltip>
+              <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
@@ -299,7 +328,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { ALL_SCOPE, hasAllScope, collapseIfComplete } from '../scopeOptions'
-import { scopeBrief } from '../format'
+import { scopeBrief, proxiesBrief, sourceBrief, localNodeBrief } from '../format'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
@@ -378,11 +407,10 @@ const otherGroups = computed(() =>
   rows.value.map((g) => g.name).filter((n) => n !== editing.value?.name),
 )
 
-function localNodeNames(ids) {
+function localNodeList(ids) {
   return (ids || [])
     .map((id) => localNodes.value.find((node) => node.id === id)?.display_name)
     .filter(Boolean)
-    .join('、')
 }
 
 function onPageChange({ page: p, limit: l }) {

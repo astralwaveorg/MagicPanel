@@ -68,6 +68,36 @@ export function scopeBrief(targets, devices) {
   return `${platform} · ${d.length} 台设备`
 }
 
+/**
+ * 包含策略摘要：表格里只显示一行，完整清单靠悬浮提示。
+ * DIRECT / REJECT 不算策略组，单独标出来，避免看漏"这组里有直连"。
+ */
+export function proxiesBrief(proxies) {
+  const list = Array.isArray(proxies) ? proxies : []
+  if (!list.length) return '—'
+  const groups = list.filter((p) => p !== 'DIRECT' && p !== 'REJECT').length
+  if (!groups) return list.includes('DIRECT') ? '直连' : '拒绝'
+  const parts = [`${groups} 个策略组`]
+  if (list.includes('DIRECT')) parts.push('直连')
+  if (list.includes('REJECT')) parts.push('拒绝')
+  return parts.join(' + ')
+}
+
+/** 节点来源摘要：只显示一行，完整清单靠悬浮提示。 */
+export function sourceBrief(useSources) {
+  const list = Array.isArray(useSources) ? useSources : []
+  if (!list.length) return '—'
+  if (list.includes(ALL_SCOPE)) return '全部来源'
+  return `${list.length} 个来源`
+}
+
+/** 本地节点摘要：只显示一行，完整清单靠悬浮提示。 */
+export function localNodeBrief(ids) {
+  const list = Array.isArray(ids) ? ids : []
+  if (!list.length) return '—'
+  return `${list.length} 个本地节点`
+}
+
 /** 备注：最多显示 8 个字，超出用省略号，完整内容靠悬浮提示。 */
 export const NOTE_BRIEF_MAX = 8
 
