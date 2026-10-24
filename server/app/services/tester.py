@@ -28,7 +28,7 @@ from .direct import direct_env
 MIHOMO_FALLBACK_VERSION = "v1.19.32"
 RELEASE_BASE = "https://github.com/MetaCubeX/mihomo/releases/download"
 RELEASE_LATEST = "https://github.com/MetaCubeX/mihomo/releases/latest"
-DELAY_URL = "https://www.gstatic.com/generate_204"
+DELAY_URL = config.HEALTH_CHECK_URL
 # 测速超时：订阅来源与本地节点共用同一口径。
 # 2 秒：能连上的节点通常在 1 秒内完成往返；再久只是让失败节点干等。
 DELAY_TIMEOUT_MS = 2000

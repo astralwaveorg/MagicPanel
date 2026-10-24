@@ -128,8 +128,13 @@ def parse_nodes(body: bytes) -> list[dict]:
     return nodes
 
 
-def count_rules(body: bytes, behavior: str) -> int:
-    """统计规则条目数，支持 yaml(text/yaml) 与纯文本两种格式。"""
+def count_rules(body: bytes, behavior: str, fmt: str = "yaml") -> int:
+    """统计规则条目数，支持 yaml(text/yaml) 与纯文本两种格式。
+
+    MRS 是二进制索引文件，条目数无法从文件里数出来，只能返回 0。
+    """
+    if fmt == "mrs":
+        return 0
     text = body.decode("utf-8", errors="replace")
     stripped = text.strip()
     if stripped.startswith("payload:") or stripped.startswith("behavior:"):

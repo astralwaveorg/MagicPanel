@@ -685,7 +685,9 @@ async function copyUrl(row) {
 async function preview(row) {
   try {
     const data = await api(`/api/v1/rule-providers/${row.id}/content`)
-    previewContent.value = data.content
+    previewContent.value = data.binary
+      ? `（${row.format} 二进制格式，${data.size} 字节，无可读原文）`
+      : data.content
     previewName.value = row.name
     previewDialog.value = true
   } catch (e) {

@@ -6,10 +6,11 @@ HTTP 200 只代表下载成功，不代表客户端已加载或策略已生效�
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
+import base64
 import json
 import urllib.parse
 
-from .. import db, security
+from .. import config, db, security
 from ..services import base_config as base_config_service
 from ..compiler import render, validate
 from ..services import tester
@@ -38,7 +39,7 @@ def _base_url(request: Request, conn) -> str:
 
 
 def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
-             record=None) -> Response:
+             record=None, data: bytes | None = None) -> Response:
     headers = dict(YAML_HEADERS)
     quoted = f'"{etag}"'
     headers["ETag"] = quoted
@@ -52,6 +53,9 @@ def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
         return Response(status_code=304, headers=headers)
     if record:
         record()
+    if data is not None:
+        # 二进制内容（MRS 规则集）：按原始字节下发
+        return Response(data, media_type="application/octet-stream", headers=headers)
     return Response(
         text, media_type="text/yaml; charset=utf-8", headers=headers,
     )
@@ -208,4 +212,11 @@ def rule_resource(token: str, name: str, request: Request):
                 (db.now(), request.client.host if request.client else "", device["id"]),
             )
 
+        if (rp["format"] or "yaml") in config.BINARY_FORMATS:
+            # MRS：库里存的是 base64，下发时还原成原始字节
+            try:
+                data = base64.b64decode(rp["content"])
+            except (ValueError, TypeError):
+                data = rp["content"].encode()
+            return _respond(request, "", etag, record=record, data=data)
         return _respond(request, rp["content"], etag, record=record)

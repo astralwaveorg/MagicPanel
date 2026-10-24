@@ -31,6 +31,11 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def sha256_bytes(data: bytes) -> str:
+    """二进制内容（MRS 规则集）的指纹。"""
+    return hashlib.sha256(data).hexdigest()
+
+
 def new_session_token() -> str:
     return secrets.token_urlsafe(32)
 

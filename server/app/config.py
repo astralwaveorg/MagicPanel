@@ -20,6 +20,13 @@ PLATFORM_LABELS = {
 
 GUARD_PROXY = "空组保护"           # 永远无法出站的占位节点，防止空策略组被客户端隐式改写
 BUILTIN_TARGETS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL"}
+# 健康检查地址：节点延迟测试、策略组测速、界面默认值共用同一处。
+# 各写一份的话，改了其中一处就会出现"测速地址和实际测速不一致"。
+HEALTH_CHECK_URL = "https://www.gstatic.com/generate_204"
+# MRS（MetaCubeX 的二进制规则集）：内容按字节处理，存库时 base64 编码，
+# 下发时还原成二进制。条目数无法从文件里数出来，只能留空。
+MRS_FORMAT = "mrs"
+BINARY_FORMATS = {MRS_FORMAT}
 # 「包含所有」哨兵：多选列表里放这个值表示"全部"（节点来源 = 所有来源，
 # 含以后新增的；引擎平台 / 设备 = 全部）。
 ALL_SCOPE = "*"

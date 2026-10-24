@@ -88,6 +88,10 @@ def collect_snapshot(conn) -> dict:
             base_devices[str(device_id)] = doc
         elif platform:
             base_docs[f"{row['engine']}|{platform}"] = doc
+        else:
+            # 引擎默认配置层的用户覆盖：键是 "engine|"（平台为空）。
+            # 渲染层按同一套语义与源码默认值合并，这一层改了才真正生效。
+            base_docs[f"{row['engine']}|"] = doc
     snippets = [
         {"name": r["name"], "category": r["category"], "engine": r["engine"],
          "content": r["content"]}

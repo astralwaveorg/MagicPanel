@@ -157,6 +157,17 @@ MIHOMO_OFFICIAL = {
         "fake-ip-filter-mode": "blacklist",
         "prefer-h3": False,
         "respect-rules": False,
+        # 局域网域名交给系统 DNS，避免把内网解析也发到公网
+        "nameserver-policy": {
+            "+.lan": "system",
+            "+.local": "system",
+            "+.home.arpa": "system",
+        },
+        "fake-ip-filter": [
+            "+.lan", "+.local", "+.home.arpa", "localhost",
+            "localhost.ptlogin2.qq.com", "+.msftconnecttest.com", "+.msftncsi.com",
+            "time.*.com", "+.ntp.org", "+.ntp.org.cn",
+        ],
     },
 }
 

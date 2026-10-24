@@ -1,8 +1,10 @@
 """规则来源：远程规则集与内联规则集，统一由服务端快照向设备分发。"""
+import base64
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import db, security
+from .. import config, db, security
 from ..deps import CurrentUser
 from ..services import fetcher, refs, updater
 
@@ -54,7 +56,9 @@ def _public(row) -> dict:
         "last_error": row["last_error"],
         "last_fetched_at": row["last_fetched_at"],
         "last_attempt_at": row["last_attempt_at"],
-        "rule_count": row["rule_count"],
+        # 二进制格式（MRS）的条目数数不出来，留空由界面显示"—"
+        "rule_count": (None if (row["format"] or "yaml") in config.BINARY_FORMATS
+                       else row["rule_count"]),
         "sha256": row["sha256"],
         "has_content": bool(row["content"]),
         "created_at": row["created_at"],
@@ -165,7 +169,12 @@ def get_content(rp_id: int, user=CurrentUser):
     """规则内容不涉凭据，允许维护者查看最近快照原文。"""
     with db.connect() as conn:
         row = _get_or_404(conn, rp_id)
-    return {"name": row["name"], "content": row["content"]}
+    if (row["format"] or "yaml") in config.BINARY_FORMATS:
+        # 二进制格式（MRS）：库里存的是 base64，没有可读原文
+        return {"name": row["name"], "content": "", "binary": True,
+                "format": row["format"],
+                "size": len(base64.b64decode(row["content"] or ""))}
+    return {"name": row["name"], "content": row["content"], "binary": False}
 
 
 @router.post("", status_code=201)

@@ -20,32 +20,9 @@ from .. import config
 from ..services import base_config as base_config_service
 from ..services import local_nodes as local_node_service
 
-DNS_MIHOOMO = {
-    "enable": True,
-    "ipv6": False,
-    "enhanced-mode": "fake-ip",
-    "fake-ip-range": "198.18.0.1/16",
-    "default-nameserver": ["223.5.5.5", "119.29.29.29"],
-    "nameserver": [
-        "https://dns.alidns.com/dns-query",
-        "https://doh.pub/dns-query",
-    ],
-    "proxy-server-nameserver": ["223.5.5.5", "119.29.29.29"],
-    "nameserver-policy": {
-        "+.lan": "system",
-        "+.local": "system",
-        "+.home.arpa": "system",
-    },
-    "fake-ip-filter": [
-        "+.lan", "+.local", "+.home.arpa", "localhost",
-        "localhost.ptlogin2.qq.com", "+.msftconnecttest.com", "+.msftncsi.com",
-        "time.*.com", "+.ntp.org", "+.ntp.org.cn",
-    ],
-}
-
 HEALTH_CHECK = {
     "enable": True,
-    "url": "https://www.gstatic.com/generate_204",
+    "url": config.HEALTH_CHECK_URL,
     "interval": 600,
     "timeout": 8000,
     "lazy": True,
@@ -74,7 +51,7 @@ def _guard_proxy(engine: str = "stash") -> dict:
     }
     if engine == "stash":
         # Stash 的单节点延迟测试参数；Mihomo 没有对应字段（组级 url 生效）
-        entry["benchmark-url"] = "https://www.gstatic.com/generate_204"
+        entry["benchmark-url"] = config.HEALTH_CHECK_URL
         entry["benchmark-timeout"] = 1
     return entry
 
@@ -182,17 +159,6 @@ def _rule_provider_entry(rp: dict) -> dict:
     if rp.get("format") and rp["format"] != "yaml":
         entry["format"] = rp["format"]
     return entry
-
-
-def _merge_dns(base: dict, override: dict) -> dict:
-    """DNS 段：字典递归覆盖，列表整体替换（用户填写的为准）。"""
-    result = dict(base)
-    for key, value in (override or {}).items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _merge_dns(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 def _merge(dst: dict, src: dict) -> None:
@@ -332,11 +298,19 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     """
     engine = target["engine"]
     # ① 产物配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
-    layers = [("引擎默认配置", base_config_service.default_doc(engine))]
+    #
+    # 复用界面那套 scope_layers()：引擎默认配置 = 源码内置默认值 + 用户在
+    # 「引擎默认配置」层的覆盖（(engine, "", 0)）。此前渲染只取源码常量，
+    # 界面上的「引擎默认配置」改了不生效，显示与产物对不上。
     platform = target.get("platform") or ""
+    docs: dict = {}
+    default_override = (snapshot.get("base") or {}).get(f"{engine}|")
+    if default_override:
+        docs[(engine, "", 0)] = base_config_service.normalize(default_override)
     general_base = (snapshot.get("base") or {}).get(f"{engine}|{platform}")
     if general_base:
-        layers.append(("引擎平台配置", base_config_service.normalize(general_base)))
+        docs[(engine, platform, 0)] = base_config_service.normalize(general_base)
+    layers = base_config_service.scope_layers(engine, platform, 0, docs)
     base, _sources = base_config_service.cascade(layers)
     # 应用级伪键：不写入产物，只控制面板内置行为
     panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))
@@ -400,19 +374,12 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     personal = [f"DOMAIN-SUFFIX,{domain},DIRECT" for domain in direct_domains]
     cfg["rules"] = pinned + personal + [_rule_line(r) for r in rules]
 
-    # Stash 由客户端接管 DNS；Mihomo 需要显式 dns 段。
-    # 用户在产物配置里写了 dns 则逐项覆盖默认值（列表以用户为准）。
-    user_dns = base.get("dns") or {}
-    if engine == "mihomo":
-        cfg["dns"] = _merge_dns(DNS_MIHOOMO, user_dns)
-        if fake_ip_filter:
-            # 个人维护的过滤列表整体替换内置列表
-            cfg["dns"]["fake-ip-filter"] = fake_ip_filter
-    elif fake_ip_filter:
-        # Stash 默认由客户端接管 DNS；只有显式配置了过滤列表才下发 dns 段
-        dns = dict(cfg.get("dns") or {})
-        dns["fake-ip-filter"] = fake_ip_filter
-        cfg["dns"] = dns
+    # Stash 常驻 Fake-IP；Mihomo 的 DNS 段（enable / enhanced-mode 等）由引擎
+    # 默认配置给出，用户在平台层改的 dns 已在层叠里合并过——这里不再另存
+    # 一份默认值，避免同一套 DNS 写两处、改一处不生效。
+    if fake_ip_filter:
+        # 个人维护的过滤列表整体替换内置列表
+        cfg.setdefault("dns", {})["fake-ip-filter"] = fake_ip_filter
 
     # 功能模块按引擎合并，平台扩展最后应用、优先级最高
     for snip in snapshot.get("snippets", []):

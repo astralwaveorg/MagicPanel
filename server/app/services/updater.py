@@ -6,10 +6,11 @@
 写事务只用于极短的状态更新；网络请求与核心测速都在事务之外执行，
 避免慢上游长期占用 SQLite 写锁（设备拉取配置会被阻塞）。
 """
+import base64
 import json
 import threading
 
-from .. import db, security
+from .. import config, db, security
 from . import fetcher, tester
 
 
@@ -219,6 +220,7 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
                 raise InvalidOperation("内联规则来源无需抓取")
             url = row["url"]
             behavior = row["behavior"]
+            fmt = row["format"] or "yaml"
             proxy = (security.decrypt_text(row["proxy_url_enc"])
                      if row["proxy_url_enc"] else "")
             name = row["name"]
@@ -233,7 +235,7 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
         count = 0
         try:
             body = fetcher.fetch(url, proxy=proxy)
-            count = fetcher.count_rules(body, behavior)
+            count = fetcher.count_rules(body, behavior, fmt)
         except Exception as exc:
             error = _error_text(exc)
         with db.tx() as conn:
@@ -250,12 +252,19 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
                     "rule_provider", rp_id, {"name": name, "error": error},
                 )
             else:
-                text = body.decode("utf-8", "replace")
+                if fmt in config.BINARY_FORMATS:
+                    # 二进制格式（MRS）：按 base64 存库，下发时还原成字节，
+                    # 指纹对原始字节计算，与客户端拿到的一致。
+                    text = base64.b64encode(body).decode("ascii")
+                    sha = security.sha256_bytes(body)
+                else:
+                    text = body.decode("utf-8", "replace")
+                    sha = security.sha256_text(text)
                 conn.execute(
                     "UPDATE rule_providers SET last_status='ok', last_error='', "
                     "last_fetched_at=?, last_attempt_at=?, rule_count=?, sha256=?, "
                     "content=?, updated_at=? WHERE id=?",
-                    (now, now, count, security.sha256_text(text), text, now, rp_id),
+                    (now, now, count, sha, text, now, rp_id),
                 )
                 security.audit(
                     conn, operator,

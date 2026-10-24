@@ -21,7 +21,7 @@ class GroupBody(BaseModel):
     use_sources: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
     local_nodes: list[int] = Field(default_factory=list)
     proxies: list[str] = Field(default_factory=list)
-    url: str = Field(default="https://www.gstatic.com/generate_204", max_length=256)
+    url: str = Field(default=config.HEALTH_CHECK_URL, max_length=256)
     interval: int = Field(default=600, ge=30, le=86400)
     timeout: int = Field(default=8000, ge=100, le=60000)
     tolerance: int = Field(default=150, ge=0, le=5000)
