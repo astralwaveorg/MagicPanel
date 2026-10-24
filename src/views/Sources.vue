@@ -90,12 +90,12 @@
                 <template #reference>
                   <span :style="row.mode === 'inline'
                     ? 'color:var(--mp-ok)' : 'color:var(--mp-muted)'">
-                    {{ row.mode === 'inline' ? '内联' : 'provider' }}
+                    {{ row.mode === 'inline' ? '内联' : '订阅' }}
                   </span>
                 </template>
                 {{ row.mode === 'inline'
-                  ? '节点写进产物顶层 proxies，能在 GLOBAL 组里直接选中；机场换节点需重拉订阅'
-                  : '节点写进 proxy-providers 段，客户端按间隔自己拉取更新' }}
+                  ? '节点写进产物顶层，能在 GLOBAL 组里直接选中；机场换节点需重拉订阅'
+                  : '节点由客户端按间隔自己下载更新' }}
               </el-tooltip>
             </template>
           </el-table-column>
@@ -116,7 +116,9 @@
             <template #default="{ row }">{{ row.auto_fetch === false ? '—' : row.interval }}</template>
           </el-table-column>
           <el-table-column label="客户端更新" width="110" align="right">
-            <template #default="{ row }">{{ row.client_interval || '跟随' }}</template>
+            <template #default="{ row }">
+              {{ row.mode === 'inline' ? '—' : (row.client_interval || '跟随') }}
+            </template>
           </el-table-column>
           <el-table-column label="测速间隔" width="110" align="right">
             <template #default="{ row }">
@@ -328,13 +330,11 @@
         </el-form-item>
         <el-form-item label="下发方式">
           <el-radio-group v-model="form.mode">
-            <el-radio value="provider">provider（客户端自己更新）</el-radio>
-            <el-radio value="inline">inline（节点写进产物，可被 GLOBAL 选中）</el-radio>
+            <el-radio value="provider">订阅 · 客户端自己下载更新</el-radio>
+            <el-radio value="inline">内联 · 写进配置，GLOBAL 里能选到</el-radio>
           </el-radio-group>
           <div class="mp-form-hint">
-            provider：节点写进产物的 proxy-providers 段，客户端按间隔自己拉取更新；
-            inline：节点直接写进产物顶层 proxies，能出现在 GLOBAL 组里，
-            代价是机场换节点后要重新拉一次订阅才生效。
+            内联下机场换节点不会自动生效，要重新拉一次订阅。
           </div>
         </el-form-item>
         <!-- 一行最多两项：挤在一行时输入框会被压窄到看不清 -->
@@ -354,6 +354,9 @@
           <el-col :xs="24" :sm="12">
             <el-form-item label="客户端更新间隔（0 = 跟随抓取间隔）">
               <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
+              <div v-if="form.mode === 'inline'" class="mp-form-hint">
+                内联下发时这个间隔不起作用：节点已写进配置，客户端不再单独下载节点列表。
+              </div>
             </el-form-item>
           </el-col>
           <el-col v-if="form.auto_test" :xs="24" :sm="12">

@@ -42,7 +42,7 @@ data/                  # 运行数据（数据库、密钥、构建产物），�
 | 表 | 要点 |
 | --- | --- |
 | users / sessions | 维护者账号（PBKDF2-SHA256），门户 PIN 散列存于 `users.portal_pin_hash`；会话只存令牌摘要，含独立 CSRF 令牌 |
-| sources（节点来源） | 订阅地址 Fernet 加密（`url_enc`）；最近一次成功快照加密留存；失败不覆盖旧快照；`filter_unavailable` 控制是否只分发可用节点；`test_results` 记录逐节点测速结果；`interval` 为抓取间隔、`test_interval` 为自动测速间隔（0 = 关闭）；`auto_fetch` 关闭后只使用本地快照（定时抓取与一键抓取跳过，仍可测速）；`auto_test` 关闭后不执行定时自动测速（仍可一键/单条手动测速）；`last_attempt_at` / `test_attempt_at` 记录最近一次尝试（含失败），供定时任务判断到期 |
+| sources（节点来源） | 订阅地址 Fernet 加密（`url_enc`）；最近一次成功快照加密留存（只保留订阅的 `proxies` 段）；失败不覆盖旧快照；`mode` 为下发方式：`provider`（写进产物的 `proxy-providers` 段，客户端自己下载更新）或 `inline`（节点写进产物顶层 `proxies`，能进 GLOBAL 组，机场换节点需重拉订阅）；`filter_unavailable` 控制是否只分发可用节点；`test_results` 记录逐节点测速结果；`interval` 为抓取间隔、`test_interval` 为自动测速间隔（0 = 关闭）；`auto_fetch` 关闭后只使用本地快照（定时抓取与一键抓取跳过，仍可测速）；`auto_test` 关闭后不执行定时自动测速（仍可一键/单条手动测速）；`last_attempt_at` / `test_attempt_at` 记录最近一次尝试（含失败），供定时任务判断到期 |
 | rule_providers（规则来源） | 远程 / 内联两类；behavior、format、规则数与摘要；`interval` 为远程抓取间隔，`last_attempt_at` 记录最近尝试（含失败） |
 | local_nodes（本地节点） | 手动填写的服务器、协议与参数；`node_type` 节点类型（本地/自建/家宽/机房/专线/中转/落地，默认「本地」）；`params_enc` / `extra_yaml_enc` 加密落盘；产物中使用 `名称 (类型)`，顶层 `proxies` 直接写入；Stash 与 Mihomo 的协议键名分别渲染 |
 | base_configs（产物基础配置） | YAML 文档，定义产物的顶层全局键（端口、模式、日志、IPv6、profile、DNS 及任意自定义键）；按 `engine` + `platform` + `device_id` 存放，构成**三层联动**：引擎默认配置（引擎内置的能力基线，可改）→ 引擎平台配置（按「引擎 + 平台」，与引擎平台一一对应）→ 设备独立配置（按设备）；每层只存与上层不同的差异；引擎与平台两级随构建快照固化，设备级在分发时叠加 |
