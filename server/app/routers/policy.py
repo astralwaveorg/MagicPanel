@@ -58,6 +58,16 @@ def _group_public(row) -> dict:
     return data
 
 
+def _has_real_source_sql() -> str:
+    """策略组是否真的指定了节点来源。
+
+    use_sources 里的 "*" 表示「包含所有来源」，不算真的指定；
+    筛选「含节点来源」时按这个口径排除。
+    """
+    return ("EXISTS (SELECT 1 FROM json_each(COALESCE(use_sources, '[]')) "
+            "WHERE value != '*')")
+
+
 def _rule_public(row) -> dict:
     data = db.row_to_dict(row)
     data["enabled"] = bool(row["enabled"])
@@ -109,15 +119,51 @@ def _get_group(conn, gid: int):
 
 @router.get("/groups/page")
 def list_groups_paged(limit: int = 50, offset: int = 0, keyword: str = "",
-                      user=CurrentUser):
-    """策略组分页列表（keyword 匹配名称）。"""
+                      gtype: str = "", hidden: str = "", scope: str = "",
+                      member: str = "", user=CurrentUser):
+    """策略组分页列表。
+
+    keyword 匹配名称；gtype 精确匹配类型；hidden 取 "0"（显示）/"1"（隐藏）；
+    scope 限定适用范围，口径与分流规则页一致：
+      global   适用于所有平台与设备
+      platform 限定了引擎平台
+      device   限定了设备
+    member 限定成员构成：
+      source 含节点来源
+      local  含本地节点
+      manual 不含节点来源也没有本地节点
+    """
     with db.connect() as conn:
-        where, args = "", []
+        where, args = [], []
         if keyword:
-            where = "WHERE name LIKE ?"
-            args = [f"%{keyword}%"]
-        data = db.paged(conn, "proxy_groups", where, args, "sort, id", limit, offset)
-    data["items"] = [_group_public(r) for r in data["items"]]
+            where.append("name LIKE ?")
+            args.append(f"%{keyword}%")
+        if gtype:
+            where.append("type = ?")
+            args.append(gtype)
+        if hidden in ("0", "1"):
+            where.append("hidden = ?")
+            args.append(1 if hidden == "1" else 0)
+        if scope == "global":
+            where.append("COALESCE(json_extract(targets, '$[0]'), '') = '*' "
+                         "AND COALESCE(json_extract(devices, '$[0]'), '') = '*'")
+        elif scope == "platform":
+            where.append("COALESCE(json_extract(targets, '$[0]'), '') != '*'")
+        elif scope == "device":
+            where.append("COALESCE(json_extract(devices, '$[0]'), '') != '*'")
+        if member == "source":
+            where.append(_has_real_source_sql())
+        elif member == "local":
+            where.append("COALESCE(json_array_length(local_nodes), 0) > 0")
+        elif member == "manual":
+            where.append(f"NOT {_has_real_source_sql()} "
+                         "AND COALESCE(json_array_length(local_nodes), 0) = 0")
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        data = db.paged(conn, "proxy_groups", clause, args, "sort, id", limit, offset)
+        data["items"] = [_group_public(r) for r in data["items"]]
+        # 未筛选时的总数，界面好写"筛选出 N 个（共 M 个）"
+        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM proxy_groups")["c"]
+    data["total_all"] = total_all
     return data
 
 

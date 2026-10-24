@@ -15,37 +15,73 @@
           <el-button link @click="clearSelection">取消选择</el-button>
         </template>
         <template v-else>
-          <el-button :loading="batchRefreshing" :disabled="batchRefreshing" @click="refreshMany(remoteRows)" type="primary">一键抓取</el-button>
+          <el-button :loading="batchRefreshing" :disabled="batchRefreshing" @click="refreshMany()" type="primary">一键抓取</el-button>
           <span v-if="batchRefreshing" class="mp-toolbar-hint">
             正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
           </span>
         </template>
-        <el-input
-          v-model="query"
-          placeholder="按名称或 URL 搜索"
-          clearable
-          style="width:240px"
-        />
       </div>
       <el-button @click="openEdit()" type="primary">添加规则来源</el-button>
+    </div>
+
+    <div class="mp-toolbar mp-filter-bar">
+      <div class="left">
+        <el-input
+          v-model="query"
+          class="mp-filter-search"
+          placeholder="搜索名称或 URL"
+          clearable
+          :prefix-icon="Search"
+          @input="onQueryInput"
+        />
+        <el-select v-model="filters.kind" class="mp-filter-select" placeholder="全部类型"
+                   clearable @change="applyFilter">
+          <el-option value="remote" label="远程 URL" />
+          <el-option value="inline" label="内联内容" />
+        </el-select>
+        <el-select v-model="filters.behavior" class="mp-filter-select" placeholder="全部行为"
+                   clearable @change="applyFilter">
+          <el-option value="domain" label="域名" />
+          <el-option value="ipcidr" label="IP 段" />
+          <el-option value="classical" label="经典规则" />
+        </el-select>
+        <el-select v-model="filters.enabled" class="mp-filter-select" placeholder="全部状态"
+                   clearable @change="applyFilter">
+          <el-option value="1" label="启用" />
+          <el-option value="0" label="停用" />
+        </el-select>
+        <el-select v-model="filters.status" class="mp-filter-select" placeholder="全部抓取结果"
+                   clearable @change="applyFilter">
+          <el-option value="ok" label="抓取成功" />
+          <el-option value="failed" label="抓取失败" />
+          <el-option value="none" label="没有抓取记录" />
+        </el-select>
+        <el-select v-model="filters.referenced" class="mp-filter-select" placeholder="全部引用情况"
+                   clearable @change="applyFilter">
+          <el-option value="1" label="被分流规则引用" />
+          <el-option value="0" label="没被引用" />
+        </el-select>
+        <el-button v-if="hasFilter" link @click="clearFilters">清空筛选</el-button>
+      </div>
+      <span class="mp-toolbar-hint">{{ countText }}</span>
     </div>
 
     <ErrorState v-if="error" :error="error" @retry="load" />
 
 
     <EmptyState
-      v-if="!rows.length"
+      v-if="!rows.length && !hasFilter"
       reason="还没有规则来源。"
       next="点击“添加规则来源”：远程来源填 URL，内联来源直接粘贴规则内容。"
     />
     <EmptyState
-      v-else-if="!filteredRows.length"
-      reason="没有匹配的规则来源。"
-      next="尝试更换名称或 URL 关键词。"
+      v-else-if="!rows.length"
+      reason="没有符合筛选条件的规则来源。"
+      next="换个关键词，或点上方“清空筛选”看全部规则来源。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="pagedRows" v-loading="loading" row-key="id" size="small"
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column prop="name" label="名称" min-width="110" :fixed="isMobile ? false : 'left'" />
@@ -107,7 +143,7 @@
           </el-table-column>
         </el-table>
       </div>
-      <Pager :page="page" :limit="pageSize" :total="filteredRows.length"
+      <Pager :page="page" :limit="pageSize" :total="total"
              :sizes="[10, 20, 50, 100]" @change="onPagerChange" />
     </div>
 
@@ -250,9 +286,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
@@ -276,7 +313,6 @@ const INTERVAL_PRESETS = [
 const router = useRouter()
 const rows = ref([])
 const isMobile = useMobile()
-const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const dialog = ref(false)
@@ -306,44 +342,50 @@ const deletedCount = ref(0)
 const query = ref('')
 const page = ref(1)
 const pageSize = ref(20)
+const total = ref(0)
+const totalAll = ref(0)
 
-function onPagerChange({ page: p, limit: l }) {
-  if (l && l !== pageSize.value) {
-    pageSize.value = l
-    page.value = 1
-    clearSelection()
-    return
-  }
-  page.value = p
-  clearSelection()
+// 搜索与筛选：规则来源有几十个，靠翻页找不动
+const filters = reactive({
+  kind: '', behavior: '', enabled: '', status: '', referenced: '',
+})
+const hasFilter = computed(() => !!query.value.trim() ||
+  !!(filters.kind || filters.behavior || filters.enabled || filters.status
+     || filters.referenced))
+const countText = computed(() => {
+  if (!hasFilter.value) return `共 ${totalAll.value} 个规则来源`
+  return `筛选出 ${total.value} 个，共 ${totalAll.value} 个`
+})
+
+let queryTimer = null
+function onQueryInput() {
+  clearTimeout(queryTimer)
+  queryTimer = setTimeout(applyFilter, 300)
 }
 
-const remoteRows = computed(() => rows.value.filter((r) => r.kind === 'remote'))
-const filteredRows = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  if (!q) return rows.value
-  return rows.value.filter((r) =>
-    (r.name || '').toLowerCase().includes(q)
-    || (r.url || '').toLowerCase().includes(q))
-})
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filteredRows.value.slice(start, start + pageSize.value)
-})
-
-watch(query, () => {
+function applyFilter() {
   page.value = 1
   clearSelection()
-})
-watch([page, pageSize], () => {
+  load()
+}
+
+function clearFilters() {
+  query.value = ''
+  filters.kind = ''
+  filters.behavior = ''
+  filters.enabled = ''
+  filters.status = ''
+  filters.referenced = ''
+  applyFilter()
+}
+
+function onPagerChange({ page: p, limit: l }) {
+  const sizeChanged = l && l !== pageSize.value
+  if (l) pageSize.value = l
+  page.value = sizeChanged ? 1 : p
   clearSelection()
-  const maxPage = Math.max(1, Math.ceil(filteredRows.value.length / pageSize.value))
-  if (page.value > maxPage) page.value = maxPage
-})
-watch(filteredRows, (list) => {
-  const maxPage = Math.max(1, Math.ceil(list.length / pageSize.value))
-  if (page.value > maxPage) page.value = maxPage
-})
+  load()
+}
 
 const emptyForm = () => ({
   name: '', behavior: 'domain', format: 'yaml', kind: 'remote', client_interval: 0,
@@ -383,7 +425,21 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    rows.value = await api('/api/v1/rule-providers')
+    const params = new URLSearchParams({
+      limit: String(pageSize.value),
+      offset: String((page.value - 1) * pageSize.value),
+    })
+    const kw = query.value.trim()
+    if (kw) params.set('keyword', kw)
+    if (filters.kind) params.set('kind', filters.kind)
+    if (filters.behavior) params.set('behavior', filters.behavior)
+    if (filters.enabled) params.set('enabled', filters.enabled)
+    if (filters.status) params.set('status', filters.status)
+    if (filters.referenced) params.set('referenced', filters.referenced)
+    const paged = await api(`/api/v1/rule-providers/page?${params.toString()}`)
+    rows.value = paged.items
+    total.value = paged.total
+    totalAll.value = paged.total_all ?? paged.total
   } catch (e) {
     error.value = e.message
     ElMessage.error(e.message)
@@ -485,7 +541,9 @@ async function refresh(row) {
 
 async function refreshMany(list) {
   if (batchRefreshing.value) return
-  const targets = (list || []).filter((r) => r && r.kind === 'remote')
+  // 不传列表时抓全部远程来源（表格现在只显示当前页）
+  const pool = list || await api('/api/v1/rule-providers')
+  const targets = (pool || []).filter((r) => r && r.kind === 'remote')
   if (!targets.length) {
     return ElMessage.info('没有可抓取的远程规则来源（内联来源无需抓取）')
   }

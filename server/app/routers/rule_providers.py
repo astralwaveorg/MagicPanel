@@ -145,15 +145,48 @@ class EnabledBody(BaseModel):
 
 @router.get("/page")
 def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
-                         user=CurrentUser):
-    """规则来源分页列表。"""
+                         kind: str = "", behavior: str = "", enabled: str = "",
+                         status: str = "", referenced: str = "", user=CurrentUser):
+    """规则来源分页列表。
+
+    keyword 匹配名称或 URL；kind（remote/inline）、behavior 精确匹配；
+    enabled 取 "0"（停用）/"1"（启用）；
+    status 限定抓取结果：ok 成功 / failed 失败 / none 从未抓取。
+    内联来源没有抓取这回事，不参与这个筛选。
+    referenced 取 "0"（没被分流规则引用）/"1"（被引用）。
+    """
     with db.connect() as conn:
-        where, args = "", []
+        where, args = [], []
         if keyword:
-            where = "WHERE name LIKE ?"
-            args = [f"%{keyword}%"]
-        data = db.paged(conn, "rule_providers", where, args, "id", limit, offset)
+            like = f"%{keyword}%"
+            where.append("(name LIKE ? OR url LIKE ?)")
+            args += [like, like]
+        if kind:
+            where.append("kind = ?")
+            args.append(kind)
+        if behavior:
+            where.append("behavior = ?")
+            args.append(behavior)
+        if enabled in ("0", "1"):
+            where.append("enabled = ?")
+            args.append(1 if enabled == "1" else 0)
+        if status == "ok":
+            where.append("kind = 'remote' AND last_status = 'ok'")
+        elif status == "failed":
+            where.append("kind = 'remote' AND last_status = 'failed'")
+        elif status == "none":
+            where.append("kind = 'remote' "
+                         "AND COALESCE(last_status, '') IN ('never', '')")
+        if referenced in ("0", "1"):
+            clause = ("EXISTS (SELECT 1 FROM rules WHERE rules.type='RULE-SET' "
+                      "AND rules.value = rule_providers.name)")
+            where.append(clause if referenced == "1" else f"NOT {clause}")
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        data = db.paged(conn, "rule_providers", clause, args, "id", limit, offset)
         data["items"] = [_public_with_refs(conn, r) for r in data["items"]]
+        # 未筛选时的总数，界面好写"筛选出 N 个（共 M 个）"
+        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM rule_providers")["c"]
+    data["total_all"] = total_all
     return data
 
 

@@ -17,13 +17,58 @@
       <el-button @click="openEdit()" type="primary">添加策略组</el-button>
     </div>
 
+    <div class="mp-toolbar mp-filter-bar">
+      <div class="left">
+        <el-input
+          v-model="query"
+          class="mp-filter-search"
+          placeholder="搜索策略组名称"
+          clearable
+          :prefix-icon="Search"
+          @input="onQueryInput"
+        />
+        <el-select v-model="filters.gtype" class="mp-filter-select" placeholder="全部类型"
+                   clearable @change="applyFilter">
+          <el-option value="select" label="手动选择" />
+          <el-option value="url-test" label="自动测速" />
+          <el-option value="fallback" label="故障切换" />
+          <el-option value="load-balance" label="负载均衡" />
+          <el-option value="relay" label="链式转发" />
+        </el-select>
+        <el-select v-model="filters.hidden" class="mp-filter-select" placeholder="全部可见性"
+                   clearable @change="applyFilter">
+          <el-option value="0" label="客户端可见" />
+          <el-option value="1" label="客户端隐藏" />
+        </el-select>
+        <el-select v-model="filters.scope" class="mp-filter-select" placeholder="全部适用范围"
+                   clearable @change="applyFilter">
+          <el-option value="global" label="适用于所有平台与设备" />
+          <el-option value="platform" label="限定了引擎平台" />
+          <el-option value="device" label="限定了设备" />
+        </el-select>
+        <el-select v-model="filters.member" class="mp-filter-select" placeholder="全部成员构成"
+                   clearable @change="applyFilter">
+          <el-option value="source" label="含节点来源" />
+          <el-option value="local" label="含本地节点" />
+          <el-option value="manual" label="只靠指定成员" />
+        </el-select>
+        <el-button v-if="hasFilter" link @click="clearFilters">清空筛选</el-button>
+      </div>
+      <span class="mp-toolbar-hint">{{ countText }}</span>
+    </div>
+
     <ErrorState v-if="error" :error="error" @retry="load" />
 
 
     <EmptyState
-      v-if="!rows.length"
+      v-if="!rows.length && !hasFilter"
       reason="还没有策略组。"
       next="点击“添加策略组”，先建入口组（如“节点选择”），再建地区自动组。"
+    />
+    <EmptyState
+      v-else-if="!rows.length"
+      reason="没有符合筛选条件的策略组。"
+      next="换个关键词，或点上方“清空筛选”看全部策略组。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -33,9 +78,10 @@
           <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
             <template #default="{ row, $index }">
               <div class="order-cell">
-                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
-                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
-                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
+                <!-- 筛选后组在列表里并不相邻，这时暂停排序以免打乱整体顺序 -->
+                <span v-if="!hasFilter" class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+                <el-button text size="small" :disabled="hasFilter || $index === 0" @click="move($index, -1)">↑</el-button>
+                <el-button text size="small" :disabled="hasFilter || $index === rows.length - 1" @click="move($index, 1)">↓</el-button>
               </div>
             </template>
           </el-table-column>
@@ -330,6 +376,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
@@ -361,8 +408,39 @@ const batch = reactive({
   useHidden: false, hidden: false,
 })
 const total = ref(0)
+const totalAll = ref(0)
 const page = ref(1)
 const limit = ref(50)
+
+// 搜索与筛选：组多了以后光看列表找不动
+const query = ref('')
+const filters = reactive({ gtype: '', hidden: '', scope: '', member: '' })
+const hasFilter = computed(() => !!query.value.trim() ||
+  !!(filters.gtype || filters.hidden || filters.scope || filters.member))
+const countText = computed(() => {
+  if (!hasFilter.value) return `共 ${totalAll.value} 个策略组`
+  return `筛选出 ${total.value} 个，共 ${totalAll.value} 个；筛选状态下不能拖动排序`
+})
+
+let queryTimer = null
+function onQueryInput() {
+  clearTimeout(queryTimer)
+  queryTimer = setTimeout(applyFilter, 300)
+}
+
+function applyFilter() {
+  page.value = 1
+  load()
+}
+
+function clearFilters() {
+  query.value = ''
+  filters.gtype = ''
+  filters.hidden = ''
+  filters.scope = ''
+  filters.member = ''
+  applyFilter()
+}
 const sources = ref([])
 const localNodes = ref([])
 const targets = ref([])
@@ -435,13 +513,24 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
+    const params = new URLSearchParams({
+      limit: String(limit.value),
+      offset: String((page.value - 1) * limit.value),
+    })
+    const kw = query.value.trim()
+    if (kw) params.set('keyword', kw)
+    if (filters.gtype) params.set('gtype', filters.gtype)
+    if (filters.hidden) params.set('hidden', filters.hidden)
+    if (filters.scope) params.set('scope', filters.scope)
+    if (filters.member) params.set('member', filters.member)
     const [groups, srcs, nodes, targetList, deviceList] = await Promise.all([
-      api(`/api/v1/groups/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api(`/api/v1/groups/page?${params.toString()}`),
       api('/api/v1/sources'), api('/api/v1/local-nodes'),
       api('/api/v1/targets'), api('/api/v1/devices'),
     ])
     rows.value = groups.items
     total.value = groups.total
+    totalAll.value = groups.total_all ?? groups.total
     sources.value = srcs.filter((s) => s.enabled)
     localNodes.value = nodes
     targets.value = targetList
@@ -499,6 +588,8 @@ async function save() {
 }
 
 async function move(index, delta) {
+  // 筛选状态下组并不相邻，排序会打乱整体顺序
+  if (hasFilter.value) return
   const ids = rows.value.map((r) => r.id)
   const [id] = ids.splice(index, 1)
   ids.splice(index + delta, 0, id)

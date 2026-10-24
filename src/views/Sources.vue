@@ -56,13 +56,54 @@
       </div>
     </div>
 
+    <div class="mp-toolbar mp-filter-bar">
+      <div class="left">
+        <el-input
+          v-model="query"
+          class="mp-filter-search"
+          placeholder="搜索来源名称"
+          clearable
+          :prefix-icon="Search"
+          @input="onQueryInput"
+        />
+        <el-select v-model="filters.enabled" class="mp-filter-select" placeholder="全部状态"
+                   clearable @change="applyFilter">
+          <el-option value="1" label="启用" />
+          <el-option value="0" label="停用" />
+        </el-select>
+        <el-select v-model="filters.mode" class="mp-filter-select" placeholder="全部下发方式"
+                   clearable @change="applyFilter">
+          <el-option value="provider" label="订阅 · 客户端自己下载" />
+          <el-option value="inline" label="内联 · 写进配置" />
+        </el-select>
+        <el-select v-model="filters.fetch" class="mp-filter-select" placeholder="全部抓取方式"
+                   clearable @change="applyFilter">
+          <el-option value="1" label="自动抓取" />
+          <el-option value="0" label="只用本地快照" />
+        </el-select>
+        <el-select v-model="filters.status" class="mp-filter-select" placeholder="全部抓取结果"
+                   clearable @change="applyFilter">
+          <el-option value="ok" label="抓取成功" />
+          <el-option value="failed" label="抓取失败" />
+          <el-option value="none" label="从未抓取" />
+        </el-select>
+        <el-button v-if="hasFilter" link @click="clearFilters">清空筛选</el-button>
+      </div>
+      <span class="mp-toolbar-hint">{{ countText }}</span>
+    </div>
+
     <ErrorState v-if="error" :error="error" @retry="load" />
 
 
     <EmptyState
-      v-if="!rows.length"
+      v-if="!rows.length && !hasFilter"
       reason="还没有订阅来源。"
       next="点击“添加订阅”，填入订阅地址后执行抓取。"
+    />
+    <EmptyState
+      v-else-if="!rows.length"
+      reason="没有符合筛选条件的来源。"
+      next="换个关键词，或点上方“清空筛选”看全部来源。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -167,6 +208,15 @@
       <div class="mp-toolbar" style="margin-bottom:12px">
         <h3 style="margin:0">本地节点</h3>
         <span class="mp-toolbar-hint">直接保存在面板中的节点，区别于远程订阅拉取</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <el-button size="small" type="success" plain
+                     :loading="testingLocalBatch"
+                     :disabled="!localNodes.length || testingLocalBatch"
+                     @click="testAllLocal">一键测速</el-button>
+          <span v-if="testingLocalBatch" class="mp-toolbar-hint">
+            正在测速 {{ localTestDone }}/{{ localTestTotal }}…
+          </span>
+        </div>
       </div>
       <EmptyState
         v-if="!localNodes.length"
@@ -200,7 +250,9 @@
           <el-table-column label="操作" width="168" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
-                <el-button size="small" :loading="testingLocal === row.id" @click="testLocal(row)" type="success" plain>测速</el-button>
+                <el-button size="small" :loading="testingLocal === row.id"
+                           :disabled="testingLocalBatch"
+                           @click="testLocal(row)" type="success" plain>测速</el-button>
                 <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleLocalEnabled(row)" />
                 <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
                 <el-button size="small" @click="removeLocal(row)" type="danger" plain>删除</el-button>
@@ -491,6 +543,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
@@ -515,16 +568,51 @@ const INTERVAL_PRESETS = [
 const rows = ref([])
 const isMobile = useMobile()
 const total = ref(0)
+const totalAll = ref(0)
 const page = ref(1)
 const limit = ref(50)
 const loading = ref(false)
 const error = ref('')
+
+// 搜索与筛选：来源多了以后光看列表找不动
+const query = ref('')
+const filters = reactive({ enabled: '', mode: '', fetch: '', status: '' })
+const hasFilter = computed(() => !!query.value.trim() ||
+  !!(filters.enabled || filters.mode || filters.fetch || filters.status))
+const countText = computed(() => {
+  if (!hasFilter.value) return `共 ${totalAll.value} 个来源`
+  return `筛选出 ${total.value} 个，共 ${totalAll.value} 个`
+})
+
+let queryTimer = null
+function onQueryInput() {
+  clearTimeout(queryTimer)
+  queryTimer = setTimeout(applyFilter, 300)
+}
+
+function applyFilter() {
+  page.value = 1
+  load()
+}
+
+function clearFilters() {
+  query.value = ''
+  filters.enabled = ''
+  filters.mode = ''
+  filters.fetch = ''
+  filters.status = ''
+  applyFilter()
+}
+
 const dialog = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const revealedUrl = ref('')
 const localNodes = ref([])
 const testingLocal = ref(0)
+const testingLocalBatch = ref(false)
+const localTestDone = ref(0)
+const localTestTotal = ref(0)
 const localSchema = ref({ protocols: [], node_types: [] })
 const localDialog = ref(false)
 const localSaving = ref(false)
@@ -630,13 +718,24 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
+    const params = new URLSearchParams({
+      limit: String(limit.value),
+      offset: String((page.value - 1) * limit.value),
+    })
+    const kw = query.value.trim()
+    if (kw) params.set('keyword', kw)
+    if (filters.enabled) params.set('enabled', filters.enabled)
+    if (filters.mode) params.set('mode', filters.mode)
+    if (filters.fetch) params.set('auto_fetch', filters.fetch)
+    if (filters.status) params.set('status', filters.status)
     const [paged, coreStatus, nodes, schema] = await Promise.all([
-      api(`/api/v1/sources/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
+      api(`/api/v1/sources/page?${params.toString()}`),
       api('/api/v1/core/status'),
       api('/api/v1/local-nodes'), api('/api/v1/local-nodes/schema'),
     ])
     rows.value = paged.items
     total.value = paged.total
+    totalAll.value = paged.total_all ?? paged.total
     core.value = coreStatus
     localNodes.value = nodes
     localSchema.value = schema
@@ -1080,6 +1179,48 @@ async function testLocal(row) {
     ElMessage.error(e.message)
   } finally {
     testingLocal.value = 0
+  }
+}
+
+// 一键测速：把面板里自己录入的本地节点逐个拨测一遍。
+// 顺序执行，避免同时启动多个 Mihomo 核心。
+async function testAllLocal() {
+  if (testingLocalBatch.value) return
+  if (core.value && !core.value.available) {
+    return ElMessage.warning('测速核心未安装，请先在线安装或本地上传')
+  }
+  const targets = [...localNodes.value]
+  if (!targets.length) return ElMessage.info('还没有本地节点')
+  testingLocalBatch.value = true
+  localTestDone.value = 0
+  localTestTotal.value = targets.length
+  let ok = 0
+  let failed = 0
+  try {
+    for (const node of targets) {
+      try {
+        const res = await api(`/api/v1/local-nodes/${node.id}/test`, { method: 'POST' })
+        const item = localNodes.value.find((n) => n.id === node.id)
+        if (item) {
+          item.test_status = res.status
+          item.test_delay = res.delay
+          item.tested_at = res.tested_at
+        }
+        if (res.ok) ok += 1
+        else failed += 1
+      } catch (e) {
+        failed += 1
+        ElMessage.error(`${node.display_name}：${e.message}`)
+      }
+      localTestDone.value += 1
+    }
+    if (failed) {
+      ElMessage.warning(`测速完成：${ok} 个可用，${failed} 个不可用`)
+    } else {
+      ElMessage.success(`测速完成：${ok} 个本地节点全部可用`)
+    }
+  } finally {
+    testingLocalBatch.value = false
   }
 }
 

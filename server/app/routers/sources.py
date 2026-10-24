@@ -142,15 +142,40 @@ def _delete_one(conn, row, operator: str, detached: list[str] | None = None) -> 
 
 @router.get("/page")
 def list_sources_paged(limit: int = 50, offset: int = 0, keyword: str = "",
-                       user=CurrentUser):
-    """节点来源分页列表。"""
+                       mode: str = "", enabled: str = "", status: str = "",
+                       auto_fetch: str = "", user=CurrentUser):
+    """节点来源分页列表。
+
+    keyword 匹配名称；mode（provider/inline）按下发方式精确匹配；
+    enabled 取 "0"（停用）/"1"（启用）；auto_fetch 同理，指自动抓取开关；
+    status 限定抓取结果：ok 成功 / failed 失败 / none 从未抓取。
+    """
     with db.connect() as conn:
-        where, args = "", []
+        where, args = [], []
         if keyword:
-            where = "WHERE name LIKE ?"
-            args = [f"%{keyword}%"]
-        data = db.paged(conn, "sources", where, args, "id", limit, offset)
-    data["items"] = [_public(r) for r in data["items"]]
+            where.append("name LIKE ?")
+            args.append(f"%{keyword}%")
+        if mode:
+            where.append("COALESCE(mode, ?) = ?")
+            args += [config.SOURCE_MODE_PROVIDER, mode]
+        if enabled in ("0", "1"):
+            where.append("enabled = ?")
+            args.append(1 if enabled == "1" else 0)
+        if auto_fetch in ("0", "1"):
+            where.append("auto_fetch = ?")
+            args.append(1 if auto_fetch == "1" else 0)
+        if status == "ok":
+            where.append("last_status = 'ok'")
+        elif status == "failed":
+            where.append("last_status = 'failed'")
+        elif status == "none":
+            where.append("COALESCE(last_status, '') IN ('never', '')")
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        data = db.paged(conn, "sources", clause, args, "id", limit, offset)
+        data["items"] = [_public(r) for r in data["items"]]
+        # 未筛选时的总数，界面好写"筛选出 N 个（共 M 个）"
+        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM sources")["c"]
+    data["total_all"] = total_all
     return data
 
 
