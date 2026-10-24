@@ -248,6 +248,25 @@ def display_name(name: str, node_type: str = "") -> str:
     return f"{label} ({kind})"
 
 
+def display_index(nodes, enabled_only: bool = True) -> dict:
+    """节点标识 → 节点。判定只认 ``display_name()`` 这一个事实来源。
+
+    策略组成员可以写本地节点的产物标识（用来精确控制成员顺序），
+    校验器、渲染器、数据自检都靠这一个索引来判断"这个名字是谁"，
+    任何地方都不再自己拼一遍名字格式——节点改名、换类型、
+    将来改显示格式，三处判定自动一起跟着变。
+
+    ``enabled_only=True`` 时只收启用中的节点：停用节点不会进入产物，
+    不能作为成员被引用。
+    """
+    index: dict = {}
+    for node in nodes or []:
+        if enabled_only and not node.get("enabled"):
+            continue
+        index[display_name(node.get("name"), node.get("node_type") or "")] = node
+    return index
+
+
 def default_params(protocol: str) -> dict:
     spec = PROTOCOLS.get(protocol)
     if not spec:

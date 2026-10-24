@@ -200,7 +200,8 @@
             <el-form-item label="名称">
               <el-input v-model="localForm.name" placeholder="例如：香港-01" />
               <div class="mp-form-hint">
-                最终标识：{{ localForm.name.trim() || '未命名' }}<template v-if="localForm.node_type"> ({{ localForm.node_type }})</template>
+                产物里的节点标识由服务端统一生成，可在左侧列表查看；
+                要把某个本地节点放进策略组，在策略组的「包含策略」里直接选它。
               </div>
             </el-form-item>
           </el-col>

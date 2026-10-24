@@ -139,15 +139,21 @@
         </el-row>
         <el-form-item :label="form.type === 'relay'
           ? '包含策略（按顺序组成转发链，至少两个，仅限策略组、本地节点或 DIRECT / REJECT）'
-          : '包含策略（其他策略组或 DIRECT / REJECT，按顺序）'">
+          : '包含策略（按顺序组成，可用策略组、本地节点或 DIRECT / REJECT）'">
           <MultiSelectClear :has-value="form.proxies.length" @clear="form.proxies = []">
             <el-select v-model="form.proxies" multiple filterable allow-create default-first-option
                        style="width:100%" placeholder="选择或输入">
               <el-option v-for="g in otherGroups" :key="g" :label="g" :value="g" />
+              <el-option v-for="n in enabledLocalNodes" :key="n.display_name"
+                         :label="n.display_name" :value="n.display_name" />
               <el-option value="DIRECT" label="DIRECT（直连）" />
               <el-option value="REJECT" label="REJECT（拒绝）" />
             </el-select>
           </MultiSelectClear>
+          <div class="mp-form-hint">
+            这里的顺序就是产物里的成员顺序。本地节点可以放中间；
+            下面「本地节点」一栏则是整组追加（排最前或最后）。
+          </div>
         </el-form-item>
         <el-form-item label="适用引擎平台">
           <ScopeSelect v-model="form.targets" all-label="包含所有引擎平台"
@@ -405,6 +411,12 @@ const hasHealthCheck = computed(() =>
 
 const otherGroups = computed(() =>
   rows.value.map((g) => g.name).filter((n) => n !== editing.value?.name),
+)
+
+// 可作为成员的本地节点：名字直接用接口给的 display_name，
+// 前端不自己拼「名称 (类型)」——拼法变了就会对不上。
+const enabledLocalNodes = computed(() =>
+  (localNodes.value || []).filter((n) => n.enabled),
 )
 
 function localNodeList(ids) {

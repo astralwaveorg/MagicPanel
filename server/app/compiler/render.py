@@ -106,10 +106,13 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
     entry = {"name": group["name"], "type": group["type"]}
     # 本地单节点可以排在最前（"优先美国"这类组用得上：机房节点先试，
     # 机场节点兜底）。local_nodes 本身是有序的 id 列表，顺序即优先级。
+    # 成员也可以直接把本地节点的产物标识写进 proxies，用来把节点插在组中间；
+    # 同一节点两处都写了就只留一份，取先出现的位置。
     if group.get("local_first"):
-        proxies = list(local_names or []) + list(group.get("proxies") or [])
+        merged = list(local_names or []) + list(group.get("proxies") or [])
     else:
-        proxies = list(group.get("proxies") or []) + list(local_names or [])
+        merged = list(group.get("proxies") or []) + list(local_names or [])
+    proxies = list(dict.fromkeys(merged))
     use = list(group.get("use_sources") or [])
     if config.ALL_SCOPE in use:
         # 「包含所有」：用全部启用的来源，以后新增的来源自动进来
@@ -224,14 +227,18 @@ def applies_to(item: dict, target_name: str, device_name: str | None = None) -> 
 
 
 def _select_structure(snapshot: dict, target: dict, warnings: list | None,
-                      device_name: str | None = None) -> tuple[list, list]:
+                      device_name: str | None = None,
+                      local_display: set | None = None) -> tuple[list, list]:
     """按目标过滤策略组与规则，并剔除当前平台必然无效的规则。
 
     安全约束：
     1. 兜底规则（MATCH/FINAL）永远保留，其指向的策略组强制保留；
     2. 指向不存在策略组的规则自动丢弃（客户端加载即失败，必须杜绝）；
-    3. 策略组成员里引用了不存在策略组的成员一并剔除。
+    3. 策略组成员里引用了不存在策略组的成员一并剔除；
+    4. 本地节点可以作为成员（用产物标识引用），此时保留——它会跟着这个组
+       一起进产物，判定只认 local_display 这个权威索引。
     """
+    local_display = local_display or set()
     target_name = target.get("name") or ""
     engine = target.get("engine") or ""
     platform = (target.get("platform") or "").lower()
@@ -307,7 +314,7 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
     for g in groups:
         proxies = [p for p in (g.get("proxies") or [])
                    if p in config.BUILTIN_TARGETS or p in group_names
-                   or p == config.GUARD_PROXY]
+                   or p in local_display or p == config.GUARD_PROXY]
         if len(proxies) != len(g.get("proxies") or []):
             if warnings is not None:
                 warnings.append(
@@ -339,13 +346,22 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         base.pop(base_config_service.FAKE_IP_FILTER_KEY, None))
     cfg: dict = base_config_service.ordered(base)
 
-    groups, rules = _select_structure(
-        snapshot, target, warnings, (device or {}).get("name"))
     # 本地节点跟随本目标实际生效的策略组，避免把其他设备的私有隧道及密钥
     # 分发给本目标。不能按全局策略组筛选：其中可能包含目标专属的策略组。
+    # 节点也可以直接作为组成员被引用（用产物标识），这时它同样跟着这个组走。
+    local_index = local_node_service.display_index(
+        [n for n in snapshot.get("local_nodes", []) if n.get("enabled")])
+    groups, rules = _select_structure(
+        snapshot, target, warnings, (device or {}).get("name"),
+        set(local_index))
     used_local = {
         node_id for group in groups for node_id in (group.get("local_nodes") or [])
     }
+    for group in groups:
+        for member in group.get("proxies") or []:
+            node = local_index.get(member)
+            if node:
+                used_local.add(node["id"])
     local_enabled = {
         node["id"]: node for node in snapshot.get("local_nodes", [])
         if node.get("enabled") and node["id"] in used_local

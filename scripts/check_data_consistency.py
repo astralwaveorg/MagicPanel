@@ -36,6 +36,7 @@ for _path in (REPO / "server", Path("/app")):
         break
 
 from app.services import base_config as bc  # noqa: E402
+from app.services import local_nodes as local_node_service  # noqa: E402
 
 STRUCT_KEYS = set(bc.PROTECTED_KEYS)
 # 命名规范：不空白、不含控制字符、首尾不空。表情符号与中文都允许
@@ -103,7 +104,14 @@ def main() -> int:
     devices = rows("SELECT id, name, target_id FROM devices")
     device_names = {d["name"] for d in devices}
     sources = {r["name"] for r in rows("SELECT name FROM sources")}
-    local_nodes = {r["id"] for r in rows("SELECT id FROM local_nodes")}
+    local_node_rows = [dict(r) for r in rows(
+        "SELECT id, name, node_type, enabled FROM local_nodes")]
+    local_nodes = {r["id"] for r in local_node_rows}
+    # 本地节点可以作为策略组成员（用来精确控制成员顺序）。"这个名字是谁"
+    # 由服务层的 display_name() 索引回答，这里不自己拼名字格式——
+    # 节点改名、换类型、显示格式调整时，判定自动跟着变。
+    # 停用的节点不会进产物，不算合法成员。
+    local_display = local_node_service.display_index(local_node_rows)
 
     for g in groups:
         for name in json.loads(g["targets"] or "[]"):
@@ -113,7 +121,8 @@ def main() -> int:
             if name != "*" and name not in device_names:
                 problems.append(f"策略组「{g['name']}」适用了不存在的设备「{name}」")
         for member in json.loads(g["proxies"] or "[]"):
-            if member not in group_names and member not in bc.__dict__.get(
+            if member not in group_names and member not in local_display \
+                    and member not in bc.__dict__.get(
                     "BUILTIN_TARGETS", ()) and member not in ("DIRECT", "REJECT", "PASS", "COMPATIBLE"):
                 problems.append(f"策略组「{g['name']}」的成员「{member}」不存在")
         for src in json.loads(g["use_sources"] or "[]"):

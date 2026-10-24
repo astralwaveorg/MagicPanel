@@ -8,6 +8,7 @@ import re
 import yaml
 
 from .. import config
+from ..services import local_nodes as local_node_service
 
 
 def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
@@ -19,6 +20,10 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
     local_nodes = {
         node["id"]: node for node in snapshot.get("local_nodes", [])
     }
+    # 本地节点的产物标识索引：成员名可以直接写节点，判定只认这一个事实来源
+    local_display = local_node_service.display_index(local_nodes.values())
+    local_display_all = local_node_service.display_index(
+        local_nodes.values(), enabled_only=False)
     groups = snapshot["groups"]
     group_names = [g["name"] for g in groups]
     group_set = set(group_names)
@@ -40,10 +45,20 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         for p in g.get("proxies") or []:
             if p in config.BUILTIN_TARGETS or p == config.GUARD_PROXY:
                 continue
-            if p not in group_set:
-                errors.append(f"策略组“{g['name']}”引用了不存在的策略组“{p}”")
-            else:
+            if p in group_set:
                 refs.append(p)
+            elif p in local_display:
+                # 本地节点：合法成员。位置即优先级，用来把节点插在组中间。
+                # 判定靠 display_name() 的权威索引，不在这里复刻名字格式。
+                if "*" in (g.get("devices") or []):
+                    warnings.append(
+                        f"策略组“{g['name']}”适用于所有设备，成员里的本地节点"
+                        f"“{p}”会连同其密钥一起下发给全部设备")
+            elif p in local_display_all:
+                errors.append(
+                    f"策略组“{g['name']}”的成员“{p}”是已停用的本地节点，不会进入产物")
+            else:
+                errors.append(f"策略组“{g['name']}”引用了不存在的策略组“{p}”")
         for u in g.get("use_sources") or []:
             if u == config.ALL_SCOPE:
                 continue          # 「包含所有」由渲染时展开，不做具体校验
