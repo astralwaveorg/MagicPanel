@@ -381,8 +381,13 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     inline_names: dict[str, list[str]] = {}
     for src in inline_sources:
         names: list[str] = []
+        excluded = set(src.get("excluded_nodes") or [])
         for node in src.get("nodes") or []:
             raw = str(node.get("name") or "")
+            # 「只分发可用节点」：测速失败的节点不进产物（provider 模式在
+            # feed 端过滤，内联模式没有 provider 可过滤）
+            if raw in excluded:
+                continue
             # 来源自身的过滤作用在原始节点名上（客户端的 provider filter 同理）
             if not source_node_service.match(src.get("filter") or "", raw):
                 continue
@@ -396,7 +401,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         if not names and warnings is not None:
             warnings.append(
                 f"节点来源“{src['name']}”设为内联下发，但没有可用节点"
-                "（尚未抓取，或全部被来源过滤正则排除）")
+                "（尚未抓取，或全部被来源过滤正则/测速结果排除）")
 
     cfg["proxies"] = [_guard_proxy(engine)]
     for node in local_enabled.values():

@@ -35,6 +35,13 @@ def collect_snapshot(conn) -> dict:
             # 自动构建才会把新节点重新下发（内联模式下客户端不再自己拉 provider）。
             item["nodes"] = source_node_service.parse(
                 security.decrypt_text(r["snapshot_enc"]))
+        if r["filter_unavailable"]:
+            # 「只分发可用节点」：provider 模式在 feed 端过滤，内联模式没有
+            # provider 可过滤，必须在构建时把测速失败的节点剔掉，否则这个开关
+            # 在内联模式下会静默失效。
+            results = json.loads(r["test_results"] or "{}")
+            item["excluded_nodes"] = sorted(
+                name for name, delay in results.items() if delay < 0)
         sources.append(item)
     rule_providers = [
         {"name": r["name"], "behavior": r["behavior"], "format": r["format"],

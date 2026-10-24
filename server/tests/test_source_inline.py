@@ -88,6 +88,26 @@ def test_inline_source_filter_removes_pseudo_nodes():
     assert "剩余流量" not in names
 
 
+def test_inline_respects_filter_unavailable():
+    """「只分发可用节点」在内联模式下也要生效：测速失败的节点不进产物。"""
+    from app.compiler import render
+
+    src = _source("机场A", nodes=[_node("香港 01"), _node("香港 02")])
+    src["excluded_nodes"] = ["香港 02"]
+    snap = _snapshot(
+        sources=[src],
+        groups=[_group("🇭🇰 香港", "url-test", use_sources=["*"],
+                       filter=r"(?i)香港")],
+    )
+    cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
+    names = [p["name"] for p in cfg["proxies"]]
+    assert "香港 01" in names
+    assert "香港 02" not in names
+    # 组里也不能再出现被排除的节点
+    grp = next(g for g in cfg["proxy-groups"] if g["name"] == "🇭🇰 香港")
+    assert "香港 02" not in grp["proxies"]
+
+
 def test_group_expands_inline_sources_into_members():
     """组引用内联来源时展开成显式成员：没有 provider 可用，use 会是空的。"""
     from app.compiler import render
