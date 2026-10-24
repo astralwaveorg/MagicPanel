@@ -34,7 +34,7 @@
 16. **策略组成员可以直接写本地节点的产物标识**（如 `🇯🇵 日本机房 01 (机房)`），成员顺序就是产物里的优先级，可以把节点插在组中间；`local_nodes` 字段则是整组追加到首或尾。判定"这个名字是谁"只认 `local_nodes.display_name()` / `display_index()` 这一个事实来源——校验器、渲染器、数据自检、界面都不许自己拼一遍「名称 (类型)」，否则节点改名或换类型后会集体失效。
 17. **不同节点来源可能有同名节点**，客户端按名字去重会互相覆盖，可用节点数会凭空少一截。每个来源在「节点来源」里配一个「节点名后缀」（下发为 `override.additional-suffix`），保证全局节点名唯一。
 18. **节点来源有两种下发方式**：`provider`（写进产物的 `proxy-providers` 段，客户端自己拉取更新）或 `inline`（节点写进产物顶层 `proxies`）。只有 `inline` 的节点会进客户端的 GLOBAL 组——Clash/Stash 的 GLOBAL 只收顶层 proxies 与策略组，provider 里的节点进不去。inline 的代价：机场换节点要重拉订阅才生效；机场订阅只保留 `proxies` 段，机场自带的 rules/dns/策略组不进面板。两种模式下「只分发可用节点」都要生效：provider 模式在 feed 端过滤，inline 模式在构建时按测速结果剔除（`sources.excluded_nodes`），漏掉哪一边这个开关就会静默失效。
-19. **规则内容源是独立仓库 `astralwaveorg/magic-sets`**，以 submodule 形式挂在 `magic-sets/`。仓库分 `rule/`（规则集合）、`script/`（Stash 脚本）、`rewrite/`（HTTP 重写）三个目录。但面板的规则集内容目前仍存在数据库 `rule_providers.content`，产物里的 rule-providers URL 指向面板自己的 `/res/rule/<name>` feed 端点，客户端从面板拉、不直连 GitHub。**submodule 与面板之间还没有读文件的链路**——要让规则以仓库文件为准，得先加这条链路。`magic-sets/` 不参与镜像构建（Dockerfile 只 COPY `server/app` 与前端产物），部署脚本 rsync 会带上它但不影响产物。
+19. **规则内容源是独立仓库 `astralwaveorg/magic-sets`**，以 submodule 形式挂在 `magic-sets/`。仓库分 `rule/`（规则集合）、`script/`（Stash 脚本）、`rewrite/`（HTTP 重写）三个目录。面板的规则集分两层，都在「规则来源」里填远程地址（**不需要代码改动**）：自维护层填 `https://cdn.jsdelivr.net/gh/astralwaveorg/magic-sets@main/rule/<名称>.yaml`（yaml，25 个集合，集合名与仓库文件名一致，中文展示名写在文件头注释里）；上游通用层填 MetaCubeX/meta-rules-dat 的 mrs 地址。面板抓取后存进 `rule_providers.content`，产物里的 rule-providers URL 仍指向面板自己的 `/res/rule/<name>` feed 端点，客户端从面板拉、不直连 GitHub。`script/` 与 `rewrite/` 片段默认停用：脚本会改写全部请求的 UA，重写依赖 HTTP 引擎与设备信任 CA，而功能模块没有按设备生效的粒度。`magic-sets/` 不参与镜像构建（Dockerfile 只 COPY `server/app` 与前端产物），部署脚本 rsync 会带上它但不影响产物。
 
 ## 改完要做的事
 
