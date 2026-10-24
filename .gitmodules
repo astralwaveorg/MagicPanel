@@ -1,0 +1,4 @@
+[submodule "rule-sets"]
+	path = rule-sets
+	url = git@github.com:astralwaveorg/magic-rules.git
+	branch = main
