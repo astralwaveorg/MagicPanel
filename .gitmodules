@@ -1,4 +1,4 @@
-[submodule "rule-sets"]
-	path = rule-sets
-	url = git@github.com:astralwaveorg/magic-rules.git
+[submodule "magic-sets"]
+	path = magic-sets
+	url = git@github.com:astralwaveorg/magic-sets.git
 	branch = main
