@@ -168,12 +168,20 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
     return entry
 
 
-def _rule_line(rule: dict) -> str:
+def _rule_line(rule: dict, engine: str = "stash") -> str:
     if rule["type"] in ("MATCH", "FINAL"):
         return f"MATCH,{rule['target']}"
     line = f"{rule['type']},{rule['value']},{rule['target']}"
     if rule.get("no_resolve") and rule["type"] in config.NO_RESOLVE_TYPES:
         line += ",no-resolve"
+    # no-track / pre-matching 是 Stash 专属能力：Mihomo 的规则参数只有
+    # no-resolve 与 src，不带这两个参数。实测 Mihomo 遇到未知参数会忽略
+    # （连乱写的参数名都能通过 -t 校验），但产物里干脆不写，语义更清楚。
+    if engine == "stash":
+        if rule.get("no_track"):
+            line += ",no-track"
+        if rule.get("pre_matching"):
+            line += ",pre-matching"
     return line
 
 
@@ -439,7 +447,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     pinned = ["DOMAIN-SUFFIX,{FEED_HOST},DIRECT"] if panel_direct else []
     # 个人直连域名：置顶在用户规则之前，保证一定先生效
     personal = [f"DOMAIN-SUFFIX,{domain},DIRECT" for domain in direct_domains]
-    cfg["rules"] = pinned + personal + [_rule_line(r) for r in rules]
+    cfg["rules"] = pinned + personal + [_rule_line(r, engine) for r in rules]
 
     # Stash 常驻 Fake-IP；Mihomo 的 DNS 段（enable / enhanced-mode 等）由引擎
     # 默认配置给出，用户在平台层改的 dns 已在层叠里合并过——这里不再另存

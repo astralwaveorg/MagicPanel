@@ -74,6 +74,8 @@ def collect_snapshot(conn) -> dict:
     rules = [
         {"type": r["type"], "value": r["value"], "target": r["target"],
          "enabled": bool(r["enabled"]), "no_resolve": bool(r["no_resolve"]),
+         "no_track": bool(r["no_track"]) if "no_track" in r.keys() else False,
+         "pre_matching": bool(r["pre_matching"]) if "pre_matching" in r.keys() else False,
          "targets": json.loads(r["targets"] or "[]"),
          "devices": json.loads(r["devices"] or "[]") if "devices" in r.keys() else []}
         for r in db.all_(conn, "SELECT * FROM rules ORDER BY sort, id")

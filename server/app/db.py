@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS rules (
   enabled INTEGER NOT NULL DEFAULT 1,
   note TEXT NOT NULL DEFAULT '',
   no_resolve INTEGER NOT NULL DEFAULT 0,
+  no_track INTEGER NOT NULL DEFAULT 0,
+  pre_matching INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -325,6 +327,12 @@ def init_db() -> None:
         # 分流规则的 no-resolve 修饰符（仅 IP 类规则有效）
         _ensure_column(conn, "rules", "no_resolve",
                        "no_resolve INTEGER NOT NULL DEFAULT 0")
+        # Stash 专属修饰符：no-track（命中连接不记入连接列表）、
+        # pre-matching（REJECT 提前到建连前生效，Stash Beta iOS/tvOS3.7+macOS4.4+）
+        _ensure_column(conn, "rules", "no_track",
+                       "no_track INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "rules", "pre_matching",
+                       "pre_matching INTEGER NOT NULL DEFAULT 0")
         # 差异配置：策略组与规则可限定适用目标（空 = 全部目标）
         _ensure_column(conn, "proxy_groups", "local_first",
                        "local_first INTEGER NOT NULL DEFAULT 0")

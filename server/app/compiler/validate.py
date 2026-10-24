@@ -127,6 +127,15 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         target = r["target"]
         if target not in group_set and target not in config.BUILTIN_TARGETS:
             errors.append(f"规则 {rtype},{r.get('value', '')} 指向不存在的目标“{target}”")
+        # pre-matching 的目标只能是 REJECT / REJECT-DROP 字面量，
+        # 用策略组会让客户端配置加载失败（官方原文）。
+        if r.get("pre_matching") and target not in config.PRE_MATCHING_TARGETS:
+            errors.append(
+                f"规则 {rtype},{r.get('value', '')} 带 pre-matching，"
+                f"目标“{target}”只能是 REJECT / REJECT-DROP，否则客户端加载失败")
+        if r.get("no_track") and rtype in ("MATCH", "FINAL"):
+            errors.append(
+                f"规则 {rtype},{r.get('value', '')} 是兜底规则，不能加 no-track")
     if not has_final:
         errors.append("缺少兜底规则：请添加一条 MATCH 规则")
 
@@ -233,4 +242,9 @@ def validate_rendered(text: str, engine: str = "") -> list[str]:
         # no-resolve / no-track 修饰符不影响出站位置
         if target not in known:
             errors.append(f"规则 {rtype} 指向不存在的出站“{target}”，会导致客户端加载失败")
+        # pre-matching 的目标只能是 REJECT / REJECT-DROP 字面量
+        if "pre-matching" in parts and target not in config.PRE_MATCHING_TARGETS:
+            errors.append(
+                f"规则 {rtype} 带 pre-matching 但目标是“{target}”，"
+                f"只能用 REJECT / REJECT-DROP，否则客户端加载失败")
     return errors

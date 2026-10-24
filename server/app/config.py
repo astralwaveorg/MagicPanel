@@ -67,6 +67,16 @@ ENGINE_RULE_TYPES = {"stash": STASH_RULE_TYPES, "mihomo": MIHOMO_RULE_TYPES}
 
 # 允许附加 no-resolve 修饰符的规则类型（IP 字面量匹配，不触发域名解析）
 NO_RESOLVE_TYPES = {"IP-CIDR", "IP-CIDR6", "GEOIP", "RULE-SET", "SRC-IP-CIDR"}
+# Stash 专属修饰符 pre-matching：让 REJECT 在连接建立之前生效。
+# 官方原文：只能用在"连接建立前就能判断"的规则类型上，
+# PROCESS-NAME / PROCESS-PATH / USER-AGENT / URL-REGEX / PROTOCOL / SCRIPT 带它会报错。
+PRE_MATCHING_TYPES = {
+    "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX",
+    "GEOSITE", "IP-CIDR", "IP-CIDR6", "GEOIP", "IP-ASN", "DST-PORT", "SRC-IP",
+    "SRC-PORT", "NETWORK", "RULE-SET", "AND", "OR", "NOT",
+}
+# pre-matching 的目标只能是这两个字面量；用策略组会让客户端配置加载失败
+PRE_MATCHING_TARGETS = {"REJECT", "REJECT-DROP"}
 TOKEN_PREFIX = "mp_"
 DEFAULT_UA = "Stash"
 FETCH_MAX_BYTES = 10 * 1024 * 1024

@@ -40,6 +40,11 @@ class RuleBody(BaseModel):
     enabled: bool = True
     note: str = Field(default="", max_length=256)
     no_resolve: bool = False
+    # Stash 专属修饰符：
+    # no_track —— 命中的连接不记入客户端连接列表（流量统计照常）
+    # pre_matching —— REJECT 提前到建连前生效（目标只能是 REJECT / REJECT-DROP 字面量）
+    no_track: bool = False
+    pre_matching: bool = False
     # 适用引擎平台 / 适用设备：默认"包含所有"，显式传空数组 = 不适用任何
     targets: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
     devices: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
@@ -72,6 +77,8 @@ def _rule_public(row) -> dict:
     data = db.row_to_dict(row)
     data["enabled"] = bool(row["enabled"])
     data["no_resolve"] = bool(row["no_resolve"])
+    data["no_track"] = bool(row["no_track"]) if "no_track" in row.keys() else False
+    data["pre_matching"] = bool(row["pre_matching"]) if "pre_matching" in row.keys() else False
     data["targets"] = json.loads(row["targets"] or "[]")
     data["devices"] = json.loads(row["devices"] or "[]") if "devices" in row.keys() else []
     data["local_first"] = bool(row["local_first"]) if "local_first" in row.keys() else False
@@ -322,6 +329,8 @@ class BatchRulePatch(BaseModel):
     enabled: bool | None = None
     note: str | None = None
     no_resolve: bool | None = None
+    no_track: bool | None = None
+    pre_matching: bool | None = None
 
 
 @router.patch("/groups/batch")
@@ -465,12 +474,13 @@ def batch_delete_groups(body: BatchIds, user=CurrentUser):
 
 @router.patch("/rules/batch")
 def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
-    """批量修改分流规则的共性配置（目标、适用平台、启用状态、备注、no-resolve）。"""
+    """批量修改分流规则的共性配置（目标、适用平台、启用状态、备注、修饰符）。"""
     ids = list(dict.fromkeys(body.ids))
     if not ids:
         raise HTTPException(400, "请先选择要修改的分流规则")
     if body.target is None and body.targets is None and body.devices is None \
-            and body.enabled is None and body.note is None and body.no_resolve is None:
+            and body.enabled is None and body.note is None and body.no_resolve is None \
+            and body.no_track is None and body.pre_matching is None:
         raise HTTPException(400, "请至少选择一个要修改的字段")
     updated = 0
     skipped: list[dict] = []
@@ -487,6 +497,9 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
             fields: list[str] = []
             args: list = []
             notes: list[str] = []
+            # 改目标与改 pre_matching 有先后依赖：pre-matching 的目标只能是
+            # REJECT / REJECT-DROP 字面量，所以先算目标再校验修饰符。
+            new_target = body.target if body.target is not None else row["target"]
             if body.target is not None:
                 if body.target not in group_names \
                         and body.target not in config.BUILTIN_TARGETS:
@@ -515,6 +528,25 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
             if body.no_resolve is not None:
                 fields.append("no_resolve=?")
                 args.append(int(body.no_resolve))
+            if body.no_track is not None:
+                if body.no_track and row["type"] in ("MATCH", "FINAL"):
+                    notes.append("兜底规则不能加 no-track，已跳过")
+                else:
+                    fields.append("no_track=?")
+                    args.append(int(body.no_track))
+            if body.pre_matching is not None:
+                if body.pre_matching:
+                    if new_target not in config.PRE_MATCHING_TARGETS:
+                        notes.append(
+                            "pre-matching 的目标只能是 REJECT / REJECT-DROP 字面量，已跳过")
+                    elif row["type"] not in config.PRE_MATCHING_TYPES:
+                        notes.append(f"pre-matching 不能用于 {row['type']} 规则，已跳过")
+                    else:
+                        fields.append("pre_matching=?")
+                        args.append(int(body.pre_matching))
+                else:
+                    fields.append("pre_matching=?")
+                    args.append(int(body.pre_matching))
             if not fields:
                 if notes:
                     skipped.append({"id": rid,
@@ -533,7 +565,9 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
                        ",".join(str(i) for i in ids),
                        {"target": body.target, "targets": body.targets,
                         "devices": body.devices,
-                        "enabled": body.enabled, "note": body.note})
+                        "enabled": body.enabled, "note": body.note,
+                        "no_track": body.no_track,
+                        "pre_matching": body.pre_matching})
     return {"ok": True, "updated": updated, "missing": missing, "skipped": skipped}
 
 
@@ -592,6 +626,18 @@ def _check_rule(body: RuleBody) -> None:
         raise HTTPException(400, "该规则类型需要填写匹配值")
     if body.no_resolve and body.type not in config.NO_RESOLVE_TYPES:
         raise HTTPException(400, "no-resolve 仅适用于 IP 类规则（IP-CIDR / GEOIP / RULE-SET 等）")
+    if body.no_track and body.type in ("MATCH", "FINAL"):
+        # 兜底规则命中的是所有未列出的流量，勾上等于让客户端不记录任何连接
+        raise HTTPException(400, "兜底规则（MATCH）不能加 no-track，否则客户端不记录任何连接")
+    if body.pre_matching:
+        if body.target not in config.PRE_MATCHING_TARGETS:
+            raise HTTPException(
+                400, "pre-matching 的目标只能是 REJECT 或 REJECT-DROP 字面量"
+                     "（用策略组会让客户端配置加载失败）")
+        if body.type not in config.PRE_MATCHING_TYPES:
+            raise HTTPException(
+                400, f"pre-matching 不能用于 {body.type} 规则"
+                     "（官方只允许连接建立前就能判断的类型）")
 
 
 def _remap_group_refs(conn, old_name: str, new_name: str) -> int:
@@ -784,9 +830,11 @@ def create_rule(body: RuleBody, user=CurrentUser):
             now = db.now()
             cur = db.insert_unique(conn,
                 "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
-                "targets, devices, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "no_track, pre_matching, targets, devices, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (sort, body.type, body.value, body.target, int(body.enabled),
-                 body.note, int(body.no_resolve),
+                 body.note, int(body.no_resolve), int(body.no_track),
+                 int(body.pre_matching),
                  json.dumps(body.targets, ensure_ascii=False),
                  json.dumps(body.devices, ensure_ascii=False), now, now),
             )
@@ -809,9 +857,11 @@ def update_rule(rid: int, body: RuleBody, user=CurrentUser):
         _get_rule(conn, rid)
         conn.execute(
             "UPDATE rules SET type=?, value=?, target=?, enabled=?, note=?, "
-            "no_resolve=?, targets=?, devices=?, updated_at=? WHERE id=?",
+            "no_resolve=?, no_track=?, pre_matching=?, targets=?, devices=?, "
+            "updated_at=? WHERE id=?",
             (body.type, body.value, body.target, int(body.enabled), body.note,
-             int(body.no_resolve), json.dumps(body.targets, ensure_ascii=False),
+             int(body.no_resolve), int(body.no_track), int(body.pre_matching),
+             json.dumps(body.targets, ensure_ascii=False),
              json.dumps(body.devices, ensure_ascii=False),
              db.now(), rid),
         )

@@ -103,6 +103,17 @@
           <el-table-column label="no-resolve" width="100" align="center">
             <template #default="{ row }">{{ row.no_resolve ? '是' : '—' }}</template>
           </el-table-column>
+          <el-table-column label="Stash 修饰符" width="130" align="center">
+            <template #default="{ row }">
+              <span v-if="row.no_track || row.pre_matching">
+                <el-tag v-if="row.no_track" size="small" type="info"
+                        effect="plain">不记录</el-tag>
+                <el-tag v-if="row.pre_matching" size="small" type="warning"
+                        effect="plain">提前拒</el-tag>
+              </span>
+              <span v-else style="color:var(--mp-muted)">—</span>
+            </template>
+          </el-table-column>
           <el-table-column label="启用" width="80">
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
           </el-table-column>
@@ -152,6 +163,7 @@
             <el-option v-for="g in groups" :key="g.name" :value="g.name" :label="g.name" />
             <el-option value="DIRECT" label="DIRECT（直连）" />
             <el-option value="REJECT" label="REJECT（拒绝）" />
+            <el-option value="REJECT-DROP" label="REJECT-DROP（静默丢弃）" />
           </el-select>
         </el-form-item>
         <el-form-item label="适用引擎平台">
@@ -178,6 +190,22 @@
           <el-checkbox v-if="canNoResolve" v-model="form.no_resolve">
             no-resolve（仅匹配 IP 字面量，不触发域名解析）
           </el-checkbox>
+        </el-form-item>
+        <el-form-item label="Stash 专属修饰符">
+          <el-checkbox v-if="canNoTrack" v-model="form.no_track">
+            不记入连接列表（命中的连接不显示在客户端连接页，流量统计照常）
+          </el-checkbox>
+          <el-checkbox v-if="canPreMatching" v-model="form.pre_matching">
+            提前拒绝（连接还没建立就拒掉，广告类请求最省 CPU 与内存）
+          </el-checkbox>
+          <div class="mp-form-hint">
+            这两项是 Stash 的能力，只有 Stash 产物会带上，Mihomo 产物不受影响。
+            「提前拒绝」要求目标直接是 REJECT / REJECT-DROP，
+            且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效——版本太旧的客户端可能加载失败。
+          </div>
+          <div v-if="form.pre_matching && !preMatchingTargetOk" class="mp-form-warn">
+            「提前拒绝」的目标只能是 REJECT / REJECT-DROP，请把上面的目标改掉再保存
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -228,6 +256,25 @@
           <el-radio :value="true">是</el-radio>
           <el-radio :value="false">否</el-radio>
         </el-radio-group>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.useNoTrack">修改「不记入连接列表」</el-checkbox>
+        </el-form-item>
+        <el-radio-group v-if="batch.useNoTrack" v-model="batch.no_track">
+          <el-radio :value="true">是</el-radio>
+          <el-radio :value="false">否</el-radio>
+        </el-radio-group>
+
+        <el-form-item>
+          <el-checkbox v-model="batch.usePreMatching">修改「提前拒绝」</el-checkbox>
+        </el-form-item>
+        <el-radio-group v-if="batch.usePreMatching" v-model="batch.pre_matching">
+          <el-radio :value="true">是</el-radio>
+          <el-radio :value="false">否</el-radio>
+        </el-radio-group>
+        <div v-if="batch.usePreMatching" class="mp-form-hint">
+          目标不是 REJECT / REJECT-DROP 的规则会被跳过，兜底规则一律跳过。
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="batchDialog = false">取消</el-button>
@@ -273,6 +320,8 @@ const batch = reactive({
   useEnabled: false, enabled: true,
   useNote: false, note: '',
   useNoResolve: false, no_resolve: false,
+  useNoTrack: false, no_track: false,
+  usePreMatching: false, pre_matching: false,
 })
 const total = ref(0)
 const totalAll = ref(0)
@@ -330,11 +379,19 @@ const sorter = useRowSortable(tableRef, rows, async (ids) => {
 })
 
 const NO_RESOLVE_TYPES = ['IP-CIDR', 'IP-CIDR6', 'GEOIP', 'RULE-SET', 'SRC-IP-CIDR']
+// Stash 的 pre-matching 只能用"连接建立前就能判断"的规则类型
+const PRE_MATCHING_TYPES = [
+  'DOMAIN', 'DOMAIN-SUFFIX', 'DOMAIN-KEYWORD', 'DOMAIN-WILDCARD', 'DOMAIN-REGEX',
+  'GEOSITE', 'IP-CIDR', 'IP-CIDR6', 'GEOIP', 'IP-ASN', 'DST-PORT', 'SRC-IP',
+  'SRC-PORT', 'NETWORK', 'RULE-SET', 'AND', 'OR', 'NOT',
+]
+const PRE_MATCHING_TARGETS = ['REJECT', 'REJECT-DROP']
 
 // 默认一律"包含所有"：新建的规则开箱即对全部平台、全部设备生效
 const emptyForm = () => ({
   type: 'DOMAIN-SUFFIX', value: '', target: 'DIRECT', enabled: true, note: '',
-  no_resolve: false, targets: [ALL_SCOPE], devices: [ALL_SCOPE],
+  no_resolve: false, no_track: false, pre_matching: false,
+  targets: [ALL_SCOPE], devices: [ALL_SCOPE],
 })
 const form = reactive(emptyForm())
 
@@ -348,6 +405,11 @@ const targetNames = computed(() => targets.value.map((t) => t.name))
 const deviceNames = computed(() => devices.value.map((d) => d.name))
 const isFinal = computed(() => ['MATCH', 'FINAL'].includes(form.type))
 const canNoResolve = computed(() => NO_RESOLVE_TYPES.includes(form.type))
+// 兜底规则命中的是所有未列出的流量，勾上等于让客户端不记录任何连接
+const canNoTrack = computed(() => !isFinal.value)
+const canPreMatching = computed(() => PRE_MATCHING_TYPES.includes(form.type))
+const preMatchingTargetOk = computed(
+  () => PRE_MATCHING_TARGETS.includes(form.target))
 
 function onPageChange({ page: p, limit: l }) {
   page.value = p
@@ -413,7 +475,9 @@ function openEdit(row) {
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {
     type: row.type, value: row.value, target: row.target, enabled: row.enabled,
-    note: row.note, no_resolve: row.no_resolve, targets: [...(row.targets || [])],
+    note: row.note, no_resolve: row.no_resolve,
+    no_track: !!row.no_track, pre_matching: !!row.pre_matching,
+    targets: [...(row.targets || [])],
     devices: [...(row.devices || [])],
   } : {})
   dialog.value = true
@@ -483,6 +547,8 @@ function openBatch() {
   batch.useEnabled = false; batch.enabled = true
   batch.useNote = false; batch.note = ''
   batch.useNoResolve = false; batch.no_resolve = false
+  batch.useNoTrack = false; batch.no_track = false
+  batch.usePreMatching = false; batch.pre_matching = false
   batchDialog.value = true
 }
 
@@ -494,6 +560,8 @@ async function saveBatch() {
   if (batch.useEnabled) payload.enabled = batch.enabled
   if (batch.useNote) payload.note = batch.note
   if (batch.useNoResolve) payload.no_resolve = batch.no_resolve
+  if (batch.useNoTrack) payload.no_track = batch.no_track
+  if (batch.usePreMatching) payload.pre_matching = batch.pre_matching
   const keys = Object.keys(payload).filter((k) => k !== 'ids')
   if (!keys.length) {
     ElMessage.warning('请至少勾选一项要修改的内容')
