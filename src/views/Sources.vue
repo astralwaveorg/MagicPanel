@@ -84,6 +84,21 @@
           <el-table-column label="节点数" width="90" align="left">
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
+          <el-table-column label="下发方式" width="100" align="center">
+            <template #default="{ row }">
+              <el-tooltip placement="top">
+                <template #reference>
+                  <span :style="row.mode === 'inline'
+                    ? 'color:var(--mp-ok)' : 'color:var(--mp-muted)'">
+                    {{ row.mode === 'inline' ? '内联' : 'provider' }}
+                  </span>
+                </template>
+                {{ row.mode === 'inline'
+                  ? '节点写进产物顶层 proxies，能在 GLOBAL 组里直接选中；机场换节点需重拉订阅'
+                  : '节点写进 proxy-providers 段，客户端按间隔自己拉取更新' }}
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column label="摘要" min-width="130">
             <template #default="{ row }"><span class="mono mp-nowrap">{{ shortSha(row.sha256) }}</span></template>
           </el-table-column>
@@ -311,6 +326,17 @@
             填了后缀，客户端会给这个来源的节点名统一加上它。
           </div>
         </el-form-item>
+        <el-form-item label="下发方式">
+          <el-radio-group v-model="form.mode">
+            <el-radio value="provider">provider（客户端自己更新）</el-radio>
+            <el-radio value="inline">inline（节点写进产物，可被 GLOBAL 选中）</el-radio>
+          </el-radio-group>
+          <div class="mp-form-hint">
+            provider：节点写进产物的 proxy-providers 段，客户端按间隔自己拉取更新；
+            inline：节点直接写进产物顶层 proxies，能出现在 GLOBAL 组里，
+            代价是机场换节点后要重新拉一次订阅才生效。
+          </div>
+        </el-form-item>
         <!-- 一行最多两项：挤在一行时输入框会被压窄到看不清 -->
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12">
@@ -530,6 +556,7 @@ const urlCopied = ref(false)
 
 const emptyForm = () => ({
   name: '', url: '', enabled: true, filter: '', ua: 'Stash', suffix: '',
+  mode: 'provider',
   interval: 21600, test_interval: 21600, client_interval: 0,
   auto_fetch: true, auto_test: true,
   allow_private: false, filter_unavailable: false,
@@ -717,7 +744,7 @@ function openEdit(row) {
   revealedUrl.value = '' 
   Object.assign(form, emptyForm(), row ? {
     name: row.name, url: '', enabled: row.enabled, filter: row.filter,
-    ua: row.ua, suffix: row.suffix || '',
+    ua: row.ua, suffix: row.suffix || '', mode: row.mode || 'provider',
     interval: row.interval, test_interval: row.test_interval,
     client_interval: row.client_interval,
     auto_fetch: row.auto_fetch !== false,

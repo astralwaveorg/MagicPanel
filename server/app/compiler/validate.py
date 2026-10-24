@@ -199,6 +199,23 @@ def validate_rendered(text: str, engine: str = "") -> list[str]:
     groups = set(group_names)
     proxies = set(proxy_names)
     known = groups | proxies | config.BUILTIN_TARGETS
+    # 策略组成员必须真实存在：客户端加载配置时会校验成员名，
+    # 引用不存在的出站会直接加载失败。内联模式下成员是展开后的节点名，
+    # 这里多一道兜底，避免节点改名或来源停用后产物加载不了。
+    for group in (data.get("proxy-groups") or []):
+        if not isinstance(group, dict):
+            continue
+        gname = group.get("name")
+        # 没有成员的策略组会让客户端整份配置加载失败（实测 Mihomo 报
+        # "`use` or `proxies` missing"，不是"这个组失效"而是"配置废了"）。
+        # 内联模式下来源节点被过滤光时组会变空，这里挡住。
+        if not (group.get("proxies") or group.get("use")):
+            errors.append(f"策略组“{gname}”没有可用成员，客户端会拒绝加载配置")
+        for member in (group.get("proxies") or []):
+            if not isinstance(member, str) or member in known:
+                continue
+            errors.append(
+                f"策略组“{gname}”的成员“{member}”不存在，会导致客户端加载失败")
     for line in (data.get("rules") or []):
         if not isinstance(line, str):
             continue

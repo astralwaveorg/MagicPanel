@@ -20,6 +20,14 @@ PLATFORM_LABELS = {
 
 GUARD_PROXY = "空组保护"           # 永远无法出站的占位节点，防止空策略组被客户端隐式改写
 BUILTIN_TARGETS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL"}
+# 节点来源的两种下发方式：
+#   provider —— 写进产物的 proxy-providers 段，客户端按 interval 自己拉取更新；
+#   inline   —— 节点写进产物顶层 proxies，客户端不再下载 provider。
+# 内联的好处是节点会进 GLOBAL 组（Clash/Stash 的 GLOBAL 只收顶层 proxies
+# 与策略组，provider 里的节点进不去）；代价是机场换节点后要重拉订阅才生效。
+SOURCE_MODE_PROVIDER = "provider"
+SOURCE_MODE_INLINE = "inline"
+SOURCE_MODES = (SOURCE_MODE_PROVIDER, SOURCE_MODE_INLINE)
 # 健康检查地址：节点延迟测试、策略组测速、界面默认值共用同一处。
 # 各写一份的话，改了其中一处就会出现"测速地址和实际测速不一致"。
 HEALTH_CHECK_URL = "https://www.gstatic.com/generate_204"

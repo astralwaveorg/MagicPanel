@@ -11,7 +11,7 @@ import json
 import threading
 
 from .. import config, db, security
-from . import fetcher, tester
+from . import fetcher, source_nodes, tester
 
 
 class NotFound(Exception):
@@ -95,10 +95,14 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
         error = ""
         body = None
         nodes: list = []
+        text = ""
         try:
             body = fetcher.fetch(url, ua=ua, allow_private=allow_private,
                                  proxy=proxy)
-            nodes = fetcher.parse_nodes(body)
+            nodes = source_nodes.extract(body)
+            # 只留 proxies 段：机场订阅里的 rules / dns / 策略组与面板无关，
+            # 留着既撑大快照，也会让内联模式把机场的规则和策略组混进产物。
+            text = source_nodes.dump(nodes)
         except Exception as exc:  # 含 httpx.InvalidURL 等非 FetchError 异常
             error = _error_text(exc)
         # 阶段三：短事务落库结果或失败状态
@@ -117,7 +121,8 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
                     "source", source_id, {"name": name, "error": error},
                 )
             else:
-                text = body.decode("utf-8", "replace")
+                meta = [{"name": str(n["name"]), "type": str(n["type"])}
+                        for n in nodes]
                 # 新快照的节点集合可能变化，旧测速结果不再可信：
                 # 清空 test_results 并把 test_attempt_at 置空，调度器会在同一轮
                 # 立即补测（不依赖“只分发可用节点”开关）。
@@ -128,7 +133,7 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
                     "tested_at=NULL, test_attempt_at=NULL, updated_at=? WHERE id=?",
                     (now, now, len(nodes), security.sha256_text(text),
                      security.encrypt_text(text),
-                     json.dumps(nodes, ensure_ascii=False), now, source_id),
+                     json.dumps(meta, ensure_ascii=False), now, source_id),
                 )
                 security.audit(
                     conn, operator,

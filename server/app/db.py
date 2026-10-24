@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS sources (
   test_interval INTEGER NOT NULL DEFAULT 21600,
   auto_test INTEGER NOT NULL DEFAULT 1,
   test_results TEXT NOT NULL DEFAULT '{}',
+  mode TEXT NOT NULL DEFAULT 'provider',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -301,6 +302,10 @@ def init_db() -> None:
         # 用 additional-suffix 给每个来源的节点名加个后缀区分开。
         _ensure_column(conn, "sources", "suffix",
                        "suffix TEXT NOT NULL DEFAULT ''")
+        # 下发方式：provider（写进 proxy-providers，客户端自己更新）
+        # 或 inline（节点写进顶层 proxies，能进 GLOBAL 组）
+        _ensure_column(conn, "sources", "mode",
+                       "mode TEXT NOT NULL DEFAULT 'provider'")
         # 引擎平台支持拖动排序
         _ensure_column(conn, "targets", "sort", "sort INTEGER NOT NULL DEFAULT 0")
         # 令牌同时保存 Fernet 加密副本：哈希用于校验，密文用于门户与后台重新展示地址

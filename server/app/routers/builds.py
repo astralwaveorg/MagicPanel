@@ -15,19 +15,27 @@ from ..compiler import render, validate
 from ..deps import CurrentUser
 from ..services import base_config as base_config_service
 from ..services import releases
+from ..services import source_nodes as source_node_service
 from ..services import tester
 
 router = APIRouter(prefix="/api/v1", tags=["builds"])
 
 
 def collect_snapshot(conn) -> dict:
-    sources = [
-        {"name": r["name"], "enabled": bool(r["enabled"]), "filter": r["filter"],
-         "ua": r["ua"], "suffix": (r["suffix"] if "suffix" in r.keys() else ""),
-         "interval": r["interval"],
-         "client_interval": r["client_interval"]}
-        for r in db.all_(conn, "SELECT * FROM sources ORDER BY id")
-    ]
+    sources = []
+    for r in db.all_(conn, "SELECT * FROM sources ORDER BY id"):
+        mode = r["mode"] if "mode" in r.keys() else config.SOURCE_MODE_PROVIDER
+        item = {"name": r["name"], "enabled": bool(r["enabled"]),
+                "filter": r["filter"], "ua": r["ua"],
+                "suffix": (r["suffix"] if "suffix" in r.keys() else ""),
+                "interval": r["interval"],
+                "client_interval": r["client_interval"], "mode": mode}
+        if mode == config.SOURCE_MODE_INLINE and r["enabled"] and r["snapshot_enc"]:
+            # 内联来源：节点定义随快照进入构建快照。机场换节点后策略指纹会变，
+            # 自动构建才会把新节点重新下发（内联模式下客户端不再自己拉 provider）。
+            item["nodes"] = source_node_service.parse(
+                security.decrypt_text(r["snapshot_enc"]))
+        sources.append(item)
     rule_providers = [
         {"name": r["name"], "behavior": r["behavior"], "format": r["format"],
          "kind": r["kind"], "interval": r["interval"],

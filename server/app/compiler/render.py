@@ -19,6 +19,7 @@ import yaml
 from .. import config
 from ..services import base_config as base_config_service
 from ..services import local_nodes as local_node_service
+from ..services import source_nodes as source_node_service
 
 HEALTH_CHECK = {
     "enable": True,
@@ -83,7 +84,8 @@ def _provider_entry(src: dict, engine: str) -> dict:
 
 
 def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
-                 all_sources: list[str] | None = None) -> dict:
+                 all_sources: list[str] | None = None,
+                 inline_names: dict[str, list[str]] | None = None) -> dict:
     entry = {"name": group["name"], "type": group["type"]}
     # 本地单节点可以排在最前（"优先美国"这类组用得上：机房节点先试，
     # 机场节点兜底）。local_nodes 本身是有序的 id 列表，顺序即优先级。
@@ -98,6 +100,16 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
     if config.ALL_SCOPE in use:
         # 「包含所有」：用全部启用的来源，以后新增的来源自动进来
         use = [name for name in (all_sources or []) if name not in use]
+    # 内联来源的节点必须展开成显式成员：provider 里的节点客户端自己才知道，
+    # 内联后没有 provider 可用，只写 use 会让组变成空的。
+    inline_members: list[str] = []
+    provider_use: list[str] = []
+    for name in use:
+        if inline_names and name in inline_names:
+            inline_members.extend(inline_names[name])
+        else:
+            provider_use.append(name)
+    use = provider_use
     if group["type"] in ("url-test", "fallback", "load-balance") \
             and config.GUARD_PROXY not in proxies:
         # 放在末尾而不是开头：占位节点永远连不通（127.0.0.1:1），
@@ -105,11 +117,21 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
         # 放末尾可保证任何客户端（哪怕不做健康检查直接取第一个成员）
         # 拿到的都是真实节点，而不是这个占位。
         proxies.append(config.GUARD_PROXY)
+    if inline_members:
+        # 组的过滤正则只作用在来源节点上（客户端的组过滤也只筛 provider 节点），
+        # 显式成员不受影响。组内没有 provider 时不再下发这个正则：
+        # 已经在这里筛过一遍，再让客户端筛一次没有意义。
+        pattern = group.get("filter")
+        if pattern:
+            inline_members = [n for n in inline_members
+                              if source_node_service.match(pattern, n)]
+        # 位置与 provider 模式一致：客户端把 provider 节点排在 proxies 之后
+        proxies = list(dict.fromkeys(proxies + inline_members))
     if proxies:
         entry["proxies"] = proxies
     if use:
         entry["use"] = use
-    if group.get("filter"):
+    if group.get("filter") and use:
         entry["filter"] = group["filter"]
     if group.get("hidden"):
         entry["hidden"] = True
@@ -153,15 +175,18 @@ def _rule_line(rule: dict) -> str:
 
 
 def _rule_provider_entry(rp: dict) -> dict:
+    fmt = rp.get("format") or "yaml"
     entry = {
         "type": "http",
         "url": f"{{FEED}}/res/rule/{urllib.parse.quote(rp['name'])}",
-        "path": f"./rules/{rp['name']}.yaml",
+        # 路径后缀跟内容格式对齐：MRS 是二进制内容，存成 .yaml 会让客户端
+        # 按文本规则集去解析（部分核心按扩展名推断格式）
+        "path": f"./rules/{rp['name']}.{fmt}",
         "behavior": rp["behavior"],
         "interval": rp.get("client_interval") or rp["interval"],
     }
-    if rp.get("format") and rp["format"] != "yaml":
-        entry["format"] = rp["format"]
+    if fmt != "yaml":
+        entry["format"] = fmt
     return entry
 
 
@@ -344,14 +369,43 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         node["id"]: node for node in snapshot.get("local_nodes", [])
         if node.get("enabled") and node["id"] in used_local
     }
+    sources = [s for s in snapshot["sources"] if s.get("enabled")]
+    inline_sources = [s for s in sources
+                      if s.get("mode") == config.SOURCE_MODE_INLINE]
+    provider_sources = [s for s in sources
+                        if s.get("mode") != config.SOURCE_MODE_INLINE]
+
+    # 内联来源的节点写进顶层 proxies：Clash/Stash 的 GLOBAL 组只收顶层 proxies
+    # 与策略组，provider 里的节点永远进不去，内联后才能被直接选中。
+    inline_nodes: list[dict] = []
+    inline_names: dict[str, list[str]] = {}
+    for src in inline_sources:
+        names: list[str] = []
+        for node in src.get("nodes") or []:
+            raw = str(node.get("name") or "")
+            # 来源自身的过滤作用在原始节点名上（客户端的 provider filter 同理）
+            if not source_node_service.match(src.get("filter") or "", raw):
+                continue
+            entry = dict(node)
+            # 节点名后缀：与 provider 的 additional-suffix 语义一致，
+            # 不同来源的同名节点靠它区分开（客户端按名字去重）
+            entry["name"] = raw + (src.get("suffix") or "")
+            inline_nodes.append(entry)
+            names.append(entry["name"])
+        inline_names[src["name"]] = names
+        if not names and warnings is not None:
+            warnings.append(
+                f"节点来源“{src['name']}”设为内联下发，但没有可用节点"
+                "（尚未抓取，或全部被来源过滤正则排除）")
+
     cfg["proxies"] = [_guard_proxy(engine)]
     for node in local_enabled.values():
         cfg["proxies"].append(local_node_service.render_proxy(node, engine))
+    cfg["proxies"].extend(inline_nodes)
 
-    sources = [s for s in snapshot["sources"] if s.get("enabled")]
-    if sources:
+    if provider_sources:
         cfg["proxy-providers"] = {
-            s["name"]: _provider_entry(s, engine) for s in sources
+            s["name"]: _provider_entry(s, engine) for s in provider_sources
         }
 
     if groups:
@@ -365,7 +419,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 if node_id in local_enabled
             ]
             cfg["proxy-groups"].append(
-                _group_entry(group, engine, names, [s["name"] for s in sources]))
+                _group_entry(group, engine, names,
+                             [s["name"] for s in sources], inline_names))
 
     rps = [r for r in snapshot["rule_providers"] if r.get("enabled")]
     if rps:

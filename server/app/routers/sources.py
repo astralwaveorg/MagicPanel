@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import db, security
+from .. import config, db, security
 from ..deps import CurrentUser
 from ..services import fetcher, refs, tester, updater
 
@@ -23,6 +23,9 @@ class SourceBody(BaseModel):
     # 节点名后缀：不同来源可能有同名节点，客户端按名字去重会互相覆盖。
     # 填了就在客户端侧给这个来源的节点名追加后缀（additional-suffix）。
     suffix: str = Field(default="", max_length=32)
+    # 下发方式：provider（写进 proxy-providers，客户端自己更新）
+    # 或 inline（节点写进顶层 proxies，能进 GLOBAL 组）
+    mode: str = Field(default=config.SOURCE_MODE_PROVIDER, max_length=16)
     interval: int = Field(default=21600, ge=600, le=604800)
     test_interval: int = Field(default=21600, ge=0, le=604800)
     client_interval: int = Field(default=0, ge=0, le=604800)
@@ -53,6 +56,12 @@ def _check_filter(value: str) -> None:
             raise HTTPException(400, f"过滤正则无效：{exc}")
 
 
+def _check_mode(value: str) -> str:
+    if value not in config.SOURCE_MODES:
+        raise HTTPException(400, f"下发方式仅支持：{'、'.join(config.SOURCE_MODES)}")
+    return value
+
+
 def _public(row, with_meta: bool = True) -> dict:
     url = security.decrypt_text(row["url_enc"])
     data = {
@@ -63,6 +72,8 @@ def _public(row, with_meta: bool = True) -> dict:
         "filter": row["filter"],
         "ua": row["ua"],
         "suffix": row["suffix"] if "suffix" in row.keys() else "",
+        "mode": (row["mode"] if "mode" in row.keys()
+                 else config.SOURCE_MODE_PROVIDER),
         "interval": row["interval"],
         "test_interval": row["test_interval"],
         "client_interval": row["client_interval"],
@@ -155,6 +166,7 @@ def create_source(body: SourceBody, user=CurrentUser):
     if not body.url:
         raise HTTPException(400, "订阅地址不能为空")
     _check_filter(body.filter)
+    _check_mode(body.mode)
     try:
         with db.tx() as conn:
             if db.one(conn, "SELECT id FROM sources WHERE name=?", (body.name,)):
@@ -163,14 +175,14 @@ def create_source(body: SourceBody, user=CurrentUser):
             cur = db.insert_unique(conn,
                 "INSERT INTO sources(name, url_enc, enabled, filter, ua, suffix, interval, "
                 "client_interval, test_interval, auto_fetch, auto_test, allow_private, "
-                "filter_unavailable, proxy_url_enc, created_at, updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "filter_unavailable, proxy_url_enc, mode, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (body.name, security.encrypt_text(body.url), int(body.enabled),
                  body.filter, body.ua, body.suffix, body.interval, body.client_interval,
                  body.test_interval, int(body.auto_fetch), int(body.auto_test),
                  int(body.allow_private), int(body.filter_unavailable),
                  security.encrypt_text(body.proxy_url) if body.proxy_url else "",
-                 now, now),
+                 body.mode, now, now),
             )
             security.audit(conn, user["username"], "新增节点来源", "source", cur.lastrowid,
                            {"name": body.name})
@@ -185,6 +197,7 @@ def create_source(body: SourceBody, user=CurrentUser):
 def update_source(source_id: int, body: SourceBody, force: bool = False,
                   user=CurrentUser):
     _check_filter(body.filter)
+    _check_mode(body.mode)
     with db.tx() as conn:
         row = _get_or_404(conn, source_id)
         clash = db.one(
@@ -216,11 +229,12 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
             "UPDATE sources SET name=?, url_enc=?, enabled=?, filter=?, ua=?, "
             "suffix=?, interval=?, client_interval=?, test_interval=?, auto_fetch=?, "
             "auto_test=?, allow_private=?, filter_unavailable=?, proxy_url_enc=?, "
-            "updated_at=? WHERE id=?",
+            "mode=?, updated_at=? WHERE id=?",
             (body.name, url_enc, int(body.enabled), body.filter, body.ua,
              body.suffix, body.interval, body.client_interval, body.test_interval,
              int(body.auto_fetch), int(body.auto_test), int(body.allow_private),
-             int(body.filter_unavailable), proxy_enc, db.now(), source_id),
+             int(body.filter_unavailable), proxy_enc, body.mode,
+             db.now(), source_id),
         )
         security.audit(conn, user["username"], "更新节点来源", "source", source_id,
                        {"name": body.name, "url_changed": bool(body.url),

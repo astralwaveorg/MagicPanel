@@ -111,23 +111,6 @@ def fetch(url: str, ua: str = config.DEFAULT_UA, allow_private: bool = False,
     return body
 
 
-def parse_nodes(body: bytes) -> list[dict]:
-    """解析节点订阅，返回 [{name, type}]；不接受不含 proxies 的内容。"""
-    try:
-        data = yaml.safe_load(body)
-    except yaml.YAMLError as exc:
-        raise FetchError(f"YAML 解析失败：{exc}") from exc
-    if not isinstance(data, dict) or not isinstance(data.get("proxies"), list):
-        raise FetchError("内容不含 proxies 列表，不是有效的节点订阅")
-    nodes = []
-    for item in data["proxies"]:
-        if isinstance(item, dict) and item.get("name") and item.get("type"):
-            nodes.append({"name": str(item["name"]), "type": str(item["type"])})
-    if not nodes:
-        raise FetchError("订阅中没有可用节点")
-    return nodes
-
-
 def count_rules(body: bytes, behavior: str, fmt: str = "yaml") -> int:
     """统计规则条目数，支持 yaml(text/yaml) 与纯文本两种格式。
 
