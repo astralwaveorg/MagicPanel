@@ -297,6 +297,10 @@ def init_db() -> None:
                        "client_interval INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "rule_providers", "client_interval",
                        "client_interval INTEGER NOT NULL DEFAULT 0")
+        # 节点名后缀：不同来源可能有同名节点，客户端按名字去重会互相覆盖，
+        # 用 additional-suffix 给每个来源的节点名加个后缀区分开。
+        _ensure_column(conn, "sources", "suffix",
+                       "suffix TEXT NOT NULL DEFAULT ''")
         # 引擎平台支持拖动排序
         _ensure_column(conn, "targets", "sort", "sort INTEGER NOT NULL DEFAULT 0")
         # 令牌同时保存 Fernet 加密副本：哈希用于校验，密文用于门户与后台重新展示地址

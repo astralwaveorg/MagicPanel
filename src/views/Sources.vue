@@ -304,6 +304,13 @@
         <el-form-item label="过滤正则（可选，过滤套餐提示等无效节点）">
           <el-input v-model="form.filter" class="mono" placeholder="(?i)^(?!.*(?:剩余|到期|官网)).+$" />
         </el-form-item>
+        <el-form-item label="节点名后缀（可选）">
+          <el-input v-model="form.suffix" class="mono" placeholder="例如 -神龙" />
+          <div class="mp-form-hint">
+            不同机场可能有同名节点，客户端按名字去重会互相覆盖。
+            填了后缀，客户端会给这个来源的节点名统一加上它。
+          </div>
+        </el-form-item>
         <!-- 一行最多两项：挤在一行时输入框会被压窄到看不清 -->
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12">
@@ -522,7 +529,7 @@ const urlContent = ref('')
 const urlCopied = ref(false)
 
 const emptyForm = () => ({
-  name: '', url: '', enabled: true, filter: '', ua: 'Stash',
+  name: '', url: '', enabled: true, filter: '', ua: 'Stash', suffix: '',
   interval: 21600, test_interval: 21600, client_interval: 0,
   auto_fetch: true, auto_test: true,
   allow_private: false, filter_unavailable: false,
@@ -710,7 +717,8 @@ function openEdit(row) {
   revealedUrl.value = '' 
   Object.assign(form, emptyForm(), row ? {
     name: row.name, url: '', enabled: row.enabled, filter: row.filter,
-    ua: row.ua, interval: row.interval, test_interval: row.test_interval,
+    ua: row.ua, suffix: row.suffix || '',
+    interval: row.interval, test_interval: row.test_interval,
     client_interval: row.client_interval,
     auto_fetch: row.auto_fetch !== false,
     auto_test: row.auto_test !== false,

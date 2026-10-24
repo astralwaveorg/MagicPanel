@@ -23,7 +23,8 @@ router = APIRouter(prefix="/api/v1", tags=["builds"])
 def collect_snapshot(conn) -> dict:
     sources = [
         {"name": r["name"], "enabled": bool(r["enabled"]), "filter": r["filter"],
-         "ua": r["ua"], "interval": r["interval"],
+         "ua": r["ua"], "suffix": (r["suffix"] if "suffix" in r.keys() else ""),
+         "interval": r["interval"],
          "client_interval": r["client_interval"]}
         for r in db.all_(conn, "SELECT * FROM sources ORDER BY id")
     ]

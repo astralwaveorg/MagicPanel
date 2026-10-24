@@ -66,6 +66,10 @@ def _provider_entry(src: dict, engine: str) -> dict:
     }
     if src.get("filter"):
         entry["filter"] = src["filter"]
+    if src.get("suffix"):
+        # 同名节点在不同来源里会互相覆盖（客户端按名字去重），
+        # 给这个来源的节点名加后缀区分开。Stash 与 Mihomo 都支持这个键。
+        entry["override"] = {"additional-suffix": src["suffix"]}
     if engine == "stash":
         # Stash 官方：集合级延迟测试参数用 benchmark-url / benchmark-timeout
         entry["headers"] = {"User-Agent": src.get("ua") or config.DEFAULT_UA}

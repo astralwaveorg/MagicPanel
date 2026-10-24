@@ -20,6 +20,9 @@ class SourceBody(BaseModel):
     enabled: bool = True
     filter: str = Field(default="", max_length=512)
     ua: str = Field(default="Stash", max_length=128)
+    # 节点名后缀：不同来源可能有同名节点，客户端按名字去重会互相覆盖。
+    # 填了就在客户端侧给这个来源的节点名追加后缀（additional-suffix）。
+    suffix: str = Field(default="", max_length=32)
     interval: int = Field(default=21600, ge=600, le=604800)
     test_interval: int = Field(default=21600, ge=0, le=604800)
     client_interval: int = Field(default=0, ge=0, le=604800)
@@ -59,6 +62,7 @@ def _public(row, with_meta: bool = True) -> dict:
         "enabled": bool(row["enabled"]),
         "filter": row["filter"],
         "ua": row["ua"],
+        "suffix": row["suffix"] if "suffix" in row.keys() else "",
         "interval": row["interval"],
         "test_interval": row["test_interval"],
         "client_interval": row["client_interval"],
@@ -157,12 +161,12 @@ def create_source(body: SourceBody, user=CurrentUser):
                 raise HTTPException(409, "同名节点来源已存在")
             now = db.now()
             cur = db.insert_unique(conn,
-                "INSERT INTO sources(name, url_enc, enabled, filter, ua, interval, "
+                "INSERT INTO sources(name, url_enc, enabled, filter, ua, suffix, interval, "
                 "client_interval, test_interval, auto_fetch, auto_test, allow_private, "
                 "filter_unavailable, proxy_url_enc, created_at, updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (body.name, security.encrypt_text(body.url), int(body.enabled),
-                 body.filter, body.ua, body.interval, body.client_interval,
+                 body.filter, body.ua, body.suffix, body.interval, body.client_interval,
                  body.test_interval, int(body.auto_fetch), int(body.auto_test),
                  int(body.allow_private), int(body.filter_unavailable),
                  security.encrypt_text(body.proxy_url) if body.proxy_url else "",
@@ -210,11 +214,11 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
             proxy_enc = security.encrypt_text(body.proxy_url) if body.proxy_url else ""
         conn.execute(
             "UPDATE sources SET name=?, url_enc=?, enabled=?, filter=?, ua=?, "
-            "interval=?, client_interval=?, test_interval=?, auto_fetch=?, "
+            "suffix=?, interval=?, client_interval=?, test_interval=?, auto_fetch=?, "
             "auto_test=?, allow_private=?, filter_unavailable=?, proxy_url_enc=?, "
             "updated_at=? WHERE id=?",
             (body.name, url_enc, int(body.enabled), body.filter, body.ua,
-             body.interval, body.client_interval, body.test_interval,
+             body.suffix, body.interval, body.client_interval, body.test_interval,
              int(body.auto_fetch), int(body.auto_test), int(body.allow_private),
              int(body.filter_unavailable), proxy_enc, db.now(), source_id),
         )
