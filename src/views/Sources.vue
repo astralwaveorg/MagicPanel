@@ -84,18 +84,21 @@
           <el-table-column label="节点数" width="90" align="left">
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
-          <el-table-column label="下发方式" width="100" align="center">
+          <el-table-column label="下发方式" width="90" align="center">
             <template #default="{ row }">
-              <el-tooltip placement="top">
-                <template #reference>
-                  <span :style="row.mode === 'inline'
-                    ? 'color:var(--mp-ok)' : 'color:var(--mp-muted)'">
-                    {{ row.mode === 'inline' ? '内联' : '订阅' }}
-                  </span>
+              <!-- 只显示名称，说明放悬浮提示里。
+                   tooltip 的内容要用 #content 插槽：默认插槽是触发器本身，
+                   内容写进去会被当成触发器内容直接铺在单元格里。 -->
+              <el-tooltip placement="top" :show-after="200">
+                <template #content>
+                  {{ row.mode === 'inline'
+                    ? '节点写进产物顶层，能在 GLOBAL 组里直接选中；机场换节点需重拉订阅'
+                    : '节点由客户端按间隔自己下载更新' }}
                 </template>
-                {{ row.mode === 'inline'
-                  ? '节点写进产物顶层，能在 GLOBAL 组里直接选中；机场换节点需重拉订阅'
-                  : '节点由客户端按间隔自己下载更新' }}
+                <span :style="row.mode === 'inline'
+                  ? 'color:var(--mp-ok)' : 'color:var(--mp-muted)'">
+                  {{ row.mode === 'inline' ? '内联' : '订阅' }}
+                </span>
               </el-tooltip>
             </template>
           </el-table-column>
@@ -256,10 +259,10 @@
             <el-form-item label="状态">
               <el-checkbox v-model="localForm.enabled">启用该节点</el-checkbox>
               <el-tooltip placement="top">
-                <template #reference>
-                  <span class="mp-info-dot">ⓘ</span>
+                <template #content>
+                  停用后，该节点保留在面板中，但不会写入最终生成的客户端配置（YAML）里。
                 </template>
-                停用后，该节点保留在面板中，但不会写入最终生成的客户端配置（YAML）里。
+                <span class="mp-info-dot">ⓘ</span>
               </el-tooltip>
             </el-form-item>
           </el-col>
