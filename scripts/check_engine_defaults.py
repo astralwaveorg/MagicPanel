@@ -8,6 +8,8 @@
 判定规则：
   * 顶层键必须出现在对应引擎的参考文件里（含被注释掉的示例行）；
   * 面板私有的伪键（_panel_direct_rule 等）不在官方文档里，跳过；
+  * 域名模式表（nameserver-policy / hosts）里的条目是数据，不是配置项，
+    不参与逐键核对——官方示例里也是同样写法；
   * 值不要求与官方示例一致（官方示例给的是"可用值"，不是"推荐值"），
     面板取的是适合代理客户端的保守值。
 
@@ -77,12 +79,26 @@ def reference_keys(path: Path) -> set[str]:
     return keys
 
 
+def _is_domain_pattern(key: str) -> bool:
+    """域名模式（``+.lan``、``*.example.com``、``geosite:cn``）是数据条目，不是配置键。"""
+    return any(ch in key for ch in "+*:") or "." in key
+
+
+def _is_data_map(value: dict) -> bool:
+    """这张表的键是域名模式 → 它是数据映射（``nameserver-policy`` / ``hosts`` 等）。
+
+    官方示例里同样是这样写的（``'+.internal.crop.com': system``），
+    表里的条目是"哪个域名交给哪个 DNS"，不是配置项，不该参与逐键对账。
+    """
+    return any(_is_domain_pattern(k) for k in value)
+
+
 def doc_keys(doc: dict, prefix: str = "") -> set[str]:
     out: set[str] = set()
     for key, value in doc.items():
         path = f"{prefix}{key}"
         out.add(path)
-        if isinstance(value, dict):
+        if isinstance(value, dict) and not _is_data_map(value):
             out |= doc_keys(value, path + ".")
     return out
 
