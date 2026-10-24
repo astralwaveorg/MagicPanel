@@ -115,20 +115,44 @@ def count_rules(body: bytes, behavior: str, fmt: str = "yaml") -> int:
     """统计规则条目数，支持 yaml(text/yaml) 与纯文本两种格式。
 
     MRS 是二进制索引文件，条目数无法从文件里数出来，只能返回 0。
+
+    带注释头的 YAML 也要按 payload 条目算：直接把非注释行数一遍，
+    会把 ``payload:`` 这行也算进去，显示的条数比实际多 1。
     """
     if fmt == "mrs":
         return 0
     text = body.decode("utf-8", errors="replace")
     stripped = text.strip()
-    if stripped.startswith("payload:") or stripped.startswith("behavior:"):
+    if stripped.startswith(("payload:", "behavior:")):
         try:
             data = yaml.safe_load(text)
-            payload = (data or {}).get("payload") or []
-            return len(payload)
         except yaml.YAMLError as exc:
             raise FetchError(f"规则集 YAML 解析失败：{exc}") from exc
+        count = _payload_count(data)
+        if count is not None:
+            return count
+    elif stripped.startswith("#"):
+        # 注释头 + payload：YAML 解析成功就按 payload 条目算，失败按行数算
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError:
+            data = None
+        count = _payload_count(data)
+        if count is not None:
+            return count
     lines = [
         ln for ln in (line.strip() for line in text.splitlines())
         if ln and not ln.startswith("#")
     ]
     return len(lines)
+
+
+def _payload_count(data) -> int | None:
+    """规则集文档里的条目数；不是这种结构时返回 None。"""
+    if not isinstance(data, dict):
+        return None
+    for key in ("payload", "behavior"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return len(value)
+    return None
