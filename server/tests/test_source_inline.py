@@ -108,6 +108,21 @@ def test_inline_respects_filter_unavailable():
     assert "香港 02" not in grp["proxies"]
 
 
+def test_inline_members_sorted_by_name():
+    """组内展开出来的来源节点按名称排序：组里挑节点时按名字翻更顺手。"""
+    from app.compiler import render
+
+    snap = _snapshot(
+        sources=[_source("机场A", nodes=[_node("香港 02"), _node("香港 01")]),
+                 _source("机场B", nodes=[_node("日本 01")])],
+        groups=[_group("🖐 手动节点", "select", use_sources=["*"])],
+    )
+    cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
+    grp = next(g for g in cfg["proxy-groups"] if g["name"] == "🖐 手动节点")
+    nodes = [m for m in grp["proxies"] if m in ("香港 01", "香港 02", "日本 01")]
+    assert nodes == sorted(nodes)
+
+
 def test_group_expands_inline_sources_into_members():
     """组引用内联来源时展开成显式成员：没有 provider 可用，use 会是空的。"""
     from app.compiler import render

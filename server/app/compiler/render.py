@@ -125,6 +125,9 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
         if pattern:
             inline_members = [n for n in inline_members
                               if source_node_service.match(pattern, n)]
+        # 按名称排序：来源内是机场给的顺序，多个来源拼起来不好找，
+        # 组里挑节点时按名字翻更顺手
+        inline_members.sort()
         # 位置与 provider 模式一致：客户端把 provider 节点排在 proxies 之后
         proxies = list(dict.fromkeys(proxies + inline_members))
     if proxies:
