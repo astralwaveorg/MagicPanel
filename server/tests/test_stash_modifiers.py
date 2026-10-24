@@ -132,3 +132,40 @@ def test_validate_blocks_pre_matching_with_group_target():
     }
     errors, _ = validate.validate_policy(snapshot)
     assert any("pre-matching" in e for e in errors), errors
+
+
+def test_same_ruleset_on_disjoint_platforms_is_not_duplicate():
+    """同一规则集在互斥的引擎平台各一条，不该报"规则重复"。"""
+    from app.compiler import validate
+
+    base = {
+        "sources": [],
+        "groups": [],
+        "rule_providers": [{"name": "ads", "enabled": True}],
+        "snippets": [],
+    }
+    disjoint = dict(base, rules=[
+        {"type": "RULE-SET", "value": "ads", "target": "REJECT", "enabled": True,
+         "no_track": False, "pre_matching": True,
+         "targets": ["Stash-iOS"], "devices": ["*"]},
+        {"type": "RULE-SET", "value": "ads", "target": "DIRECT", "enabled": True,
+         "no_track": False, "pre_matching": False,
+         "targets": ["Mihomo-Android"], "devices": ["*"]},
+        {"type": "MATCH", "value": "", "target": "DIRECT", "enabled": True,
+         "targets": ["*"], "devices": ["*"]},
+    ])
+    _, warnings = validate.validate_policy(disjoint)
+    assert not any("规则重复" in w for w in warnings), warnings
+
+    overlapping = dict(base, rules=[
+        {"type": "RULE-SET", "value": "ads", "target": "REJECT", "enabled": True,
+         "no_track": False, "pre_matching": True,
+         "targets": ["Stash-iOS"], "devices": ["*"]},
+        {"type": "RULE-SET", "value": "ads", "target": "DIRECT", "enabled": True,
+         "no_track": False, "pre_matching": False,
+         "targets": ["*"], "devices": ["*"]},
+        {"type": "MATCH", "value": "", "target": "DIRECT", "enabled": True,
+         "targets": ["*"], "devices": ["*"]},
+    ])
+    _, warnings = validate.validate_policy(overlapping)
+    assert any("规则重复" in w for w in warnings), warnings

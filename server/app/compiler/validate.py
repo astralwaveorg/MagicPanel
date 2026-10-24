@@ -11,6 +11,13 @@ from .. import config
 from ..services import local_nodes as local_node_service
 
 
+def _scope_overlap(a: list[str], b: list[str]) -> bool:
+    """两个「适用引擎平台」列表是否有交集（"*" 是包含全部的哨兵）。"""
+    if config.ALL_SCOPE in a or config.ALL_SCOPE in b:
+        return True
+    return bool(set(a) & set(b))
+
+
 def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -104,7 +111,9 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         dfs(name, [])
 
     # 分流规则
-    seen: set[tuple[str, str]] = set()
+    # 同一个规则集可能在互斥的引擎平台各挂一条（例如 Stash 侧用 REJECT + pre-matching，
+    # Mihomo 侧用策略组），适用范围不重叠就不算重复。
+    seen: dict[tuple[str, str], list[list[str]]] = {}
     has_final = False
     for r in snapshot["rules"]:
         if not r.get("enabled", True):
@@ -121,9 +130,11 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         elif not r.get("value"):
             errors.append(f"规则 {rtype} 缺少匹配值")
         key = (rtype, r["value"])
-        if key in seen:
+        scope = r.get("targets") or []
+        prev_scopes = seen.setdefault(key, [])
+        if any(_scope_overlap(scope, prev) for prev in prev_scopes):
             warnings.append(f"规则重复：{rtype},{r['value']}")
-        seen.add(key)
+        prev_scopes.append(scope)
         target = r["target"]
         if target not in group_set and target not in config.BUILTIN_TARGETS:
             errors.append(f"规则 {rtype},{r.get('value', '')} 指向不存在的目标“{target}”")
