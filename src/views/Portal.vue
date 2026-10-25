@@ -204,13 +204,13 @@
                 </div>
                 <span class="pt-prov-meta">{{ providerMeta(p) }}</span>
                 <span class="pt-prov-kind" :data-kind="p.kind">
-                  {{ p.kind === 'inline' ? '内联' : '远程' }}
+                  {{ providerKindLabel(p.kind) }}
                 </span>
                 <div class="pt-prov-actions">
                   <button
                     class="pt-mini"
-                    :disabled="!p.url"
-                    @click="copy(p.url, 'prov-' + p.name)"
+                    :disabled="!p.address"
+                    @click="copy(p.address, 'prov-' + p.name)"
                   >{{ copied === 'prov-' + p.name ? '已复制' : '复制地址' }}</button>
                   <button class="pt-mini" @click="openProvider(p)">预览</button>
                 </div>
@@ -281,18 +281,21 @@
           <dl class="pt-detail-grid">
             <div><dt>行为</dt><dd>{{ behaviorLabel(providerDetail.behavior) }}</dd></div>
             <div><dt>格式</dt><dd>{{ formatLabel(providerDetail.format) }}</dd></div>
+            <div><dt>来源</dt><dd>{{ providerKindLabel(providerDetail.kind) }}</dd></div>
             <div><dt>条目</dt><dd>{{ providerDetail.rule_count || '—' }}</dd></div>
             <div><dt>大小</dt><dd>{{ sizeText(providerDetail.size) }}</dd></div>
-            <div><dt>抓取</dt><dd>{{ providerDetail.last_status || '—' }}</dd></div>
-            <div><dt>最近抓取</dt><dd>{{ timeText(providerDetail.last_fetched_at) }}</dd></div>
+            <div><dt>{{ providerDetail.kind === 'repo' ? '同步状态' : '抓取状态' }}</dt>
+              <dd>{{ providerDetail.last_status || '—' }}</dd></div>
+            <div><dt>{{ providerDetail.kind === 'repo' ? '最近同步' : '最近抓取' }}</dt>
+              <dd>{{ timeText(providerDetail.last_fetched_at) }}</dd></div>
             <div><dt>面板抓取间隔</dt><dd>{{ durationText(providerDetail.interval) }}</dd></div>
             <div><dt>客户端间隔</dt><dd>{{ providerDetail.client_interval ? durationText(providerDetail.client_interval) : '跟随面板' }}</dd></div>
           </dl>
           <p
             class="pt-detail-url"
-            :class="{ empty: !providerDetail.url }"
-            @click="providerDetail.url && copy(providerDetail.url, 'detail-url')"
-          >{{ providerDetail.url || '面板内联内容，没有上游地址' }}</p>
+            :class="{ empty: !providerDetail.address }"
+            @click="providerDetail.address && copy(providerDetail.address, 'detail-url')"
+          >{{ providerDetail.address || '面板内联内容，没有可复制的地址' }}</p>
           <pre class="pt-detail-preview">{{ providerDetail.preview || '二进制规则集，没有可读文本内容' }}</pre>
           <p v-if="providerDetail.truncated" class="pt-detail-note">
             仅显示前 120 行，共 {{ providerDetail.total_lines }} 行
@@ -300,8 +303,8 @@
           <div class="pt-detail-actions">
             <button
               class="pt-btn"
-              :disabled="!providerDetail.url"
-              @click="copy(providerDetail.url, 'detail-url')"
+              :disabled="!providerDetail.address"
+              @click="copy(providerDetail.address, 'detail-url')"
             >{{ copied === 'detail-url' ? '已复制' : '复制地址' }}</button>
             <button class="pt-btn" @click="closeProvider">关闭</button>
           </div>
@@ -499,6 +502,9 @@ function providerGroupMeta(g) {
 }
 
 function behaviorLabel(b) { return BEHAVIOR_LABELS[b] || b }
+// 来源类型三态：远程 / 内联 / 仓库（仓库托管是自主维护带来的第三种）
+const PROVIDER_KIND_LABELS = { remote: '远程', inline: '内联', repo: '仓库' }
+function providerKindLabel(k) { return PROVIDER_KIND_LABELS[k] || k }
 function formatLabel(f) { return FORMAT_LABELS[f] || f }
 
 function providerMeta(p) {
@@ -1123,6 +1129,7 @@ onMounted(async () => {
 .pt-prov-kind { font-size: 11px; padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
 .pt-prov-kind[data-kind='remote'] { background: rgba(34, 197, 183, 0.16); color: #5fd8c8; }
 .pt-prov-kind[data-kind='inline'] { background: rgba(250, 183, 82, 0.16); color: #f5c069; }
+.pt-prov-kind[data-kind='repo'] { background: rgba(108, 123, 255, 0.18); color: #9aa8ff; }
 .pt-prov-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .pt-mini {
   font-size: 12px;

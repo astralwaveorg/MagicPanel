@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from .. import config, db, security
 from ..routers import builds
-from . import releases, retention, tester, updater
+from . import releases, repo_sync, retention, tester, updater
 
 logger = logging.getLogger("magicpanel.scheduler")
 AUTO_OPERATOR = "系统"
@@ -207,6 +207,32 @@ def _run_snippet_fetch(summary: dict, now: datetime, force: bool = False) -> Non
             logger.warning("自动抓取拓展模块失败：%s：%s", row["name"], exc)
 
 
+def _run_deps_sync(summary: dict, now: datetime, force: bool = False) -> None:
+    """定时同步依赖仓库：到点拉取并把 rule/*.yaml 同步进规则来源。
+
+    只 pull 不 push；冲突时停在冲突态等人工处理。
+    """
+    with db.connect() as conn:
+        enabled = _setting(conn, "deps_enabled", "0") == "1"
+        hours = int(_setting(conn, "deps_sync_hours", "12") or 12)
+        last = _setting(conn, "deps_last_sync_at", "")
+    if not enabled:
+        return
+    if not force and last and not _due(last, hours * 3600, now):
+        return
+    try:
+        with db.tx() as conn:
+            result = repo_sync.run_sync(conn, AUTO_OPERATOR, automatic=True)
+        summary["deps_created"] += result["created"]
+        summary["deps_updated"] += result["updated"]
+        for message in result["errors"]:
+            summary["errors"].append(f"依赖仓库：{message}")
+    except Exception as exc:
+        summary["deps_failed"] += 1
+        summary["errors"].append(f"依赖仓库同步：{exc}")
+        logger.warning("依赖仓库同步失败：%s", exc)
+
+
 def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
     """自动构建发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。
 
@@ -386,6 +412,7 @@ def _run_retention(summary: dict) -> None:
 def _has_activity(summary: dict) -> bool:
     keys = ("sources_fetched", "sources_failed", "rules_fetched", "rules_failed",
             "snippets_fetched", "snippets_failed",
+            "deps_created", "deps_updated", "deps_failed",
             "tests_run", "tests_errors", "build", "published")
     return any(summary.get(key) for key in keys) or bool(summary.get("errors"))
 
@@ -408,6 +435,9 @@ def _record_run(summary: dict, trigger: str, actor: str) -> None:
         "rules_failed": summary["rules_failed"],
         "snippets_fetched": summary["snippets_fetched"],
         "snippets_failed": summary["snippets_failed"],
+        "deps_created": summary["deps_created"],
+        "deps_updated": summary["deps_updated"],
+        "deps_failed": summary["deps_failed"],
         "tests_run": summary["tests_run"],
         "tests_ok": summary["tests_ok"],
         "tests_failed": summary["tests_failed"],
@@ -453,6 +483,9 @@ def run_once(force: bool = False, trigger: str = "scheduled",
         "rules_failed": 0,
         "snippets_fetched": 0,
         "snippets_failed": 0,
+        "deps_created": 0,
+        "deps_updated": 0,
+        "deps_failed": 0,
         "tests_run": 0,
         "tests_ok": 0,
         "tests_failed": 0,
@@ -479,6 +512,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
                 _run_rule_fetch(summary, now, force=force)
             if fetch_snippets:
                 _run_snippet_fetch(summary, now, force=force)
+            _run_deps_sync(summary, now, force=force)
             if test_sources:
                 _run_source_test(summary, now, force=force)
             _run_auto_build(summary, now, force=force)

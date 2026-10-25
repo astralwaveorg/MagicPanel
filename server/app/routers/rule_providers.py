@@ -18,8 +18,10 @@ class RuleProviderBody(BaseModel):
     name: str = Field(min_length=1, max_length=64, pattern=r"^[^\s/?#%&]+$")
     behavior: str = "domain"
     format: str = "yaml"
-    kind: str = "remote"  # remote / inline
+    kind: str = "remote"  # remote / inline / repo
     url: str = Field(default="", max_length=1024)
+    # 仓库托管的来源：仓库内相对路径，内容由同步写入
+    repo_path: str = Field(default="", max_length=512)
     inline_content: str = Field(default="", max_length=2_000_000)
     interval: int = Field(default=86400, ge=600, le=604800)
     client_interval: int = Field(default=0, ge=0, le=604800)
@@ -56,6 +58,8 @@ def _public(row) -> dict:
         "last_error": row["last_error"],
         "last_fetched_at": row["last_fetched_at"],
         "last_attempt_at": row["last_attempt_at"],
+        # 仓库托管的来源：仓库内相对路径（kind='repo'）
+        "repo_path": row["repo_path"] if "repo_path" in row.keys() else "",
         # 二进制格式（MRS）的条目数数不出来，留空由界面显示"—"
         "rule_count": (None if (row["format"] or "yaml") in config.BINARY_FORMATS
                        else row["rule_count"]),
@@ -75,6 +79,8 @@ def _validate_body(body: RuleProviderBody) -> None:
         raise HTTPException(400, "远程规则来源必须填写 URL")
     if body.kind == "inline" and not body.inline_content.strip():
         raise HTTPException(400, "内联规则来源必须填写内容")
+    if body.kind == "repo" and not body.repo_path.strip():
+        raise HTTPException(400, "仓库托管的规则来源必须指定仓库内路径")
 
 
 def _get_or_404(conn, rp_id: int):
@@ -231,12 +237,12 @@ def create_provider(body: RuleProviderBody, user=CurrentUser):
             "INSERT INTO rule_providers(name, behavior, format, kind, url, "
             "inline_content, interval, client_interval, enabled, content, "
             "rule_count, sha256, last_status, last_fetched_at, proxy_url_enc, "
-            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "repo_path, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.behavior, body.format, body.kind, body.url,
              body.inline_content, body.interval, body.client_interval,
              int(body.enabled), content, count, sha, status, fetched,
              security.encrypt_text(body.proxy_url) if body.proxy_url else "",
-             now, now),
+             body.repo_path, now, now),
         )
         security.audit(conn, user["username"], "新增规则来源", "rule_provider",
                        cur.lastrowid, {"name": body.name})
@@ -290,6 +296,13 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
             sha = security.sha256_text(content)
             status = "ok"
             fetched = db.now()
+        elif body.kind == "repo":
+            # 仓库托管：内容由同步写入，界面改不动
+            content = old["content"]
+            count = old["rule_count"]
+            sha = old["sha256"]
+            status = old["last_status"]
+            fetched = old["last_fetched_at"]
         elif old["kind"] == "inline":
             # 从 inline 切到 remote：清空旧快照与尝试时间，下一轮立即抓取
             content, count, sha, status, fetched = "", None, None, "never", None
@@ -298,11 +311,11 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
             "UPDATE rule_providers SET name=?, behavior=?, format=?, kind=?, url=?, "
             "inline_content=?, interval=?, client_interval=?, enabled=?, content=?, "
             "rule_count=?, sha256=?, last_status=?, last_fetched_at=?, "
-            "last_attempt_at=?, proxy_url_enc=?, updated_at=? WHERE id=?",
+            "last_attempt_at=?, proxy_url_enc=?, repo_path=?, updated_at=? WHERE id=?",
             (body.name, body.behavior, body.format, body.kind, body.url,
              body.inline_content, body.interval, body.client_interval,
              int(body.enabled), content, count, sha, status, fetched, attempt,
-             proxy_enc, db.now(), rp_id),
+             proxy_enc, body.repo_path or old["repo_path"], db.now(), rp_id),
         )
         security.audit(conn, user["username"], "更新规则来源", "rule_provider", rp_id,
                        {"name": body.name})

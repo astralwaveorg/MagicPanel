@@ -180,13 +180,24 @@ def _provider_desc(content: str, fmt: str) -> str:
 def _provider_meta(r) -> dict:
     """规则来源的元信息：不含原始内容，内容按需单独取。"""
     content = r["content"] or ""
+    kind = r["kind"]
+    repo_path = r["repo_path"] if "repo_path" in r.keys() else ""
+    # 「复制地址」复制的东西：远程复制上游 URL，仓库托管复制仓库内路径，内联没有地址
+    if kind == "remote":
+        address = r["url"]
+    elif kind == "repo":
+        address = repo_path
+    else:
+        address = ""
     return {
         "name": r["name"],
         "behavior": r["behavior"],
         "format": r["format"],
-        "kind": r["kind"],
+        "kind": kind,
         "rule_count": r["rule_count"] or 0,
-        "url": r["url"] if r["kind"] == "remote" else "",
+        "url": r["url"] if kind == "remote" else "",
+        "repo_path": repo_path,
+        "address": address,
         "interval": r["interval"],
         "client_interval": r["client_interval"],
         "last_status": r["last_status"],

@@ -38,6 +38,7 @@
                    clearable @change="applyFilter">
           <el-option value="remote" label="远程 URL" />
           <el-option value="inline" label="内联内容" />
+          <el-option value="repo" label="仓库托管" />
         </el-select>
         <el-select v-model="filters.behavior" class="mp-filter-select" placeholder="全部行为"
                    clearable @change="applyFilter">
@@ -86,20 +87,24 @@
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column prop="name" label="名称" min-width="110" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="类型" width="90">
-            <template #default="{ row }">{{ row.kind === 'remote' ? '远程' : '内联' }}</template>
+            <template #default="{ row }">{{ KIND_LABELS[row.kind] || row.kind }}</template>
           </el-table-column>
           <el-table-column prop="behavior" label="行为" width="90" />
           <el-table-column prop="format" label="格式" width="90" />
           <el-table-column label="URL" width="110">
             <template #default="{ row }">
               <el-button v-if="row.kind === 'remote' && row.url" size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
+              <el-tooltip v-else-if="row.kind === 'repo' && row.repo_path"
+                          :content="row.repo_path" placement="top">
+                <span class="mp-cell-sub">仓库路径</span>
+              </el-tooltip>
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
           <el-table-column label="抓取状态" min-width="110">
             <template #default="{ row }">
-              <!-- 内联规则直接写在面板里，不存在抓取 -->
-              <StatusDot v-if="row.kind === 'remote'" v-bind="sourceStatus(row)" />
+              <!-- 内联规则直接写在面板里，不存在抓取；仓库来源看的是同步状态 -->
+              <StatusDot v-if="row.kind !== 'inline'" v-bind="sourceStatus(row)" />
               <el-tooltip v-if="row.kind === 'remote' && row.last_status === 'failed' && row.rule_count"
                          :content="`抓取失败，客户端继续用上次抓到的内容（${row.rule_count} 条）`"
                          placement="top">
@@ -302,8 +307,9 @@ import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
-const INTERVAL_PRESETS = [
-  { label: '15 分钟', value: 900 },
+// 来源类型三态：远程 / 内联 / 仓库（仓库托管由自主维护同步而来）
+const KIND_LABELS = { remote: '远程', inline: '内联', repo: '仓库' }
+const INTERVAL_PRESETS = [  { label: '15 分钟', value: 900 },
   { label: '1 小时', value: 3600 },
   { label: '6 小时', value: 21600 },
   { label: '1 天', value: 86400 },

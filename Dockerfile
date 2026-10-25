@@ -17,6 +17,12 @@ WORKDIR /app
 COPY server/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 自主维护要真的做 Git 操作（克隆、拉取、提交、推送、三方合并），
+# 需要真 git 与 ssh；openssh-client 同时提供 ssh-keygen（生成部署密钥对）。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git openssh-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY server/app ./app
 COPY --from=web /build/server/app/static ./app/static
 

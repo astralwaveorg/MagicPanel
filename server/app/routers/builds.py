@@ -46,7 +46,10 @@ def collect_snapshot(conn) -> dict:
     rule_providers = [
         {"name": r["name"], "behavior": r["behavior"], "format": r["format"],
          "kind": r["kind"], "interval": r["interval"],
-         "client_interval": r["client_interval"], "enabled": bool(r["enabled"])}
+         "client_interval": r["client_interval"], "enabled": bool(r["enabled"]),
+         # 内容指纹进快照：规则内容变了策略指纹就变，自动构建才会重新下发。
+         # （规则来源的 content 以前不进快照，改了规则不触发自动构建。）
+         "content_sha": security.sha256_text(r["content"] or "")}
         for r in db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
     ]
     local_nodes = [

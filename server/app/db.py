@@ -206,6 +206,21 @@ CREATE TABLE IF NOT EXISTS snippets (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS repo_migrations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch INTEGER NOT NULL DEFAULT 1,
+  object_type TEXT NOT NULL,     -- rule_provider
+  object_id INTEGER NOT NULL,
+  origin_kind TEXT NOT NULL,     -- remote / inline
+  origin_url TEXT NOT NULL DEFAULT '',
+  origin_repo_path TEXT NOT NULL DEFAULT '',
+  origin_behavior TEXT NOT NULL DEFAULT '',
+  origin_enabled INTEGER NOT NULL DEFAULT 1,
+  origin_content_sha TEXT NOT NULL DEFAULT '',
+  origin_rule_count INTEGER,
+  switched_at TEXT NOT NULL,
+  reverted_at TEXT
+);
 CREATE TABLE IF NOT EXISTS base_configs (
   engine TEXT NOT NULL DEFAULT 'stash',
   platform TEXT NOT NULL DEFAULT '',
@@ -290,6 +305,9 @@ def init_db() -> None:
                        "auto_test INTEGER NOT NULL DEFAULT 1")
         _ensure_column(conn, "rule_providers", "last_attempt_at",
                        "last_attempt_at TEXT")
+        # 仓库托管的规则来源：repo_path 指向仓库内相对路径
+        _ensure_column(conn, "rule_providers", "repo_path",
+                       "repo_path TEXT NOT NULL DEFAULT ''")
         # 拓展模块的来源类型：inline（面板内建）/ remote（远程 URL，由服务端抓取）
         _ensure_column(conn, "snippets", "source",
                        "source TEXT NOT NULL DEFAULT 'inline'")

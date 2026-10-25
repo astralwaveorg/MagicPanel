@@ -105,6 +105,23 @@ SETTINGS_DEFAULTS = {
     "auto_publish_enabled": "1",
     "auto_publish_env": "production",   # production / testing
     "auto_build_last_attempt": "",      # 内部：上次自动构建检查时间
+    # 自主维护：依赖文件库（单仓库）
+    "deps_enabled": "0",
+    "deps_url": "git@github.com:astralwaveorg/magic-sets.git",
+    "deps_branch": "main",
+    "deps_auth": "ssh",                 # ssh / https / none
+    "deps_private_key_enc": "",         # Fernet 密文，只写不读
+    "deps_token_enc": "",               # HTTPS 方式用，Fernet 密文
+    "deps_commit_name": "MagicPanel",
+    "deps_commit_email": "magicpanel@localhost",
+    "deps_sync_hours": "12",
+    "deps_auto_push": "1",
+    "deps_auto_create_rule_sources": "1",
+    "deps_exclude_paths": ".git,.github,.env,*.bak,.*",
+    "deps_max_file_bytes": str(2 * 1024 * 1024),
+    "deps_last_sync_at": "",            # 内部
+    "deps_last_commit": "",             # 内部
+    "deps_last_error": "",              # 内部
 }
 
 
