@@ -39,20 +39,38 @@
 
     面板的规则集分四层：**自维护层**（仓库里的 `rule/*.yaml`，当前 7 个集合，在面板里是 `kind='repo'`，内容由同步写入，**不再经 jsDelivr 中转——改完推上去，客户端下一次拉取就是新的，没有 12 小时缓存**）；**上游通用层**（MetaCubeX/meta-rules-dat 的 mrs，`kind='remote'`）；**上游应用集合层**（blackmatrix7/ios_rule_script 的 `rule/Clash/<集合名>/<集合名>.yaml`，yaml，行为 `classical`，一条文件混多种规则类型，如 `XiaoMi`——**不进自维护仓库**，那是自维护层）；**第三方成品库**直接引别人的成品规则直链（如 `TG-Twilight/AWAvenue-Ads-Rule` 的 `Filters/*.mrs`，mrs、行为 `domain`，当前只有广告过滤这一条）。
 
-    **自维护层的集合一律用 `behavior: classical`**：条目量不大，但类型可以混着写，域名、IP 段、进程名放进同一个文件，一个规则就能表达一整类分流意图。`classical` 里没有 `domain` 行为那种「`+.` 是后缀、不带是精确」的简写，`+.example.com` 要写成 `DOMAIN-SUFFIX,example.com`，`example.com` 要写成 `DOMAIN,example.com`——写错会把精确匹配放宽成整个域。当前 7 个集合：`jp`（域名 + 1 条 IP 段，走 🇯🇵日本）、`process`（进程名，直连）、`chat-ext`（小众聊天域名）、`social-ext`（小众社区域名）、`proxy`（IP 查询域名，走默认代理）、`direct`（自建服务域名，直连）、`reject`（广告域名，拦截）。
+    **自维护层的集合一律用 `behavior: classical`**：条目量不大，但类型可以混着写，域名、IP 段、进程名放进同一个文件，一个规则就能表达一整类分流意图。`classical` 里没有 `domain` 行为那种「`+.` 是后缀、不带是精确」的简写，`+.example.com` 要写成 `DOMAIN-SUFFIX,example.com`，`example.com` 要写成 `DOMAIN,example.com`——写错会把精确匹配放宽成整个域。
+
+**集合文件名一律带 `magic-` 前缀**，表示是自维护的（`magic-chat` 而不是 `chat-ext` 这类后缀命名）。当前 11 个集合按目标组分文件：一个目标组一个文件，规则只写一条指向它：
+
+| 集合 | 目标组 | 内容 |
+| --- | --- | --- |
+| `magic-jp` | 🇯🇵日本 | 日本线路域名 + 韩国固定 IP 段 |
+| `magic-direct` | DIRECT | 自建服务域名与国内直连站点 |
+| `magic-process` | DIRECT | 本地传输、同步与远控类进程名 |
+| `magic-reject` | REJECT / 🛑 广告过滤 | 最小广告域名集 |
+| `magic-proxy` | 🚀 默认代理 | IP 查询服务域名 |
+| `magic-game` | 🎮 海外游戏 | Steam 下载 CDN（服务器在境外） |
+| `magic-us` | 🇺🇸美国 | 美国区域域名（`behavior: domain`，唯一例外） |
+| `magic-google` | 🔍 谷歌服务 | 谷歌服务补充域名 |
+| `magic-microsoft` | Ⓜ️ 微软服务 | 微软服务补充域名 |
+| `magic-chat` | 💬 即时通讯 | 小众聊天应用域名 |
+| `magic-social` | 👥 海外社交 | 小众社区平台域名 |
+
+改集名的顺序：先在仓库里改文件名与文件头，再在面板上把规则来源改名（规则引用会自动跟着改），最后把引用它的规则值改成新名字。
 
     集合名 = 仓库文件名去扩展名（文件名是引用键），中文展示名写在文件头注释里。**集合含 IP 段时用它的 `_No_Resolve` 变体**（`<集合名>_No_Resolve.yaml`），IP 条目自带 `no-resolve`，客户端遇到域名请求不会为这条规则白做一次 DNS 解析；`DMM` / `JOOX` / `KakaoTalk` / `Naver` / `Yandex` / `Twitch` / `Amazon` 都是这种。blackmatrix7 的 `rule/Clash/` 目录实际有 666 个集合目录，可用的不止 README 里列的那些。
 
     面板抓取后存进 `rule_providers.content`，产物里的 rule-providers URL 仍指向面板自己的 `/res/rule/<name>` feed 端点，客户端从面板拉、不直连 GitHub（**客户端协议不变**）。
 
     `script/` 与 `rewrite/` 片段默认停用：脚本会改写全部请求的 UA，重写依赖 HTTP 引擎与设备信任 CA，而拓展模块没有按设备生效的粒度。仓库托管实体的内容只读，改动只在自主维护页做；启用状态归面板。
-21. **规则顺序就是优先级**：客户端从上往下第一条命中即生效，所以顺序必须按「越具体越靠前、同一目标组聚成一块」排。当前 117 条规则（`sort` 0–116）分十一块：① 本地与保留地址直连 ② 网络层直连（`private` / `private-ip` → 「🏠 私有网络」组；`dns-direct` / `process` / `direct-ports` → DIRECT）③ 广告（REJECT）④ 设备专属直连（`direct` → DIRECT；`jp` → 🇯🇵日本；`connectivity-check` / `mirror-accelerate` / `lvsp-direct` → DIRECT）⑤ Steam 香港 ⑥ **小而明确的直连集合**（`ai-cn` / `apple-cn` / `apple-push` / `apple-push-ip` / `PrivateTracker` / `cn.bing.com` / `microsoft-cn` / `games-cn` / `pt` / `trackers` / `AmazonCN` / `XiaoMi`）⑦ 服务分组（同一目标组连续成一块）⑧ 路由回家 ⑨ 通用代理兜底（`proxy-bm7` / `proxy-domain` / `proxy`，在「🚀 默认代理」块末尾）⑩ **大而泛的直连集合**（`cn-services` / `cn` / `cn-ip`）⑪ `MATCH`。
+21. **规则顺序就是优先级**：客户端从上往下第一条命中即生效，所以顺序必须按「越具体越靠前、同一目标组聚成一块」排。当前 117 条规则（`sort` 0–116）分十一块：① 本地与保留地址直连（0–2）② 网络层直连（3–7，`private` / `private-ip` / `dns-direct` / `magic-process` / `direct-ports` → DIRECT）③ 广告（8–11，Stash 三平台用 `REJECT` 字面量、其余平台用「🛑 广告过滤」策略组）④ 设备专属直连（12–16，`magic-direct` → DIRECT；`magic-jp` → 🇯🇵日本；`connectivity-check` / `mirror-accelerate` / `lvsp-direct` → DIRECT）⑤ Steam 香港（17，`steam-cn`）⑥ **小而明确的直连集合**（18–28，`ai-cn` / `apple-cn` / `apple-push` / `apple-push-ip` / `PrivateTracker` / `microsoft-cn` / `games-cn` / `pt` / `trackers` / `AmazonCN` / `XiaoMi`）⑦ 服务分组（29–93，同一目标组连续成一块）⑧ 路由回家（94–95）⑨ 通用代理兜底（96–112，云服务商集合 `aws` / `azure` / `cloudflare` / `cloudflare-ip` / `digitalocean` / `vercel` / `netlify` 与 `proxy-bm7` / `proxy-domain` / `magic-proxy` 在「🚀 默认代理」块末尾）⑩ **大而泛的直连集合**（113–115，`cn-services` / `cn` / `cn-ip`）⑪ `MATCH`（116）。
 
     **大而泛的直连集合一律往后排**：`cn`（110k 条）、`cn-ip`（10k 条）、`cn-services` 排在强制代理与服务分组之后、`MATCH` 之前。理由是它们会把**所有**国内域名先拦去直连，任何一条更具体的规则都轮不到——2026-10-25 的 v2ex 故障就是这么来的：`cn-services` 里的 `+.v2ex.com` 抢先命中直连，而 `proxy-domain` 里写的是笔误 `+.v2ex.co`（`v2ex.co` 根本没有 A 记录），两条凑在一起让强制代理彻底失效。改成「先分流、未列出的兜底走代理」之后，漏配一条直连规则只会让线路不最优，不会让服务打不开。反过来，**小而明确的直连集合仍留在服务分组之前**，它们条目少、指向明确，抢先命中是对的。
 
     第 ⑦ 块内部再分三层，顺序不能乱：**地区锁服务**（🇯🇵日本 / 🇹🇼台湾 / 🇭🇰香港 / 🇺🇸美国 / 🌍欧洲）→ **主题细分**（🛒 跨境电商 / 🪙 加密货币 / 💬 即时通讯 / 👥 海外社交 / 🎞️ 国际影音 / 💻 开发工具）→ **宽泛合集**（`media` / `disney` / `social` / `games` 等）。地区锁服务必须早于宽泛合集：`media` 里有 10 条 BBC 域名、`disney` 里有 47 条 Hulu 域名，宽泛合集先命中就播不了英国版权区、看不了 Hulu。
 
-    五条硬约束：`MATCH` 永远最后；`ai-cn` / `apple-cn` / `microsoft-cn` / `games-cn` 必须早于对应父集合（`ai-cn` 早于人工智能那三个上游集合 `openai` / `anthropic` / `category-ai-chat-!cn`，`apple-cn` 早于 `apple`，`microsoft-cn` 早于 `microsoft`，`games-cn` 早于 `games`），否则国内子集合整体失效；`steam-cn` 必须早于 `cn`（实测与 cn 重叠 13 条，Steam 中国的域名）；`proxy-bm7` / `proxy-domain` / `proxy` 放在「🚀 默认代理」块末尾，且**必须早于** `cn-services` / `cn` / `cn-ip`；`cn-services` 只保留「上游集合未覆盖 + 实测必须直连」的条目（当前 3 条），不要往里塞国内服务的国际版与境外节点——那些直连必然超时，应交给兜底走代理。
+    五条硬约束：`MATCH` 永远最后；`ai-cn` / `apple-cn` / `microsoft-cn` / `games-cn` 必须早于对应父集合（`ai-cn` 早于人工智能那三个上游集合 `openai` / `anthropic` / `category-ai-chat-!cn`，`apple-cn` 早于 `apple`，`microsoft-cn` 早于 `microsoft`，`games-cn` 早于 `games`），否则国内子集合整体失效；`steam-cn` 必须早于 `cn`（实测与 cn 重叠 13 条，Steam 中国的域名）；云服务商集合（`aws` / `azure` / `cloudflare` / `cloudflare-ip` / `digitalocean` / `vercel` / `netlify`）与 `proxy-bm7` / `proxy-domain` / `magic-proxy` 放在「🚀 默认代理」块末尾，且**必须早于** `cn-services` / `cn` / `cn-ip`；`cn-services` 只保留「上游集合未覆盖 + 实测必须直连」的条目（当前 3 条），不要往里塞国内服务的国际版与境外节点——那些直连必然超时，应交给兜底走代理。
 
     **判断一个集合里的条目还有没有用，要按产物规则顺序模拟「首个命中」，不能只看集合之间的覆盖关系。** 集合之间的覆盖只说明「别的集合也有这条」，还要看那条规则在产物里排在第几位：排在更靠前的集合命中时，留在靠后集合里的同一条就是**死条目**（`cn-services` 里的 `wegame.com.cn` 就是这种——`games` 在第 7 块、`cn-services` 在第 10 块，它永远轮不到，删掉也不改路由）。判定方法：按产物 `rules:` 的顺序遍历，对每个候选域名找第一个能命中的 `RULE-SET`。
 
@@ -61,7 +79,7 @@
 23. **`ipcidr` 行为的规则集必须加 `no-resolve`。** 官方文档明确「ipcidr 类规则集支持 no-resolve 参数」：不加的话客户端遇到域名请求会先为这条规则做一次 DNS 解析再判断 IP 是否命中。判断依据是来源的 `behavior`，不是规则的 `type`——`RULE-SET` 规则的 `no_resolve` 只会对 `ipcidr` 行为真正生效。新建 `ipcidr` 来源后要同步把引用它的规则勾上 no-resolve。
 24. **规则与规则集改动后要按官方文档复核一遍。** 白名单以官方文档为准，不靠记忆：Stash <https://stash.wiki/rules/rule-types>、<https://stash.wiki/rules/rule-set>；Mihomo <https://wiki.metacubex.one/config/rules/>、<https://wiki.metacubex.one/config/rule-providers/>。要核对的项、已发现过的问题（`ipcidr` 行为漏加 `no-resolve`，现存的 `private-ip` / `telegram-ip` / `cn-ip` 都已带上）以及 Stash 独有能力（`no-track` / `pre-matching`）都写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则与规则集的规范核对」。**规则来源内部的一致性（内容有没有悬空引用、有没有规则引用它）暂时不查**——面板侧的校验向阳后面自己优化，验收时不必报告这两类问题。Stash 独有的 `no-track` / `pre-matching` **只写进 Stash 产物**（Mihomo 的规则参数只有 `no-resolve` 与 `src`；实测 Mihomo 遇到未知参数会忽略、不会加载失败，但产物里不写更清楚）；`pre-matching` 还要求目标是 `REJECT` 字面量、用策略组会直接加载失败，且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效，版本太旧的客户端可能加载失败。兜底规则（MATCH）不能加 `no-track`，否则客户端不记录任何连接。同一个规则集可以在互斥的引擎平台各挂一条（广告过滤就是这么分轨的：Stash iOS/tvOS/macOS 用 `REJECT` 字面量，其余平台用「🛑 广告过滤」策略组），「规则重复」判定只看适用范围有无交集。
 25. **服务分流要按「这个服务到底要什么」分派，不要一律丢进默认代理。** 三类需求对应三种落法：**地区锁服务**（Pixiv / DMM / Hulu / BBC，换 IP 就打不开）→ 指向对应地区组；**账号风控服务**（Discord / Slack / Amazon / 币圈，对出口 IP 的信誉与地区一致性有校验）→ 指向固定出口的 `select` 组（🛒 跨境电商 / 🪙 加密货币，本地节点排最前），别交给 `url-test` 自动切 IP；**上游大集合吃掉了本该更细路由的域名**（`media` 里的 BBC、`disney` 里的 Hulu）→ 拆出服务专属集合并排在宽泛合集之前。判断"这个集合值不值得加"必须与面板全部现有集合求交，看净增量与路由错位，算增量的三个坑（公共后缀回溯、behavior 不能嗅探、mrs 要换 yaml 等价物）写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「服务细分：按用途与地区分派」。
-26. **社交类分流按用途分两组：💬 即时通讯 与 👥 海外社交。** 前者是点对点聊天、群聊、通话、消息推送（Telegram / WhatsApp / Signal / Discord / LINE / Viber / KakaoTalk / Messenger / Snapchat / Element / Session / Threema / SimpleX / Wire / Zalo / Slack），后者是动态、发帖、图文流、关注、社区（Twitter / Instagram / Facebook / Reddit / Threads / Bluesky / Tumblr / Pinterest / LinkedIn / TruthSocial / VK / OK / Quora / Lemmy / Nextdoor / GETTR / Minds / MeWe / Gab / Mastodon）。**两个块在第 7 块内各自连续，通讯块必须排在社交块前面**——两块都含 LINE / Messenger / Discord 的域名，具体服务集合要排在宽泛的 `social-extra` / `social` 前面，否则走错组。geosite 的 `category-social-media-!cn`（`social`）已覆盖 Twitter / Facebook / Instagram / Threads / Tumblr / LinkedIn / TruthSocial / VK / Bluesky / Mastodon 的全部条目，**不要再为它们建单服务集合**（同约束 22 的重复清单）；只有净增量不为零的才建来源。小众服务（Threema / Session / SimpleX / Wire / Viber / Quora / Lemmy / Nextdoor / OK / GETTR / Minds / MeWe / Gab）走自维护层 `chat-ext` 与 `social-ext`，域名逐个核实过。
+26. **社交类分流按用途分两组：💬 即时通讯 与 👥 海外社交。** 前者是点对点聊天、群聊、通话、消息推送（Telegram / WhatsApp / Signal / Discord / LINE / Viber / KakaoTalk / Messenger / Snapchat / Element / Session / Threema / SimpleX / Wire / Zalo / Slack），后者是动态、发帖、图文流、关注、社区（Twitter / Instagram / Facebook / Reddit / Threads / Bluesky / Tumblr / Pinterest / LinkedIn / TruthSocial / VK / OK / Quora / Lemmy / Nextdoor / GETTR / Minds / MeWe / Gab / Mastodon）。**两个块在第 7 块内各自连续，通讯块必须排在社交块前面**——两块都含 LINE / Messenger / Discord 的域名，具体服务集合要排在宽泛的 `social-extra` / `social` 前面，否则走错组。geosite 的 `category-social-media-!cn`（`social`）已覆盖 Twitter / Facebook / Instagram / Threads / Tumblr / LinkedIn / TruthSocial / VK / Bluesky / Mastodon 的全部条目，**不要再为它们建单服务集合**（同约束 22 的重复清单）；只有净增量不为零的才建来源。小众服务（Threema / Session / SimpleX / Wire / Viber / Quora / Lemmy / Nextdoor / OK / GETTR / Minds / MeWe / Gab）走自维护层 `magic-chat` 与 `magic-social`，域名逐个核实过。
 27. **策略组的顺序是向阳精心配置过的基线，不得变更。** 下面这 33 个策略组的先后顺序（含 `sort` 值）是基线，括号内是 `sort`：
 
     ```
