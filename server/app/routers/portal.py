@@ -177,7 +177,7 @@ def _provider_desc(content: str, fmt: str) -> str:
     return ""
 
 
-def _provider_meta(r) -> dict:
+def _provider_meta(r, repo_origin: str = "") -> dict:
     """规则来源的元信息：不含原始内容，内容按需单独取。"""
     content = r["content"] or ""
     kind = r["kind"]
@@ -204,7 +204,8 @@ def _provider_meta(r) -> dict:
         "last_fetched_at": r["last_fetched_at"],
         "size": len(content),
         "sha256": (r["sha256"] or "")[:12],
-        "origin": _provider_origin(r["url"]),
+        # 仓库托管的来源没有上游 URL，来源归属取自后台配置的依赖仓库地址
+        "origin": _provider_origin(r["url"]) or (repo_origin if kind == "repo" else ""),
         "desc": _provider_desc(content, r["format"]),
     }
 
@@ -284,8 +285,9 @@ def portal_data(body: PinBody, request: Request):
             )
         ]
         # 规则来源仅展示元信息，随配置下发，不展示原始内容
+        repo_origin = _provider_origin(db.get_setting(conn, "deps_url", ""))
         rule_providers = [
-            _provider_meta(r)
+            _provider_meta(r, repo_origin)
             for r in db.all_(
                 conn,
                 "SELECT * FROM rule_providers WHERE enabled=1 ORDER BY id",
@@ -330,7 +332,8 @@ def portal_provider_detail(body: ProviderDetailBody, request: Request):
         )
         if not row:
             raise HTTPException(404, "规则来源不存在")
-        meta = _provider_meta(row)
+        meta = _provider_meta(row, _provider_origin(
+            db.get_setting(conn, "deps_url", "")))
         content = row["content"] or ""
     lines = content.splitlines()
     preview = ""
