@@ -95,8 +95,12 @@ def _env(conn) -> dict:
     env["GCM_INTERACTIVE"] = "never"
     key_path = _write_key(conn)
     if key_path:
+        # known_hosts 落在数据目录里：容器没有可写的 HOME，指到别处会写不进去
+        known = config.DATA_DIR / "deps" / "known_hosts"
+        known.parent.mkdir(parents=True, exist_ok=True)
         env["GIT_SSH_COMMAND"] = (
-            f"ssh -i {key_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+            f"ssh -i {key_path} -o IdentitiesOnly=yes "
+            f"-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={known}"
         )
     token = _setting(conn, "deps_token_enc", "")
     if token:
@@ -168,7 +172,10 @@ def _friendly_error(args: list[str], stderr: str) -> str:
         return "远端有新提交，先拉取再推送"
     if "conflict" in lowered:
         return "存在冲突，需要先解决冲突"
-    first = text.splitlines()[0] if text else ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    useful = [ln for ln in lines
+              if not ln.startswith("Cloning into") and not ln.startswith("warning:")]
+    first = (useful or lines or [""])[0]
     return f"git {args[0]} 失败：{first}" if first else f"git {args[0]} 失败"
 
 

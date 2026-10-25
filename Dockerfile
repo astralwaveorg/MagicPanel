@@ -27,7 +27,12 @@ COPY server/app ./app
 COPY --from=web /build/server/app/static ./app/static
 
 # 运行身份由 docker-compose.yml 的 user 指定（NAS 上是 1000:1001，
-# 与 data 目录的属主一致）。镜像内不再另建用户，避免两套 uid 打架。
+# 与 data 目录的属主一致）。这里只为这个 uid 补一条 passwd/group 记录，
+# 不改变 uid 本身，也不新建目录属主：没有这条记录，ssh 会因为
+# "No user exists for uid 1000" 直接拒绝连接，自主维护的 Git 操作就做不了。
+RUN groupadd --gid 1001 app 2>/dev/null || true \
+ && useradd --uid 1000 --gid 1001 --no-create-home \
+        --home-dir /app/data --shell /usr/sbin/nologin app 2>/dev/null || true
 RUN mkdir -p /app/data
 
 EXPOSE 8000
