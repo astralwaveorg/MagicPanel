@@ -26,7 +26,7 @@
         </div>
         <p v-if="status.last_error" class="mp-deps-error">{{ status.last_error }}</p>
       </div>
-      <div class="mp-deps-bar-actions">
+      <div class="mp-deps-bar-actions mp-btn-grid">
         <el-button :loading="syncing" @click="syncNow" type="primary">立即同步</el-button>
         <el-button @click="openHistory">提交历史</el-button>
         <el-button @click="settingsOpen = true">仓库设置</el-button>
@@ -87,7 +87,7 @@
             class="mono"
             placeholder="（内容加载中）"
           />
-          <div class="mp-deps-detail-actions">
+          <div class="mp-deps-detail-actions mp-btn-grid">
             <el-button :disabled="current.binary" @click="saveFile">保存</el-button>
             <el-button :disabled="current.binary" @click="saveAndCommit">保存并提交</el-button>
             <el-button v-if="current.rule_source" type="primary" plain
@@ -109,7 +109,7 @@
           <div><strong>远端 theirs</strong><pre class="mono">{{ c.theirs }}</pre></div>
         </div>
         <el-input v-model="conflictDraft[c.path]" type="textarea" :rows="8" class="mono" />
-        <div class="mp-deps-detail-actions">
+        <div class="mp-deps-detail-actions mp-btn-grid">
           <el-button @click="resolve(c.path, 'manual')">提交手工合并</el-button>
           <el-button @click="resolve(c.path, 'theirs')" plain>整体用远端</el-button>
           <el-button @click="resolve(c.path, 'ours')" plain>整体保留本地</el-button>
@@ -508,7 +508,6 @@ function goRuleSources() {
 .mp-deps-commit { color: var(--mp-text-secondary); }
 .mp-deps-badges { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .mp-deps-error { color: var(--mp-danger); font-size: 12.5px; margin: 6px 0 0; }
-.mp-deps-bar-actions { display: flex; gap: 8px; }
 .mp-deps-body {
   display: grid;
   grid-template-columns: minmax(240px, 320px) 1fr;
@@ -540,7 +539,7 @@ function goRuleSources() {
 .mp-deps-mark[data-status='remote'] { color: var(--mp-info, #409eff); }
 .mp-deps-mark[data-status='conflict'] { color: var(--mp-danger); }
 .mp-deps-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
-.mp-deps-detail-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.mp-deps-detail-actions { margin-top: 12px; }
 .mp-deps-conflict { margin-bottom: 20px; }
 .mp-deps-conflict-path { font-size: 13px; margin: 0 0 8px; }
 .mp-deps-three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 8px; }
@@ -552,5 +551,10 @@ function goRuleSources() {
 @media (max-width: 900px) {
   .mp-deps-body { grid-template-columns: 1fr; }
   .mp-deps-three { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  /* 窄屏：状态信息独占一行，按钮组换到下面 */
+  .mp-deps-bar { flex-wrap: wrap; }
+  .mp-deps-bar-left { flex: 1 1 100%; }
 }
 </style>

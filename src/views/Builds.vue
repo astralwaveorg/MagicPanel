@@ -1,19 +1,26 @@
 <template>
   <div>
     <div class="mp-page-head">
-      <div>
+      <div class="mp-page-head-row">
         <h2 class="mp-page-title">构建发布</h2>
-        <p class="mp-page-desc">
-          构建把当前策略固化为不可变快照并逐目标校验。构建有四种状态：已构建、测试中、生产中、已下线；同一时刻只有一个生产版本和一个测试版本。发布后客户端需下一次拉取才生效。
-        </p>
+        <div class="mp-btn-grid mp-page-head-actions">
+          <el-tooltip content="强制跑一轮：抓取上游、测速、创建新构建，再发布到目标环境" placement="bottom-end">
+            <el-button :loading="triggering" @click="runAutoNow" type="primary">立即发布</el-button>
+          </el-tooltip>
+          <el-tooltip v-if="tab === 'builds'"
+                      content="只创建当前策略的不可变快照，不发布；发布在下面的表格里操作"
+                      placement="bottom-end">
+            <el-button :loading="building" @click="createBuild">创建构建</el-button>
+          </el-tooltip>
+        </div>
       </div>
-      <el-tooltip content="强制跑一轮：抓取上游、测速、创建新构建，再发布到目标环境" placement="bottom-end">
-        <el-button :loading="triggering" @click="runAutoNow" type="primary">立即发布</el-button>
-      </el-tooltip>
+      <p class="mp-page-desc">
+        构建把当前策略固化为不可变快照并逐目标校验。构建有四种状态：已构建、测试中、生产中、已下线；同一时刻只有一个生产版本和一个测试版本。发布后客户端需下一次拉取才生效。
+      </p>
     </div>
 
     <el-tabs v-model="tab" class="mp-builds-tabs">
-      <el-tab-pane label="构建发布" name="builds">
+      <el-tab-pane label="手动构建发布" name="builds">
         <div class="mp-card">
           <div class="mp-toolbar" style="margin-bottom:0">
             <div class="left" style="flex-direction:column;align-items:flex-start;gap:8px">
@@ -62,7 +69,6 @@
                 <el-button link @click="clearSelection">取消选择</el-button>
               </div>
             </div>
-            <el-button :loading="building" @click="createBuild" type="primary">创建构建</el-button>
           </div>
         </div>
 
@@ -152,7 +158,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="自动构建发布" name="auto">
+      <el-tab-pane label="自动运行配置" name="auto">
         <AutoBuildPanel />
       </el-tab-pane>
     </el-tabs>
@@ -228,7 +234,7 @@
 </template>
 
 <script setup>
-// 构建发布页：两个 tab（构建发布 / 自动构建发布）+ 页面级「立即发布」。
+// 构建发布页：两个 tab（手动构建发布 / 自动运行配置）+ 页面级「立即发布」「创建构建」。
 // tab 走 query 参数（?tab=builds / ?tab=auto），两个 tab 各自可直达。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -522,15 +528,6 @@ async function removeSelected() {
 </script>
 
 <style scoped>
-/* 页面头：标题在左，页面级主操作在右 */
-.mp-page-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.mp-page-head .mp-page-desc { margin-bottom: 12px; }
 .mp-builds-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }
 .mp-builds-tabs :deep(.el-tabs__item) { font-size: 14px; }
 /* 抽屉里的发布动作区 */

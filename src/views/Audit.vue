@@ -4,7 +4,7 @@
     <p class="mp-page-desc">记录维护操作与设备下载；不含订阅地址、令牌或节点凭据。</p>
 
     <div class="mp-toolbar" style="margin-bottom:12px">
-      <div class="left">
+      <div class="mp-btn-grid mp-toolbar-actions">
         <el-button size="small" type="danger" plain :disabled="!selection.length" @click="removeSelected">
           删除选中（{{ selection.length }}）
         </el-button>
@@ -12,9 +12,9 @@
           清空全部
         </el-button>
       </div>
-      <div class="right">
+      <div class="mp-search-row">
         <el-input v-model="keyword" size="small" placeholder="搜索操作 / 操作人 / 详情"
-                  clearable style="width:240px" @keyup.enter="reload" @clear="reload" />
+                  clearable @keyup.enter="reload" @clear="reload" />
         <el-button size="small" @click="reload">搜索</el-button>
       </div>
     </div>

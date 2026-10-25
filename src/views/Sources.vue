@@ -27,7 +27,7 @@
     </el-alert>
 
     <div class="mp-toolbar">
-      <div class="left">
+      <div class="mp-btn-grid mp-toolbar-actions">
         <template v-if="selected.length">
           <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
           <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting" @click="refreshMany(selected)" type="primary">抓取选中</el-button>
@@ -38,10 +38,15 @@
           <span v-if="batchTesting" class="mp-toolbar-hint">
             正在测速 {{ testDone }}/{{ testTotal }}…
           </span>
+          <span v-else-if="batchRefreshing" class="mp-toolbar-hint">
+            正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
+          </span>
         </template>
         <template v-else>
           <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting" @click="refreshMany(rows)" type="primary">一键抓取</el-button>
           <el-button :loading="batchTesting" :disabled="batchRefreshing || batchTesting" @click="testMany(rows)" type="success" plain>一键测速</el-button>
+          <el-button class="mp-push-right" @click="openEdit()" type="primary">添加订阅</el-button>
+          <el-button @click="openLocalEdit()" type="primary">添加节点</el-button>
           <span v-if="batchRefreshing" class="mp-toolbar-hint">
             正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
           </span>
@@ -49,10 +54,6 @@
             正在测速 {{ testDone }}/{{ testTotal }}…
           </span>
         </template>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <el-button @click="openEdit()" type="primary">添加订阅</el-button>
-        <el-button @click="openLocalEdit()" type="primary">添加节点</el-button>
       </div>
     </div>
 

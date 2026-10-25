@@ -147,6 +147,79 @@ html, body, #app {
 }
 .mp-toolbar .left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mp-toolbar-hint { color: var(--mp-text-secondary); font-size: 12.5px; }
+
+/* 操作按钮栅格：桌面端横排自适应，窄屏一行两个、各占 50% */
+.mp-btn-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.mp-btn-grid > .el-button { margin: 0; }
+.mp-btn-grid > .el-upload { margin: 0; display: inline-block; }
+/* 桌面端：标了这个类的按钮贴到右边（窄屏由栅格接管，不需要） */
+@media (min-width: 769px) {
+  .mp-btn-grid > .mp-push-right { margin-left: auto; }
+}
+/* 顶部操作区：桌面端撑满一行，按钮按需靠右 */
+.mp-toolbar-actions { flex: 1 1 auto; min-width: 0; }
+/* 栅格里的提示文字与已选计数：单独占一行 */
+.mp-btn-grid > .mp-toolbar-hint,
+.mp-btn-grid > .mp-selected-hint { flex: 0 0 100%; margin: 0; }
+.mp-btn-grid > .el-button.link { flex: 0 0 auto; }
+
+/* 开关行：标签在左、开关在右，撑满整行。
+   比「标签在上、开关在下」少一半高度，窄屏尤其明显。 */
+.mp-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  min-height: 40px;
+}
+.mp-switch-row + .mp-switch-row { border-top: 1px solid var(--mp-border); }
+.mp-switch-label { font-size: 13px; }
+
+/* 表单行：标签在左、控件在右，撑满整行（输入框、下拉框一类） */
+.mp-form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  min-height: 40px;
+}
+.mp-form-row + .mp-form-row,
+.mp-form-row + .mp-switch-row { border-top: 1px solid var(--mp-border); }
+.mp-form-row .mp-switch-label { flex: 1 1 auto; min-width: 0; }
+.mp-control-end { flex: 0 0 auto; width: 160px; max-width: 55%; }
+
+/* 搜索行：输入框撑满剩余宽度，按钮贴右 */
+.mp-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.mp-search-row .el-input { flex: 1 1 auto; min-width: 0; }
+.mp-search-row > .el-button { flex: 0 0 auto; margin: 0; }
+
+/* 头像行：头像在左、操作在右；窄屏操作换到下一行 */
+.mp-avatar-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.mp-avatar-actions { flex: 1 1 auto; min-width: 0; }
+/* PIN 的按钮排在输入框下面 */
+.mp-pin-actions { margin-top: 8px; }
+
+/* 页面头：标题行（标题在左、页面级操作在右），说明文字另起一行 */
+.mp-page-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mp-page-head .mp-page-desc { margin-bottom: 12px; }
 .mp-selected-hint { font-size: 13px; font-weight: 600; }
 .mp-form-hint { color: var(--mp-text-secondary); font-size: 12px; line-height: 1.6; margin-top: 2px; }
 /* 表单里的阻断性提示：配置能存下但产物会被客户端拒绝，必须显眼 */
@@ -214,7 +287,21 @@ html, body, #app {
 .el-table--small td.el-table__cell { padding: 6px 0; }
 
 /* 状态点：与文字共同编码状态 */
-.mp-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+}
+/* 文字过长时单行截断，完整内容靠 title 悬浮看；不截断会把窄屏整页撑宽 */
+.mp-status > span:last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .mp-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .mp-dot.ok { background: var(--mp-ok); }
 .mp-dot.warn { background: var(--mp-warn); }
@@ -302,6 +389,8 @@ html, body, #app {
   .el-form-item__label { padding-bottom: 4px; font-size: 13px; line-height: 1.4; }
   .el-radio-group { flex-wrap: wrap; row-gap: 6px; }
   .el-select, .el-input, .el-input-number { width: 100%; }
+  /* 数字输入框不撑满整行：满宽的加减按钮又宽又难看 */
+  .el-input-number { width: 180px; max-width: 100%; }
 
   /* 工具栏：主按钮独占一行；批量操作按钮排成两列网格，手指好点 */
   .mp-toolbar { gap: 8px; margin-bottom: 10px; }
@@ -311,6 +400,31 @@ html, body, #app {
   .mp-toolbar .left .el-button { flex: 1 1 calc(50% - 4px); margin-left: 0; }
   .mp-toolbar .left .mp-selected-hint { width: 100%; }
   .mp-toolbar .left .el-button.link { flex: 0 0 auto; }
+
+  /* 操作按钮栅格：窄屏一行两个、各占 50% */
+  .mp-btn-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+  .mp-btn-grid > * { margin: 0 !important; min-width: 0; }
+  .mp-btn-grid .el-button { width: 100%; }
+  .mp-btn-grid > .el-upload { display: block; width: 100%; }
+  .mp-btn-grid > .el-upload .el-button { width: 100%; }
+  /* 落单的一个撑满整行 */
+  .mp-btn-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  /* 提示文字与已选计数：整行占满 */
+  .mp-btn-grid > .mp-toolbar-hint,
+  .mp-btn-grid > .mp-selected-hint { grid-column: 1 / -1; }
+
+  /* 页面头：标题与页面级操作同一行，省掉一行按钮 */
+  .mp-page-head-row { flex-wrap: nowrap; }
+  .mp-page-head-row .mp-page-title { flex: 0 0 auto; }
+  .mp-page-head-row .mp-btn-grid { flex: 1 1 auto; width: auto; }
+
+  /* 开关行：标签与开关同一行 */
+  .mp-switch-row { padding: 6px 0; }
 
   /* 顺序列：手机上触屏拖不动手柄，改用 ↑↓ 按钮，手柄隐藏；
      两个按钮必须同一行（列宽只有 56px），否则会竖着排开 */

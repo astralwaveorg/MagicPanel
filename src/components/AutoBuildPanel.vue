@@ -27,13 +27,14 @@
         </div>
       </div>
       <el-form label-position="top" style="max-width:720px;margin-top:8px">
-        <el-form-item label="启用服务端定时任务">
+        <div class="mp-switch-row">
+          <span class="mp-switch-label">启用服务端定时任务</span>
           <el-switch v-model="form.scheduler_enabled" />
-          <span class="mp-form-hint" style="margin-left:12px">
-            关闭后不再自动抓取、测速和构建，已经发布的内容不受影响
-          </span>
-        </el-form-item>
+        </div>
       </el-form>
+      <p class="mp-form-hint">
+        关闭后不再自动抓取、测速和构建，已经发布的内容不受影响。
+      </p>
     </div>
 
     <!-- 宽屏两卡片等高，窄屏按内容自然高度 -->
@@ -41,24 +42,26 @@
       <el-col :xs="24" :md="12">
         <div class="mp-card mp-equal-card">
           <h3>抓取与测速</h3>
-          <el-form label-position="top">
-            <el-form-item label="自动抓取节点来源">
-              <el-switch v-model="form.auto_fetch_sources" />
-            </el-form-item>
-            <el-form-item label="自动测速节点来源">
-              <el-switch v-model="form.auto_test_sources" />
-            </el-form-item>
-            <el-form-item label="自动抓取规则来源">
-              <el-switch v-model="form.auto_fetch_rules" />
-            </el-form-item>
-            <el-form-item label="自动抓取拓展模块">
-              <el-switch v-model="form.auto_fetch_snippets" />
-            </el-form-item>
-          </el-form>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">自动抓取节点来源</span>
+            <el-switch v-model="form.auto_fetch_sources" />
+          </div>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">自动测速节点来源</span>
+            <el-switch v-model="form.auto_test_sources" />
+          </div>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">自动抓取规则来源</span>
+            <el-switch v-model="form.auto_fetch_rules" />
+          </div>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">自动抓取拓展模块</span>
+            <el-switch v-model="form.auto_fetch_snippets" />
+          </div>
           <p class="mp-form-hint">
             每个来源的抓取/测速间隔在对应的来源页面配置，支持批量修改。
           </p>
-          <div class="mp-auto-links">
+          <div class="mp-btn-grid mp-auto-links">
             <el-button size="small" @click="router.push('/admin/sources')">节点来源</el-button>
             <el-button size="small" @click="router.push('/admin/rule-providers')">规则来源</el-button>
             <el-button size="small" @click="router.push('/admin/snippets')">拓展模块</el-button>
@@ -68,25 +71,27 @@
       <el-col :xs="24" :md="12">
         <div class="mp-card mp-equal-card">
           <h3>自动构建与发布</h3>
-          <el-form label-position="top">
-            <el-form-item label="策略变化时自动创建构建">
-              <el-switch v-model="form.auto_build_enabled" />
-            </el-form-item>
-            <el-form-item label="构建检查间隔（小时）">
-              <el-input-number v-model="form.auto_build_interval_hours"
-                               :min="1" :max="168" :step="1" style="width:180px" />
-            </el-form-item>
-            <el-form-item label="校验通过后自动构建发布">
-              <el-switch v-model="form.auto_publish_enabled" />
-            </el-form-item>
-            <el-form-item label="发布环境">
-              <el-select v-model="form.auto_publish_env" style="width:180px"
-                         :disabled="!form.auto_publish_enabled">
-                <el-option value="production" label="生产环境" />
-                <el-option value="testing" label="测试环境" />
-              </el-select>
-            </el-form-item>
-          </el-form>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">策略变化时自动创建构建</span>
+            <el-switch v-model="form.auto_build_enabled" />
+          </div>
+          <div class="mp-form-row">
+            <span class="mp-switch-label">构建检查间隔（小时）</span>
+            <el-input-number v-model="form.auto_build_interval_hours"
+                             :min="1" :max="168" :step="1" class="mp-control-end" />
+          </div>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">校验通过后自动构建发布</span>
+            <el-switch v-model="form.auto_publish_enabled" />
+          </div>
+          <div class="mp-form-row">
+            <span class="mp-switch-label">发布环境</span>
+            <el-select v-model="form.auto_publish_env" class="mp-control-end"
+                       :disabled="!form.auto_publish_enabled">
+              <el-option value="production" label="生产环境" />
+              <el-option value="testing" label="测试环境" />
+            </el-select>
+          </div>
           <p class="mp-form-hint">
             只有策略快照变化且校验通过才发布；失败的构建不会覆盖当前生效版本。
           </p>
@@ -156,7 +161,7 @@
 </template>
 
 <script setup>
-// 「自动构建发布」面板：只管配置与记录，执行类动作在页面标题行。
+// 「自动运行配置」面板：只管配置与记录，执行类动作在页面标题行。
 // 状态与动作来自共享模块，与标题行的「立即发布」按钮同源。
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -185,8 +190,7 @@ onMounted(loadAutoPublish)
   background: var(--mp-surface-2);
 }
 .mp-auto-label { color: var(--mp-text); font-weight: 600; margin-right: 8px; }
-.mp-auto-links { display: flex; gap: 8px; margin-top: 10px; }
-.mp-auto-links .el-button { margin: 0; }
+.mp-auto-links { margin-top: 10px; }
 @media (max-width: 640px) {
   .mp-auto-status { font-size: 12.5px; }
 }

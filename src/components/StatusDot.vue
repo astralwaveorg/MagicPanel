@@ -1,5 +1,5 @@
 <template>
-  <span class="mp-status" :title="tip || ''">
+  <span class="mp-status" :title="tip || text">
     <span class="mp-dot" :class="kind"></span>
     <span>{{ text }}</span>
   </span>

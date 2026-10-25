@@ -6,22 +6,25 @@
     </p>
 
     <div class="mp-toolbar">
-      <div class="left">
+      <div class="mp-btn-grid mp-toolbar-actions">
         <template v-if="selected.length">
           <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
           <el-button :loading="batchRefreshing" :disabled="batchRefreshing" @click="refreshMany(selected)" type="primary">抓取选中</el-button>
           <el-button :disabled="batchRefreshing" @click="openBatchInterval">修改抓取间隔</el-button>
           <el-button :disabled="batchRefreshing" @click="removeSelected" type="danger" plain>批量删除</el-button>
           <el-button link @click="clearSelection">取消选择</el-button>
+          <span v-if="batchRefreshing" class="mp-toolbar-hint">
+            正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
+          </span>
         </template>
         <template v-else>
           <el-button :loading="batchRefreshing" :disabled="batchRefreshing" @click="refreshMany()" type="primary">一键抓取</el-button>
+          <el-button class="mp-push-right" @click="openEdit()" type="primary">添加规则来源</el-button>
           <span v-if="batchRefreshing" class="mp-toolbar-hint">
             正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
           </span>
         </template>
       </div>
-      <el-button @click="openEdit()" type="primary">添加规则来源</el-button>
     </div>
 
     <div class="mp-toolbar mp-filter-bar">

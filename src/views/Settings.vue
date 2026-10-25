@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2 class="mp-page-title">设置</h2>
+    <h2 class="mp-page-title">系统设置</h2>
     <p class="mp-page-desc">对外地址、测速核心、首页访问 PIN、账号与备份。</p>
 
     <div class="mp-card">
@@ -30,12 +30,13 @@
         远端副本是跨故障的最后一道保险。备份可自动定时执行，也可随时手动触发。
       </p>
       <el-form label-position="top" style="max-width:560px">
-        <el-form-item label="启用自动备份">
+        <div class="mp-switch-row">
+          <span class="mp-switch-label">启用自动备份</span>
           <el-switch v-model="webdav.enabled" />
-          <div class="mp-form-hint">
-            关闭后仍可手动上传备份；定时任务与调度器总开关无关。
-          </div>
-        </el-form-item>
+        </div>
+        <p class="mp-form-hint">
+          关闭后仍可手动上传备份；定时任务与调度器总开关无关。
+        </p>
         <el-form-item label="WebDAV 地址">
           <el-input v-model="webdav.url" class="mono"
                     placeholder="https://dav.example.com/remote.php/dav/files/mypanel" />
@@ -59,9 +60,9 @@
           <el-input-number v-model="webdav.keep" :min="1" :max="100" />
           <div class="mp-form-hint">超出后自动删除最旧的快照与其主密钥。</div>
         </el-form-item>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="mp-btn-grid">
           <el-button :loading="webdavSaving" @click="saveWebdav" type="primary">保存配置</el-button>
-          <el-button :loading="webdavTesting" @click="testWebdav" type="primary">测试连接</el-button>
+          <el-button :loading="webdavTesting" @click="testWebdav">测试连接</el-button>
           <el-button :loading="webdavUploading" @click="uploadWebdav" type="success" plain>立即备份到 WebDAV</el-button>
           <el-button @click="loadWebdavFiles" type="info" plain>查看远端备份</el-button>
         </div>
@@ -73,19 +74,21 @@
           {{ webdavInfo.last_error }}
         </div>
       </div>
-      <el-table v-if="webdavFiles.length" :data="webdavFiles" size="small"
-                style="margin-top:12px">
-        <el-table-column prop="name" label="远端文件" min-width="200" class="mono" />
-        <el-table-column label="大小" width="110" align="right">
-          <template #default="{ row }">{{ (row.size / 1024 / 1024).toFixed(1) }} MB</template>
-        </el-table-column>
-        <el-table-column prop="modified" label="修改时间" min-width="180" />
-        <el-table-column label="操作" width="100" align="right">
-          <template #default="{ row }">
-            <el-button v-if="row.name.endsWith('.db')" size="small" @click="restoreWebdav(row)" type="warning" plain>恢复</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <!-- 表格要包在可横向滚动的容器里，否则窄屏会被表格撑破整页 -->
+      <div v-if="webdavFiles.length" class="mp-table-wrap" style="margin-top:12px">
+        <el-table :data="webdavFiles" size="small">
+          <el-table-column prop="name" label="远端文件" min-width="200" class="mono" />
+          <el-table-column label="大小" width="110" align="right">
+            <template #default="{ row }">{{ (row.size / 1024 / 1024).toFixed(1) }} MB</template>
+          </el-table-column>
+          <el-table-column prop="modified" label="修改时间" min-width="180" />
+          <el-table-column label="操作" width="100" align="right">
+            <template #default="{ row }">
+              <el-button v-if="row.name.endsWith('.db')" size="small" @click="restoreWebdav(row)" type="warning" plain>恢复</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
     </div>
 
     <div class="mp-card">
@@ -96,13 +99,12 @@
         <div style="font-size:12.5px;color:var(--mp-text-secondary)">
           服务端平台 <span class="mono">{{ core.platform }}</span><template v-if="core.asset_hint">，手动下载请选 <span class="mono">{{ core.asset_hint }}</span></template>
         </div>
-        <div>
+        <div class="mp-btn-grid">
           <el-button :loading="coreBusy" @click="installCoreOnline" type="primary">
             在线安装最新版
           </el-button>
           <el-upload
             :auto-upload="false" :show-file-list="false" :on-change="onUploadCore"
-            style="display:inline-block;margin-left:10px"
           >
             <el-button plain :loading="coreBusy">本地上传安装 / 更新</el-button>
           </el-upload>
@@ -126,6 +128,8 @@
       <div class="mp-row-actions">
         <el-input v-model="portalPin" maxlength="4" placeholder="4 位数字"
                   class="mono mp-pin-input" />
+      </div>
+      <div class="mp-btn-grid mp-pin-actions">
         <el-button type="primary" :loading="savingPin" @click="savePin">
           {{ store.user?.has_portal_pin ? '更换 PIN' : '设置 PIN' }}
         </el-button>
@@ -145,10 +149,10 @@
 
     <div class="mp-card">
       <h3>我的头像</h3>
-      <div style="display:flex;align-items:center;gap:16px">
+      <div class="mp-avatar-row">
         <UserAvatar :user="store.user" :size="56" />
         <!-- 两个按钮并排一行，窄屏再换行 -->
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="mp-btn-grid mp-avatar-actions">
           <el-upload
             :auto-upload="false" :show-file-list="false"
             accept="image/png,image/jpeg,image/webp" :on-change="uploadAvatar"
@@ -156,11 +160,11 @@
             <el-button type="primary" plain>上传头像</el-button>
           </el-upload>
           <el-button v-if="store.user?.has_avatar" @click="removeAvatar" type="danger" plain>移除</el-button>
-          <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:8px 0 0">
-            支持 PNG / JPEG / WebP，不超过 2 MB；未上传时按用户名生成默认头像。
-          </p>
         </div>
       </div>
+      <p class="mp-form-hint">
+        支持 PNG / JPEG / WebP，不超过 2 MB；未上传时按用户名生成默认头像。
+      </p>
     </div>
 
     <div class="mp-card">
@@ -217,7 +221,7 @@
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
         备份含加密后的订阅地址与令牌摘要，需与服务端 data/secret.key 分开保管；恢复会覆盖全部数据。
       </p>
-      <div class="mp-row-actions">
+      <div class="mp-btn-grid">
         <el-button @click="exportBackup" type="info" plain>导出备份（JSON）</el-button>
         <el-upload :auto-upload="false" :show-file-list="false" accept=".json" :on-change="importBackup">
           <el-button plain type="warning">从备份恢复</el-button>
