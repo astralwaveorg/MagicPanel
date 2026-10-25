@@ -72,7 +72,7 @@ def sync_content(conn, operator: str) -> dict:
     patterns = cfg["exclude_paths"].split(",") if cfg["exclude_paths"] else []
     patterns = [p.strip() for p in patterns if p.strip()]
     files = repo_manager.list_files(conn)
-    created = updated = 0
+    created = updated = skipped = 0
     errors: list[str] = []
     for item in files:
         rel = item["path"]
@@ -108,6 +108,11 @@ def sync_content(conn, operator: str) -> dict:
                            cur.lastrowid, {"name": name, "repo_path": rel})
             created += 1
             continue
+        if row["kind"] != "repo":
+            # 同一个名字的来源已经被改成远程或内联：仓库不再管它，
+            # 也不能用仓库文件覆盖它自己的内容。
+            skipped += 1
+            continue
         if row["content"] == text and row["repo_path"] == rel:
             continue
         conn.execute(
@@ -117,7 +122,7 @@ def sync_content(conn, operator: str) -> dict:
             (rel, meta["behavior"], text, meta["count"], _sha(text), now, now, row["id"]),
         )
         updated += 1
-    return {"created": created, "updated": updated, "errors": errors}
+    return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
 
 
 def sync_one(conn, name: str, operator: str) -> dict:
@@ -125,6 +130,8 @@ def sync_one(conn, name: str, operator: str) -> dict:
     row = db.one(conn, "SELECT * FROM rule_providers WHERE name=?", (name,))
     if not row:
         raise SyncError("规则来源不存在")
+    if row["kind"] != "repo":
+        raise SyncError("这条规则来源不是仓库托管的，内容不由仓库决定")
     rel = row["repo_path"] if "repo_path" in row.keys() else ""
     if not rel:
         raise SyncError("这条规则来源没有绑定仓库文件")
@@ -154,7 +161,7 @@ def run_sync(conn, operator: str, automatic: bool = False) -> dict:
 
     定时任务只 pull 不 push（D7）；冲突时停在冲突态，不推。
     """
-    summary = {"pulled": False, "created": 0, "updated": 0,
+    summary = {"pulled": False, "created": 0, "updated": 0, "skipped": 0,
                "errors": [], "conflicts": [], "pushed": False}
     try:
         repo_manager.pull(conn)
@@ -168,6 +175,7 @@ def run_sync(conn, operator: str, automatic: bool = False) -> dict:
         result = sync_content(conn, operator)
         summary["created"] = result["created"]
         summary["updated"] = result["updated"]
+        summary["skipped"] = result["skipped"]
         summary["errors"].extend(result["errors"])
         cfg = repo_manager.get_settings(conn)
         if cfg["auto_push"] and repo_manager.dirty_files(conn):

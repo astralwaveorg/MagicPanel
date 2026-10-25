@@ -385,6 +385,7 @@ async function syncNow() {
     const parts = []
     if (r.created) parts.push(`新建来源 ${r.created}`)
     if (r.updated) parts.push(`更新内容 ${r.updated}`)
+    if (r.skipped) parts.push(`跳过 ${r.skipped}（面板里已改成远程或内联）`)
     if (r.errors?.length) parts.push(r.errors.join('；'))
     ElMessage[parts.some((p) => p.includes('失败')) ? 'warning' : 'success'](
       parts.length ? parts.join('，') : '没有变化'

@@ -161,3 +161,66 @@ def test_deps_refresh_repo_provider(client, origin_repo):
         f"/api/v1/rule-providers/{demo['id']}/content", headers=h).json()["content"]
     assert "+.example.com" in content
     assert "tampered" not in content
+
+
+def test_repo_source_switch_kind_frees_repo_file(client, origin_repo):
+    """来源改成内联后：仓库路径清空，仓库里的同名文件就能删了。
+
+    以前删除检查只看名字、不看来源类型，来源已经不用仓库了却还删不掉文件。
+    """
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    _configure(client, h, origin_repo)
+    assert client.post("/api/v1/deps/clone", headers=h).status_code == 200
+    assert client.post("/api/v1/deps/sync", headers=h).status_code == 200
+
+    demo = [p for p in client.get("/api/v1/rule-providers", headers=h).json()
+            if p["name"] == "demo"][0]
+    assert demo["kind"] == "repo"
+    assert demo["repo_path"] == "rule/demo.yaml"
+
+    # 仓库托管的来源挡着，文件删不掉
+    r = client.delete("/api/v1/deps/file?path=rule%2Fdemo.yaml", headers=h)
+    assert r.status_code == 409
+    assert "demo" in r.json()["detail"]
+
+    # 改成内联：仓库路径要跟着清掉
+    r = client.put(f"/api/v1/rule-providers/{demo['id']}", headers=h, json={
+        "name": "demo", "behavior": "domain", "format": "yaml", "kind": "inline",
+        "inline_content": "payload:\n  - +.example.com\n",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["repo_path"] == ""
+
+    # 仓库里的文件不再被占用，可以删
+    r = client.delete("/api/v1/deps/file?path=rule%2Fdemo.yaml", headers=h)
+    assert r.status_code == 200, r.text
+
+
+def test_sync_keeps_non_repo_source_content(client, origin_repo):
+    """同步只管仓库托管的来源：内联来源的内容不能被仓库文件覆盖。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    _configure(client, h, origin_repo)
+    assert client.post("/api/v1/deps/clone", headers=h).status_code == 200
+    assert client.post("/api/v1/deps/sync", headers=h).status_code == 200
+
+    demo = [p for p in client.get("/api/v1/rule-providers", headers=h).json()
+            if p["name"] == "demo"][0]
+    client.put(f"/api/v1/rule-providers/{demo['id']}", headers=h, json={
+        "name": "demo", "behavior": "domain", "format": "yaml", "kind": "inline",
+        "inline_content": "payload:\n  - +.mine.example\n",
+    })
+
+    r = client.post("/api/v1/deps/sync", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["skipped"] == 1
+
+    demo = [p for p in client.get("/api/v1/rule-providers", headers=h).json()
+            if p["name"] == "demo"][0]
+    assert demo["kind"] == "inline"
+    assert demo["repo_path"] == ""
+    content = client.get(
+        f"/api/v1/rule-providers/{demo['id']}/content", headers=h).json()["content"]
+    assert "+.mine.example" in content
+    assert "+.example.com" not in content

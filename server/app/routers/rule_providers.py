@@ -307,6 +307,12 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
             # 从 inline 切到 remote：清空旧快照与尝试时间，下一轮立即抓取
             content, count, sha, status, fetched = "", None, None, "never", None
             attempt = None
+        # 仓库路径只对 kind='repo' 有意义：换成远程或内联时一并清掉，
+        # 否则来源已经不用仓库了，仓库里的同名文件却还删不掉。
+        repo_path = body.repo_path.strip() if body.kind == "repo" else ""
+        if body.kind == "repo" and not repo_path:
+            # 界面上没改路径就沿用原来的
+            repo_path = old["repo_path"] if "repo_path" in old.keys() else ""
         conn.execute(
             "UPDATE rule_providers SET name=?, behavior=?, format=?, kind=?, url=?, "
             "inline_content=?, interval=?, client_interval=?, enabled=?, content=?, "
@@ -315,7 +321,7 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
             (body.name, body.behavior, body.format, body.kind, body.url,
              body.inline_content, body.interval, body.client_interval,
              int(body.enabled), content, count, sha, status, fetched, attempt,
-             proxy_enc, body.repo_path or old["repo_path"], db.now(), rp_id),
+             proxy_enc, repo_path, db.now(), rp_id),
         )
         security.audit(conn, user["username"], "更新规则来源", "rule_provider", rp_id,
                        {"name": body.name})

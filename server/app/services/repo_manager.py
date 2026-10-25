@@ -414,14 +414,22 @@ def _is_binary(path: Path) -> bool:
 
 
 def _rule_source_for(rel: str, conn) -> str:
-    """这个文件是否已被规则来源引用（仓库托管的 rule/*.yaml）。"""
+    """这个文件是否被规则来源占用（仓库托管的 rule/*.yaml）。
+
+    只有 kind='repo' 的来源才真正消费仓库文件：来源改成远程或内联后，
+    仓库里的同名文件就不再被占用，应当允许删除。
+    """
     if not rel.startswith("rule/"):
         return ""
     name = rel.rsplit("/", 1)[-1]
     if not name.endswith(".yaml"):
         return ""
     stem = name[:-len(".yaml")]
-    row = db.one(conn, "SELECT name FROM rule_providers WHERE name=?", (stem,))
+    row = db.one(
+        conn,
+        "SELECT name FROM rule_providers WHERE kind='repo' AND (repo_path=? OR name=?)",
+        (rel, stem),
+    )
     return row["name"] if row else ""
 
 

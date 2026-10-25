@@ -89,7 +89,7 @@
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column prop="name" label="名称" min-width="110" :fixed="isMobile ? false : 'left'" />
-          <el-table-column label="类型" width="90">
+          <el-table-column label="类型" width="100">
             <template #default="{ row }">{{ KIND_LABELS[row.kind] || row.kind }}</template>
           </el-table-column>
           <el-table-column prop="behavior" label="行为" width="90" />
@@ -184,10 +184,17 @@
           <el-radio-group v-model="form.kind">
             <el-radio value="remote">远程 URL</el-radio>
             <el-radio value="inline">内联内容</el-radio>
+            <el-radio value="repo">维护仓库</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="form.kind === 'remote'" label="URL">
           <el-input v-model="form.url" class="mono" placeholder="https://…/ruleset.yaml" />
+        </el-form-item>
+        <el-form-item v-else-if="form.kind === 'repo'" label="仓库路径">
+          <el-input v-model="form.repo_path" class="mono" placeholder="rule/集合名.yaml" />
+          <div class="mp-form-hint">
+            内容由「自主维护」仓库里的这个文件决定：在自主维护页改完并提交，同步后这里跟着更新。
+          </div>
         </el-form-item>
         <el-form-item v-else label="规则内容（yaml payload 或每行一条）">
           <el-input v-model="form.inline_content" type="textarea" :rows="8" class="mono"
@@ -219,6 +226,9 @@
             </el-form-item>
             <div v-if="form.kind === 'inline'" class="mp-form-hint">
               内联内容由本机维护：改完保存，构建时即刻生效，客户端按上面的间隔重新拉取。
+            </div>
+            <div v-else-if="form.kind === 'repo'" class="mp-form-hint">
+              仓库托管：内容由「自主维护」仓库里的文件决定，改完在那边提交并同步。
             </div>
           </el-col>
         </el-row>
@@ -314,7 +324,7 @@ import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管由自主维护同步而来）
-const KIND_LABELS = { remote: '远程', inline: '内联', repo: '仓库' }
+const KIND_LABELS = { remote: '远程', inline: '内联', repo: '维护仓库' }
 const INTERVAL_PRESETS = [  { label: '15 分钟', value: 900 },
   { label: '1 小时', value: 3600 },
   { label: '6 小时', value: 21600 },
@@ -401,7 +411,7 @@ function onPagerChange({ page: p, limit: l }) {
 
 const emptyForm = () => ({
   name: '', behavior: 'domain', format: 'yaml', kind: 'remote', client_interval: 0,
-  url: '', inline_content: '', interval: 86400, enabled: true,
+  url: '', inline_content: '', repo_path: '', interval: 86400, enabled: true,
   use_proxy: false, proxy_url: '', current_proxy: '',
 })
 const form = reactive(emptyForm())
@@ -475,7 +485,8 @@ async function openEdit(row) {
   Object.assign(form, emptyForm(), row ? {
     name: row.name, behavior: row.behavior, format: row.format, kind: row.kind,
     client_interval: row.client_interval,
-    url: row.url, inline_content: '', interval: row.interval, enabled: row.enabled,
+    url: row.url, inline_content: '', repo_path: row.repo_path || '',
+    interval: row.interval, enabled: row.enabled,
     use_proxy: !!row.use_proxy, proxy_url: '', current_proxy: row.proxy_url_masked || '',
   } : {})
   dialog.value = true
