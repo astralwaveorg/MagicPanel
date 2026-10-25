@@ -63,15 +63,15 @@
             <div class="pt-grid">
               <article v-for="d in g.devices" :key="d.name" class="pt-card">
                 <div class="pt-card-head">
-                  <span class="pt-card-name">{{ d.display_name || d.name }}</span>
+                  <span class="pt-card-name">{{ cardTitle(d) }}</span>
                   <span class="pt-tag" :data-env="d.env">
                     {{ d.env === 'production' ? '生产环境' : '测试环境' }}
                   </span>
                 </div>
                 <p class="pt-card-meta">
                   {{ platformLabel(d.platform) }} · {{ d.target_name }}
-                  <template v-if="d.display_name && d.display_name !== d.name">
-                    · 文件 {{ d.name }}.yaml
+                  <template v-if="hasOwnProfile(d)">
+                    · 设备：{{ d.display_name }}
                   </template>
                 </p>
                 <div class="pt-card-actions">
@@ -287,6 +287,14 @@ const hasAnyResult = computed(() =>
 
 function platformLabel(p) { return PLATFORM_LABELS[p] || p }
 function engineLabel(e) { return e === 'stash' ? 'Stash' : 'Mihomo' }
+// 设备卡片标题：有独立配置文件时用文件名（去掉 .yaml），没有就用设备名。
+// 文件名唯一，设备显示名可能重名；反过来设备名一眼可辨，所以两者分两行摆。
+function hasOwnProfile(d) {
+  return !!(d.display_name && d.display_name !== d.name)
+}
+function cardTitle(d) {
+  return hasOwnProfile(d) ? d.name : (d.display_name || d.name)
+}
 // 头部摘要：当前生效的生产 / 测试版本
 function releaseText(env) {
   const label = env === 'production' ? '生产版本' : '测试版本'
