@@ -153,44 +153,85 @@
           </div>
         </section>
 
-        <!-- 分流规则：默认折叠，搜索时自动展开匹配项 -->
+        <!-- 分流规则 -->
         <section v-if="rules.length || (!appliedQuery && ruleTotal)">
-          <h2 class="pt-sec-title">分流规则<small>个人维护，点击复制</small></h2>
-          <button
-            v-if="!appliedQuery && !rulesExpanded"
-            class="pt-rules-toggle"
-            @click="rulesExpanded = true"
-          >共 {{ ruleTotal }} 条，点击展开</button>
-          <ul v-else class="pt-rules">
-            <li v-for="(r, i) in rules" :key="i" @click="copyRule(r, i)">
-              <span class="pt-rule-line">{{ ruleLine(r) }}</span>
-              <span class="pt-rule-note">{{ copied === 'rule-' + i ? '已复制' : (r.note || '') }}</span>
-            </li>
-          </ul>
-          <button
-            v-if="!appliedQuery && rulesExpanded"
-            class="pt-rules-toggle"
-            @click="rulesExpanded = false"
-          >收起</button>
+          <div class="pt-sec-head">
+            <h2 class="pt-sec-title">分流规则<small>个人维护，点击复制</small></h2>
+          </div>
+          <p class="pt-prov-summary">{{ ruleSummary }}</p>
+          <div v-for="g in ruleGroups" :key="g.key" class="pt-prov-group">
+            <button class="pt-prov-group-head" @click="toggleGroup(g.key)">
+              <span class="pt-prov-group-name">{{ g.label }}</span>
+              <span class="pt-prov-group-meta">{{ g.count }} 条</span>
+              <span class="pt-prov-group-caret">{{ groupOpen(g.key) ? '▾' : '▸' }}</span>
+            </button>
+            <ul v-if="groupOpen(g.key)" class="pt-rules">
+              <li v-for="it in g.items" :key="it.i" @click="copyRule(it.r, it.i)">
+                <span class="pt-rule-line">{{ ruleLine(it.r) }}</span>
+                <span class="pt-rule-note">{{ copied === 'rule-' + it.i ? '已复制' : (it.r.note || '') }}</span>
+              </li>
+            </ul>
+          </div>
         </section>
 
         <!-- 规则来源 -->
         <section v-if="ruleProviders.length">
-          <h2 class="pt-sec-title">规则来源<small>已随配置下发</small></h2>
-          <div class="pt-providers">
-            <span v-for="p in ruleProviders" :key="p.name" class="pt-chip"
-                  :title="`${p.behavior} · ${p.kind === 'inline' ? '内联' : '远程'}`">
-              {{ p.name }}<i>{{ p.rule_count ?? 0 }} 条</i>
-            </span>
+          <div class="pt-sec-head">
+            <h2 class="pt-sec-title">规则来源<small>已随配置下发</small></h2>
+            <div class="pt-chips">
+              <button
+                v-for="d in PROVIDER_DIMENSIONS"
+                :key="d.key"
+                class="pt-chip pt-chip-toggle"
+                :class="{ active: providerDimension === d.key }"
+                :aria-pressed="providerDimension === d.key"
+                @click="providerDimension = d.key"
+              >{{ d.label }}</button>
+            </div>
+          </div>
+          <p class="pt-prov-summary">{{ providerSummary }}</p>
+          <div v-for="g in providerGroups" :key="g.key" class="pt-prov-group">
+            <button class="pt-prov-group-head" @click="toggleGroup(providerGroupKey(g))">
+              <span class="pt-prov-group-name">{{ g.label }}</span>
+              <span class="pt-prov-group-meta">{{ providerGroupMeta(g) }}</span>
+              <span class="pt-prov-group-caret">{{ groupOpen(providerGroupKey(g)) ? '▾' : '▸' }}</span>
+            </button>
+            <ul v-if="groupOpen(providerGroupKey(g))" class="pt-prov-list">
+              <li v-for="p in g.items" :key="p.name" class="pt-prov-row">
+                <div class="pt-prov-main">
+                  <span class="pt-prov-name">{{ p.name }}</span>
+                  <span v-if="p.desc" class="pt-prov-desc">{{ p.desc }}</span>
+                </div>
+                <span class="pt-prov-meta">{{ providerMeta(p) }}</span>
+                <span class="pt-prov-kind" :data-kind="p.kind">
+                  {{ p.kind === 'inline' ? '内联' : '远程' }}
+                </span>
+                <div class="pt-prov-actions">
+                  <button
+                    class="pt-mini"
+                    :disabled="!p.url"
+                    @click="copy(p.url, 'prov-' + p.name)"
+                  >{{ copied === 'prov-' + p.name ? '已复制' : '复制地址' }}</button>
+                  <button class="pt-mini" @click="openProvider(p)">预览</button>
+                </div>
+              </li>
+            </ul>
           </div>
         </section>
 
         <!-- 功能模块 -->
         <section v-if="snippetGroups.length">
-          <h2 class="pt-sec-title">功能模块<small>已随配置下发</small></h2>
-          <div class="pt-snippets">
-            <div v-for="g in snippetGroups" :key="g.category" class="pt-snippet-group">
-              <span class="pt-snippet-cat">{{ g.label }}</span>
+          <div class="pt-sec-head">
+            <h2 class="pt-sec-title">功能模块<small>已随配置下发</small></h2>
+          </div>
+          <p class="pt-prov-summary">{{ snippetSummary }}</p>
+          <div v-for="g in snippetGroups" :key="g.category" class="pt-prov-group">
+            <button class="pt-prov-group-head" @click="toggleGroup(snippetGroupKey(g))">
+              <span class="pt-prov-group-name">{{ g.label }}</span>
+              <span class="pt-prov-group-meta">{{ g.items.length }} 个</span>
+              <span class="pt-prov-group-caret">{{ groupOpen(snippetGroupKey(g)) ? '▾' : '▸' }}</span>
+            </button>
+            <div v-if="groupOpen(snippetGroupKey(g))" class="pt-snippet-group">
               <span v-for="s in g.items" :key="s.name" class="pt-chip" :title="s.note">
                 {{ s.name }}<i v-if="s.engine !== 'all'">{{ engineLabel(s.engine) }}</i>
               </span>
@@ -231,12 +272,47 @@
           <button class="pt-btn" @click="closeQr">关闭</button>
         </div>
       </div>
+
+      <!-- 规则来源详情 -->
+      <div v-if="providerDetail" class="pt-modal" @click.self="closeProvider">
+        <div class="pt-modal-card wide">
+          <p class="pt-modal-title">{{ providerDetail.name }}</p>
+          <p v-if="providerDetail.desc" class="pt-detail-desc">{{ providerDetail.desc }}</p>
+          <dl class="pt-detail-grid">
+            <div><dt>行为</dt><dd>{{ behaviorLabel(providerDetail.behavior) }}</dd></div>
+            <div><dt>格式</dt><dd>{{ formatLabel(providerDetail.format) }}</dd></div>
+            <div><dt>条目</dt><dd>{{ providerDetail.rule_count || '—' }}</dd></div>
+            <div><dt>大小</dt><dd>{{ sizeText(providerDetail.size) }}</dd></div>
+            <div><dt>抓取</dt><dd>{{ providerDetail.last_status || '—' }}</dd></div>
+            <div><dt>最近抓取</dt><dd>{{ timeText(providerDetail.last_fetched_at) }}</dd></div>
+            <div><dt>面板抓取间隔</dt><dd>{{ durationText(providerDetail.interval) }}</dd></div>
+            <div><dt>客户端间隔</dt><dd>{{ providerDetail.client_interval ? durationText(providerDetail.client_interval) : '跟随面板' }}</dd></div>
+          </dl>
+          <p
+            class="pt-detail-url"
+            :class="{ empty: !providerDetail.url }"
+            @click="providerDetail.url && copy(providerDetail.url, 'detail-url')"
+          >{{ providerDetail.url || '面板内联内容，没有上游地址' }}</p>
+          <pre class="pt-detail-preview">{{ providerDetail.preview || '二进制规则集，没有可读文本内容' }}</pre>
+          <p v-if="providerDetail.truncated" class="pt-detail-note">
+            仅显示前 120 行，共 {{ providerDetail.total_lines }} 行
+          </p>
+          <div class="pt-detail-actions">
+            <button
+              class="pt-btn"
+              :disabled="!providerDetail.url"
+              @click="copy(providerDetail.url, 'detail-url')"
+            >{{ copied === 'detail-url' ? '已复制' : '复制地址' }}</button>
+            <button class="pt-btn" @click="closeProvider">关闭</button>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { api } from '../api'
@@ -264,7 +340,6 @@ const qrUrl = ref('')
 const qrText = ref('')
 const qrDevice = ref('')
 const qrCache = new Map()
-const rulesExpanded = ref(false)
 let lockTimer = null
 
 const CATEGORY_LABELS = {
@@ -329,7 +404,149 @@ const rules = computed(() =>
 const ruleTotal = computed(() => data.value?.rules?.length || 0)
 
 const ruleProviders = computed(() =>
-  (data.value?.rule_providers || []).filter((p) => hit(p.name, p.behavior, p.kind)))
+  (data.value?.rule_providers || []).filter((p) =>
+    hit(p.name, p.behavior, p.kind, p.format, p.origin, p.desc)))
+
+// 首页的三个折叠区块（分流规则 / 规则来源 / 功能模块）共用一套展开状态：
+// 默认全折叠，只记展开的分组 key。
+const expanded = ref([])
+function groupOpen(key) { return expanded.value.includes(key) }
+function toggleGroup(key) {
+  const i = expanded.value.indexOf(key)
+  if (i >= 0) expanded.value.splice(i, 1)
+  else expanded.value.push(key)
+}
+
+// 分流规则按目标策略组分组：规则本来就是「什么流量走哪组」，
+// 同一个目标组的规则在产物里也是连续一块。
+const ruleGroups = computed(() => {
+  const map = new Map()
+  rules.value.forEach((r, i) => {
+    const key = r.target || '未指定目标'
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push({ r, i })
+  })
+  return [...map.entries()].map(([key, items]) => ({
+    key, label: key, count: items.length, items,
+  }))
+})
+
+const ruleSummary = computed(() => {
+  const list = rules.value
+  const targets = new Set(list.map((r) => r.target).filter(Boolean)).size
+  const fallback = list.filter((r) => ['MATCH', 'FINAL'].includes(r.type)).length
+  const tail = fallback ? ` · 含 ${fallback} 条兜底` : ''
+  return `${list.length} 条 · ${targets} 个目标${tail}`
+})
+
+// 规则来源分组：按行为（客户端语义）或按上游仓库（来源归属）都能看
+const PROVIDER_DIMENSIONS = [
+  { key: 'behavior', label: '按行为' },
+  { key: 'origin', label: '按来源' },
+]
+const BEHAVIOR_LABELS = { domain: '域名', ipcidr: 'IP 段', classical: '混合' }
+const FORMAT_LABELS = { yaml: 'YAML', mrs: 'MRS', text: 'Text' }
+const BEHAVIOR_ORDER = ['domain', 'ipcidr', 'classical']
+const providerDimension = ref('behavior')
+const providerDetail = ref(null)
+
+// 分组 key 带前缀，避免与其它区块撞名；换了分组维度也各记各的展开状态
+function providerGroupKey(g) { return `prov:${providerDimension.value}:${g.key}` }
+function snippetGroupKey(g) { return `snip:${g.category}` }
+
+const providerGroups = computed(() => {
+  const byBehavior = providerDimension.value === 'behavior'
+  const map = new Map()
+  for (const p of ruleProviders.value) {
+    const key = byBehavior ? p.behavior : (p.origin || '其他来源')
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(p)
+  }
+  const groups = [...map.entries()].map(([key, items]) => ({
+    key,
+    label: byBehavior ? (BEHAVIOR_LABELS[key] || key) : key,
+    items: items.slice().sort((a, b) => (b.rule_count || 0) - (a.rule_count || 0)),
+    count: items.length,
+    total: items.reduce((s, p) => s + (p.rule_count || 0), 0),
+    // 二进制集合（MRS）数不出条目数，组标题别显示成「0 条」
+    uncounted: items.filter((p) => !p.rule_count).length,
+  }))
+  if (byBehavior) {
+    groups.sort((a, b) => BEHAVIOR_ORDER.indexOf(a.key) - BEHAVIOR_ORDER.indexOf(b.key))
+  } else {
+    groups.sort((a, b) => b.count - a.count)
+  }
+  return groups
+})
+
+const providerSummary = computed(() => {
+  const list = ruleProviders.value
+  const remote = list.filter((p) => p.kind !== 'inline').length
+  const total = list.reduce((s, p) => s + (p.rule_count || 0), 0)
+  const uncounted = list.filter((p) => !p.rule_count).length
+  const kinds = BEHAVIOR_ORDER
+    .map((b) => `${BEHAVIOR_LABELS[b]} ${list.filter((p) => p.behavior === b).length}`)
+    .join(' · ')
+  const tail = uncounted ? `共 ${total} 条（另有 ${uncounted} 个二进制集合未统计）` : `共 ${total} 条`
+  return `${list.length} 个来源 · 远程 ${remote} · 内联 ${list.length - remote} · ${kinds} · ${tail}`
+})
+
+// 分组标题的条目数：整组都数不出来时别显示「0 条」
+function providerGroupMeta(g) {
+  if (g.total) return `${g.count} 个 · ${g.total} 条`
+  if (g.uncounted) return `${g.count} 个 · 条数未统计`
+  return `${g.count} 个`
+}
+
+function behaviorLabel(b) { return BEHAVIOR_LABELS[b] || b }
+function formatLabel(f) { return FORMAT_LABELS[f] || f }
+
+function providerMeta(p) {
+  const parts = [behaviorLabel(p.behavior), formatLabel(p.format)]
+  parts.push(p.rule_count ? `${p.rule_count} 条` : (p.format === 'mrs' ? '二进制' : '未统计'))
+  parts.push(p.client_interval ? `客户端 ${durationText(p.client_interval)}` : '客户端跟随面板')
+  return parts.join(' · ')
+}
+
+function durationText(sec) {
+  if (!sec) return '—'
+  if (sec % 86400 === 0) return `${sec / 86400} 天`
+  if (sec % 3600 === 0) return `${sec / 3600} 小时`
+  if (sec % 60 === 0) return `${sec / 60} 分钟`
+  return `${sec} 秒`
+}
+
+function sizeText(n) {
+  if (!n) return '—'
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${n} B`
+}
+
+// 后端给的是 ISO 时间，详情里只显示到分钟
+function timeText(v) {
+  if (!v) return '未抓取'
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  return m ? `${m[1]} ${m[2]}` : String(v)
+}
+
+// 原始内容不进首屏数据，点预览时再按需拉
+async function openProvider(p) {
+  providerDetail.value = { name: p.name, desc: p.desc, preview: '加载中…' }
+  try {
+    const resp = await fetch('/api/v1/portal/provider-detail', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: p.name, pin: pin.value }),
+    })
+    if (!resp.ok) throw new Error('拉取失败')
+    providerDetail.value = await resp.json()
+  } catch {
+    providerDetail.value = { name: p.name, desc: p.desc, preview: '拉取失败，请刷新页面重试' }
+  }
+}
+
+function closeProvider() { providerDetail.value = null }
 
 const snippetGroups = computed(() => {
   const groups = {}
@@ -340,6 +557,23 @@ const snippetGroups = computed(() => {
   return Object.entries(groups).map(([category, items]) => ({
     category, label: CATEGORY_LABELS[category] || category, items,
   }))
+})
+
+const snippetSummary = computed(() => {
+  const list = snippetGroups.value
+  const total = list.reduce((s, g) => s + g.items.length, 0)
+  return `${total} 个模块 · ${list.length} 类`
+})
+
+// 搜索时把命中的分组展开；清空搜索后回到默认折叠
+watch(appliedQuery, (q) => {
+  if (!q) { expanded.value = []; return }
+  const keys = [
+    ...ruleGroups.value.map((g) => g.key),
+    ...providerGroups.value.map((g) => providerGroupKey(g)),
+    ...snippetGroups.value.map((g) => snippetGroupKey(g)),
+  ]
+  for (const k of keys) if (!expanded.value.includes(k)) expanded.value.push(k)
 })
 
 const guides = computed(() => data.value?.guides || [])
@@ -802,20 +1036,6 @@ onMounted(async () => {
 .pt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 规则 */
-.pt-rules-toggle {
-  width: 100%;
-  padding: 11px 16px;
-  font-size: 13px;
-  text-align: left;
-  color: #8ba0f8;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.pt-rules-toggle:hover { border-color: rgba(108, 123, 255, 0.55); }
-.pt-rules-toggle + .pt-rules-toggle { margin-top: 8px; }
 .pt-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .pt-rules li {
   display: flex;
@@ -838,10 +1058,127 @@ onMounted(async () => {
 .pt-rule-note { color: #79809a; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 
 /* 功能模块 */
-.pt-snippets { display: flex; flex-direction: column; gap: 12px; }
 .pt-snippet-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.pt-snippet-cat { font-size: 13px; color: #8f96b0; width: 44px; flex-shrink: 0; }
-.pt-providers { display: flex; gap: 10px; flex-wrap: wrap; }
+/* 分组头下面挂列表时留一点间距 */
+.pt-prov-group .pt-rules,
+.pt-prov-group .pt-prov-list,
+.pt-prov-group .pt-snippet-group { margin-top: 8px; }
+
+/* 规则来源 */
+.pt-chip-toggle {
+  color: #aab1c8;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.pt-chip-toggle:hover { background: rgba(255, 255, 255, 0.14); }
+.pt-chip-toggle.active {
+  color: #fff;
+  background: #5468f0;
+  border-color: #5468f0;
+}
+.pt-prov-summary { color: #8f96b0; font-size: 12.5px; margin: 0 0 10px; }
+.pt-prov-group { margin-bottom: 10px; }
+.pt-prov-group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #c3c8dc;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+.pt-prov-group-head:hover { border-color: rgba(108, 123, 255, 0.55); }
+.pt-prov-group-name { font-size: 13px; font-weight: 600; }
+.pt-prov-group-meta { font-size: 12px; color: #79809a; }
+.pt-prov-group-caret { margin-left: auto; color: #8ba0f8; font-size: 11px; }
+.pt-prov-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pt-prov-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pt-prov-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pt-prov-name {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: #dfe3f0;
+}
+.pt-prov-desc {
+  font-size: 12px;
+  color: #8f96b0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pt-prov-meta { font-size: 12px; color: #79809a; white-space: nowrap; }
+.pt-prov-kind { font-size: 11px; padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
+.pt-prov-kind[data-kind='remote'] { background: rgba(34, 197, 183, 0.16); color: #5fd8c8; }
+.pt-prov-kind[data-kind='inline'] { background: rgba(250, 183, 82, 0.16); color: #f5c069; }
+.pt-prov-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.pt-mini {
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #dfe3f0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s;
+}
+.pt-mini:hover:not(:disabled) { border-color: rgba(108, 123, 255, 0.6); }
+.pt-mini:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 规则来源详情 */
+.pt-modal-card.wide { width: 760px; max-width: 100%; text-align: left; }
+.pt-detail-desc { color: #8f96b0; font-size: 13px; margin: 0 0 12px; }
+.pt-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 18px;
+  margin: 0 0 14px;
+}
+.pt-detail-grid > div { display: flex; gap: 8px; font-size: 12.5px; align-items: baseline; }
+.pt-detail-grid dt { color: #79809a; margin: 0; flex: none; }
+.pt-detail-grid dd { margin: 0; color: #dfe3f0; word-break: break-all; }
+.pt-detail-url {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: #7e93c9;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 12px;
+  word-break: break-all;
+  cursor: pointer;
+}
+.pt-detail-url.empty { color: #6d7490; cursor: default; }
+.pt-detail-preview {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #aab1c8;
+  background: rgba(0, 0, 0, 0.32);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.pt-detail-note { color: #6d7490; font-size: 11.5px; margin: 8px 0 0; }
+.pt-detail-actions { display: flex; gap: 10px; margin-top: 16px; }
+
 .pt-empty {
   color: #79809a; font-size: 13px;
   background: rgba(255, 255, 255, 0.05);
@@ -915,6 +1252,10 @@ onMounted(async () => {
   .pt-search-btn { padding: 0 16px; }
   .pt-grid { grid-template-columns: 1fr; }
   .pt-rules li { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .pt-prov-row { flex-wrap: wrap; }
+  .pt-prov-meta { white-space: normal; }
+  .pt-prov-actions { width: 100%; }
+  .pt-prov-actions .pt-mini { flex: 1; }
   .pt-main { padding: 0 14px 44px; }
   .pt-hero-inner { padding: 0 14px; }
 }

@@ -126,3 +126,48 @@ def test_portal_data_content(client):
     _anonymous(client)
     data = client.post("/api/v1/portal/data", json={"pin": "1357"}).json()
     assert data["devices"][0]["subscription_url"] == new_url
+
+
+def test_portal_provider_detail(client):
+    """规则来源：首屏只给元信息，原始内容按需拉取。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "demo", "behavior": "domain", "format": "yaml", "kind": "inline",
+        "inline_content": "# 说明: 演示集合\npayload:\n  - +.example.com\n"})
+    client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "remote-demo", "behavior": "ipcidr", "format": "yaml", "kind": "remote",
+        "url": "https://cdn.jsdelivr.net/gh/astralwaveorg/magic-sets@main/rule/demo.yaml"})
+    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "1357"})
+
+    _anonymous(client)
+    data = client.post("/api/v1/portal/data", json={"pin": "1357"}).json()
+    by_name = {p["name"]: p for p in data["rule_providers"]}
+    assert "demo" in by_name and "remote-demo" in by_name
+
+    demo = by_name["demo"]
+    assert demo["behavior"] == "domain" and demo["kind"] == "inline"
+    assert demo["desc"] == "演示集合"
+    # 首屏只有元信息，不带原始内容
+    assert "content" not in demo and "preview" not in demo
+    # 内联来源没有上游地址
+    assert demo["url"] == ""
+    remote = by_name["remote-demo"]
+    assert remote["origin"] == "astralwaveorg/magic-sets"
+    assert remote["url"].endswith("rule/demo.yaml")
+    assert remote["behavior"] == "ipcidr"
+
+    # 详情按需拉，带内容预览
+    r = client.post("/api/v1/portal/provider-detail", json={"name": "demo", "pin": "1357"})
+    assert r.status_code == 200, r.text
+    detail = r.json()
+    assert "payload:" in detail["preview"]
+    assert detail["truncated"] is False
+    assert detail["total_lines"] == 3
+
+    # 未登录又不带 PIN：拒绝；名字不存在：404
+    _anonymous(client)
+    assert client.post("/api/v1/portal/provider-detail",
+                       json={"name": "demo"}).status_code == 401
+    assert client.post("/api/v1/portal/provider-detail",
+                       json={"name": "nope", "pin": "1357"}).status_code == 404

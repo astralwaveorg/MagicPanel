@@ -12,7 +12,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
-from .. import db, security
+from .. import config, db, security
 from ..deps import CurrentUser
 from ..services import releases
 
@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/v1/portal", tags=["portal"])
 
 _MAX_FAILS = 5
 _LOCK_SECONDS = 600
+_PREVIEW_LINES = 120  # 详情预览最多给多少行
 _attempts: dict[str, list] = {}  # ip -> [失败次数, 锁定截止时间戳]
 
 # 客户端资源：官方或维护者确认的下载入口
@@ -150,6 +151,53 @@ def _check_pin(conn, request: Request, pin: str) -> None:
     _attempts.pop(ip, None)
 
 
+class ProviderDetailBody(BaseModel):
+    """按需拉取单个规则来源详情：名字加门户 PIN。"""
+    name: str
+    pin: str = Field(default="")
+
+
+def _provider_origin(url: str) -> str:
+    """从上游地址取仓库标识，用来按来源分组：owner/repo。"""
+    text = url or ""
+    m = re.search(r"github\.com/([^/]+)/([^/@?#]+)", text)
+    if not m:
+        m = re.search(r"/gh/([^/]+)/([^/@?#]+)", text)
+    return f"{m.group(1)}/{m.group(2)}" if m else ""
+
+
+def _provider_desc(content: str, fmt: str) -> str:
+    """集合文件头部的说明行：自维护集合写「# 说明: ...」，上游文件没有就留空。"""
+    if fmt in config.BINARY_FORMATS:
+        return ""
+    for line in (content or "").splitlines()[:20]:
+        m = re.match(r"^#\s*(?:说明|Description)\s*[:：]\s*(\S.*)$", line.strip())
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _provider_meta(r) -> dict:
+    """规则来源的元信息：不含原始内容，内容按需单独取。"""
+    content = r["content"] or ""
+    return {
+        "name": r["name"],
+        "behavior": r["behavior"],
+        "format": r["format"],
+        "kind": r["kind"],
+        "rule_count": r["rule_count"] or 0,
+        "url": r["url"] if r["kind"] == "remote" else "",
+        "interval": r["interval"],
+        "client_interval": r["client_interval"],
+        "last_status": r["last_status"],
+        "last_fetched_at": r["last_fetched_at"],
+        "size": len(content),
+        "sha256": (r["sha256"] or "")[:12],
+        "origin": _provider_origin(r["url"]),
+        "desc": _provider_desc(content, r["format"]),
+    }
+
+
 @router.get("/status")
 def portal_status():
     """门户是否可用：任一维护者设置了 PIN 即视为开启。"""
@@ -226,8 +274,7 @@ def portal_data(body: PinBody, request: Request):
         ]
         # 规则来源仅展示元信息，随配置下发，不展示原始内容
         rule_providers = [
-            {"name": r["name"], "behavior": r["behavior"], "kind": r["kind"],
-             "rule_count": r["rule_count"]}
+            _provider_meta(r)
             for r in db.all_(
                 conn,
                 "SELECT * FROM rule_providers WHERE enabled=1 ORDER BY id",
@@ -249,4 +296,38 @@ def portal_data(body: PinBody, request: Request):
         "rule_providers": rule_providers,
         "snippets": snippets,
         "release_state": release_state,
+    }
+
+
+@router.post("/provider-detail")
+def portal_provider_detail(body: ProviderDetailBody, request: Request):
+    """单个规则来源的详情与内容预览。
+
+    原始内容不进门户首屏数据，这里按需取：文本格式给前若干行，
+    二进制格式（MRS）没有可读内容，只给大小与指纹。
+    """
+    with db.connect() as conn:
+        user = _session_user(conn, request)
+        if not user:
+            if not body.pin:
+                raise HTTPException(401, "请输入 PIN 或登录维护者账号")
+            _check_pin(conn, request, body.pin)
+        row = db.one(
+            conn,
+            "SELECT * FROM rule_providers WHERE name=? AND enabled=1",
+            (body.name,),
+        )
+        if not row:
+            raise HTTPException(404, "规则来源不存在")
+        meta = _provider_meta(row)
+        content = row["content"] or ""
+    lines = content.splitlines()
+    preview = ""
+    if row["format"] not in config.BINARY_FORMATS:
+        preview = "\n".join(lines[:_PREVIEW_LINES])
+    return {
+        **meta,
+        "preview": preview,
+        "total_lines": len(lines),
+        "truncated": len(lines) > _PREVIEW_LINES,
     }
