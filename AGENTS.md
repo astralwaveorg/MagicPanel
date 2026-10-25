@@ -41,7 +41,7 @@
 
     **自维护层的集合一律用 `behavior: classical`**：条目量不大，但类型可以混着写，域名、IP 段、进程名放进同一个文件，一个规则就能表达一整类分流意图。`classical` 里没有 `domain` 行为那种「`+.` 是后缀、不带是精确」的简写，`+.example.com` 要写成 `DOMAIN-SUFFIX,example.com`，`example.com` 要写成 `DOMAIN,example.com`——写错会把精确匹配放宽成整个域。
 
-**集合文件名一律带 `magic-` 前缀**，表示是自维护的（`magic-chat` 而不是 `chat-ext` 这类后缀命名）。当前 11 个集合按目标组分文件：一个目标组一个文件，规则只写一条指向它：
+**集合文件名一律带 `magic-` 前缀**，表示是自维护的（`magic-chat` 而不是 `chat-ext` 这类后缀命名）。当前 13 个集合按目标组分文件：一个目标组一个文件，规则只写一条指向它：
 
 | 集合 | 目标组 | 内容 |
 | --- | --- | --- |
@@ -49,13 +49,15 @@
 | `magic-direct` | DIRECT | 自建服务域名与国内直连站点 |
 | `magic-process` | DIRECT | 本地传输、同步与远控类进程名 |
 | `magic-reject` | REJECT / 🛑 广告过滤 | 最小广告域名集 |
-| `magic-proxy` | 🚀 默认代理 | IP 查询服务域名 |
+| `magic-proxy` | 🚀 默认代理 | IP 查询、云服务、自建与金融站点域名 |
 | `magic-game` | 🎮 海外游戏 | Steam 下载 CDN（服务器在境外） |
 | `magic-us` | 🇺🇸美国 | 美国区域域名（`behavior: domain`，唯一例外） |
 | `magic-google` | 🔍 谷歌服务 | 谷歌服务补充域名 |
 | `magic-microsoft` | Ⓜ️ 微软服务 | 微软服务补充域名 |
 | `magic-chat` | 💬 即时通讯 | 小众聊天应用域名 |
 | `magic-social` | 👥 海外社交 | 小众社区平台域名 |
+| `magic-adult` | 🚀 默认代理 | 成人内容站点域名 |
+| `magic-dev` | 🚀 默认代理 | 开发者平台、工具与包源域名 |
 
 改集名的顺序：先在仓库里改文件名与文件头，再在面板上把规则来源改名（规则引用会自动跟着改），最后把引用它的规则值改成新名字。
 
@@ -64,7 +66,9 @@
     面板抓取后存进 `rule_providers.content`，产物里的 rule-providers URL 仍指向面板自己的 `/res/rule/<name>` feed 端点，客户端从面板拉、不直连 GitHub（**客户端协议不变**）。
 
     `script/` 与 `rewrite/` 片段默认停用：脚本会改写全部请求的 UA，重写依赖 HTTP 引擎与设备信任 CA，而拓展模块没有按设备生效的粒度。仓库托管实体的内容只读，改动只在自主维护页做；启用状态归面板。
-21. **规则顺序就是优先级**：客户端从上往下第一条命中即生效，所以顺序必须按「越具体越靠前、同一目标组聚成一块」排。当前 117 条规则（`sort` 0–116）分十一块：① 本地与保留地址直连（0–2）② 网络层直连（3–7，`private` / `private-ip` / `dns-direct` / `magic-process` / `direct-ports` → DIRECT）③ 广告（8–11，Stash 三平台用 `REJECT` 字面量、其余平台用「🛑 广告过滤」策略组）④ 设备专属直连（12–16，`magic-direct` → DIRECT；`magic-jp` → 🇯🇵日本；`connectivity-check` / `mirror-accelerate` / `lvsp-direct` → DIRECT）⑤ Steam 香港（17，`steam-cn`）⑥ **小而明确的直连集合**（18–28，`ai-cn` / `apple-cn` / `apple-push` / `apple-push-ip` / `PrivateTracker` / `microsoft-cn` / `games-cn` / `pt` / `trackers` / `AmazonCN` / `XiaoMi`）⑦ 服务分组（29–93，同一目标组连续成一块）⑧ 路由回家（94–95）⑨ 通用代理兜底（96–112，云服务商集合 `aws` / `azure` / `cloudflare` / `cloudflare-ip` / `digitalocean` / `vercel` / `netlify` 与 `proxy-bm7` / `proxy-domain` / `magic-proxy` 在「🚀 默认代理」块末尾）⑩ **大而泛的直连集合**（113–115，`cn-services` / `cn` / `cn-ip`）⑪ `MATCH`（116）。
+21. **规则顺序就是优先级**：客户端从上往下第一条命中即生效，所以顺序必须按「越具体越靠前、同一目标组聚成一块」排。
+
+    **自维护（`magic-` 前缀）的规则排在整张表最前面**，其余规则按下面的十一块排。**整张表的顺序由向阳自己在界面上排，Agent 不要整体重排**——新增规则时插到对应分组块里、或加到表头的 `magic-` 区，然后交给向阳微调。（2026-10-26：Agent 按十一块整体重排过一次，把向阳刚排好的顺序覆盖了，规则顺序因此以面板界面为准。）当前 120 条规则（`sort` 0–119）：**开头是自维护区**（0–13，14 条 `magic-` 规则），其后按十一块排——① 本地与保留地址直连（14–16）② 网络层直连（17–20，`private` / `private-ip` / `dns-direct` / `direct-ports` → DIRECT）③ 广告（21–22，Stash 三平台用 `REJECT` 字面量、其余平台用「🛑 广告过滤」策略组）④ 设备专属直连（23–25，`connectivity-check` / `mirror-accelerate` / `lvsp-direct` → DIRECT）⑤ Steam 香港（26，`steam-cn`）⑥ **小而明确的直连集合**（27–37，`ai-cn` / `apple-cn` / `apple-push` / `apple-push-ip` / `PrivateTracker` / `microsoft-cn` / `games-cn` / `pt` / `trackers` / `AmazonCN` / `XiaoMi`）⑦ 服务分组（38–96，同一目标组连续成一块）⑧ 路由回家（97–98）⑨ 通用代理兜底（99–115，云服务商集合 `aws` / `azure` / `cloudflare` / `cloudflare-ip` / `digitalocean` / `vercel` / `netlify` / `oracle` 与 `proxy-bm7` / `proxy-domain` 在「🚀 默认代理」块末尾；`biliintl` → 🎞️ 国际影音、`onedrive` → Ⓜ️ 微软服务也排在这一段）⑩ **大而泛的直连集合**（116–118，`cn-services` / `cn` / `cn-ip`）⑪ `MATCH`（119）。
 
     **大而泛的直连集合一律往后排**：`cn`（110k 条）、`cn-ip`（10k 条）、`cn-services` 排在强制代理与服务分组之后、`MATCH` 之前。理由是它们会把**所有**国内域名先拦去直连，任何一条更具体的规则都轮不到——2026-10-25 的 v2ex 故障就是这么来的：`cn-services` 里的 `+.v2ex.com` 抢先命中直连，而 `proxy-domain` 里写的是笔误 `+.v2ex.co`（`v2ex.co` 根本没有 A 记录），两条凑在一起让强制代理彻底失效。改成「先分流、未列出的兜底走代理」之后，漏配一条直连规则只会让线路不最优，不会让服务打不开。反过来，**小而明确的直连集合仍留在服务分组之前**，它们条目少、指向明确，抢先命中是对的。
 
@@ -80,7 +84,7 @@
 24. **规则与规则集改动后要按官方文档复核一遍。** 白名单以官方文档为准，不靠记忆：Stash <https://stash.wiki/rules/rule-types>、<https://stash.wiki/rules/rule-set>；Mihomo <https://wiki.metacubex.one/config/rules/>、<https://wiki.metacubex.one/config/rule-providers/>。要核对的项、已发现过的问题（`ipcidr` 行为漏加 `no-resolve`，现存的 `private-ip` / `telegram-ip` / `cn-ip` 都已带上）以及 Stash 独有能力（`no-track` / `pre-matching`）都写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则与规则集的规范核对」。**规则来源内部的一致性（内容有没有悬空引用、有没有规则引用它）暂时不查**——面板侧的校验向阳后面自己优化，验收时不必报告这两类问题。Stash 独有的 `no-track` / `pre-matching` **只写进 Stash 产物**（Mihomo 的规则参数只有 `no-resolve` 与 `src`；实测 Mihomo 遇到未知参数会忽略、不会加载失败，但产物里不写更清楚）；`pre-matching` 还要求目标是 `REJECT` 字面量、用策略组会直接加载失败，且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效，版本太旧的客户端可能加载失败。兜底规则（MATCH）不能加 `no-track`，否则客户端不记录任何连接。同一个规则集可以在互斥的引擎平台各挂一条（广告过滤就是这么分轨的：Stash iOS/tvOS/macOS 用 `REJECT` 字面量，其余平台用「🛑 广告过滤」策略组），「规则重复」判定只看适用范围有无交集。
 25. **服务分流要按「这个服务到底要什么」分派，不要一律丢进默认代理。** 三类需求对应三种落法：**地区锁服务**（Pixiv / DMM / Hulu / BBC，换 IP 就打不开）→ 指向对应地区组；**账号风控服务**（Discord / Slack / Amazon / 币圈，对出口 IP 的信誉与地区一致性有校验）→ 指向固定出口的 `select` 组（🛒 跨境电商 / 🪙 加密货币，本地节点排最前），别交给 `url-test` 自动切 IP；**上游大集合吃掉了本该更细路由的域名**（`media` 里的 BBC、`disney` 里的 Hulu）→ 拆出服务专属集合并排在宽泛合集之前。判断"这个集合值不值得加"必须与面板全部现有集合求交，看净增量与路由错位，算增量的三个坑（公共后缀回溯、behavior 不能嗅探、mrs 要换 yaml 等价物）写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「服务细分：按用途与地区分派」。
 26. **社交类分流按用途分两组：💬 即时通讯 与 👥 海外社交。** 前者是点对点聊天、群聊、通话、消息推送（Telegram / WhatsApp / Signal / Discord / LINE / Viber / KakaoTalk / Messenger / Snapchat / Element / Session / Threema / SimpleX / Wire / Zalo / Slack），后者是动态、发帖、图文流、关注、社区（Twitter / Instagram / Facebook / Reddit / Threads / Bluesky / Tumblr / Pinterest / LinkedIn / TruthSocial / VK / OK / Quora / Lemmy / Nextdoor / GETTR / Minds / MeWe / Gab / Mastodon）。**两个块在第 7 块内各自连续，通讯块必须排在社交块前面**——两块都含 LINE / Messenger / Discord 的域名，具体服务集合要排在宽泛的 `social-extra` / `social` 前面，否则走错组。geosite 的 `category-social-media-!cn`（`social`）已覆盖 Twitter / Facebook / Instagram / Threads / Tumblr / LinkedIn / TruthSocial / VK / Bluesky / Mastodon 的全部条目，**不要再为它们建单服务集合**（同约束 22 的重复清单）；只有净增量不为零的才建来源。小众服务（Threema / Session / SimpleX / Wire / Viber / Quora / Lemmy / Nextdoor / OK / GETTR / Minds / MeWe / Gab）走自维护层 `magic-chat` 与 `magic-social`，域名逐个核实过。
-27. **策略组的顺序是向阳精心配置过的基线，不得变更。** 下面这 33 个策略组的先后顺序（含 `sort` 值）是基线，括号内是 `sort`：
+27. **策略组的顺序是向阳精心配置过的基线，不得变更。** 下面这 32 个策略组的先后顺序（含 `sort` 值）是基线，括号内是 `sort`：
 
     ```
     🚀 默认代理(0) → 🛑 广告过滤(1) → 🔍 谷歌服务(2) → 🧠 人工智能(3) → 💻 开发工具(4)
@@ -89,13 +93,14 @@
     → 🇯🇵日本(15) → 🇺🇸美国(16) → 🇹🇼台湾(17) → 🇰🇷韩国(18) → 🇸🇬 新加坡(19) → 🇭🇰香港(20)
     → 🌍欧洲(21) → 🇯🇵 日本机房(22) → 🇺🇸 美国机房(23) → 🇯🇵 日本自动(24) → 🇺🇸 美国自动(25)
     → 🇹🇼 台湾自动(26) → 🇰🇷 韩国自动(27) → 🇭🇰 香港自动(28) → 🌍 欧洲自动(29)
-    → 🇸🇬 新加坡自动(30) → 🏠 路由回家(31) → 🏠 私有网络(32)
+    → 🇸🇬 新加坡自动(30) → 🏠 路由回家(31)
     ```
 
-    > 基线于 2026-10-26 核对：线上 33 个组，顺序与本段逐项一致。`🇸🇬 新加坡`（外层可见组，`sort=19`）
-    > 与内层隐藏组 `🇸🇬 新加坡自动`（`sort=30`）成对；末尾追加了 `🏠 私有网络`（`sort=32`，
-    > `select`，成员只有 `DIRECT`，承载 `private` / `private-ip` 两条规则）。
+    > 基线于 2026-10-26 核对：线上 32 个组，顺序与本段逐项一致。`🇸🇬 新加坡`（外层可见组，`sort=19`）
+    > 与内层隐藏组 `🇸🇬 新加坡自动`（`sort=30`）成对。
     > 上一版写的 `🇸🇬 新加坡(15)` 与线上不符，已按线上实际顺序改正。
+    > 曾短暂存在的 `🏠 私有网络` 组已删除——私有地址必然直连，单独一个组没有意义，
+    > `private` / `private-ip` 两条规则直接指向 `DIRECT`。
 
     **任何重构（菜单重排、页面合并、构建流程改动、数据层切换）都不得改动这个先后顺序**，包括不得重排 `sort` 值。新建组只能追加到指定位置；删除组时其余组的相对顺序不变。改动前先拉线上当前顺序核对，改动后逐项比对确认一致。**要改顺序必须向阳明确要求。**
 
