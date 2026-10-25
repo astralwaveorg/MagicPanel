@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2 class="mp-page-title">功能模块</h2>
+    <h2 class="mp-page-title">拓展模块</h2>
     <p class="mp-page-desc">
       用于补充脚本、复写、面板等 YAML 片段，构建时按引擎合并至目标配置。
       合并规则：字典递归合并、列表追加、标量覆盖；平台扩展最后生效，优先级最高。
@@ -23,7 +23,7 @@
 
     <EmptyState
       v-if="!rows.length"
-      reason="暂未添加任何功能模块。"
+      reason="暂未添加任何拓展模块。"
       next="点击“添加模块”即可配置，例如为 Stash 增加面板，或为 Mihomo 追加 DNS 配置。"
     />
     <div v-else class="mp-card">
@@ -242,7 +242,7 @@ async function save() {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除模块 “${row.name}”？下次构建不再包含该片段。`, '删除功能模块')) return
+    `删除模块 “${row.name}”？下次构建不再包含该片段。`, '删除拓展模块')) return
   try {
     await api(`/api/v1/snippets/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

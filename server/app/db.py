@@ -854,7 +854,7 @@ def _migrate_base_configs_scope(conn) -> None:
 
 
 def _migrate_base_configs(conn) -> None:
-    """按引擎写入默认产物配置（已存在的不覆盖）。"""
+    """按引擎写入默认基础配置（已存在的不覆盖）。"""
     from .services import base_config as base_config_service
 
     # 播种为空覆盖：内置默认才是起点，通用层默认不覆盖任何键

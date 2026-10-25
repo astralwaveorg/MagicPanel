@@ -1,4 +1,4 @@
-"""功能模块：脚本、复写、面板等按引擎归类的配置片段。
+"""拓展模块：脚本、复写、面板等按引擎归类的配置片段。
 
 内容为 YAML 映射片段，构建时按引擎合并进目标配置：
 字典递归合并、列表追加、标量覆盖，平台扩展（extra_yaml）最后应用。
@@ -40,11 +40,11 @@ def _check(body: SnippetBody) -> None:
         raise HTTPException(400, f"内容不是合法 YAML：{exc}")
     if not isinstance(fragment, dict) or not fragment:
         raise HTTPException(400, "内容必须是非空的 YAML 映射（键值结构）")
-    # 功能模块的列表是"追加"语义，写结构键会造出重名节点/组、
+    # 拓展模块的列表是"追加"语义，写结构键会造出重名节点/组、
     # 或把规则追加到兜底规则之后（永不生效）。
     for key, reason in PROTECTED_KEYS.items():
         if key in fragment:
-            raise HTTPException(400, f"功能模块不能包含“{key}”：{reason}")
+            raise HTTPException(400, f"拓展模块不能包含“{key}”：{reason}")
 
 
 def _public(row) -> dict:
@@ -57,14 +57,14 @@ def _public(row) -> dict:
 def _get(conn, sid: int):
     row = db.one(conn, "SELECT * FROM snippets WHERE id=?", (sid,))
     if not row:
-        raise HTTPException(404, "功能模块不存在")
+        raise HTTPException(404, "拓展模块不存在")
     return row
 
 
 @router.get("/page")
 def list_snippets_paged(limit: int = 50, offset: int = 0, keyword: str = "",
                         user=CurrentUser):
-    """功能模块分页列表。"""
+    """拓展模块分页列表。"""
     with db.connect() as conn:
         where, args = "", []
         if keyword:
@@ -87,7 +87,7 @@ def create_snippet(body: SnippetBody, user=CurrentUser):
     _check(body)
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM snippets WHERE name=?", (body.name,)):
-            raise HTTPException(409, "同名功能模块已存在")
+            raise HTTPException(409, "同名拓展模块已存在")
         now = db.now()
         cur = conn.execute(
             "INSERT INTO snippets(name, category, engine, content, enabled, sort, "
@@ -95,7 +95,7 @@ def create_snippet(body: SnippetBody, user=CurrentUser):
             (body.name, body.category, body.engine, body.content,
              int(body.enabled), body.sort, body.note, now, now),
         )
-        security.audit(conn, user["username"], "新增功能模块", "snippet",
+        security.audit(conn, user["username"], "新增拓展模块", "snippet",
                        cur.lastrowid, {"name": body.name, "category": body.category})
         row = _get(conn, cur.lastrowid)
     return _public(row)
@@ -110,14 +110,14 @@ def update_snippet(sid: int, body: SnippetBody, user=CurrentUser):
             conn, "SELECT id FROM snippets WHERE name=? AND id!=?", (body.name, sid)
         )
         if clash:
-            raise HTTPException(409, "同名功能模块已存在")
+            raise HTTPException(409, "同名拓展模块已存在")
         conn.execute(
             "UPDATE snippets SET name=?, category=?, engine=?, content=?, enabled=?, "
             "sort=?, note=?, updated_at=? WHERE id=?",
             (body.name, body.category, body.engine, body.content, int(body.enabled),
              body.sort, body.note, db.now(), sid),
         )
-        security.audit(conn, user["username"], "更新功能模块", "snippet", sid,
+        security.audit(conn, user["username"], "更新拓展模块", "snippet", sid,
                        {"name": body.name, "category": body.category})
         row = _get(conn, sid)
     return db.row_to_dict(row)
@@ -128,6 +128,6 @@ def delete_snippet(sid: int, user=CurrentUser):
     with db.tx() as conn:
         row = _get(conn, sid)
         conn.execute("DELETE FROM snippets WHERE id=?", (sid,))
-        security.audit(conn, user["username"], "删除功能模块", "snippet", sid,
+        security.audit(conn, user["username"], "删除拓展模块", "snippet", sid,
                        {"name": row["name"]})
     return {"ok": True}

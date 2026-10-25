@@ -143,7 +143,7 @@ def _switch(conn, build, env: Env, status: BuildStatus, action: str,
             operator: str, reason: str, record: bool = True) -> dict:
     """执行一次状态切换（调用方必须已开启写事务）。
 
-    record=False 时不写发布历史：两步流转（自动发布到生产）算一次操作，
+    record=False 时不写发布历史：两步流转（自动构建发布到生产）算一次操作，
     只留最终那一条历史，否则 10 条上限会被一轮操作吃掉两条。
     """
     now = db.now()

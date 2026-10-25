@@ -1,4 +1,4 @@
-"""产物配置：引擎默认配置 → 引擎平台配置 → 设备独立配置 的多级联动。
+"""基础配置：引擎默认配置 → 引擎平台配置 → 设备独立配置 的多级联动。
 
 层级语义（后者覆盖前者）：
 ① 引擎默认配置：引擎内置的能力基线，随程序发布，可直接改；
@@ -137,7 +137,7 @@ def _save_scope(conn, engine: str, platform: str, device_id: int,
         "updated_at=excluded.updated_at",
         (engine, key_platform, key_device, text, db.now()))
     label = f"{engine}:{platform or '通用'}:{device_id or 0}"
-    security.audit(conn, operator, "更新产物配置", "base_config", label,
+    security.audit(conn, operator, "更新基础配置", "base_config", label,
                    {"keys": sorted(normalized.keys())})
     return normalized
 
@@ -274,7 +274,7 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         docs = _all_docs(conn)
         _, _, updated_at = _load_scope(conn, engine, plat, dev_id)
         if body.updated_at and updated_at and body.updated_at != updated_at:
-            raise HTTPException(409, "产物配置已被其他维护者修改，请刷新后再保存")
+            raise HTTPException(409, "基础配置已被其他维护者修改，请刷新后再保存")
         try:
             effective = base_config_service.parse_content(body.content)
             base_config_service.validate_doc(effective, device_scope=bool(dev_id))
@@ -444,7 +444,7 @@ def apply(body: ApplyBody, user=CurrentUser):
                     user["username"])
     try:
         build_id, status = builds.create_build(
-            user["username"], note=body.note or "更新产物配置")
+            user["username"], note=body.note or "更新基础配置")
     except builds.BuildError as exc:
         raise HTTPException(400, str(exc))
     if status != "success":
@@ -455,7 +455,7 @@ def apply(body: ApplyBody, user=CurrentUser):
         with db.tx(immediate=True) as conn:
             build = builds._get_build(conn, build_id)
             result = releases.publish_build(
-                conn, build, user["username"], body.note or "更新产物配置",
+                conn, build, user["username"], body.note or "更新基础配置",
                 releases.Env(body.env))
     except releases.ReleaseError as exc:
         raise HTTPException(400, str(exc))

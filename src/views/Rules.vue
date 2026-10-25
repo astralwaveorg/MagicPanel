@@ -100,20 +100,7 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="no-resolve" width="100" align="center">
-            <template #default="{ row }">{{ row.no_resolve ? '是' : '—' }}</template>
-          </el-table-column>
-          <el-table-column label="Stash 修饰符" width="130" align="center">
-            <template #default="{ row }">
-              <span v-if="row.no_track || row.pre_matching">
-                <el-tag v-if="row.no_track" size="small" type="info"
-                        effect="plain">不记录</el-tag>
-                <el-tag v-if="row.pre_matching" size="small" type="warning"
-                        effect="plain">提前拒</el-tag>
-              </span>
-              <span v-else style="color:var(--mp-muted)">—</span>
-            </template>
-          </el-table-column>
+          <!-- no-resolve 与 Stash 修饰符是规则级细节，只在编辑弹窗与批量修改里出现 -->
           <el-table-column label="启用" width="80">
             <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
           </el-table-column>

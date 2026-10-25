@@ -62,7 +62,7 @@ def test_builtin_default_rejects_protected_keys(client):
                       json={"content": _yaml({"rules": ["MATCH,DIRECT"]})},
                       headers=hdr)
     assert resp.status_code == 400
-    assert "产物配置不能包含" in resp.text
+    assert "基础配置不能包含" in resp.text
 
 
 def test_builtin_scope_needs_engine(client):

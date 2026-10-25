@@ -23,7 +23,7 @@
     <EmptyState
       v-if="!targets.length"
       reason="还没有引擎平台，无法添加设备。"
-      next="先在“引擎平台”中添加（引擎 + 平台）。"
+      next="先在「基础配置 → 引擎平台」中添加（引擎 + 平台）。"
     />
     <EmptyState
       v-else-if="!rows.length"
@@ -116,7 +116,7 @@
         </el-form-item>
         <el-form-item label="设备独立配置">
           <div class="mp-form-hint">
-            端口、DNS、日志等个性化配置，请前往「产物配置 → 设备独立配置」修改。
+            端口、DNS、日志等个性化配置，请前往「基础配置 → 设备独立配置」修改。
             该页面可查看配置的逐层继承来源。
           </div>
         </el-form-item>

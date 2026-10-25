@@ -8,7 +8,7 @@
   3. 设备：所属引擎平台存在；「设备独立配置」的键与设备所在引擎平台一致；
   4. 基础配置各层：不含结构键（proxies / proxy-groups / rules 等）；
      不保留与上层完全相同的键（重复覆盖 = 数据冗余）；
-  5. 功能模块：内容是非空 YAML 映射、不含结构键、引擎范围合法；
+  5. 拓展模块：内容是非空 YAML 映射、不含结构键、引擎范围合法；
      已启用的模块若与引擎默认配置完全重复，给出提示（可关掉）；
   6. 命名：策略组 / 规则 / 引擎平台 / 设备的命名风格一致、无空白字符。
 
@@ -323,28 +323,28 @@ def main() -> int:
                 or json.loads(g["local_nodes"] or "[]")):
             problems.append(f"策略组「{g['name']}」没有任何成员")
 
-    # ---- 5. 功能模块 ----
+    # ---- 5. 拓展模块 ----
     for s in rows("SELECT id, name, engine, enabled, content FROM snippets"):
         try:
             content = yaml.safe_load(s["content"] or "")
         except Exception as exc:
-            problems.append(f"功能模块「{s['name']}」内容不是合法 YAML：{exc}")
+            problems.append(f"拓展模块「{s['name']}」内容不是合法 YAML：{exc}")
             continue
         if not isinstance(content, dict) or not content:
-            problems.append(f"功能模块「{s['name']}」内容必须是非空 YAML 映射")
+            problems.append(f"拓展模块「{s['name']}」内容必须是非空 YAML 映射")
             continue
         for k in STRUCT_KEYS:
             if k in content:
-                problems.append(f"功能模块「{s['name']}」含结构键 {k}")
+                problems.append(f"拓展模块「{s['name']}」含结构键 {k}")
         if s["engine"] not in ("all", "stash", "mihomo"):
-            problems.append(f"功能模块「{s['name']}」的引擎范围「{s['engine']}」非法")
+            problems.append(f"拓展模块「{s['name']}」的引擎范围「{s['engine']}」非法")
         if s["enabled"]:
             for engine in (("stash", "mihomo") if s["engine"] == "all" else (s["engine"],)):
                 default = bc.default_doc(engine)
                 if all(key in default and default[key] == value
                        for key, value in content.items()):
                     notes.append(
-                        f"功能模块「{s['name']}」与 {engine} 引擎默认配置完全重复，"
+                        f"拓展模块「{s['name']}」与 {engine} 引擎默认配置完全重复，"
                         "可以关掉（引擎默认配置已包含）")
 
     if notes:

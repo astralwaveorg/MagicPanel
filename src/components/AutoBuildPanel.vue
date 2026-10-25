@@ -1,10 +1,9 @@
 <template>
   <div>
-    <h2 class="mp-page-title">自动发布</h2>
     <ul class="mp-page-desc mp-desc-list">
       <li>服务端按各来源的间隔自动抓取上游、按测速间隔自动测速</li>
       <li>策略变化时按设定间隔创建构建并发布</li>
-      <li>“立即手动发布”会忽略到期时间，强制执行一轮抓取、测速和构建检查</li>
+      <li>页面标题行的「立即发布」会忽略到期时间，强制执行一轮抓取、测速和构建检查</li>
     </ul>
 
     <div class="mp-card">
@@ -15,7 +14,7 @@
           <span class="mp-toolbar-hint">上次运行：{{ fmtTime(status.last_tick_at) }}</span>
           <span v-if="!status.autostart" class="mp-toolbar-hint">后台循环未启动</span>
         </div>
-        <el-button :loading="triggering" @click="runNow" type="primary">立即手动发布</el-button>
+        <el-button :loading="triggering" @click="runAutoNow" type="primary">立即发布</el-button>
       </div>
       <div class="mp-auto-status">
         <div>
@@ -73,7 +72,7 @@
               <el-input-number v-model="form.auto_build_interval_hours"
                                :min="1" :max="168" :step="1" style="width:180px" />
             </el-form-item>
-            <el-form-item label="校验通过后自动发布">
+            <el-form-item label="校验通过后自动构建发布">
               <el-switch v-model="form.auto_publish_enabled" />
             </el-form-item>
             <el-form-item label="发布环境">
@@ -92,7 +91,7 @@
     </el-row>
 
     <div class="mp-card" style="display:flex;justify-content:flex-end">
-      <el-button :loading="saving" @click="save" type="primary">保存自动任务设置</el-button>
+      <el-button :loading="saving" @click="saveAutoSettings" type="primary">保存自动任务设置</el-button>
     </div>
 
     <div class="mp-card">
@@ -122,8 +121,8 @@
     </div>
 
     <div class="mp-card">
-      <h3>最近自动发布（最新 20 次）</h3>
-      <EmptyState v-if="!releases.length" reason="还没有自动发布记录。" />
+      <h3>最近自动构建发布（最新 20 次）</h3>
+      <EmptyState v-if="!releases.length" reason="还没有自动构建发布记录。" />
       <div v-else class="mp-table-wrap">
         <el-table :data="releases" size="small">
           <el-table-column label="时间" width="140">
@@ -153,165 +152,20 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+// 「自动构建发布」面板：只管配置与记录，执行类动作在页面标题行。
+// 状态与动作来自共享模块，与标题行的「立即发布」按钮同源。
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { api } from '../api'
-import StatusDot from '../components/StatusDot.vue'
-import EmptyState from '../components/EmptyState.vue'
-import { fmtTime, ENV_LABELS, RELEASE_ACTION_LABELS } from '../format'
+import StatusDot from './StatusDot.vue'
+import EmptyState from './EmptyState.vue'
+import { fmtTime } from '../format'
+import {
+  status, releases, runs, saving, triggering, form, lastResultText,
+  loadAutoPublish, saveAutoSettings, runAutoNow, releaseActionText, resultText,
+} from '../useAutoPublish'
 
 const router = useRouter()
-const status = ref({ running: false, autostart: true, last_tick_at: '', last_result: null, last_error: '' })
-const releases = ref([])
-const runs = ref([])
-const saving = ref(false)
-const triggering = ref(false)
-const form = reactive({
-  scheduler_enabled: true,
-  auto_fetch_sources: true,
-  auto_test_sources: true,
-  auto_fetch_rules: true,
-  auto_build_enabled: true,
-  auto_build_interval_hours: 12,
-  auto_publish_enabled: true,
-  auto_publish_env: 'production',
-})
-
-// 发布历史动作：发布/回滚带上环境，下线只写动作
-function releaseActionText(row) {
-  const action = RELEASE_ACTION_LABELS[row.action] || row.action
-  if (row.action === 'offline') return action
-  return `${action}到${ENV_LABELS[row.env] || row.env}`
-}
-
-function resultText(r) {
-  if (!r) return '暂无运行记录'
-  const parts = []
-  if (r.sources_fetched || r.sources_failed) {
-    parts.push(`节点抓取 ${r.sources_fetched} 成功 / ${r.sources_failed} 失败`)
-  }
-  if (r.rules_fetched || r.rules_failed) {
-    parts.push(`规则抓取 ${r.rules_fetched} 成功 / ${r.rules_failed} 失败`)
-  }
-  if (r.tests_run || r.tests_errors) {
-    parts.push(`测速 ${r.tests_ok} 可用 / ${r.tests_failed} 失败`)
-  }
-  if (r.test_skipped) parts.push(r.test_skipped)
-  if (r.build) {
-    parts.push(typeof r.build === 'string'
-      ? `构建：${r.build}`
-      : `构建 #${r.build.id}（${r.build.status === 'success' ? '通过' : '失败'}）`)
-  }
-  if (r.published) parts.push(`已发布到${ENV_LABELS[r.published] || r.published}`)
-  if (r.build_error) parts.push(`构建错误：${r.build_error}`)
-  if (r.errors?.length) parts.push(`${r.errors.length} 个抓取/测速错误`)
-  if (r.skipped) parts.push(r.skipped)
-  if (!parts.length) {
-    return r.trigger === 'manual' ? '强制执行完成，没有可处理的项目' : '本轮没有到期任务'
-  }
-  return parts.join('；')
-}
-
-const lastResultText = computed(() => resultText(status.value.last_result))
-
-function applySettings(s) {
-  form.scheduler_enabled = s.scheduler_enabled === '1'
-  form.auto_fetch_sources = s.auto_fetch_sources === '1'
-  form.auto_test_sources = s.auto_test_sources === '1'
-  form.auto_fetch_rules = s.auto_fetch_rules === '1'
-  form.auto_build_enabled = s.auto_build_enabled === '1'
-  form.auto_build_interval_hours = Number(s.auto_build_interval_hours) || 12
-  form.auto_publish_enabled = s.auto_publish_enabled === '1'
-  form.auto_publish_env = s.auto_publish_env === 'testing' ? 'testing' : 'production'
-}
-
-async function load() {
-  try {
-    const [s, st, rel, runList] = await Promise.all([
-      api('/api/v1/settings'), api('/api/v1/automation/status'),
-      api('/api/v1/releases?auto_only=true'), api('/api/v1/automation/runs?limit=20'),
-    ])
-    applySettings(s)
-    status.value = st
-    releases.value = rel
-    runs.value = runList
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
-}
-onMounted(load)
-
-async function refreshStatus() {
-  try {
-    const [st, rel, runList] = await Promise.all([
-      api('/api/v1/automation/status'),
-      api('/api/v1/releases?auto_only=true'),
-      api('/api/v1/automation/runs?limit=20'),
-    ])
-    status.value = st
-    releases.value = rel
-    runs.value = runList
-  } catch { /* 状态刷新失败不打扰 */ }
-}
-
-async function save() {
-  saving.value = true
-  try {
-    await api('/api/v1/settings', { method: 'PUT', body: { values: {
-      scheduler_enabled: form.scheduler_enabled ? '1' : '0',
-      auto_fetch_sources: form.auto_fetch_sources ? '1' : '0',
-      auto_test_sources: form.auto_test_sources ? '1' : '0',
-      auto_fetch_rules: form.auto_fetch_rules ? '1' : '0',
-      auto_build_enabled: form.auto_build_enabled ? '1' : '0',
-      auto_build_interval_hours: String(form.auto_build_interval_hours),
-      auto_publish_enabled: form.auto_publish_enabled ? '1' : '0',
-      auto_publish_env: form.auto_publish_env,
-    } } })
-    ElMessage.success('自动任务设置已保存')
-    await refreshStatus()
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    saving.value = false
-  }
-}
-
-async function runNow() {
-  if (triggering.value) return
-  triggering.value = true
-  const beforeTick = status.value.last_tick_at
-  try {
-    await api('/api/v1/automation/run', { method: 'POST' })
-    ElMessage.success('已开始强制执行，正在等待运行结果…')
-    let seenRunning = false
-    let finished = false
-    // 抓取 + 测速 + 核心校验可能要几分钟，最多等 10 分钟；
-    // 期间页面显示"运行中"，不再让用户对着一根转圈猜。
-    const started = Date.now()
-    while (Date.now() - started < 10 * 60 * 1000) {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      await refreshStatus()
-      if (status.value.running) seenRunning = true
-      if (!status.value.running && status.value.last_tick_at
-          && status.value.last_tick_at !== beforeTick) {
-        finished = true
-        break
-      }
-      if (!status.value.running && !seenRunning) break
-    }
-    if (finished) {
-      ElMessage.success('自动任务执行完成')
-      await load()
-    } else {
-      ElMessage.warning('未获取到本轮结果，请稍后刷新查看运行记录')
-    }
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    triggering.value = false
-  }
-}
+onMounted(loadAutoPublish)
 </script>
 
 <style scoped>

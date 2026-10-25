@@ -81,8 +81,8 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Menu, Moon, Odometer, Connection, Collection, SetUp, Filter, Monitor,
-  Iphone, Promotion, Document, Sunny, Tools, MagicStick, Timer, Operation,
+  Menu, Moon, Odometer, Connection, Collection, SetUp, Filter,
+  Iphone, Promotion, Document, Sunny, Tools, MagicStick, Operation, FolderOpened,
 } from '@element-plus/icons-vue'
 import { confirmBox } from './confirm'
 import { api } from './api'
@@ -102,22 +102,22 @@ function onToggleTheme() {
 const isAuthPage = computed(() =>
   route.meta.standalone || ['/admin/login', '/admin/setup'].includes(route.path))
 
-// 侧边栏按依赖顺序排列：上游内容 → 引用它们 → 产物形态 → 配置 → 设备 → 构建发布 → 运维。
-// 高频页面同时尽量靠上，日常改策略的路径最短。
+// 侧边栏按依赖顺序排列：先看当前生效的配置（策略组、来源、规则），
+// 再看产物形态与设备，最后是构建发布与运维。高频页面同时尽量靠上，
+// 日常改策略的路径最短。
 const menu = [
   { path: '/admin', title: '系统状态', icon: Odometer },
+  { path: '/admin/groups', title: '策 略 组', icon: SetUp },
   { path: '/admin/sources', title: '节点来源', icon: Connection },
   { path: '/admin/rule-providers', title: '规则来源', icon: Collection },
-  { path: '/admin/groups', title: '策 略 组', icon: SetUp },
+  { path: '/admin/artifact', title: '基础配置', icon: Operation },
   { path: '/admin/rules', title: '分流规则', icon: Filter },
-  { path: '/admin/targets', title: '引擎平台', icon: Monitor },
-  { path: '/admin/artifact', title: '产物配置', icon: Operation },
-  { path: '/admin/snippets', title: '功能模块', icon: MagicStick },
   { path: '/admin/devices', title: '设备管理', icon: Iphone },
+  { path: '/admin/snippets', title: '拓展模块', icon: MagicStick },
   { path: '/admin/builds', title: '构建发布', icon: Promotion },
-  { path: '/admin/automation', title: '自动发布', icon: Timer },
+  { path: '/admin/dependencies', title: '自主维护', icon: FolderOpened },
   { path: '/admin/audit', title: '审计日志', icon: Document },
-  { path: '/admin/settings', title: '设置', icon: Tools },
+  { path: '/admin/settings', title: '系统设置', icon: Tools },
 ]
 
 async function onLogout() {

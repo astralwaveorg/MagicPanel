@@ -1,4 +1,4 @@
-"""功能模块：CRUD 校验与构建合并。"""
+"""拓展模块：CRUD 校验与构建合并。"""
 import yaml
 from conftest import auth_headers, setup_admin
 from test_api import make_policy

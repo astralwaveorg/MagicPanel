@@ -219,10 +219,10 @@
           </div>
         </section>
 
-        <!-- 功能模块 -->
+        <!-- 拓展模块 -->
         <section v-if="snippetGroups.length">
           <div class="pt-sec-head">
-            <h2 class="pt-sec-title">功能模块<small>已随配置下发</small></h2>
+            <h2 class="pt-sec-title">拓展模块<small>已随配置下发</small></h2>
           </div>
           <p class="pt-prov-summary">{{ snippetSummary }}</p>
           <div v-for="g in snippetGroups" :key="g.category" class="pt-prov-group">
@@ -407,7 +407,7 @@ const ruleProviders = computed(() =>
   (data.value?.rule_providers || []).filter((p) =>
     hit(p.name, p.behavior, p.kind, p.format, p.origin, p.desc)))
 
-// 首页的三个折叠区块（分流规则 / 规则来源 / 功能模块）共用一套展开状态：
+// 首页的三个折叠区块（分流规则 / 规则来源 / 拓展模块）共用一套展开状态：
 // 默认全折叠，只记展开的分组 key。
 const expanded = ref([])
 function groupOpen(key) { return expanded.value.includes(key) }
@@ -1057,7 +1057,7 @@ onMounted(async () => {
 }
 .pt-rule-note { color: #79809a; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 
-/* 功能模块 */
+/* 拓展模块 */
 .pt-snippet-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* 分组头下面挂列表时留一点间距 */
 .pt-prov-group .pt-rules,

@@ -1,4 +1,4 @@
-"""自动发布的闸门：Mihomo 目标必须真的做过核心校验（mihomo -t）。
+"""自动构建发布的闸门：Mihomo 目标必须真的做过核心校验（mihomo -t）。
 
 回归背景：设备专属产物的构建结果里没有写 core_checked 字段，
 闸门用 item.get("core_checked") 判断时取到 None（falsy），
@@ -42,7 +42,7 @@ def test_unchecked_core_targets_empty_results():
 def test_device_artifact_records_core_checked(client, monkeypatch):
     """设备专属产物的构建结果必须写 core_checked（与平台产物一致）。
 
-    少了这个字段，自动发布的闸门会把「核心校验通过」的设备产物
+    少了这个字段，自动构建发布的闸门会把「核心校验通过」的设备产物
     当成没校验，于是自动构建一直发不出去。
     """
     from app.services import tester
@@ -73,7 +73,7 @@ def test_device_artifact_records_core_checked(client, monkeypatch):
     assert dev["name"] in build["results"], build["results"].keys()
     assert build["results"][dev["name"]]["core_checked"] is True
     assert "核心校验" in build["results"][dev["name"]]["verification"]
-    # 这种产物不该被自动发布的闸门拦下
+    # 这种产物不该被自动构建发布的闸门拦下
     assert scheduler._unchecked_core_targets(build["results"]) == []
 
 

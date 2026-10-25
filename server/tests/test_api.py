@@ -704,6 +704,55 @@ def test_rule_provider_batch_interval_delete_and_references(client):
     assert client.get(f"/api/v1/rules/{rule['id']}", headers=h).status_code == 404
 
 
+def test_publish_both_one_shot(client):
+    """一键发布：已构建 → 生产中，一步到位。
+
+    与"先发布至测试、再发布至生产"两步的区别只有交互次数，
+    底层是同一个事务：先置测试再置生产，发布历史只记一条。
+    """
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+
+    build = client.post("/api/v1/builds", headers=h, json={"note": "一键"}).json()
+    assert build["verify_status"] == "success"
+    assert build["status"] == "BUILT"
+
+    r = client.post(f"/api/v1/builds/{build['id']}/publish-both", headers=h,
+                    json={"reason": "一键上线"})
+    assert r.status_code == 200, r.text
+
+    state = client.get("/api/v1/release-state").json()
+    assert state["production"]["id"] == build["id"]
+    assert state["production"]["status"] == "PRODUCTION"
+    # 构建状态是生产中，测试通道自然空置（与自动构建发布同一套语义）
+    assert state["testing"] is None
+
+    # 发布历史只记一条：先置测试那一步不写历史
+    releases = client.get("/api/v1/releases").json()
+    assert len(releases) == 1
+    assert releases[0]["build_id"] == build["id"]
+    assert releases[0]["env"] == "production"
+    assert releases[0]["action"] == "publish"
+    assert releases[0]["reason"] == "一键上线"
+
+    # 已经是当前生产版本，再点会被状态机拒绝
+    r = client.post(f"/api/v1/builds/{build['id']}/publish-both", headers=h,
+                    json={"reason": ""})
+    assert r.status_code == 400
+    assert "已是当前生产版本" in r.json()["detail"]
+
+    # 已下线的构建也能一键发布（回滚场景）
+    client.post(f"/api/v1/builds/{build['id']}/offline", headers=h, json={"reason": ""})
+    again = client.post("/api/v1/builds", headers=h, json={"note": "再一版"}).json()
+    publish_to_prod(client, h, again["id"])
+    client.post(f"/api/v1/builds/{again['id']}/offline", headers=h, json={"reason": ""})
+    r = client.post(f"/api/v1/builds/{build['id']}/publish-both", headers=h,
+                    json={"reason": "回滚上线"})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v1/release-state").json()["production"]["id"] == build["id"]
+
+
 def test_build_delete_and_release_state_reference(client):
     """构建删除：只有从未发布过的构建可物理删除，其余状态只能归档。
 
@@ -813,7 +862,7 @@ def test_release_history_retention(client):
     # 动作是 publish / rollback / offline，不再是 promote
     assert {r["action"] for r in releases} == {"publish"}
     assert {r["env"] for r in releases} == {"testing", "production"}
-    # 手动发布不进入“自动发布”页
+    # 手动发布不进入“自动构建发布”页
     assert client.get("/api/v1/releases?auto_only=true").json() == []
     from app import db
     with db.connect() as conn:
@@ -865,7 +914,7 @@ def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
     monkeypatch.setattr(updater, "test_source", fake_test)
     monkeypatch.setattr(scheduler, "_core_available", lambda: True)
     # 模拟核心校验通过：没有核心时 Mihomo 目标只能静态校验，
-    # 自动发布到生产环境会被拦下。
+    # 自动构建发布到生产环境会被拦下。
     from app.services import tester
     monkeypatch.setattr(tester, "validate_config", lambda text, *a, **k: (True, ""))
 
@@ -884,7 +933,7 @@ def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
     assert state["production"]["status"] == "PRODUCTION"
     assert state["production"]["published_by"] == "系统"
     assert state["production"]["publish_reason"] == "自动构建发布"
-    # 自动发布到生产时是"先置测试、再置生产"两步同事务，
+    # 自动构建发布到生产时是"先置测试、再置生产"两步同事务，
     # 因此发布完成后测试环境空置，直到下一次发布。
     assert state["testing"] is None
     releases = client.get("/api/v1/releases").json()
@@ -893,7 +942,7 @@ def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
     assert releases[0]["action"] == "publish"
     assert releases[0]["env"] == "production"
     auto_releases = client.get("/api/v1/releases?auto_only=true").json()
-    # 自动发布是"同一事务内先置测试再置生产"的一步操作，发布历史只记一条
+    # 自动构建发布是"同一事务内先置测试再置生产"的一步操作，发布历史只记一条
     assert len(auto_releases) == 1
     assert auto_releases[0]["env"] == "production"
     assert all(r["build_id"] == summary["build"]["id"] for r in auto_releases)
@@ -1006,13 +1055,13 @@ def test_auto_publish_waits_for_filtered_speed_test(client, monkeypatch):
     summary = scheduler.run_once(force=True)
     assert summary["build"]["status"] == "success"
     assert summary["published"] == "production"
-    # 自动发布到生产是"同一事务内先置测试再置生产"的一步操作，
+    # 自动构建发布到生产是"同一事务内先置测试再置生产"的一步操作，
     # 发布历史只记最终那一条（否则 10 条上限一轮就吃掉两条）
     history = client.get("/api/v1/releases").json()
     assert len(history) == 1
     assert history[0]["env"] == "production"
     assert history[0]["action"] == "publish"
-    # 自动发布后该构建就是生产版本
+    # 自动构建发布后该构建就是生产版本
     state = client.get("/api/v1/release-state").json()
     assert state["production"]["id"] == summary["build"]["id"]
 
@@ -2626,7 +2675,7 @@ def test_device_reorder_and_batch(client):
 
 
 def test_base_config_scopes_follow_target_and_device_order(client):
-    """产物配置页的作用域顺序跟着引擎平台页、设备管理页走，名称也一致。"""
+    """基础配置页的作用域顺序跟着引擎平台页、设备管理页走，名称也一致。"""
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     t1 = client.post("/api/v1/targets", headers=h, json={

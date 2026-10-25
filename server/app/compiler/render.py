@@ -6,9 +6,9 @@
 因此构建产物与 builds 快照都包含本地节点凭据，不能公开分发。
 
 差异化维度（自下而上叠加）：
-① 产物配置：引擎默认配置 → 引擎平台配置 → 设备独立配置
+① 基础配置：引擎默认配置 → 引擎平台配置 → 设备独立配置
 ② 结构内容：策略组与分流规则按「适用目标」过滤，并按平台能力剔除必然无效的规则
-③ 功能模块：按引擎过滤
+③ 拓展模块：按引擎过滤
 ④ 平台扩展：引擎平台 extra_yaml
 （⑤ 设备级覆盖在分发层叠加，见 routers/feed.py）
 """
@@ -337,7 +337,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     传入设备 = 渲染这台设备自己的产物（含只属于它的策略组与规则）。
     """
     engine = target["engine"]
-    # ① 产物配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
+    # ① 基础配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
     #
     # 复用界面那套 scope_layers()：引擎默认配置 = 源码内置默认值 + 用户在
     # 「引擎默认配置」层的覆盖（(engine, "", 0)）。此前渲染只取源码常量，
@@ -456,7 +456,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         # 个人维护的过滤列表整体替换内置列表
         cfg.setdefault("dns", {})["fake-ip-filter"] = fake_ip_filter
 
-    # 功能模块按引擎合并，平台扩展最后应用、优先级最高
+    # 拓展模块按引擎合并，平台扩展最后应用、优先级最高
     for snip in snapshot.get("snippets", []):
         if snip["engine"] in (engine, "all"):
             _merge(cfg, yaml.safe_load(snip["content"]) or {})
@@ -542,7 +542,7 @@ def dedupe_rules(text: str) -> str:
 def apply_device_overlay(text: str, overlay_yaml: str) -> str:
     """设备级个性化：在目标产物之上叠加该设备自己的扩展 YAML。
 
-    合并语义与「产物配置」的分层完全一致：字典递归、列表**追加**、标量覆盖。
+    合并语义与「基础配置」的分层完全一致：字典递归、列表**追加**、标量覆盖。
     设备层是"个性化"语义：保存的是与上层的差异，列表只记新增项，
     因此这里用追加语义——下发结果 = 平台产物 + 这台设备新增的内容。
 

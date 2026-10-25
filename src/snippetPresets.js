@@ -1,4 +1,4 @@
-// 功能模块常用预设。
+// 拓展模块常用预设。
 //
 // 内容按官方文档书写：
 //   Stash  —— https://stash.wiki（配置样例 / HTTP 重写 / 面板 Tile / 管理脚本）
@@ -12,7 +12,7 @@ export const SNIPPET_PRESETS = [
     name: 'IPv6 支持',
     category: 'general',
     engine: 'all',
-    note: '允许 IPv6 解析与连接；产物配置里写的是 ipv6: false，本模块优先级更高。',
+    note: '允许 IPv6 解析与连接；基础配置里写的是 ipv6: false，本模块优先级更高。',
     content: `ipv6: true
 `,
   },

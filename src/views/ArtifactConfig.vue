@@ -1,6 +1,5 @@
 <template>
   <div class="mp-artifact">
-    <h2 class="mp-page-title">产物配置</h2>
     <p class="mp-page-desc">
       配置分三层：<strong>引擎默认配置</strong>（引擎内置的能力基线，随程序发布，可直接改）→
       <strong>引擎平台配置</strong>（按引擎 + 平台，可新增）→
@@ -51,7 +50,7 @@
           <div class="mp-toolbar">
             <div class="left">
               <div class="mp-scope-current">
-                <strong>{{ current ? current.label : '产物配置' }}</strong>
+                <strong>{{ current ? current.label : '基础配置' }}</strong>
                 <span class="mp-toolbar-hint">{{ currentHint }}</span>
                 <span v-if="inheritChain.length" class="mp-inherit-chain">
                   继承链：{{ inheritChain.join(' → ') }}
@@ -631,7 +630,7 @@ function toYaml(obj) {
 function parseYaml(text) {
   const data = yamlLoad(text)
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('产物配置必须是键值映射')
+    throw new Error('基础配置必须是键值映射')
   }
   return data
 }
@@ -783,7 +782,7 @@ async function apply() {
       method: 'POST',
       body: {
         engine: s.engine, platform: s.platform, device_id: s.device_id,
-        content: raw.value, env: env.value, note: '更新产物配置',
+        content: raw.value, env: env.value, note: '更新基础配置',
       },
     })
     ElMessage.success(`已构建 #${r.build_id} 并发布到${ENV_LABELS[env.value] || env.value}`)

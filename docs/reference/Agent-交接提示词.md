@@ -56,12 +56,12 @@
 
 | 层 | 谁维护 | 说明 |
 | --- | --- | --- |
-| ① 产物配置 | 产物配置页，三层 | 引擎默认配置 → 引擎平台配置 → 设备独立配置 |
+| ① 基础配置 | 基础配置页，三层 | 引擎默认配置 → 引擎平台配置 → 设备独立配置 |
 | ② 结构化内容 | 节点/策略组/规则各自页面 | 服务端生成，任何配置层都不许覆盖 |
-| ③ 功能模块 | 功能模块页 | YAML 片段，字典递归合并、列表追加 |
+| ③ 拓展模块 | 拓展模块页 | YAML 片段，字典递归合并、列表追加 |
 | ④ 平台扩展 | 引擎平台页 | 单个引擎平台专属片段，最后应用 |
 
-**产物配置的三层**（`base_configs` 表，主键 `(engine, platform, device_id)`）是整个项目的核心心智模型：
+**基础配置的三层**（`base_configs` 表，主键 `(engine, platform, device_id)`）是整个项目的核心心智模型：
 
 - 每一层**只存"相对基线的差异"**，其余自动继承上层
 - 基线（`inherited`）：引擎默认配置层 = 程序内置默认值；引擎平台配置 / 设备独立配置 = 上层合并后的生效值
@@ -81,7 +81,7 @@
 完整十条在 `AGENTS.md`，这里是最容易踩的几条：
 
 1. `proxies` / `proxy-providers` / `proxy-groups` / `rule-providers` / `rules` 五个结构化键，
-   产物配置三层、平台扩展、功能模块**都不许写**，服务端硬校验（400）
+   基础配置三层、平台扩展、拓展模块**都不许写**，服务端硬校验（400）
 2. 兜底规则 `MATCH` 永远排在最后
 3. 规则类型创建时校验 13 种（`config.RULE_TYPES`），构建时再按引擎白名单复查
    （`ENGINE_RULE_TYPES`），超出白名单客户端会加载失败
@@ -92,7 +92,7 @@
 8. 凭据不进仓库（`scripts/check_secrets.py` 会拦）
 9. 改引擎默认配置要核对官方文档（`scripts/check_engine_defaults.py` 逐键对账）
 10. 命名只有三个层级名：引擎默认配置 / 引擎平台配置 / 设备独立配置；
-    页面叫「产物配置」，引擎平台自己的片段叫「平台扩展」
+    页面叫「基础配置」，引擎平台自己的片段叫「平台扩展」
 
 ---
 
@@ -108,7 +108,7 @@ src/
   views/       一个页面对应一个 .vue
   components/  通用组件（ScopeSelect / EnableToggle / StatusDot / Pager …）
   scopeOptions.js   「包含所有」哨兵，与后端 config.ALL_SCOPE 对齐
-  snippetPresets.js 功能模块预设（纯前端常量）
+  snippetPresets.js 拓展模块预设（纯前端常量）
 scripts/       deploy.sh（发布）/ package.sh / check_data_consistency.py / check_secrets.py / docs_lookup.py
 docs/          使用 / 开发 / 配置文档 + 官方文档查阅流程
 official-example/ 官方配置样例，核对引擎默认配置用
@@ -118,7 +118,7 @@ official-example/ 官方配置样例，核对引擎默认配置用
 
 ## 改配置（数据）：直接改，别去点页面
 
-用户要改规则、策略组、来源、设备、产物配置这类**数据**时，不要走界面，两条路：
+用户要改规则、策略组、来源、设备、基础配置这类**数据**时，不要走界面，两条路：
 
 1. **走 API**（推荐，有校验有审计）：用管理端账号登录拿 session + CSRF，然后
    `POST/PUT/DELETE https://magichub.top:8443/api/v1/...`。账号密码问用户要，别猜。
@@ -137,7 +137,7 @@ official-example/ 官方配置样例，核对引擎默认配置用
 - 策略组 `use_sources` 里的来源名必须存在；用 `["*"]` 表示"所有来源（含以后新增的）"
 - 设备 `name` 是**文件名**（产物文件名 = `<name>.yaml`），`note` 才是展示用设备名
 - 设备 `target_id` 指向引擎平台；换平台要连带改 `base_configs` 的键
-- 产物配置三层：写 `base_configs` 时只写差异，且要按本层的列表语义（设备层 = 追加）
+- 基础配置三层：写 `base_configs` 时只写差异，且要按本层的列表语义（设备层 = 追加）
 - 结构化内容只能通过业务接口写（服务端会校验），别手写 `rules` / `proxy-groups`
 
 ---

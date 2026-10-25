@@ -345,7 +345,7 @@ def create_build(operator: str, note: str = "",
                 "sha256": security.sha256_text(text) if text else "",
                 "size": len(text.encode()),
                 "verification": verification,
-                # 必须与平台产物一样写出来：自动发布的闸门据此判断
+                # 必须与平台产物一样写出来：自动构建发布的闸门据此判断
                 # Mihomo 目标到底做没做核心校验，缺字段会被误判成"没校验"。
                 "core_checked": core_checked,
             }
@@ -479,6 +479,13 @@ def _publish(action: str, bid: int, reason: str, operator: str) -> dict:
             elif action == "prod":
                 result = releases.publish_to_production(
                     conn, build, operator, reason)
+            elif action == "both":
+                # 一步到位：同一事务内先置测试再置生产，发布历史只记一条。
+                # publish_build 内部就是这两步，语义与自动任务一致。
+                if build["status"] == releases.BuildStatus.PRODUCTION.value:
+                    raise releases.ReleaseError("该构建已是当前生产版本")
+                result = releases.publish_build(conn, build, operator, reason,
+                                                releases.Env.PRODUCTION)
             elif action == "rollback":
                 result = releases.publish_to_production(
                     conn, build, operator, reason, rollback=True)
@@ -499,6 +506,15 @@ def publish_to_test(bid: int, body: PublishBody, user=CurrentUser):
 def publish_to_prod(bid: int, body: PublishBody, user=CurrentUser):
     """发布至生产环境：测试中 / 已下线 → 生产中。"""
     return _publish("prod", bid, body.reason, user["username"])
+
+
+@router.post("/builds/{bid}/publish-both")
+def publish_both(bid: int, body: PublishBody, user=CurrentUser):
+    """一键发布：已构建 / 已下线 → 测试中 + 生产中，一步到位。
+
+    两步同处一个事务，状态原子切换；发布历史只记最终那一条。
+    """
+    return _publish("both", bid, body.reason, user["username"])
 
 
 @router.post("/builds/{bid}/rollback-to-prod")
@@ -524,7 +540,7 @@ def release_state(user=CurrentUser):
 def list_releases(auto_only: bool = False, user=CurrentUser):
     with db.connect() as conn:
         if auto_only:
-            # 自动任务固定以“系统”身份发布；手动发布不进入自动发布页
+            # 自动任务固定以“系统”身份发布；手动发布不进入自动构建发布页
             rows = db.all_(
                 conn,
                 "SELECT * FROM releases WHERE operator='系统' "

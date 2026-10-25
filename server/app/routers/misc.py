@@ -244,7 +244,7 @@ def put_settings(body: SettingsBody, user=CurrentUser):
             if not 1 <= hours <= 168:
                 raise HTTPException(400, "自动构建间隔需在 1–168 小时之间")
         if key == "auto_publish_env" and value not in ("production", "testing"):
-            raise HTTPException(400, "自动发布环境仅支持 production / testing")
+            raise HTTPException(400, "自动构建发布环境仅支持 production / testing")
     with db.tx() as conn:
         for key, value in body.values.items():
             db.set_setting(conn, key, value.strip())

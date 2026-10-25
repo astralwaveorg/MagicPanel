@@ -183,10 +183,10 @@ def _run_rule_fetch(summary: dict, now: datetime, force: bool = False) -> None:
 
 
 def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
-    """自动发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。
+    """自动构建发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。
 
     关闭了自动测速（auto_test=0）或测速间隔为 0 的来源不会产生测速结果，
-    不参与门禁，否则会永久阻塞自动发布。
+    不参与门禁，否则会永久阻塞自动构建发布。
     """
     skipped = [
         r["name"] for r in db.all_(
@@ -283,7 +283,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
                 summary["skipped"] = "未开启测速的来源不参与门禁：" + "、".join(skipped)
             if not ready:
                 summary["build_error"] = (
-                    "自动发布等待测速结果：" + "、".join(missing)
+                    "自动构建发布等待测速结果：" + "、".join(missing)
                 )
                 if not _core_available():
                     # 核心缺失时永远等不到测速结果：退避到下一个周期，
@@ -309,7 +309,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     summary["build"] = {"id": build_id, "status": status}
     if status != "success" or not publish:
         return
-    # 核心缺失时 Mihomo 产物只做了静态校验：自动发布到生产环境前必须确认
+    # 核心缺失时 Mihomo 产物只做了静态校验：自动构建发布到生产环境前必须确认
     # 每个 Mihomo 目标都过了核心校验，否则先降级为候选，等核心就位再发。
     try:
         with db.connect() as conn:
@@ -318,7 +318,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
         unchecked = _unchecked_core_targets(results) if _core_available() else []
         if unchecked:
             summary["build_error"] = (
-                "以下 Mihomo 目标未做核心校验（mihomo -t），已跳过自动发布："
+                "以下 Mihomo 目标未做核心校验（mihomo -t），已跳过自动构建发布："
                 + "、".join(unchecked)
             )
             return
@@ -332,8 +332,8 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
                 conn, build, AUTO_OPERATOR, "自动构建发布", releases.Env(env),
             )
     except Exception as exc:
-        summary["build_error"] = f"自动发布失败：{exc}"
-        logger.exception("自动发布失败")
+        summary["build_error"] = f"自动构建发布失败：{exc}"
+        logger.exception("自动构建发布失败")
         # 不推进 auto_build_last_attempt：发布没成功，下一轮要继续尝试
         with db.tx() as wconn:
             db.set_setting(wconn, "auto_build_last_attempt", "")
