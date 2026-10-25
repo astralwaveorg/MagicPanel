@@ -1,4 +1,0 @@
-[submodule "magic-sets"]
-	path = magic-sets
-	url = git@github.com:astralwaveorg/magic-sets.git
-	branch = main
