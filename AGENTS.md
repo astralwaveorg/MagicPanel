@@ -42,6 +42,20 @@
 24. **规则与规则集改动后要按官方文档复核一遍。** 白名单以官方文档为准，不靠记忆：Stash <https://stash.wiki/rules/rule-types>、<https://stash.wiki/rules/rule-set>；Mihomo <https://wiki.metacubex.one/config/rules/>、<https://wiki.metacubex.one/config/rule-providers/>。要核对的项、已发现过的问题（`kr` 漏 no-resolve）以及 Stash 独有能力（`no-track` / `pre-matching`）都写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则与规则集的规范核对」。Stash 独有的 `no-track` / `pre-matching` **只写进 Stash 产物**（Mihomo 的规则参数只有 `no-resolve` 与 `src`；实测 Mihomo 遇到未知参数会忽略、不会加载失败，但产物里不写更清楚）；`pre-matching` 还要求目标是 `REJECT` 字面量、用策略组会直接加载失败，且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效，版本太旧的客户端可能加载失败。兜底规则（MATCH）不能加 `no-track`，否则客户端不记录任何连接。同一个规则集可以在互斥的引擎平台各挂一条（广告过滤就是这么分轨的），「规则重复」判定只看适用范围有无交集。
 25. **服务分流要按「这个服务到底要什么」分派，不要一律丢进默认代理。** 三类需求对应三种落法：**地区锁服务**（Pixiv / DMM / Hulu / BBC，换 IP 就打不开）→ 指向对应地区组；**账号风控服务**（Discord / Slack / Amazon / 币圈，对出口 IP 的信誉与地区一致性有校验）→ 指向固定出口的 `select` 组（🛒 跨境电商 / 🪙 加密货币，本地节点排最前），别交给 `url-test` 自动切 IP；**上游大集合吃掉了本该更细路由的域名**（`media` 里的 BBC、`disney` 里的 Hulu）→ 拆出服务专属集合并排在宽泛合集之前。判断"这个集合值不值得加"必须与面板全部现有集合求交，看净增量与路由错位，算增量的三个坑（公共后缀回溯、behavior 不能嗅探、mrs 要换 yaml 等价物）写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「服务细分：按用途与地区分派」。
 26. **社交类分流按用途分两组：💬 即时通讯 与 👥 海外社交。** 前者是点对点聊天、群聊、通话、消息推送（Telegram / WhatsApp / Signal / Discord / LINE / Viber / KakaoTalk / Messenger / Snapchat / Element / Session / Threema / SimpleX / Wire / Zalo / Slack），后者是动态、发帖、图文流、关注、社区（Twitter / Instagram / Facebook / Reddit / Threads / Bluesky / Tumblr / Pinterest / LinkedIn / TruthSocial / VK / OK / Quora / Lemmy / Nextdoor / GETTR / Minds / MeWe / Gab / Mastodon）。**两个块在第 7 块内各自连续，通讯块必须排在社交块前面**——两块都含 LINE / Messenger / Discord 的域名，具体服务集合要排在宽泛的 `social-extra` / `social` 前面，否则走错组。geosite 的 `category-social-media-!cn`（`social`）已覆盖 Twitter / Facebook / Instagram / Threads / Tumblr / LinkedIn / TruthSocial / VK / Bluesky / Mastodon 的全部条目，**不要再为它们建单服务集合**（同约束 22 的重复清单）；只有净增量不为零的才建来源。小众服务（Threema / Session / SimpleX / Wire / Viber / Quora / Lemmy / Nextdoor / OK / GETTR / Minds / MeWe / Gab）走自维护层 `chat-extra` 与 `social-niche`，域名逐个核实过。
+27. **策略组的顺序是向阳精心配置过的基线，不得变更。** 下面这 31 个策略组的先后顺序（含 `sort` 值）是基线，括号内是 `sort`：
+
+    ```
+    🚀 默认代理(0) → 🛑 广告过滤(3) → 🔍 谷歌服务(6) → 🧠 人工智能(7) → 💻 开发工具(9)
+    → 🎮 海外游戏(10) → 🎞️ 国际影音(11) → 🎵 TikTok(12) → 💬 即时通讯(13) → 👥 海外社交(14)
+    → 🍎 苹果服务(15) → Ⓜ️ 微软服务(16) → 🛒 跨境电商(22) → 🪙 加密货币(23) → ⚡️ 自动测速(24)
+    → 🇯🇵日本(25) → 🇭🇰香港(26) → 🇹🇼台湾(26) → 🇰🇷韩国(27) → 🇺🇸美国(150) → 🌍欧洲(151)
+    → 🇯🇵 日本机房(152) → 🇺🇸 美国机房(153) → 🇯🇵 日本自动(154) → 🇺🇸 美国自动(155)
+    → 🇹🇼 台湾自动(156) → 🇰🇷 韩国自动(157) → 🇭🇰 香港自动(158) → 🌍 欧洲自动(159)
+    → 🇸🇬 新加坡自动(160) → 🏠 路由回家(161)
+    ```
+
+    **任何重构（菜单重排、页面合并、构建流程改动、数据层切换）都不得改动这个先后顺序**，包括不得重排 `sort` 值。新建组只能追加到指定位置；删除组时其余组的相对顺序不变。改动前先拉线上当前顺序核对，改动后逐项比对确认一致。**要改顺序必须向阳明确要求。**
+
 
 ## 改完要做的事
 
