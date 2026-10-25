@@ -88,6 +88,15 @@
 
 30. **「一键发布」与「立即发布」是两个动作。** 一键发布（`POST /api/v1/builds/{id}/publish-both`）发布**已有的这个构建**，内部是同一事务里先置测试再置生产，发布历史只记一条；立即发布触发一整轮自动任务（抓取 → 测速 → 创建**新**构建 → 发布）。两者名字相近，界面上必须让用户分得清。
 
+31. **DNS 段走「境外 DoH + 走代理」，不要用国内解析器。** 2026-10-25 实测：国内能用的 DNS 通道全都会拿到假 IP——明文 UDP 被链路注入，国内 DoH（alidns / doh.pub / dot.pub / 1.12.12.12）由解析器服务端主动投毒（同一个端点从境外出口查也是假 IP），境外 DoH 国内直连不通。唯一能拿到真 IP 的路径是让 DNS 查询走代理出口：Mihomo 用 `nameserver: [https://1.1.1.1/dns-query#🚀 默认代理, …]`，Stash 没有 `#策略组` 语法，用 `nameserver: [https://1.1.1.1/dns-query, …]` + `follow-rule: true`。
+
+    - **DNS 服务器一律写裸 IP 形式**（官方文档要求，否则多一层引导解析、还有递归查询风险）。
+    - `default-nameserver` 只用于解析 DoH 服务器域名，必须纯 IP；`proxy-server-nameserver` 解析节点域名，是独立链路不跟随规则，必须国内可达。
+    - `fallback` / `fallback-filter` 只用 `ipcidr` + `domain`，**不要用 `geoip` 判定**（主 DNS 已干净，geoip 只会多一个 geo 数据依赖）。
+    - 国内域名仍走国内解析器（`nameserver-policy` 里按 `rule-set:<集合>` + `+.cn` 指到 `doh.pub`），保住国内 CDN。
+    - `nameserver-policy` 的 `rule-set:<name>` 必须**逐个集合写成独立键**：逗号合并写法是 Stash 专有扩展，Mihomo 不认，合并键在 Mihomo 客户端上静默失效。
+    - 前提：规则里必须保留 `IP-CIDR,1.1.1.1/32`、`8.8.8.8/32`、`8.8.4.4/32`、`1.0.0.1/32` → `🚀 默认代理`，否则 `follow-rule` 下 DNS 全部超时。改动细节与验证方法见 [配置文档](docs/配置文档.md#dns-段防污染)。
+
 
 ## 改完要做的事
 

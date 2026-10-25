@@ -105,9 +105,11 @@ def doc_keys(doc: dict, prefix: str = "") -> set[str]:
 
 def main() -> int:
     refs = {
-        "mihomo": [REPO / "official-example" / "mihomo-example.yaml"],
+        "mihomo": [REPO / "official-example" / "mihomo-example.yaml",
+                   REPO / "official-example" / "dns-fallback-reference.yaml"],
         "stash": [REPO / "official-example" / "stash-example.yaml",
-                  REPO / "official-example" / "stash-dns-reference.yaml"],
+                  REPO / "official-example" / "stash-dns-reference.yaml",
+                  REPO / "official-example" / "dns-fallback-reference.yaml"],
     }
     missing: list[str] = []
     for engine, paths in refs.items():

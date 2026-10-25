@@ -1,5 +1,6 @@
 """拓展模块：CRUD 校验与构建合并。"""
 import yaml
+from app.services import base_config
 from conftest import auth_headers, setup_admin
 from test_api import make_policy
 
@@ -146,12 +147,16 @@ def test_snippet_merge_into_build(client):
     assert stash["panel"]["首页"]["title"] == "家庭网络"
     assert stash["log-level"] == "info"      # 启用模块覆盖默认值
     # mihomo 专用片段不进 stash（stash 自带 DNS 基线，但不能被片段改写）
-    assert "fallback" not in stash.get("dns", {})
+    # 基线本身带 fallback（境外 DoH 兜底），所以要比"基线值"而不是"没有这个键"
+    assert stash["dns"]["fallback"] == base_config.default_doc("stash")["dns"]["fallback"]
+    assert stash["dns"]["fallback"] != ["https://dns.google/dns-query"]
 
     mih = yaml.safe_load(client.get(
         f"/api/v1/builds/{bid}/artifact/mihomo-android").json()["content"])
     assert "panel" not in mih                # stash 专用片段不进 mihomo
-    assert mih["dns"]["fallback"] == ["https://dns.google/dns-query"]
+    # 片段里的列表是「追加」语义（_merge：列表相加），不是替换
+    assert mih["dns"]["fallback"] == (base_config.default_doc("mihomo")["dns"]["fallback"]
+                                      + ["https://dns.google/dns-query"])
     assert mih["dns"]["enhanced-mode"] == "fake-ip"  # 与默认 dns 深度合并
 
     # 门户按分类返回启用模块的元信息（不含内容）

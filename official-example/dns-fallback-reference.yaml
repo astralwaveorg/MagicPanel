@@ -1,0 +1,15 @@
+# 「回退 DNS」与回退过滤器的配置键
+# 来源：
+#   Stash  —— https://stash.wiki/features/dns-server（回退 DNS 一节）
+#   Mihomo —— MetaCubeX/mihomo 的 docs/config.yaml（fallback / fallback-filter 段）
+# 取值取自官方示例，仅用于核对"哪些键被官方支持"。
+dns:
+  fallback:
+    - https://1.1.1.1/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+    domain:
+      - '+.google.com'

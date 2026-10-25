@@ -102,11 +102,47 @@ _COMMON_DEFAULTS = {
     PANEL_DIRECT_KEY: True,
 }
 
+# ---- DNS 段取值（2026-10-25 国内网络实测后定稿）----
+#
+# 为什么不用国内解析器：国内能用的 DNS 通道全都会拿到假 IP——
+#   * 明文 UDP（119.29.29.29 / 180.76.76.76 / 223.5.5.5）：被链路注入，
+#     www.google.com 会返回 104.244.42.197 这类假地址；
+#   * 国内 DoH（dns.alidns.com / 223.5.5.5 / doh.pub / dot.pub / 1.12.12.12）：
+#     加密挡住了链路注入，但解析器服务端自己按合规策略投毒，
+#     同一个端点从境外出口查也还是假 IP——是解析器行为，不是链路问题；
+#   * 境外 DoH（1.1.1.1 / 8.8.8.8 / 9.9.9.9 / dns.google / quad9 …）：
+#     国内直连一律不通。
+# 唯一拿到真 IP 的路径：境外 DoH 走代理。
+#   * Mihomo 用 "#策略组" 后缀直接指定出口；
+#   * Stash 没有这个语法，只能开 follow-rule，由分流规则决定 DNS 出口
+#     （规则里已有 IP-CIDR,1.1.1.1/32、8.8.8.8/32 → 🚀 默认代理）。
+# DNS 服务器一律用裸 IP 形式：官方文档要求这样才能避免递归查询
+# （Stash 文档「DNS 查询跟随规则」一节明确列出这一前提）。
+#
+# 国内域名仍走国内解析器（放在引擎平台配置层的 nameserver-policy 里），
+# 这样国内站点的 CDN 解析不被境外出口改写；国内解析器用 doh.pub
+# （与 alidns 实测返回同一批国内 CDN 节点，且不带阿里云）。
 _DNS_COMMON = {
     "fake-ip-range": "198.18.0.1/16",
-    "default-nameserver": ["223.5.5.5", "119.29.29.29"],
-    "nameserver": ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"],
-    "proxy-server-nameserver": ["223.5.5.5", "119.29.29.29"],
+    # 引导 DNS：只用来解析 DoH 服务器的域名，官方要求必须是纯 IP
+    "default-nameserver": ["119.29.29.29", "180.76.76.76"],
+    # 节点域名解析：独立链路，不跟随规则，必须国内可达
+    "proxy-server-nameserver": ["https://doh.pub/dns-query", "119.29.29.29"],
+}
+
+# 境外 DoH（裸 IP 形式）：配合 follow-rule / respect-rules 走代理
+_FOREIGN_DOH = ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"]
+# 回退 DNS：另一家解析器兜底，同样走代理
+_FALLBACK_DOH = ["https://9.9.9.9/dns-query", "https://149.112.112.112/dns-query"]
+# 回退过滤：命中这些域名或这些网段时改用回退解析器的结果。
+# 不用 geoip 判定——主 DNS 已经是干净的境外解析器，没有"国内污染值"要筛，
+# 引入 geoip 只会多一个 geo 数据依赖。
+_FALLBACK_FILTER = {
+    "ipcidr": ["240.0.0.0/4", "0.0.0.0/32", "127.0.0.1/32"],
+    "domain": [
+        "+.google.com", "+.googleapis.com", "+.youtube.com", "+.twitter.com",
+        "+.facebook.com", "+.instagram.com", "+.telegram.org", "+.github.com",
+    ],
 }
 
 # Stash 官方内置 DNS 服务支持的键（https://stash.wiki/features/dns-server）：
@@ -116,6 +152,10 @@ _DNS_COMMON = {
 # 跟随规则用 follow-rule（Mihomo 才叫 respect-rules）。
 STASH_DNS = {
     **_DNS_COMMON,
+    "nameserver": list(_FOREIGN_DOH),
+    "fallback": list(_FALLBACK_DOH),
+    "fallback-filter": deepcopy(_FALLBACK_FILTER),
+    "follow-rule": True,
     "ipv6": False,
 }
 
@@ -156,7 +196,13 @@ MIHOMO_OFFICIAL = {
         "enhanced-mode": "fake-ip",
         "fake-ip-filter-mode": "blacklist",
         "prefer-h3": False,
-        "respect-rules": False,
+        # 境外 DoH 走代理：Mihomo 可以用 "#策略组" 直接指定出口，
+        # 也可以开 respect-rules 交给规则决定（引擎默认配置不写死策略组名，
+        # 具体出口放在引擎平台配置层）。默认走 respect-rules。
+        "respect-rules": True,
+        "nameserver": list(_FOREIGN_DOH),
+        "fallback": list(_FALLBACK_DOH),
+        "fallback-filter": deepcopy(_FALLBACK_FILTER),
         # 局域网域名交给系统 DNS，避免把内网解析也发到公网
         "nameserver-policy": {
             "+.lan": "system",
