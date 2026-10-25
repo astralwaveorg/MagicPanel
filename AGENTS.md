@@ -59,7 +59,7 @@
     改顺序前先读 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则顺序：按目标分组」。
 22. **同一件事的两份清单必须合并，不然其中一份大面积失效。** 上游 `geosite/steam@cn`（19 条）与 blackmatrix7 `SteamCN`（17 条）重叠 14 条，后者 82% 的条目永远走不到、且 14 条路由方向与写规则时的意图相反。已删 `SteamCN`，把它独有的 2 条域名拆成 `DOMAIN-SUFFIX` 规则继续直连。**判断办法**：拿每个集合的条目与面板全部现有集合求交（严格区分 `DOMAIN` 精确与 `DOMAIN-SUFFIX` 后缀语义，后缀回溯要停在公共后缀之前，behavior 用面板声明值，mrs 要换同名 yaml 等价物），交集大到让规则大面积失效时，删重复的那份、把独有内容拆成小规则，别靠调顺序。
 23. **`ipcidr` 行为的规则集必须加 `no-resolve`。** 官方文档明确「ipcidr 类规则集支持 no-resolve 参数」：不加的话客户端遇到域名请求会先为这条规则做一次 DNS 解析再判断 IP 是否命中。判断依据是来源的 `behavior`，不是规则的 `type`——`RULE-SET` 规则的 `no_resolve` 只会对 `ipcidr` 行为真正生效。新建 `ipcidr` 来源后要同步把引用它的规则勾上 no-resolve。
-24. **规则与规则集改动后要按官方文档复核一遍。** 白名单以官方文档为准，不靠记忆：Stash <https://stash.wiki/rules/rule-types>、<https://stash.wiki/rules/rule-set>；Mihomo <https://wiki.metacubex.one/config/rules/>、<https://wiki.metacubex.one/config/rule-providers/>。要核对的项、已发现过的问题（`ipcidr` 行为漏加 `no-resolve`，现存的 `private-ip` / `telegram-ip` / `cn-ip` 都已带上）以及 Stash 独有能力（`no-track` / `pre-matching`）都写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则与规则集的规范核对」。Stash 独有的 `no-track` / `pre-matching` **只写进 Stash 产物**（Mihomo 的规则参数只有 `no-resolve` 与 `src`；实测 Mihomo 遇到未知参数会忽略、不会加载失败，但产物里不写更清楚）；`pre-matching` 还要求目标是 `REJECT` 字面量、用策略组会直接加载失败，且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效，版本太旧的客户端可能加载失败。兜底规则（MATCH）不能加 `no-track`，否则客户端不记录任何连接。同一个规则集可以在互斥的引擎平台各挂一条（广告过滤就是这么分轨的：Stash iOS/tvOS/macOS 用 `REJECT` 字面量，其余平台用「🛑 广告过滤」策略组），「规则重复」判定只看适用范围有无交集。
+24. **规则与规则集改动后要按官方文档复核一遍。** 白名单以官方文档为准，不靠记忆：Stash <https://stash.wiki/rules/rule-types>、<https://stash.wiki/rules/rule-set>；Mihomo <https://wiki.metacubex.one/config/rules/>、<https://wiki.metacubex.one/config/rule-providers/>。要核对的项、已发现过的问题（`ipcidr` 行为漏加 `no-resolve`，现存的 `private-ip` / `telegram-ip` / `cn-ip` 都已带上）以及 Stash 独有能力（`no-track` / `pre-matching`）都写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则与规则集的规范核对」。**规则来源内部的一致性（内容有没有悬空引用、有没有规则引用它）暂时不查**——面板侧的校验向阳后面自己优化，验收时不必报告这两类问题。Stash 独有的 `no-track` / `pre-matching` **只写进 Stash 产物**（Mihomo 的规则参数只有 `no-resolve` 与 `src`；实测 Mihomo 遇到未知参数会忽略、不会加载失败，但产物里不写更清楚）；`pre-matching` 还要求目标是 `REJECT` 字面量、用策略组会直接加载失败，且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效，版本太旧的客户端可能加载失败。兜底规则（MATCH）不能加 `no-track`，否则客户端不记录任何连接。同一个规则集可以在互斥的引擎平台各挂一条（广告过滤就是这么分轨的：Stash iOS/tvOS/macOS 用 `REJECT` 字面量，其余平台用「🛑 广告过滤」策略组），「规则重复」判定只看适用范围有无交集。
 25. **服务分流要按「这个服务到底要什么」分派，不要一律丢进默认代理。** 三类需求对应三种落法：**地区锁服务**（Pixiv / DMM / Hulu / BBC，换 IP 就打不开）→ 指向对应地区组；**账号风控服务**（Discord / Slack / Amazon / 币圈，对出口 IP 的信誉与地区一致性有校验）→ 指向固定出口的 `select` 组（🛒 跨境电商 / 🪙 加密货币，本地节点排最前），别交给 `url-test` 自动切 IP；**上游大集合吃掉了本该更细路由的域名**（`media` 里的 BBC、`disney` 里的 Hulu）→ 拆出服务专属集合并排在宽泛合集之前。判断"这个集合值不值得加"必须与面板全部现有集合求交，看净增量与路由错位，算增量的三个坑（公共后缀回溯、behavior 不能嗅探、mrs 要换 yaml 等价物）写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「服务细分：按用途与地区分派」。
 26. **社交类分流按用途分两组：💬 即时通讯 与 👥 海外社交。** 前者是点对点聊天、群聊、通话、消息推送（Telegram / WhatsApp / Signal / Discord / LINE / Viber / KakaoTalk / Messenger / Snapchat / Element / Session / Threema / SimpleX / Wire / Zalo / Slack），后者是动态、发帖、图文流、关注、社区（Twitter / Instagram / Facebook / Reddit / Threads / Bluesky / Tumblr / Pinterest / LinkedIn / TruthSocial / VK / OK / Quora / Lemmy / Nextdoor / GETTR / Minds / MeWe / Gab / Mastodon）。**两个块在第 7 块内各自连续，通讯块必须排在社交块前面**——两块都含 LINE / Messenger / Discord 的域名，具体服务集合要排在宽泛的 `social-extra` / `social` 前面，否则走错组。geosite 的 `category-social-media-!cn`（`social`）已覆盖 Twitter / Facebook / Instagram / Threads / Tumblr / LinkedIn / TruthSocial / VK / Bluesky / Mastodon 的全部条目，**不要再为它们建单服务集合**（同约束 22 的重复清单）；只有净增量不为零的才建来源。小众服务（Threema / Session / SimpleX / Wire / Viber / Quora / Lemmy / Nextdoor / OK / GETTR / Minds / MeWe / Gab）走自维护层 `chat-ext` 与 `social-ext`，域名逐个核实过。
 27. **策略组的顺序是向阳精心配置过的基线，不得变更。** 下面这 33 个策略组的先后顺序（含 `sort` 值）是基线，括号内是 `sort`：
@@ -114,6 +114,20 @@ DEPLOY_PROXY=http://10.0.1.8:7890 bash scripts/deploy.sh   # 发布（脚本自�
 ```
 
 配置类改动还要**重新构建发布**才生效（只有设备独立配置例外，分发时实时叠加）。
+
+## 客户端侧核对
+
+本机 Mac mini 上的 Stash 4.4.0 装了命令行 `stash`，能直接问**正在运行的核心**，比在产物 YAML 里推演可靠：
+
+```sh
+stash status                              # 版本 / 模式 / 端口 / 吞吐
+stash rule ls --limit 0                   # 核心里生效的完整规则表（确认客户端是否拉到新订阅）
+stash rule match www.v2ex.com            # 某目标命中哪条规则、出口链、解析到的 IP
+stash proxy ls "🇯🇵日本"                  # 某个组内的节点与当前选择
+stash provider ls                         # rule/proxy/script provider 的条目数与更新时间
+```
+
+`stash rule match` 走的是与真实流量相同的匹配过程（`--process` / `--user-agent` / `--network` 可补齐只有真实流量才带的属性）。它**不能**重新拉取配置本身——配置更新仍要在 Stash App 里点「更新订阅」，`provider update` 只刷远程规则集。
 
 ## 官方文档
 
