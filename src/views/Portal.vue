@@ -71,59 +71,66 @@
       <main class="pt-main">
         <!-- 核心配置 -->
         <section v-if="engineGroups.length">
-          <h2 class="pt-sec-title">核心配置</h2>
-          <div v-for="g in engineGroups" :key="g.engine" class="pt-engine">
-            <div class="pt-engine-head">
-              <h3 class="pt-engine-title">{{ g.label }}</h3>
-              <div class="pt-chips">
-                <button
-                  v-for="p in g.platforms"
-                  :key="p.key"
-                  class="pt-chip"
-                  :data-platform="p.key"
-                  :class="{ active: platformFilter === p.key }"
-                  :aria-pressed="platformFilter === p.key"
-                  :title="platformFilter === p.key ? '取消筛选' : `只看 ${p.label} 设备`"
-                  @click="togglePlatform(p.key)"
-                >
-                  <span class="pt-chip-dot"></span>{{ p.label }}
-                </button>
-              </div>
-            </div>
-            <div v-if="g.devices.length" class="pt-grid">
-              <article v-for="d in g.devices" :key="d.name" class="pt-card" :data-platform="d.platform">
-                <div class="pt-card-head">
-                  <span class="pt-card-name">{{ cardTitle(d) }}</span>
-                  <span class="pt-tag" :data-env="d.env">
-                    {{ d.env === 'production' ? '生产环境' : '测试环境' }}
-                  </span>
-                </div>
-                <p class="pt-card-meta">
-                  <span class="pt-plat">{{ platformLabel(d.platform) }}</span> · {{ d.target_name }}
-                  <template v-if="hasOwnProfile(d)">
-                    · 设备：{{ d.display_name }}
-                  </template>
-                </p>
-                <div class="pt-card-actions">
-                  <button
-                    class="pt-btn primary"
-                    :disabled="!d.subscription_url"
-                    @click="copy(d.subscription_url, 'dev-' + d.name)"
-                  >{{ copied === 'dev-' + d.name ? '已复制' : '复制地址' }}</button>
-                  <a
-                    v-if="d.subscription_url"
-                    class="pt-btn"
-                    :href="installUrl(d)"
-                  >一键导入</a>
-                  <button
-                    class="pt-btn"
-                    :disabled="!d.subscription_url"
-                    @click="showQr(d)"
-                  >二维码</button>
-                </div>
-              </article>
+          <div class="pt-sec-head">
+            <h2 class="pt-sec-title">核心配置</h2>
+            <div class="pt-chips">
+              <button
+                v-for="p in platformFilters"
+                :key="p.key"
+                class="pt-chip"
+                :data-platform="p.key"
+                :class="{ active: platformFilter === p.key, empty: !p.count }"
+                :aria-pressed="platformFilter === p.key"
+                :title="platformFilter === p.key
+                  ? '取消筛选'
+                  : (p.count ? `只看 ${p.label} 设备（${p.count} 台）` : `${p.label}：暂无设备`)"
+                @click="togglePlatform(p.key)"
+              >
+                <span class="pt-chip-dot"></span>{{ p.label }}
+              </button>
             </div>
           </div>
+          <p v-if="platformFilter && !devices.length" class="pt-empty">
+            {{ platformLabel(platformFilter) }} 暂无订阅设备
+          </p>
+          <template v-for="g in engineGroups" :key="g.engine">
+            <div v-if="g.devices.length || !platformFilter" class="pt-engine">
+              <h3 class="pt-engine-title">{{ g.label }}</h3>
+              <div class="pt-grid">
+                <article v-for="d in g.devices" :key="d.name" class="pt-card" :data-platform="d.platform">
+                  <div class="pt-card-head">
+                    <span class="pt-card-name">{{ cardTitle(d) }}</span>
+                    <span class="pt-tag" :data-env="d.env">
+                      {{ d.env === 'production' ? '生产环境' : '测试环境' }}
+                    </span>
+                  </div>
+                  <p class="pt-card-meta">
+                    <span class="pt-plat">{{ platformLabel(d.platform) }}</span> · {{ d.target_name }}
+                    <template v-if="hasOwnProfile(d)">
+                      · 设备：{{ d.display_name }}
+                    </template>
+                  </p>
+                  <div class="pt-card-actions">
+                    <button
+                      class="pt-btn primary"
+                      :disabled="!d.subscription_url"
+                      @click="copy(d.subscription_url, 'dev-' + d.name)"
+                    >{{ copied === 'dev-' + d.name ? '已复制' : '复制地址' }}</button>
+                    <a
+                      v-if="d.subscription_url"
+                      class="pt-btn"
+                      :href="installUrl(d)"
+                    >一键导入</a>
+                    <button
+                      class="pt-btn"
+                      :disabled="!d.subscription_url"
+                      @click="showQr(d)"
+                    >二维码</button>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </template>
         </section>
         <p v-else-if="!appliedQuery" class="pt-empty">
           暂无订阅地址：设备尚未创建或尚未发布版本，请联系维护者在管理后台完成配置与发布。
@@ -283,8 +290,8 @@ const devices = computed(() =>
     && hit(d.name, d.display_name, d.platform, d.target_name, d.note)))
 
 const engineGroups = computed(() => {
-  // 分组与平台标签都基于**全部**设备，不受搜索与平台筛选影响——
-  // 否则标签会在筛选后消失，用户就没法切回别的平台了。
+  // 引擎分组基于**全部**设备，不受搜索与平台筛选影响——
+  // 否则筛选后整个区块会消失，用户就没法切回别的平台了。
   const groups = {}
   for (const d of data.value?.devices || []) {
     const key = d.engine || 'other'
@@ -293,12 +300,19 @@ const engineGroups = computed(() => {
   return Object.entries(groups).map(([engine, list]) => ({
     engine,
     label: ENGINE_LABELS[engine] || engine,
-    platforms: PLATFORM_ORDER
-      .filter((key) => list.some((d) => d.platform === key))
-      .map((key) => ({ key, label: PLATFORM_LABELS[key] || key })),
     devices: list.filter((d) => devices.value.includes(d)),
   }))
 })
+
+// 平台标签固定列出全部支持的平台，包括当前还没有设备的（如 Linux），
+// 标签不随筛选消失，用户随时能切回去。平台是跨引擎的统一概念，
+// 点任意一个平台标签，Stash 与 Mihomo 两个引擎的设备一起筛。
+const platformFilters = computed(() =>
+  PLATFORM_ORDER.map((key) => ({
+    key,
+    label: PLATFORM_LABELS[key] || key,
+    count: (data.value?.devices || []).filter((d) => d.platform === key).length,
+  })))
 
 // 平台筛选：点标签只看该平台，再点一次取消。两个引擎共用同一筛选状态——
 // 平台是跨引擎的统一概念，点任意一个引擎的 iOS 都应该看到所有 iOS 设备。
@@ -561,9 +575,10 @@ onMounted(async () => {
     radial-gradient(700px 320px at 15% 0%, rgba(108, 123, 255, 0.35), transparent),
     radial-gradient(600px 300px at 90% 20%, rgba(34, 197, 183, 0.28), transparent),
     linear-gradient(180deg, #141834 0%, #0b0e1a 100%);
-  padding: 16px 20px 36px;
+  padding: 16px 0 36px;
 }
-.pt-hero-inner { max-width: 1080px; margin: 0 auto; }
+/* 横向内边距只在这里给，顶部与下方内容列左右严格对齐 */
+.pt-hero-inner { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
 .pt-hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .pt-hero-brand { font-weight: 700; letter-spacing: 1px; opacity: 0.9; display: inline-flex; align-items: center; gap: 8px; }
 .pt-hero-logo { width: 22px; height: 22px; }
@@ -587,11 +602,11 @@ onMounted(async () => {
   flex: 1;
   text-align: center;
 }
-/* 搜索框收窄，与下方一行统计信息比例协调；右侧留出明确的搜索按钮 */
+/* 搜索框铺满内容列，右侧留出明确的搜索按钮 */
 .pt-search {
   display: flex;
   gap: 10px;
-  max-width: 760px;
+  max-width: 100%;
   margin-top: 14px;
 }
 .pt-search-box { position: relative; flex: 1; min-width: 0; }
@@ -649,16 +664,17 @@ onMounted(async () => {
   gap: 10px;
 }
 .pt-sec-title small { font-size: 12px; font-weight: 400; color: #79809a; }
-.pt-engine-title { font-size: 13px; color: #8f96b0; margin: 0; font-weight: 600; }
-
-/* 引擎标题行：左边引擎名，右边平台筛选标签 */
-.pt-engine-head {
+/* 区块标题行：标题在左，右侧可以挂筛选标签 */
+.pt-sec-head {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   flex-wrap: wrap;
-  margin: 18px 0 10px;
+  margin: 34px 0 14px;
 }
+.pt-sec-head .pt-sec-title { margin: 0; }
+.pt-engine-title { font-size: 13px; color: #8f96b0; margin: 18px 0 10px; font-weight: 600; }
+
 .pt-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* 平台色板：低饱和莫兰迪色系，颜色只出现在筛选标签、卡片侧条与平台文字三处 */
@@ -689,6 +705,9 @@ onMounted(async () => {
   background: color-mix(in srgb, var(--pc) 24%, transparent);
   border-color: color-mix(in srgb, var(--pc) 52%, transparent);
 }
+/* 当前没有设备的平台：标签保留但压暗，说明"支持但还没有" */
+.pt-chip.empty { opacity: 0.4; }
+.pt-chip.empty:hover { opacity: 0.7; }
 .pt-chip-dot {
   width: 6px;
   height: 6px;
@@ -897,6 +916,7 @@ onMounted(async () => {
   .pt-grid { grid-template-columns: 1fr; }
   .pt-rules li { flex-direction: column; align-items: flex-start; gap: 4px; }
   .pt-main { padding: 0 14px 44px; }
+  .pt-hero-inner { padding: 0 14px; }
 }
 </style>
 
