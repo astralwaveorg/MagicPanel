@@ -158,12 +158,21 @@ class ProviderDetailBody(BaseModel):
 
 
 def _provider_origin(url: str) -> str:
-    """从上游地址取仓库标识，用来按来源分组：owner/repo。"""
+    """从上游地址取仓库标识（owner/repo），用来按来源分组。
+
+    覆盖三种写法：jsDelivr 的 /gh/owner/repo、网页版 github.com/owner/repo、
+    以及 SSH 的 git@github.com:owner/repo.git。
+    """
     text = url or ""
-    m = re.search(r"github\.com/([^/]+)/([^/@?#]+)", text)
+    m = re.search(r"/gh/([^/]+)/([^/@?#]+)", text)
     if not m:
-        m = re.search(r"/gh/([^/]+)/([^/@?#]+)", text)
-    return f"{m.group(1)}/{m.group(2)}" if m else ""
+        m = re.search(r"github\.com[/:]([^/]+)/([^/@?#]+)", text)
+    if not m:
+        return ""
+    repo = m.group(2)
+    if repo.endswith(".git"):
+        repo = repo[:-len(".git")]
+    return f"{m.group(1)}/{repo}"
 
 
 def _provider_desc(content: str, fmt: str) -> str:
