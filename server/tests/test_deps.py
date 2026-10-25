@@ -136,3 +136,28 @@ def test_deps_sync_creates_source_only_when_enabled(client, origin_repo):
     assert r.status_code == 200, r.text
     assert r.json()["created"] == 0
     assert client.get("/api/v1/rule-providers", headers=h).json() == []
+
+
+def test_deps_refresh_repo_provider(client, origin_repo):
+    """仓库托管的来源点「从仓库同步」：只更新内容，不做 Git 操作。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    _configure(client, h, origin_repo)
+    assert client.post("/api/v1/deps/clone", headers=h).status_code == 200
+    assert client.post("/api/v1/deps/sync", headers=h).status_code == 200
+
+    providers = client.get("/api/v1/rule-providers", headers=h).json()
+    demo = [p for p in providers if p["name"] == "demo"][0]
+    assert demo["kind"] == "repo"
+
+    # 面板里改坏内容后，「从仓库同步」把它恢复成仓库里的样子
+    client.put(f"/api/v1/rule-providers/{demo['id']}", headers=h, json={
+        "name": "demo", "behavior": "domain", "format": "yaml", "kind": "repo",
+        "repo_path": "rule/demo.yaml", "content": "payload:\n  - +.tampered.com\n"})
+    r = client.post(f"/api/v1/rule-providers/{demo['id']}/refresh", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["last_status"] == "ok"
+    content = client.get(
+        f"/api/v1/rule-providers/{demo['id']}/content", headers=h).json()["content"]
+    assert "+.example.com" in content
+    assert "tampered" not in content

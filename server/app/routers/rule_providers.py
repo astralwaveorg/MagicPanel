@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
-from ..services import fetcher, refs, updater
+from ..services import fetcher, refs, repo_manager, repo_sync, updater
 
 router = APIRouter(prefix="/api/v1/rule-providers", tags=["rule-providers"])
 
@@ -425,6 +425,15 @@ def batch_delete_providers(body: BatchIds, user=CurrentUser):
 
 @router.post("/{rp_id}/refresh")
 def refresh_provider(rp_id: int, user=CurrentUser):
+    # 仓库托管的来源不做抓取：只从仓库工作树同步这一个文件的内容
+    with db.connect() as conn:
+        existing = _get_or_404(conn, rp_id)
+        if existing["kind"] == "repo":
+            try:
+                row = repo_sync.sync_one(conn, existing["name"], user["username"])
+            except (repo_sync.SyncError, repo_manager.RepoError) as exc:
+                raise HTTPException(400, str(exc))
+            return _public(row)
     try:
         row = updater.refresh_provider(rp_id, user["username"])
     except updater.NotFound as exc:

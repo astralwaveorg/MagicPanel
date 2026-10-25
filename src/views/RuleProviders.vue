@@ -105,8 +105,10 @@
             <template #default="{ row }">
               <!-- 内联规则直接写在面板里，不存在抓取；仓库来源看的是同步状态 -->
               <StatusDot v-if="row.kind !== 'inline'" v-bind="sourceStatus(row)" />
-              <el-tooltip v-if="row.kind === 'remote' && row.last_status === 'failed' && row.rule_count"
-                         :content="`抓取失败，客户端继续用上次抓到的内容（${row.rule_count} 条）`"
+              <el-tooltip v-if="row.kind !== 'inline' && row.last_status === 'failed' && row.rule_count"
+                         :content="row.kind === 'repo'
+                           ? `同步失败，客户端继续用上次同步的内容（${row.rule_count} 条）`
+                           : `抓取失败，客户端继续用上次抓到的内容（${row.rule_count} 条）`"
                          placement="top">
                 <span class="mp-cell-sub">仍用上次内容</span>
               </el-tooltip>
@@ -140,6 +142,7 @@
               <div class="op-grid">
                 <el-button size="small" :disabled="!row.has_content" @click="preview(row)" type="info" plain>内容</el-button>
                 <el-button size="small" v-if="row.kind === 'remote'" :loading="row._refreshing" @click="refresh(row)" type="primary">抓取</el-button>
+                <el-button size="small" v-else-if="row.kind === 'repo'" :loading="row._refreshing" @click="refresh(row)" type="primary">从仓库同步</el-button>
                 <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleEnabled(row)" />
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
                 <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
@@ -531,7 +534,11 @@ async function refreshRow(row, silent = false) {
       method: 'POST',
     })
     Object.assign(row, updated)
-    if (!silent) ElMessage.success(`抓取成功：${updated.rule_count} 条规则`)
+    if (!silent) {
+      ElMessage.success(row.kind === 'repo'
+        ? `已从仓库同步：${updated.rule_count} 条规则`
+        : `抓取成功：${updated.rule_count} 条规则`)
+    }
     return true
   } catch (e) {
     if (!silent) ElMessage.error(e.message)

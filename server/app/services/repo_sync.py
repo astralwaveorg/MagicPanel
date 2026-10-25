@@ -120,6 +120,31 @@ def sync_content(conn, operator: str) -> dict:
     return {"created": created, "updated": updated, "errors": errors}
 
 
+def sync_one(conn, name: str, operator: str) -> dict:
+    """从仓库同步单个规则集合（只更新这一个文件的内容，不做 Git 操作）。"""
+    row = db.one(conn, "SELECT * FROM rule_providers WHERE name=?", (name,))
+    if not row:
+        raise SyncError("规则来源不存在")
+    rel = row["repo_path"] if "repo_path" in row.keys() else ""
+    if not rel:
+        raise SyncError("这条规则来源没有绑定仓库文件")
+    target = repo_manager.safe_path(conn, rel)
+    if not target.exists():
+        raise SyncError(f"仓库里没有 {rel}")
+    content = target.read_text(encoding="utf-8")
+    meta = validate_rule_file(content, rel)
+    now = db.now()
+    conn.execute(
+        "UPDATE rule_providers SET content=?, sha256=?, rule_count=?, behavior=?, "
+        "last_status='ok', last_fetched_at=?, updated_at=? WHERE id=?",
+        (content, security.sha256_text(content), meta["count"], meta["behavior"],
+         now, now, row["id"]),
+    )
+    security.audit(conn, operator, "从仓库同步规则来源", "rule_provider",
+                   row["id"], {"name": name, "repo_path": rel})
+    return db.one(conn, "SELECT * FROM rule_providers WHERE id=?", (row["id"],))
+
+
 def _sha(text: str) -> str:
     return security.sha256_text(text)
 
