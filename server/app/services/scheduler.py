@@ -182,6 +182,31 @@ def _run_rule_fetch(summary: dict, now: datetime, force: bool = False) -> None:
             logger.warning("自动抓取规则来源失败：%s：%s", row["name"], exc)
 
 
+def _run_snippet_fetch(summary: dict, now: datetime, force: bool = False) -> None:
+    """抓取远程拓展模块：与规则来源同构的到期判断与重试。"""
+    with db.connect() as conn:
+        rows = db.all_(
+            conn,
+            "SELECT id, name, interval, last_attempt_at, last_fetched_at, created_at "
+            "FROM snippets WHERE enabled=1 AND source='remote' ORDER BY id",
+        )
+    for row in rows:
+        last = row["last_attempt_at"] or row["last_fetched_at"]
+        if not force and last and not _due(last, row["interval"], now):
+            continue
+        try:
+            _fetch_with_retry(
+                lambda sid=row["id"]: updater.refresh_snippet(
+                    sid, AUTO_OPERATOR, automatic=True),
+                f"自动抓取拓展模块 {row['name']}",
+            )
+            summary["snippets_fetched"] += 1
+        except Exception as exc:
+            summary["snippets_failed"] += 1
+            summary["errors"].append(f"拓展模块 {row['name']}：{exc}")
+            logger.warning("自动抓取拓展模块失败：%s：%s", row["name"], exc)
+
+
 def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
     """自动构建发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。
 
@@ -360,6 +385,7 @@ def _run_retention(summary: dict) -> None:
 
 def _has_activity(summary: dict) -> bool:
     keys = ("sources_fetched", "sources_failed", "rules_fetched", "rules_failed",
+            "snippets_fetched", "snippets_failed",
             "tests_run", "tests_errors", "build", "published")
     return any(summary.get(key) for key in keys) or bool(summary.get("errors"))
 
@@ -380,6 +406,8 @@ def _record_run(summary: dict, trigger: str, actor: str) -> None:
         "sources_failed": summary["sources_failed"],
         "rules_fetched": summary["rules_fetched"],
         "rules_failed": summary["rules_failed"],
+        "snippets_fetched": summary["snippets_fetched"],
+        "snippets_failed": summary["snippets_failed"],
         "tests_run": summary["tests_run"],
         "tests_ok": summary["tests_ok"],
         "tests_failed": summary["tests_failed"],
@@ -423,6 +451,8 @@ def run_once(force: bool = False, trigger: str = "scheduled",
         "sources_failed": 0,
         "rules_fetched": 0,
         "rules_failed": 0,
+        "snippets_fetched": 0,
+        "snippets_failed": 0,
         "tests_run": 0,
         "tests_ok": 0,
         "tests_failed": 0,
@@ -437,6 +467,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             master = _setting(conn, "scheduler_enabled", "1") == "1"
             fetch_sources = _enabled(conn, "auto_fetch_sources", "1")
             fetch_rules = _enabled(conn, "auto_fetch_rules", "1")
+            fetch_snippets = _enabled(conn, "auto_fetch_snippets", "1")
             test_sources = _enabled(conn, "auto_test_sources", "1")
         if not master and not force:
             summary["skipped"] = "定时任务未启用"
@@ -446,6 +477,8 @@ def run_once(force: bool = False, trigger: str = "scheduled",
                 _run_source_fetch(summary, now, force=force)
             if fetch_rules:
                 _run_rule_fetch(summary, now, force=force)
+            if fetch_snippets:
+                _run_snippet_fetch(summary, now, force=force)
             if test_sources:
                 _run_source_test(summary, now, force=force)
             _run_auto_build(summary, now, force=force)
@@ -455,9 +488,11 @@ def run_once(force: bool = False, trigger: str = "scheduled",
         _state["last_result"] = summary
         _state["last_error"] = ""
         logger.info(
-            "定时任务完成：抓取节点 %s/%s，规则 %s/%s，测速 %s，构建 %s",
+            "定时任务完成：抓取节点 %s/%s，规则 %s/%s，模块 %s/%s，测速 %s，构建 %s",
             summary["sources_fetched"], summary["sources_fetched"] + summary["sources_failed"],
             summary["rules_fetched"], summary["rules_fetched"] + summary["rules_failed"],
+            summary["snippets_fetched"],
+            summary["snippets_fetched"] + summary["snippets_failed"],
             summary["tests_run"], summary["build"],
         )
         _record_run(summary, trigger, actor)

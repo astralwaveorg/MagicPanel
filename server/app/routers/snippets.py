@@ -10,6 +10,7 @@ import yaml
 from .. import db, security
 from ..deps import CurrentUser
 from ..services import base_config as base_config_service
+from ..services import fetcher, updater
 
 PROTECTED_KEYS = base_config_service.PROTECTED_KEYS
 
@@ -17,16 +18,26 @@ router = APIRouter(prefix="/api/v1/snippets", tags=["snippets"])
 
 CATEGORIES = {"script", "rewrite", "panel", "dns", "general"}
 ENGINES = {"stash", "mihomo", "all"}
+# 来源类型：inline = 面板内建（内容直接写在页面上）；remote = 远程 URL（服务端抓取）
+SOURCES = {"inline", "remote"}
+FORMATS = {"yaml", "text"}
 
 
 class SnippetBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     category: str = "general"
     engine: str = "all"
-    content: str = Field(min_length=1, max_length=100_000)
+    content: str = Field(default="", max_length=100_000)
     enabled: bool = True
     sort: int = 0
     note: str = Field(default="", max_length=256)
+    source: str = "inline"
+    url: str = Field(default="", max_length=1024)
+    format: str = "yaml"
+    interval: int = Field(default=86400, ge=600, le=604800)
+    client_interval: int = Field(default=0, ge=0, le=604800)
+    # 抓取走代理：服务端直连抓不到时经指定代理中转；传空串表示改成直连
+    proxy_url: str | None = Field(default=None, max_length=512)
 
 
 def _check(body: SnippetBody) -> None:
@@ -34,6 +45,17 @@ def _check(body: SnippetBody) -> None:
         raise HTTPException(400, "分类仅支持：script / rewrite / panel / dns / general")
     if body.engine not in ENGINES:
         raise HTTPException(400, "适用引擎仅支持：stash / mihomo / all")
+    if body.source not in SOURCES:
+        raise HTTPException(400, "来源类型仅支持：inline / remote")
+    if body.source == "remote":
+        if not body.url.strip():
+            raise HTTPException(400, "远程拓展模块必须填写 URL")
+        if body.format not in FORMATS:
+            raise HTTPException(400, "格式仅支持：yaml / text")
+    if not body.content.strip():
+        if body.source == "inline":
+            raise HTTPException(400, "内容不能为空")
+        return
     try:
         fragment = yaml.safe_load(body.content)
     except yaml.YAMLError as exc:
@@ -48,9 +70,14 @@ def _check(body: SnippetBody) -> None:
 
 
 def _public(row) -> dict:
-    """对外字段：布尔值还原成 True/False，其余按原样。"""
+    """对外字段：布尔值还原成 True/False，抓取代理只回显脱敏值。"""
     data = db.row_to_dict(row)
     data["enabled"] = bool(data.get("enabled"))
+    enc = data.pop("proxy_url_enc", "") or ""
+    data["use_proxy"] = bool(enc)
+    data["proxy_url_masked"] = (
+        security.mask_url(security.decrypt_text(enc)) if enc else ""
+    )
     return data
 
 
@@ -91,12 +118,17 @@ def create_snippet(body: SnippetBody, user=CurrentUser):
         now = db.now()
         cur = conn.execute(
             "INSERT INTO snippets(name, category, engine, content, enabled, sort, "
-            "note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            "note, source, url, format, interval, client_interval, proxy_url_enc, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.category, body.engine, body.content,
-             int(body.enabled), body.sort, body.note, now, now),
+             int(body.enabled), body.sort, body.note, body.source, body.url,
+             body.format, body.interval, body.client_interval,
+             security.encrypt_text(body.proxy_url) if body.proxy_url else "",
+             now, now),
         )
         security.audit(conn, user["username"], "新增拓展模块", "snippet",
-                       cur.lastrowid, {"name": body.name, "category": body.category})
+                       cur.lastrowid, {"name": body.name, "category": body.category,
+                                       "source": body.source})
         row = _get(conn, cur.lastrowid)
     return _public(row)
 
@@ -105,22 +137,44 @@ def create_snippet(body: SnippetBody, user=CurrentUser):
 def update_snippet(sid: int, body: SnippetBody, user=CurrentUser):
     _check(body)
     with db.tx() as conn:
-        _get(conn, sid)
+        old = _get(conn, sid)
         clash = db.one(
             conn, "SELECT id FROM snippets WHERE name=? AND id!=?", (body.name, sid)
         )
         if clash:
             raise HTTPException(409, "同名拓展模块已存在")
+        # 抓取代理：留空表示不改；传空串表示改成直连
+        proxy_enc = old["proxy_url_enc"] or ""
+        if body.proxy_url is not None:
+            proxy_enc = (security.encrypt_text(body.proxy_url)
+                         if body.proxy_url else "")
         conn.execute(
             "UPDATE snippets SET name=?, category=?, engine=?, content=?, enabled=?, "
-            "sort=?, note=?, updated_at=? WHERE id=?",
+            "sort=?, note=?, source=?, url=?, format=?, interval=?, "
+            "client_interval=?, proxy_url_enc=?, updated_at=? WHERE id=?",
             (body.name, body.category, body.engine, body.content, int(body.enabled),
-             body.sort, body.note, db.now(), sid),
+             body.sort, body.note, body.source, body.url, body.format,
+             body.interval, body.client_interval, proxy_enc, db.now(), sid),
         )
         security.audit(conn, user["username"], "更新拓展模块", "snippet", sid,
-                       {"name": body.name, "category": body.category})
+                       {"name": body.name, "category": body.category,
+                        "source": body.source})
         row = _get(conn, sid)
-    return db.row_to_dict(row)
+    return _public(row)
+
+
+@router.post("/{sid}/refresh")
+def refresh_snippet(sid: int, user=CurrentUser):
+    """立刻抓取远程拓展模块；失败保留上一次可用内容。"""
+    try:
+        row = updater.refresh_snippet(sid, user["username"])
+    except updater.NotFound as exc:
+        raise HTTPException(404, str(exc))
+    except updater.InvalidOperation as exc:
+        raise HTTPException(400, str(exc))
+    except fetcher.FetchError as exc:
+        raise HTTPException(502, f"抓取失败：{exc}（已保留最近一次可用内容）")
+    return _public(row)
 
 
 @router.delete("/{sid}")

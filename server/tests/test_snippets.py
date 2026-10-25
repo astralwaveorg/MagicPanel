@@ -49,6 +49,72 @@ def test_snippet_paged_list(client):
     assert data["items"][0]["enabled"] is True
 
 
+def test_snippet_remote_source(client, monkeypatch):
+    """远程拓展模块：来源类型、内联/远程互斥、抓取失败保留旧内容。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+
+    # 远程来源必须填 URL；内联来源不需要
+    r = client.post("/api/v1/snippets", headers=h, json={
+        "name": "远程片段", "source": "remote", "content": "log-level: info"})
+    assert r.status_code == 400
+    assert "URL" in r.json()["detail"]
+
+    # 内联来源必须有内容
+    r = client.post("/api/v1/snippets", headers=h, json={
+        "name": "空内联", "source": "inline", "content": ""})
+    assert r.status_code == 400
+
+    # 来源类型只能是 inline / remote
+    r = client.post("/api/v1/snippets", headers=h, json={
+        "name": "坏来源", "source": "repo", "content": "a: 1"})
+    assert r.status_code == 400
+
+    # 远程来源允许先不带内容（内容由抓取填充）
+    r = client.post("/api/v1/snippets", headers=h, json={
+        "name": "远程片段", "source": "remote",
+        "url": "https://example.com/frag.yaml", "format": "yaml",
+        "interval": 3600, "client_interval": 0})
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    assert r.json()["source"] == "remote"
+    assert r.json()["interval"] == 3600
+    # 抓取代理不回显明文
+    assert r.json()["proxy_url_masked"] == ""
+
+    # 远程来源抓取失败：记状态、保留上一次可用内容
+    r = client.post(f"/api/v1/snippets/{sid}/refresh", headers=h)
+    assert r.status_code == 502, r.text
+    assert "保留" in r.json()["detail"]
+    row = client.get("/api/v1/snippets", headers=h).json()[0]
+    assert row["last_status"] == "failed"
+    assert row["last_error"]
+
+    # 内联来源不能抓取
+    inline = client.post("/api/v1/snippets", headers=h, json={
+        "name": "内联片段", "content": "log-level: info"}).json()
+    r = client.post(f"/api/v1/snippets/{inline['id']}/refresh", headers=h)
+    assert r.status_code == 400
+
+    # 抓取成功：内容进缓存，并进入产物
+    monkeypatch.setattr("app.services.fetcher.fetch",
+                        lambda *a, **k: b"log-level: debug\n")
+    r = client.post(f"/api/v1/snippets/{sid}/refresh", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["last_status"] == "ok"
+    assert "log-level: debug" in r.json()["content"]
+
+    make_policy(client, csrf)
+    # 内联片段与远程片段写同一个键，后合并的覆盖前面的；删掉内联的再验证产物
+    assert client.delete(f"/api/v1/snippets/{inline['id']}", headers=h).status_code == 200
+    build = client.post("/api/v1/builds", headers=h, json={})
+    assert build.status_code == 201, build.text
+    bid = build.json()["id"]
+    stash = yaml.safe_load(client.get(
+        f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"])
+    assert stash["log-level"] == "debug"
+
+
 def test_snippet_merge_into_build(client):
     csrf = setup_admin(client)
     make_policy(client, csrf)

@@ -33,6 +33,15 @@
           <el-table-column label="分类" width="90">
             <template #default="{ row }">{{ CATEGORY_LABELS[row.category] || row.category }}</template>
           </el-table-column>
+          <el-table-column label="来源" width="90">
+            <template #default="{ row }">
+              <el-tooltip v-if="row.source === 'remote'"
+                          :content="row.url || '远程来源'" placement="top">
+                <el-tag size="small" type="info" effect="plain">远程</el-tag>
+              </el-tooltip>
+              <el-tag v-else size="small" effect="plain">内联</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="适用引擎" width="100">
             <template #default="{ row }">{{ ENGINE_LABELS[row.engine] || row.engine }}</template>
           </el-table-column>
@@ -49,10 +58,12 @@
           <el-table-column label="更新时间" min-width="130">
             <template #default="{ row }">{{ fmtTime(row.updated_at) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="180" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="250" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="preview(row)" type="info" plain>内容</el-button>
+                <el-button v-if="row.source === 'remote'" size="small"
+                           :loading="refreshing === row.id" @click="refresh(row)" plain>抓取</el-button>
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
                 <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
               </div>
@@ -66,7 +77,7 @@
     <el-dialog v-model="dialog" :title="editing ? '编辑模块' : '添加模块'"
                width="min(640px, 94vw)">
       <el-form :model="form" label-position="top">
-        <el-form-item label="常用预设（选好后点“填入”，内容可继续修改）">
+        <el-form-item v-if="form.source === 'inline'" label="常用预设（选好后点“填入”，内容可继续修改）">
           <div style="display:flex;gap:8px;width:100%">
             <el-select v-model="presetKey" placeholder="选择一个预设" style="flex:1" filterable>
               <el-option-group v-for="(items, cat) in PRESETS_BY_CATEGORY" :key="cat"
@@ -107,7 +118,57 @@
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="内容（YAML 键值片段）">
+        <el-form-item label="来源类型">
+          <el-radio-group v-model="form.source">
+            <el-radio-button value="inline">内联内容</el-radio-button>
+            <el-radio-button value="remote">远程 URL</el-radio-button>
+          </el-radio-group>
+          <div class="mp-form-hint">
+            {{ form.source === 'remote'
+              ? '服务端按间隔抓取远端文件，内容进缓存；抓取失败保留上一次可用内容。'
+              : '内容直接写在下面，构建时按引擎合并进目标配置。' }}
+          </div>
+        </el-form-item>
+        <template v-if="form.source === 'remote'">
+          <el-form-item label="远程地址">
+            <el-input v-model="form.url" placeholder="https://example.com/fragment.yaml" />
+          </el-form-item>
+          <el-row :gutter="12">
+            <el-col :span="8">
+              <el-form-item label="格式">
+                <el-select v-model="form.format" style="width:100%">
+                  <el-option value="yaml" label="YAML" />
+                  <el-option value="text" label="纯文本" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="抓取间隔（秒）">
+                <el-input-number v-model="form.interval" :min="600" :max="604800"
+                                 :step="3600" style="width:100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="客户端更新间隔（秒）">
+                <el-input-number v-model="form.client_interval" :min="0" :max="604800"
+                                 :step="3600" style="width:100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item label="抓取走代理">
+            <el-switch v-model="form.useProxy" />
+            <span class="mp-form-hint" style="margin-left:12px">
+              服务端直连抓不到时经指定代理中转（例如 http://10.0.1.8:7890）
+            </span>
+          </el-form-item>
+          <el-form-item label="抓取代理地址">
+            <el-input v-model="form.proxyUrl" placeholder="留空表示直连抓取" />
+          </el-form-item>
+          <el-form-item v-if="form.content" label="当前缓存内容（抓取后由服务端维护）">
+            <el-input :model-value="form.content" type="textarea" :rows="6" readonly class="mono" />
+          </el-form-item>
+        </template>
+        <el-form-item v-else label="内容（YAML 键值片段）">
           <el-input v-model="form.content" type="textarea" :rows="10" class="mono"
                     placeholder="panel:&#10;  首页:&#10;    title: 家庭网络" />
         </el-form-item>
@@ -163,10 +224,14 @@ const presetKey = ref('')
 const previewDialog = ref(false)
 const previewContent = ref('')
 const previewName = ref('')
+const refreshing = ref(0)
 
 const emptyForm = () => ({
   name: '', category: 'general', engine: 'all', content: '',
   enabled: true, sort: 0, note: '',
+  source: 'inline', url: '', format: 'yaml',
+  interval: 86400, client_interval: 0,
+  useProxy: false, proxyUrl: '',
 })
 const form = reactive(emptyForm())
 
@@ -179,6 +244,7 @@ function applyPreset() {
   form.content = preset.content
   form.note = preset.note || ''
   form.enabled = preset.enabled !== false
+  form.source = 'inline'
   ElMessage.success('已填入预设，可继续修改后保存')
 }
 
@@ -215,19 +281,39 @@ function openEdit(row) {
   Object.assign(form, emptyForm(), row ? {
     name: row.name, category: row.category, engine: row.engine,
     content: row.content, enabled: !!row.enabled, sort: row.sort, note: row.note,
+    source: row.source || 'inline', url: row.url || '',
+    format: row.format || 'yaml',
+    interval: row.interval ?? 86400, client_interval: row.client_interval ?? 0,
+    useProxy: !!row.use_proxy, proxyUrl: '',
   } : {})
   dialog.value = true
 }
 
 async function save() {
   if (!form.name.trim()) return ElMessage.warning('请填写名称')
-  if (!form.content.trim()) return ElMessage.warning('请填写内容')
+  if (form.source === 'inline' && !form.content.trim()) {
+    return ElMessage.warning('请填写内容')
+  }
+  if (form.source === 'remote' && !form.url.trim()) {
+    return ElMessage.warning('请填写远程地址')
+  }
   saving.value = true
+  const body = {
+    name: form.name, category: form.category, engine: form.engine,
+    content: form.source === 'inline' ? form.content : (form.content || ''),
+    enabled: form.enabled, sort: form.sort, note: form.note,
+    source: form.source, url: form.url, format: form.format,
+    interval: form.interval, client_interval: form.client_interval,
+    // 抓取代理：留空表示不改；给了空串表示改成直连
+    proxy_url: form.source === 'remote'
+      ? (form.useProxy ? (form.proxyUrl || '') : '')
+      : null,
+  }
   try {
     if (editing.value) {
-      await api(`/api/v1/snippets/${editing.value.id}`, { method: 'PUT', body: { ...form } })
+      await api(`/api/v1/snippets/${editing.value.id}`, { method: 'PUT', body })
     } else {
-      await api('/api/v1/snippets', { method: 'POST', body: { ...form } })
+      await api('/api/v1/snippets', { method: 'POST', body })
     }
     dialog.value = false
     ElMessage.success('已保存，下次构建时生效')
@@ -237,6 +323,19 @@ async function save() {
     ElMessage.error(e.message)
   } finally {
     saving.value = false
+  }
+}
+
+async function refresh(row) {
+  refreshing.value = row.id
+  try {
+    await api(`/api/v1/snippets/${row.id}/refresh`, { method: 'POST' })
+    ElMessage.success(`已抓取 “${row.name}”`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    refreshing.value = 0
   }
 }
 

@@ -10,6 +10,8 @@ import base64
 import json
 import threading
 
+import yaml
+
 from .. import config, db, security
 from . import fetcher, source_nodes, tester
 
@@ -50,6 +52,13 @@ def _source_row(conn, source_id: int):
     row = db.one(conn, "SELECT * FROM sources WHERE id=?", (source_id,))
     if not row:
         raise NotFound("节点来源不存在")
+    return row
+
+
+def _snippet_row(conn, sid: int):
+    row = db.one(conn, "SELECT * FROM snippets WHERE id=?", (sid,))
+    if not row:
+        raise NotFound("拓展模块不存在")
     return row
 
 
@@ -284,3 +293,84 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
     finally:
         lock.release()
         _release_lock(key, lock)
+
+
+def refresh_snippet(sid: int, operator: str, automatic: bool = False):
+    """抓取远程拓展模块并留存快照；内联拓展模块不参与抓取。
+
+    与 refresh_provider 同构：失败时先提交状态再抛异常，
+    并保留上一次可用内容（内容进产物，坏内容会直接打坏客户端配置）。
+    """
+    key = f"snippet:{sid}"
+    lock = _lock_for(key)
+    if not lock.acquire(blocking=False):
+        raise InvalidOperation("该拓展模块正在抓取中，请稍候再试")
+    try:
+        with db.tx() as conn:
+            row = _snippet_row(conn, sid)
+            if row["source"] != "remote":
+                raise InvalidOperation("内联拓展模块无需抓取")
+            url = row["url"]
+            proxy = (security.decrypt_text(row["proxy_url_enc"])
+                     if row["proxy_url_enc"] else "")
+            name = row["name"]
+            now = db.now()
+            conn.execute(
+                "UPDATE snippets SET last_attempt_at=?, updated_at=? WHERE id=?",
+                (now, now, sid),
+            )
+        error = ""
+        body = None
+        try:
+            body = fetcher.fetch(url, proxy=proxy)
+            # 抓到的内容仍要过拓展模块的校验：非法 YAML 或结构键会打坏产物
+            text = body.decode("utf-8", "replace")
+            _validate_snippet_content(text)
+        except Exception as exc:
+            error = _error_text(exc)
+        with db.tx() as conn:
+            now = db.now()
+            if error:
+                conn.execute(
+                    "UPDATE snippets SET last_status='failed', last_error=?, "
+                    "last_attempt_at=?, updated_at=? WHERE id=?",
+                    (error, now, now, sid),
+                )
+                security.audit(
+                    conn, operator,
+                    _action(automatic, "刷新拓展模块失败", "自动抓取拓展模块失败"),
+                    "snippet", sid, {"name": name, "error": error},
+                )
+            else:
+                conn.execute(
+                    "UPDATE snippets SET last_status='ok', last_error='', "
+                    "last_fetched_at=?, last_attempt_at=?, content=?, updated_at=? "
+                    "WHERE id=?",
+                    (now, now, text, now, sid),
+                )
+                security.audit(
+                    conn, operator,
+                    _action(automatic, "刷新拓展模块", "自动抓取拓展模块"),
+                    "snippet", sid, {"name": name},
+                )
+        if error:
+            raise fetcher.FetchError(error)
+        with db.connect() as conn:
+            return _snippet_row(conn, sid)
+    finally:
+        lock.release()
+        _release_lock(key, lock)
+
+
+def _validate_snippet_content(text: str) -> None:
+    """远程抓到的片段必须仍是合法的非空 YAML 映射，且不含结构键。"""
+    from . import base_config as base_config_service
+    try:
+        fragment = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise fetcher.FetchError(f"内容不是合法 YAML：{exc}") from exc
+    if not isinstance(fragment, dict) or not fragment:
+        raise fetcher.FetchError("内容必须是非空的 YAML 映射（键值结构）")
+    for key, reason in base_config_service.PROTECTED_KEYS.items():
+        if key in fragment:
+            raise fetcher.FetchError(f"拓展模块不能包含“{key}”：{reason}")

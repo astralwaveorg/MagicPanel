@@ -324,7 +324,15 @@ def main() -> int:
             problems.append(f"策略组「{g['name']}」没有任何成员")
 
     # ---- 5. 拓展模块 ----
-    for s in rows("SELECT id, name, engine, enabled, content FROM snippets"):
+    for s in rows("SELECT id, name, engine, enabled, content, source, last_status "
+                  "FROM snippets"):
+        if s["engine"] not in ("all", "stash", "mihomo"):
+            problems.append(f"拓展模块「{s['name']}」的引擎范围「{s['engine']}」非法")
+        if s["source"] == "remote" and not (s["content"] or "").strip():
+            # 远程拓展模块还没抓到内容：不阻断，但提示它此刻不进产物
+            if s["enabled"]:
+                notes.append(f"拓展模块「{s['name']}」还没抓到内容，构建时不包含它")
+            continue
         try:
             content = yaml.safe_load(s["content"] or "")
         except Exception as exc:
@@ -336,8 +344,6 @@ def main() -> int:
         for k in STRUCT_KEYS:
             if k in content:
                 problems.append(f"拓展模块「{s['name']}」含结构键 {k}")
-        if s["engine"] not in ("all", "stash", "mihomo"):
-            problems.append(f"拓展模块「{s['name']}」的引擎范围「{s['engine']}」非法")
         if s["enabled"]:
             for engine in (("stash", "mihomo") if s["engine"] == "all" else (s["engine"],)):
                 default = bc.default_doc(engine)

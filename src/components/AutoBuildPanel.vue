@@ -14,7 +14,7 @@
           <span class="mp-toolbar-hint">上次运行：{{ fmtTime(status.last_tick_at) }}</span>
           <span v-if="!status.autostart" class="mp-toolbar-hint">后台循环未启动</span>
         </div>
-        <el-button :loading="triggering" @click="runAutoNow" type="primary">立即发布</el-button>
+        <!-- 「立即发布」是页面级主操作，在标题行右侧，这里不再重复放一个 -->
       </div>
       <div class="mp-auto-status">
         <div>
@@ -51,6 +51,9 @@
             <el-form-item label="自动抓取规则来源">
               <el-switch v-model="form.auto_fetch_rules" />
             </el-form-item>
+            <el-form-item label="自动抓取拓展模块">
+              <el-switch v-model="form.auto_fetch_snippets" />
+            </el-form-item>
           </el-form>
           <p class="mp-form-hint">
             每个来源的抓取/测速间隔在对应的来源页面配置，支持批量修改。
@@ -58,6 +61,7 @@
           <div class="mp-auto-links">
             <el-button size="small" @click="router.push('/admin/sources')">节点来源</el-button>
             <el-button size="small" @click="router.push('/admin/rule-providers')">规则来源</el-button>
+            <el-button size="small" @click="router.push('/admin/snippets')">拓展模块</el-button>
           </div>
         </div>
       </el-col>
@@ -160,8 +164,8 @@ import StatusDot from './StatusDot.vue'
 import EmptyState from './EmptyState.vue'
 import { fmtTime } from '../format'
 import {
-  status, releases, runs, saving, triggering, form, lastResultText,
-  loadAutoPublish, saveAutoSettings, runAutoNow, releaseActionText, resultText,
+  status, releases, runs, saving, form, lastResultText,
+  loadAutoPublish, saveAutoSettings, releaseActionText, resultText,
 } from '../useAutoPublish'
 
 const router = useRouter()

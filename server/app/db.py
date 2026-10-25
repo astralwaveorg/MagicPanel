@@ -290,6 +290,25 @@ def init_db() -> None:
                        "auto_test INTEGER NOT NULL DEFAULT 1")
         _ensure_column(conn, "rule_providers", "last_attempt_at",
                        "last_attempt_at TEXT")
+        # 拓展模块的来源类型：inline（面板内建）/ remote（远程 URL，由服务端抓取）
+        _ensure_column(conn, "snippets", "source",
+                       "source TEXT NOT NULL DEFAULT 'inline'")
+        _ensure_column(conn, "snippets", "url", "url TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snippets", "format",
+                       "format TEXT NOT NULL DEFAULT 'yaml'")
+        _ensure_column(conn, "snippets", "interval",
+                       "interval INTEGER NOT NULL DEFAULT 86400")
+        _ensure_column(conn, "snippets", "client_interval",
+                       "client_interval INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "snippets", "proxy_url_enc",
+                       "proxy_url_enc TEXT NOT NULL DEFAULT ''")
+        # 远程拓展模块的抓取状态：失败保留上一次可用内容
+        _ensure_column(conn, "snippets", "last_status",
+                       "last_status TEXT NOT NULL DEFAULT 'never'")
+        _ensure_column(conn, "snippets", "last_error",
+                       "last_error TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snippets", "last_fetched_at", "last_fetched_at TEXT")
+        _ensure_column(conn, "snippets", "last_attempt_at", "last_attempt_at TEXT")
         # 抓取走代理：服务端出不去机场/规则站时，经指定代理中转
         _ensure_column(conn, "sources", "proxy_url_enc",
                        "proxy_url_enc TEXT NOT NULL DEFAULT ''")

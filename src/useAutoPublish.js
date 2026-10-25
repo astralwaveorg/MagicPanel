@@ -20,6 +20,7 @@ const form = reactive({
   auto_fetch_sources: true,
   auto_test_sources: true,
   auto_fetch_rules: true,
+  auto_fetch_snippets: true,
   auto_build_enabled: true,
   auto_build_interval_hours: 12,
   auto_publish_enabled: true,
@@ -43,6 +44,9 @@ export function resultText(r) {
   }
   if (r.rules_fetched || r.rules_failed) {
     parts.push(`规则抓取 ${r.rules_fetched} 成功 / ${r.rules_failed} 失败`)
+  }
+  if (r.snippets_fetched || r.snippets_failed) {
+    parts.push(`拓展模块抓取 ${r.snippets_fetched} 成功 / ${r.snippets_failed} 失败`)
   }
   if (r.tests_run || r.tests_errors) {
     parts.push(`测速 ${r.tests_ok} 可用 / ${r.tests_failed} 失败`)
@@ -71,6 +75,7 @@ function applySettings(s) {
   form.auto_fetch_sources = s.auto_fetch_sources === '1'
   form.auto_test_sources = s.auto_test_sources === '1'
   form.auto_fetch_rules = s.auto_fetch_rules === '1'
+  form.auto_fetch_snippets = s.auto_fetch_snippets !== '0'
   form.auto_build_enabled = s.auto_build_enabled === '1'
   form.auto_build_interval_hours = Number(s.auto_build_interval_hours) || 12
   form.auto_publish_enabled = s.auto_publish_enabled === '1'
@@ -113,6 +118,7 @@ export async function saveAutoSettings() {
       auto_fetch_sources: form.auto_fetch_sources ? '1' : '0',
       auto_test_sources: form.auto_test_sources ? '1' : '0',
       auto_fetch_rules: form.auto_fetch_rules ? '1' : '0',
+      auto_fetch_snippets: form.auto_fetch_snippets ? '1' : '0',
       auto_build_enabled: form.auto_build_enabled ? '1' : '0',
       auto_build_interval_hours: String(form.auto_build_interval_hours),
       auto_publish_enabled: form.auto_publish_enabled ? '1' : '0',
