@@ -43,9 +43,23 @@
             <button v-if="isMaintainer" class="pt-exit" @click="goAdmin">管理后台</button>
             <button v-else class="pt-exit" @click="exitPortal">退出查看</button>
           </div>
-          <div class="pt-search">
-            <input v-model="query" placeholder="搜索订阅、规则、客户端…" aria-label="搜索">
-          </div>
+          <form class="pt-search" @submit.prevent="doSearch">
+            <div class="pt-search-box">
+              <input
+                v-model="query"
+                placeholder="搜索订阅、规则、客户端…"
+                aria-label="搜索"
+              >
+              <button
+                v-if="query"
+                type="button"
+                class="pt-search-clear"
+                aria-label="清空搜索"
+                @click="clearSearch"
+              >×</button>
+            </div>
+            <button class="pt-search-btn" type="submit">搜索</button>
+          </form>
           <p class="pt-hero-sub">
             {{ devices.length }} 台设备 · {{ data.rules.length }} 条个人规则 ·
             {{ data.rule_providers.length }} 个规则来源 ·
@@ -59,9 +73,25 @@
         <section v-if="engineGroups.length">
           <h2 class="pt-sec-title">核心配置</h2>
           <div v-for="g in engineGroups" :key="g.engine" class="pt-engine">
-            <h3 class="pt-engine-title">{{ g.label }}</h3>
-            <div class="pt-grid">
-              <article v-for="d in g.devices" :key="d.name" class="pt-card">
+            <div class="pt-engine-head">
+              <h3 class="pt-engine-title">{{ g.label }}</h3>
+              <div class="pt-chips">
+                <button
+                  v-for="p in g.platforms"
+                  :key="p.key"
+                  class="pt-chip"
+                  :data-platform="p.key"
+                  :class="{ active: platformFilter === p.key }"
+                  :aria-pressed="platformFilter === p.key"
+                  :title="platformFilter === p.key ? '取消筛选' : `只看 ${p.label} 设备`"
+                  @click="togglePlatform(p.key)"
+                >
+                  <span class="pt-chip-dot"></span>{{ p.label }}
+                </button>
+              </div>
+            </div>
+            <div v-if="g.devices.length" class="pt-grid">
+              <article v-for="d in g.devices" :key="d.name" class="pt-card" :data-platform="d.platform">
                 <div class="pt-card-head">
                   <span class="pt-card-name">{{ cardTitle(d) }}</span>
                   <span class="pt-tag" :data-env="d.env">
@@ -69,7 +99,7 @@
                   </span>
                 </div>
                 <p class="pt-card-meta">
-                  {{ platformLabel(d.platform) }} · {{ d.target_name }}
+                  <span class="pt-plat">{{ platformLabel(d.platform) }}</span> · {{ d.target_name }}
                   <template v-if="hasOwnProfile(d)">
                     · 设备：{{ d.display_name }}
                   </template>
@@ -95,7 +125,7 @@
             </div>
           </div>
         </section>
-        <p v-else-if="!query" class="pt-empty">
+        <p v-else-if="!appliedQuery" class="pt-empty">
           暂无订阅地址：设备尚未创建或尚未发布版本，请联系维护者在管理后台完成配置与发布。
         </p>
 
@@ -117,10 +147,10 @@
         </section>
 
         <!-- 分流规则：默认折叠，搜索时自动展开匹配项 -->
-        <section v-if="rules.length || (!query && ruleTotal)">
+        <section v-if="rules.length || (!appliedQuery && ruleTotal)">
           <h2 class="pt-sec-title">分流规则<small>个人维护，点击复制</small></h2>
           <button
-            v-if="!query && !rulesExpanded"
+            v-if="!appliedQuery && !rulesExpanded"
             class="pt-rules-toggle"
             @click="rulesExpanded = true"
           >共 {{ ruleTotal }} 条，点击展开</button>
@@ -131,7 +161,7 @@
             </li>
           </ul>
           <button
-            v-if="!query && rulesExpanded"
+            v-if="!appliedQuery && rulesExpanded"
             class="pt-rules-toggle"
             @click="rulesExpanded = false"
           >收起</button>
@@ -180,8 +210,8 @@
           <span>链接拉取无需额外鉴权，请仅发给受信设备</span>
         </footer>
 
-        <div v-if="query && !hasAnyResult" class="pt-noresult">
-          没有匹配 “{{ query }}” 的内容
+        <div v-if="appliedQuery && !hasAnyResult" class="pt-noresult">
+          没有匹配 “{{ appliedQuery }}” 的内容
         </div>
       </main>
 
@@ -217,7 +247,10 @@ const gateError = ref('')
 const shaking = ref(false)
 const locked = ref(false)
 const lockRemain = ref(0)
+// query 是输入框里的字，appliedQuery 是实际生效的搜索词（点按钮或回车才更新）
 const query = ref('')
+const appliedQuery = ref('')
+const platformFilter = ref('')
 const copied = ref('')
 const pinInput = ref(null)
 const qrUrl = ref('')
@@ -234,28 +267,44 @@ const PLATFORM_LABELS = {
   ios: 'iOS', macos: 'macOS', tvos: 'tvOS', windows: 'Windows', android: 'Android',
   linux: 'Linux',
 }
+// 平台标签的固定排列顺序，保证两个引擎下的标签列一致
+const PLATFORM_ORDER = ['ios', 'macos', 'tvos', 'windows', 'android', 'linux']
 const ENGINE_LABELS = { stash: 'Stash', mihomo: 'Mihomo' }
 
 const norm = (s) => (s || '').toLowerCase()
-const hit = (...fields) => !query.value
-  || fields.some((f) => norm(f).includes(norm(query.value)))
+const hit = (...fields) => !appliedQuery.value
+  || fields.some((f) => norm(f).includes(norm(appliedQuery.value)))
+function doSearch() { appliedQuery.value = query.value }
+function clearSearch() { query.value = ''; appliedQuery.value = '' }
 
 const devices = computed(() =>
   (data.value?.devices || []).filter((d) =>
-    hit(d.name, d.display_name, d.platform, d.target_name, d.note)))
+    (!platformFilter.value || d.platform === platformFilter.value)
+    && hit(d.name, d.display_name, d.platform, d.target_name, d.note)))
 
 const engineGroups = computed(() => {
+  // 分组与平台标签都基于**全部**设备，不受搜索与平台筛选影响——
+  // 否则标签会在筛选后消失，用户就没法切回别的平台了。
   const groups = {}
-  for (const d of devices.value) {
+  for (const d of data.value?.devices || []) {
     const key = d.engine || 'other'
     ;(groups[key] ||= []).push(d)
   }
   return Object.entries(groups).map(([engine, list]) => ({
     engine,
     label: ENGINE_LABELS[engine] || engine,
-    devices: list,
+    platforms: PLATFORM_ORDER
+      .filter((key) => list.some((d) => d.platform === key))
+      .map((key) => ({ key, label: PLATFORM_LABELS[key] || key })),
+    devices: list.filter((d) => devices.value.includes(d)),
   }))
 })
+
+// 平台筛选：点标签只看该平台，再点一次取消。两个引擎共用同一筛选状态——
+// 平台是跨引擎的统一概念，点任意一个引擎的 iOS 都应该看到所有 iOS 设备。
+function togglePlatform(key) {
+  platformFilter.value = platformFilter.value === key ? '' : key
+}
 
 const clients = computed(() =>
   (data.value?.clients || []).filter((c) => hit(c.name, c.desc, c.platform)))
@@ -538,10 +587,17 @@ onMounted(async () => {
   flex: 1;
   text-align: center;
 }
-.pt-search { margin-top: 14px; }
+/* 搜索框收窄，与下方一行统计信息比例协调；右侧留出明确的搜索按钮 */
+.pt-search {
+  display: flex;
+  gap: 10px;
+  max-width: 760px;
+  margin-top: 14px;
+}
+.pt-search-box { position: relative; flex: 1; min-width: 0; }
 .pt-search input {
   width: 100%;
-  padding: 11px 16px;
+  padding: 11px 38px 11px 16px;
   font-size: 14px;
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
@@ -551,6 +607,35 @@ onMounted(async () => {
 }
 .pt-search input:focus { border-color: #6c7bff; }
 .pt-search input::placeholder { color: #6d7490; }
+.pt-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #aab1c8;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pt-search-clear:hover { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.pt-search-btn {
+  flex: none;
+  padding: 0 24px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, #6c7bff, #7c5cf0);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.1s;
+}
+.pt-search-btn:hover { filter: brightness(1.12); }
+.pt-search-btn:active { transform: translateY(1px); }
 /* 统计信息放在搜索框下面 */
 .pt-hero-sub { color: #9aa0b5; font-size: 12.5px; margin: 10px 0 0; }
 
@@ -564,7 +649,53 @@ onMounted(async () => {
   gap: 10px;
 }
 .pt-sec-title small { font-size: 12px; font-weight: 400; color: #79809a; }
-.pt-engine-title { font-size: 13px; color: #8f96b0; margin: 18px 0 10px; font-weight: 600; }
+.pt-engine-title { font-size: 13px; color: #8f96b0; margin: 0; font-weight: 600; }
+
+/* 引擎标题行：左边引擎名，右边平台筛选标签 */
+.pt-engine-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 18px 0 10px;
+}
+.pt-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 平台色板：低饱和莫兰迪色系，颜色只出现在筛选标签、卡片侧条与平台文字三处 */
+.pt-chip[data-platform='ios'] { --pc: #6ea8fe; }
+.pt-chip[data-platform='android'] { --pc: #5fd08a; }
+.pt-chip[data-platform='windows'] { --pc: #4fc3d9; }
+.pt-chip[data-platform='macos'] { --pc: #a98bf0; }
+.pt-chip[data-platform='tvos'] { --pc: #f0996a; }
+.pt-chip[data-platform='linux'] { --pc: #d4b45a; }
+
+.pt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  padding: 3px 10px;
+  border-radius: 99px;
+  white-space: nowrap;
+  color: var(--pc);
+  background: color-mix(in srgb, var(--pc) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pc) 24%, transparent);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pt-chip:hover { background: color-mix(in srgb, var(--pc) 20%, transparent); }
+.pt-chip.active {
+  background: color-mix(in srgb, var(--pc) 24%, transparent);
+  border-color: color-mix(in srgb, var(--pc) 52%, transparent);
+}
+.pt-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pc);
+  opacity: 0.85;
+}
 
 .pt-grid {
   display: grid;
@@ -578,6 +709,25 @@ onMounted(async () => {
   padding: 16px 18px;
   backdrop-filter: blur(8px);
   animation: pt-rise 0.35s ease both;
+  position: relative;
+  overflow: hidden;
+}
+/* 卡片左侧的平台色条：不占布局宽度，用内阴影画 */
+.pt-card[data-platform='ios'] { --pc: #6ea8fe; }
+.pt-card[data-platform='android'] { --pc: #5fd08a; }
+.pt-card[data-platform='windows'] { --pc: #4fc3d9; }
+.pt-card[data-platform='macos'] { --pc: #a98bf0; }
+.pt-card[data-platform='tvos'] { --pc: #f0996a; }
+.pt-card[data-platform='linux'] { --pc: #d4b45a; }
+.pt-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--pc, transparent);
+  opacity: 0.7;
 }
 @keyframes pt-rise {
   from { opacity: 0; transform: translateY(8px); }
@@ -597,6 +747,7 @@ onMounted(async () => {
 .pt-tag[data-env='testing'] { background: rgba(250, 183, 82, 0.16); color: #f5c069; }
 .pt-tag.soft { background: rgba(255, 255, 255, 0.1); color: #aab1c8; }
 .pt-card-meta { color: #8f96b0; font-size: 12px; margin: 6px 0 0; }
+.pt-plat { color: var(--pc, #8f96b0); }
 .pt-card-note { color: #79809a; font-size: 12px; margin: 8px 0 0; }
 .pt-url {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -741,6 +892,8 @@ onMounted(async () => {
   .pt-hero h1.pt-hero-title { font-size: 15px; letter-spacing: 1px; }
   .pt-hero-top { gap: 8px; }
   .pt-hero-sub { font-size: 12px; }
+  .pt-search { max-width: 100%; }
+  .pt-search-btn { padding: 0 16px; }
   .pt-grid { grid-template-columns: 1fr; }
   .pt-rules li { flex-direction: column; align-items: flex-start; gap: 4px; }
   .pt-main { padding: 0 14px 44px; }
