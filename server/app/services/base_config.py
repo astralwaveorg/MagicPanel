@@ -28,7 +28,7 @@ PROTECTED_KEYS = {
     "proxy-providers": "远程代理集由“节点来源”维护",
     "proxy-groups": "策略组由“策略组”页维护",
     "rule-providers": "规则集合由“规则来源”维护",
-    "rules": "分流规则由“分流规则”页维护",
+    "rules": "分流规则由“分流策略”页维护",
 }
 
 # 设备配置作用域额外禁止的键：控制面相关。

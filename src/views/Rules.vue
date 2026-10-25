@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2 class="mp-page-title">分流规则</h2>
+    <h2 class="mp-page-title">分流策略</h2>
     <p class="mp-page-desc">
       规则按声明顺序自上而下首次匹配，最后一条须为 MATCH 兜底。按住左侧手柄拖动排序；分页时仅重排当前页，调整后于下一次构建生效。筛选后规则在列表里并不相邻，此时暂停排序以免打乱整体顺序。
     </p>

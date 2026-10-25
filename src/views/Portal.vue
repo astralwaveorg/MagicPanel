@@ -153,10 +153,10 @@
           </div>
         </section>
 
-        <!-- 分流规则 -->
+        <!-- 分流策略 -->
         <section v-if="rules.length || (!appliedQuery && ruleTotal)">
           <div class="pt-sec-head">
-            <h2 class="pt-sec-title">分流规则<small>个人维护，点击复制</small></h2>
+            <h2 class="pt-sec-title">分流策略<small>个人维护，点击复制</small></h2>
           </div>
           <p class="pt-prov-summary">{{ ruleSummary }}</p>
           <div v-for="g in ruleGroups" :key="g.key" class="pt-prov-group">
@@ -410,7 +410,7 @@ const ruleProviders = computed(() =>
   (data.value?.rule_providers || []).filter((p) =>
     hit(p.name, p.behavior, p.kind, p.format, p.origin, p.desc)))
 
-// 首页的三个折叠区块（分流规则 / 规则来源 / 拓展模块）共用一套展开状态：
+// 首页的三个折叠区块（分流策略 / 规则来源 / 拓展模块）共用一套展开状态：
 // 默认全折叠，只记展开的分组 key。
 const expanded = ref([])
 function groupOpen(key) { return expanded.value.includes(key) }
