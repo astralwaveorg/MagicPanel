@@ -931,22 +931,48 @@ def insert_unique(conn, sql: str, args=(), message: str = "记录已存在"):
 
 
 def reorder_subset(conn, table: str, ids: list[int]) -> int:
-    """按给定顺序重排这些行，其它行保持原位。
+    """按给定顺序重排这些行，其它行保持原相对顺序。
 
     列表分页后，界面只拿得到当前页的 id；此时"整表顺序"的语义不成立，
-    但"这几项之间按拖动的顺序排"是明确的——按它们现有的 sort 值
-    重新分配即可，不影响其它行。
+    但"这几项之间按拖动的顺序排"是明确的——把它们按新顺序放回原位置
+    区间，区间内其余行整体顺延，相对顺序不变。
+
+    排序键 sort 必须全局唯一。值重复时两个组拿到同一个 sort，
+    相对顺序退回由 id 决定，拖动不会有任何效果（界面表现为"拖了没反应"）。
+    这里在重排前先消歧：整表按当前顺序重新编号，相对顺序不变，
+    之后任何拖动都能表达。消歧只在存在重复时触发，正常路径不动数值。
     """
     if not ids:
         return 0
     marks = ",".join("?" for _ in ids)
     rows = all_(conn, f"SELECT id, sort FROM {table} WHERE id IN ({marks})",
                 list(ids))
-    if len(rows) != len(set(ids)):
+    # id 重复或含不存在的 id：IN 查询会折叠重复项，只按行数比对会漏掉重复
+    if len(set(ids)) != len(ids) or len(rows) != len(set(ids)):
         return 0
-    values = sorted(r["sort"] for r in rows)
-    for index, rid in enumerate(ids):
-        conn.execute(f"UPDATE {table} SET sort=? WHERE id=?", (values[index], rid))
+    all_rows = all_(conn, f"SELECT id, sort FROM {table} ORDER BY sort, id")
+    if not all_rows:
+        return 0
+    order = [r["id"] for r in all_rows]
+    values = [r["sort"] for r in all_rows]
+    idset = set(ids)
+
+    # sort 值有重复 → 整表按当前顺序重编号消歧（相对顺序不变）
+    if len(set(values)) != len(values):
+        for index, rid in enumerate(order):
+            conn.execute(f"UPDATE {table} SET sort=? WHERE id=?", (index, rid))
+        values = list(range(len(order)))
+
+    # 把子集按提交顺序放进它占据的位置区间（连续块语义）：
+    # 区间内不在子集里的行整体顺延，相对顺序不变
+    positions = [i for i, rid in enumerate(order) if rid in idset]
+    lo, hi = positions[0], positions[-1]
+    middle = [rid for rid in order[lo:hi + 1] if rid not in idset]
+    new_order = order[:lo] + list(ids) + middle + order[hi + 1:]
+
+    # 区间内的槽位值按新顺序重新分配，区间外的行完全不动
+    for slot, rid in zip(values[lo:hi + 1], new_order[lo:hi + 1]):
+        conn.execute(f"UPDATE {table} SET sort=? WHERE id=?", (slot, rid))
     return len(ids)
 
 
