@@ -39,18 +39,18 @@
             <span class="pt-hero-brand">
               <img class="pt-hero-logo" src="/logo.svg" alt="">MagicPanel
             </span>
+            <h1 class="pt-hero-title">订阅中心</h1>
             <button v-if="isMaintainer" class="pt-exit" @click="goAdmin">管理后台</button>
             <button v-else class="pt-exit" @click="exitPortal">退出查看</button>
           </div>
-          <h1>订阅中心</h1>
+          <div class="pt-search">
+            <input v-model="query" placeholder="搜索订阅、规则、客户端…" aria-label="搜索">
+          </div>
           <p class="pt-hero-sub">
             {{ devices.length }} 台设备 · {{ data.rules.length }} 条个人规则 ·
             {{ data.rule_providers.length }} 个规则来源 ·
             {{ releaseText('production') }} · {{ releaseText('testing') }}
           </p>
-          <div class="pt-search">
-            <input v-model="query" placeholder="搜索订阅、规则、客户端…" aria-label="搜索">
-          </div>
         </div>
       </header>
 
@@ -512,10 +512,10 @@ onMounted(async () => {
     radial-gradient(700px 320px at 15% 0%, rgba(108, 123, 255, 0.35), transparent),
     radial-gradient(600px 300px at 90% 20%, rgba(34, 197, 183, 0.28), transparent),
     linear-gradient(180deg, #141834 0%, #0b0e1a 100%);
-  padding: 22px 20px 44px;
+  padding: 16px 20px 36px;
 }
 .pt-hero-inner { max-width: 1080px; margin: 0 auto; }
-.pt-hero-top { display: flex; justify-content: space-between; align-items: center; }
+.pt-hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .pt-hero-brand { font-weight: 700; letter-spacing: 1px; opacity: 0.9; display: inline-flex; align-items: center; gap: 8px; }
 .pt-hero-logo { width: 22px; height: 22px; }
 .pt-exit {
@@ -528,12 +528,21 @@ onMounted(async () => {
   cursor: pointer;
 }
 .pt-exit:hover { border-color: rgba(255, 255, 255, 0.5); color: #fff; }
-.pt-hero h1 { font-size: 30px; margin: 26px 0 8px; letter-spacing: 1px; }
-.pt-hero-sub { color: #9aa0b5; font-size: 13px; margin: 0 0 22px; }
+/* 标题与品牌同一行，顶部整体收紧 */
+.pt-hero h1.pt-hero-title {
+  font-size: 18px;
+  margin: 0;
+  letter-spacing: 2px;
+  font-weight: 600;
+  opacity: 0.92;
+  flex: 1;
+  text-align: center;
+}
+.pt-search { margin-top: 14px; }
 .pt-search input {
   width: 100%;
-  padding: 13px 18px;
-  font-size: 15px;
+  padding: 11px 16px;
+  font-size: 14px;
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -542,6 +551,8 @@ onMounted(async () => {
 }
 .pt-search input:focus { border-color: #6c7bff; }
 .pt-search input::placeholder { color: #6d7490; }
+/* 统计信息放在搜索框下面 */
+.pt-hero-sub { color: #9aa0b5; font-size: 12.5px; margin: 10px 0 0; }
 
 /* 内容 */
 .pt-main { max-width: 1080px; margin: -24px auto 0; padding: 0 20px 56px; }
@@ -727,7 +738,9 @@ onMounted(async () => {
 .pt-modal-card .pt-btn { margin-top: 6px; }
 
 @media (max-width: 640px) {
-  .pt-hero h1 { font-size: 24px; }
+  .pt-hero h1.pt-hero-title { font-size: 15px; letter-spacing: 1px; }
+  .pt-hero-top { gap: 8px; }
+  .pt-hero-sub { font-size: 12px; }
   .pt-grid { grid-template-columns: 1fr; }
   .pt-rules li { flex-direction: column; align-items: flex-start; gap: 4px; }
   .pt-main { padding: 0 14px 44px; }
