@@ -37,9 +37,11 @@
 19. **节点来源有两种下发方式**：`provider`（写进产物的 `proxy-providers` 段，客户端自己拉取更新）或 `inline`（节点写进产物顶层 `proxies`）。只有 `inline` 的节点会进客户端的 GLOBAL 组——Clash/Stash 的 GLOBAL 只收顶层 proxies 与策略组，provider 里的节点进不去。inline 的代价：机场换节点要重拉订阅才生效；机场订阅只保留 `proxies` 段，机场自带的 rules/dns/策略组不进面板。两种模式下「只分发可用节点」都要生效：provider 模式在 feed 端过滤，inline 模式在构建时按测速结果剔除（`sources.excluded_nodes`），漏掉哪一边这个开关就会静默失效。
 20. **规则内容源是独立仓库 `astralwaveorg/magic-sets`，由后台「自主维护」页托管。** 主仓库不再有 submodule 引用（`.gitmodules` 与 `magic-sets/` 已删除）；仓库地址、分支、鉴权凭据存在 `settings.deps_*`，容器运行时把仓库 clone 到 `/app/data/deps/rule-repo`，面板在「自主维护」页里浏览、编辑、提交、推送。仓库分 `rule/`（规则集合）、`script/`（Stash 脚本）、`rewrite/`（HTTP 重写）三个目录。
 
-    面板的规则集分四层：**自维护层**（仓库里的 `rule/*.yaml`，当前 7 个集合，在面板里是 `kind='repo'`，内容由同步写入，**不再经 jsDelivr 中转——改完推上去，客户端下一次拉取就是新的，没有 12 小时缓存**）；**上游通用层**（MetaCubeX/meta-rules-dat 的 mrs，`kind='remote'`）；**上游应用集合层**（blackmatrix7/ios_rule_script 的 `rule/Clash/<集合名>/<集合名>.yaml`，yaml，行为 `classical`，一条文件混多种规则类型，如 `XiaoMi`——**不进自维护仓库**，那是自维护层）；**第三方成品库**直接引别人的成品规则直链（如 `TG-Twilight/AWAvenue-Ads-Rule` 的 `Filters/*.mrs`，mrs、行为 `domain`，当前只有广告过滤这一条）。
+    面板的规则集分四层：**自维护层**（仓库里的 `rule/*.yaml`，当前 13 个集合，在面板里是 `kind='repo'`，内容由同步写入，**不再经 jsDelivr 中转——推上去面板的 `/res/rule/<name>` feed 立刻是新内容，没有 12 小时 CDN 缓存**）；**上游通用层**（MetaCubeX/meta-rules-dat 的 mrs，`kind='remote'`）；**上游应用集合层**（blackmatrix7/ios_rule_script 的 `rule/Clash/<集合名>/<集合名>.yaml`，yaml，行为 `classical`，一条文件混多种规则类型，如 `XiaoMi`——**不进自维护仓库**，那是自维护层）；**第三方成品库**直接引别人的成品规则直链（如 `TG-Twilight/AWAvenue-Ads-Rule` 的 `Filters/*.mrs`，mrs、行为 `domain`，当前只有广告过滤这一条）。
 
     **自维护层的集合一律用 `behavior: classical`**：条目量不大，但类型可以混着写，域名、IP 段、进程名放进同一个文件，一个规则就能表达一整类分流意图。`classical` 里没有 `domain` 行为那种「`+.` 是后缀、不带是精确」的简写，`+.example.com` 要写成 `DOMAIN-SUFFIX,example.com`，`example.com` 要写成 `DOMAIN,example.com`——写错会把精确匹配放宽成整个域。
+
+    **改了自维护集合，客户端不会立刻看到——那是客户端自己的缓存，不是面板的**。客户端把规则集按 `rule-providers` 的 `interval` 存在本地（`path` 指定的位置），更新订阅只换规则表、不换集合内容；集合内容要等客户端自己重新下载。产物里的这个 `interval` 取自规则来源的 `client_interval`，为 0 时回落到来源的 `interval`（默认 86400）。2026-10-26 已把 13 个自维护集合的 `client_interval` 统一设成 **21600（6 小时，与上游通用集合一致）**；要更快就调「规则来源 → 客户端更新间隔」。强制刷新某个规则集可以打控制器的 `PUT /providers/rules/<name>`（Mac 上 `stash provider update <name>` 在 Stash 4.4.0 上返回 404，不可用）。
 
 **集合文件名一律带 `magic-` 前缀**，表示是自维护的（`magic-chat` 而不是 `chat-ext` 这类后缀命名）。当前 13 个集合按目标组分文件：一个目标组一个文件，规则只写一条指向它：
 
