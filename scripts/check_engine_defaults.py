@@ -44,12 +44,16 @@ EXTRA_ALLOWED = {
         "sniffer": "Clash.Meta 兼容键",
         "tcp-concurrent": "Clash 兼容键",
         "unified-delay": "Clash 兼容键",
+        "profile": "Stash 支持 profile.store-selected / store-fake-ip（stash.wiki configuration）",
     },
     "mihomo": {
         "geodata-mode": "Clash.Meta 兼容键（mihomo 支持，官方示例未展开）",
         "keep-alive-interval": "Mihomo 文档未在示例里展开，但内核支持",
         "tcp-concurrent": "Mihomo 文档未在示例里展开，但内核支持",
         "unified-delay": "Mihomo 文档未在示例里展开，但内核支持",
+        "global-client-fingerprint":
+            "mihomo 官方支持（docs/config.yaml global-client-fingerprint），示例文件版本未含",
+        "sniffer": "mihomo 核心能力（docs/config.yaml 有 sniffer 段），示例文件版本未含",
     },
 }
 

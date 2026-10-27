@@ -740,6 +740,14 @@ def _migrate_base_config_defaults(conn) -> None:
     targets = all_(conn, "SELECT id, engine, platform FROM targets")
     target_info = {int(t["id"]): (t["engine"], t["platform"]) for t in targets}
 
+    if not any(docs.values()):
+        # 全新数据库（播种的空覆盖行不算）：没有任何历史层级需要保全。
+        # 不跳过的话，这里会把「旧默认与新默认的差异」当作用户覆盖种进
+        # 引擎默认层，把源码基线的新取值整个遮蔽掉（2026-10-28 踩过）。
+        conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                     "VALUES('base_defaults_full_v1', ?)", (now(),))
+        return
+
     def save(engine: str, platform: str, device_id: int, overlay: dict) -> None:
         key = (engine, platform, device_id)
         content = base_config_service.to_yaml(overlay) if overlay else ""

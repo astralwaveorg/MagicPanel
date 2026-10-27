@@ -105,9 +105,15 @@ def test_render_only_stash_carries_modifiers(client):
     mihomo = yaml.safe_load(render.render_target(
         snapshot, {"name": "t", "engine": "mihomo", "extra_yaml": ""}))
 
-    # rules[0] 是置顶的面板域名直连规则，用户规则从 rules[1] 开始
-    assert stash["rules"][1] == "RULE-SET,ads,REJECT,no-track,pre-matching"
-    assert mihomo["rules"][1] == "RULE-SET,ads,REJECT"
+    # rules[0] 是置顶的 FEED 域名直连规则，随后是基线里的个人直连域名
+    # （_direct_domains 已固化到引擎默认配置），用户规则从其后开始
+    from app.services import base_config as bc
+    personal = bc.normalize_domains(
+        bc.default_doc("stash").get(bc.DIRECT_DOMAINS_KEY))
+    offset = 1 + len(personal)
+    assert stash["rules"][1] == "DOMAIN-SUFFIX,magichub.top,DIRECT"
+    assert stash["rules"][offset] == "RULE-SET,ads,REJECT,no-track,pre-matching"
+    assert mihomo["rules"][offset] == "RULE-SET,ads,REJECT"
     # 兜底规则永远不带修饰符
     assert stash["rules"][-1] == "MATCH,DIRECT"
 

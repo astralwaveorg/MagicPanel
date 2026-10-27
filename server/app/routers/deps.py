@@ -2,6 +2,7 @@
 
 前缀 /api/v1/deps，全部需要登录 + CSRF。
 """
+import yaml
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -159,8 +160,28 @@ def deps_get_file(path: str = Query(...), user=CurrentUser):
             _fail(exc)
 
 
+def _validate_text_file(path: str, content: str) -> None:
+    """写入前做语法校验：这里的 yaml 同时是客户端直接下载的规则文件，
+    写坏了会让设备拉到坏配置，必须在门口拦住（2026-10-28）。"""
+    name = path.rsplit("/", 1)[-1].lower()
+    if name.endswith((".yaml", ".yml")):
+        try:
+            yaml.safe_load(content or "")
+        except yaml.YAMLError as exc:
+            mark = (f"（第 {exc.problem_mark.line + 1} 行）"
+                    if getattr(exc, "problem_mark", None) else "")
+            raise HTTPException(400, f"YAML 语法校验未通过{mark}：{exc.problem or exc}")
+    elif name.endswith(".json"):
+        import json as _json
+        try:
+            _json.loads(content or "null")
+        except ValueError as exc:
+            raise HTTPException(400, f"JSON 语法校验未通过：{exc}")
+
+
 @router.put("/file")
 def deps_put_file(body: FileBody, user=CurrentUser):
+    _validate_text_file(body.path, body.content)
     with db.connect() as conn:
         try:
             repo_manager.write_file(conn, body.path, body.content)
@@ -171,6 +192,7 @@ def deps_put_file(body: FileBody, user=CurrentUser):
 
 @router.post("/file")
 def deps_post_file(body: FileBody, user=CurrentUser):
+    _validate_text_file(body.path, body.content)
     with db.connect() as conn:
         try:
             repo_manager.create_file(conn, body.path, body.content)

@@ -63,37 +63,34 @@ def overview(user=CurrentUser):
                 conn, "SELECT * FROM audit ORDER BY id DESC LIMIT 8"
             )
         ]
+        counts = {
+            "groups": db.one(conn, "SELECT COUNT(*) c FROM proxy_groups")["c"],
+            "rules": db.one(conn, "SELECT COUNT(*) c FROM rules")["c"],
+            "rules_enabled": db.one(conn, "SELECT COUNT(*) c FROM rules WHERE enabled=1")["c"],
+        }
     return {
         "release_state": release_state,
         "sources": sources,
         "rule_providers": rule_providers,
         "devices": devices,
+        "counts": counts,
         "recent_audit": recent_audit,
-        "health": _health_snapshot(conn, devices),
+        "health": _health_snapshot(conn),
         "note": "下载成功仅代表文件取回，不代表配置加载、VPN 启动或规则生效。",
     }
 
 
-def _health_snapshot(conn, devices: list) -> dict:
+def _health_snapshot(conn) -> dict:
     """运行状态自检：把"系统是否健康"一次性算清楚。
 
-    概览页直接展示这些结论，不必让用户自己比对磁盘、备份、
-    设备拉取时间与核心状态。
+    概览页直接展示这些结论。只保留备份与测速核心两类真正需要处理的项——
+    磁盘、设备拉取时效属于使用者自己掌握的运行细节，不进健康结论
+    （2026-10-28 概览改版时移除）。
     """
-    import shutil
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timezone
 
     issues: list[str] = []
     data_dir = config.DATA_DIR
-    disk_free = 0
-    disk_total = 0
-    try:
-        usage = shutil.disk_usage(data_dir)
-        disk_free, disk_total = usage.free, usage.total
-        if disk_free < 512 * 1024 * 1024:
-            issues.append("数据盘剩余空间不足 512 MB，构建与备份可能失败")
-    except OSError:
-        issues.append("无法读取数据盘信息")
 
     # 最近一次备份
     last_backup = ""
@@ -107,25 +104,6 @@ def _health_snapshot(conn, devices: list) -> dict:
     else:
         issues.append("还没有任何备份快照")
 
-    # 长时间未拉取的设备
-    stale_devices = []
-    now = datetime.now(timezone.utc)
-    for d in devices:
-        last = d.get("last_pull_at") or ""
-        if not last:
-            stale_devices.append(d["name"])
-            continue
-        try:
-            pulled = datetime.fromisoformat(last)
-        except ValueError:
-            continue
-        if pulled.tzinfo is None:
-            pulled = pulled.replace(tzinfo=timezone.utc)
-        if (now - pulled) > timedelta(hours=48):
-            stale_devices.append(d["name"])
-    if stale_devices:
-        issues.append("以下设备超过 48 小时未拉取：" + "、".join(stale_devices))
-
     core = tester.core_status()
     if not core.get("available"):
         issues.append("测速核心未安装，节点测速与 Mihomo 核心校验不可用")
@@ -133,12 +111,9 @@ def _health_snapshot(conn, devices: list) -> dict:
     return {
         "ok": not issues,
         "issues": issues,
-        "disk_free_mb": round(disk_free / 1024 / 1024),
-        "disk_total_mb": round(disk_total / 1024 / 1024),
         "last_backup_at": (datetime.fromtimestamp(last_backup, timezone.utc)
                            .astimezone().isoformat(timespec="seconds")
                            if last_backup else ""),
-        "stale_devices": stale_devices,
         "core_available": bool(core.get("available")),
         "core_version": core.get("version", ""),
     }

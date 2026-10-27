@@ -146,17 +146,17 @@ def test_snippet_merge_into_build(client):
         f"/api/v1/builds/{bid}/artifact/stash-ios").json()["content"])
     assert stash["panel"]["首页"]["title"] == "家庭网络"
     assert stash["log-level"] == "info"      # 启用模块覆盖默认值
-    # mihomo 专用片段不进 stash（stash 自带 DNS 基线，但不能被片段改写）
-    # 基线本身带 fallback（境外 DoH 兜底），所以要比"基线值"而不是"没有这个键"
-    assert stash["dns"]["fallback"] == base_config.default_doc("stash")["dns"]["fallback"]
-    assert stash["dns"]["fallback"] != ["https://dns.google/dns-query"]
+    # mihomo 专用片段不进 stash；DNS 基线 2026-10-27 起不再带 fallback，
+    # 片段写的键也不得漏进 stash 产物
+    assert "fallback" not in stash["dns"]
+    assert stash["dns"]["nameserver"] == base_config.default_doc("stash")["dns"]["nameserver"]
 
     mih = yaml.safe_load(client.get(
         f"/api/v1/builds/{bid}/artifact/mihomo-android").json()["content"])
     assert "panel" not in mih                # stash 专用片段不进 mihomo
-    # 片段里的列表是「追加」语义（_merge：列表相加），不是替换
-    assert mih["dns"]["fallback"] == (base_config.default_doc("mihomo")["dns"]["fallback"]
-                                      + ["https://dns.google/dns-query"])
+    # 片段里的列表是「追加」语义（_merge：列表相加），不是替换；
+    # 基线没有 fallback 时，追加结果就是片段自己那份
+    assert mih["dns"]["fallback"] == ["https://dns.google/dns-query"]
     assert mih["dns"]["enhanced-mode"] == "fake-ip"  # 与默认 dns 深度合并
 
     # 门户按分类返回启用模块的元信息（不含内容）

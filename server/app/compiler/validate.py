@@ -3,6 +3,7 @@
 静态通过不代表目标客户端实机可用；Stash 没有官方无头校验工具，
 其结果只能标记为“静态通过”。实机验收属于客户端环节，不在发布范围内。
 """
+import ipaddress
 import re
 
 import yaml
@@ -16,6 +17,64 @@ def _scope_overlap(a: list[str], b: list[str]) -> bool:
     if config.ALL_SCOPE in a or config.ALL_SCOPE in b:
         return True
     return bool(set(a) & set(b))
+
+
+# Fake-IP 段（198.18.0.0/15）：Stash 连接竞速会把内部预解析得到的 Fake-IP
+# 带进规则评估（AGENTS.md 约束 33），覆盖这段的 IP 规则一旦排在域名规则之前，
+# 就会把域名连接误判成私网/直连黑洞。精确到不覆盖 Fake-IP 段且带 no-resolve
+# 的 CIDR（如 192.168.0.0/16、::1/128）是安全的。
+_FAKEIP_NET = (ipaddress.ip_network("198.18.0.0/15"),)
+# 已知覆盖 Fake-IP 段的规则来源（MetaCubeX private/lan 库包含 198.18.0.0/15）：
+# 名单只收「确定覆盖」的集合名模式，避免对 cn-ip / apple-push-ip 等公共段误报。
+_FAKEIP_PROVIDER_RE = re.compile(r"private|lan", re.IGNORECASE)
+
+_DOMAIN_RULE_TYPES = {
+    "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-REGEX", "GEOSITE",
+}
+_IP_RULE_TYPES = {"IP-CIDR", "IP-CIDR6", "GEOIP"}
+
+
+def _cidr_hits_fakeip(value: str) -> bool:
+    """字面 CIDR 是否可能包含 Fake-IP 段地址（解析失败按可能处理）。"""
+    text = value.split("/")[0].strip()
+    if text.startswith("fe80") or text == "255.255.255.255":
+        return False
+    try:
+        net = ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        return True
+    return any(net.overlaps(other) for other in _FAKEIP_NET)
+
+
+def _fakeip_order_issues(rules: list[dict], behaviors: dict[str, str]) -> list[str]:
+    """约束 33：可能命中 Fake-IP 的 IP 类规则必须排在全部域名类规则之后。"""
+    last_domain = -1
+    for idx, r in enumerate(rules):
+        if not r.get("enabled", True):
+            continue
+        rtype = r["type"]
+        if rtype in _DOMAIN_RULE_TYPES:
+            last_domain = idx
+        elif rtype == "RULE-SET" and behaviors.get(r["value"]) == "domain":
+            last_domain = idx
+    if last_domain < 0:
+        return []
+    issues: list[str] = []
+    for idx, r in enumerate(rules):
+        if not r.get("enabled", True) or idx >= last_domain:
+            continue
+        rtype, value = r["type"], r.get("value", "")
+        no_resolve = bool(r.get("no_resolve"))
+        if rtype in ("IP-CIDR", "IP-CIDR6"):
+            if no_resolve and not _cidr_hits_fakeip(value):
+                continue
+            issues.append(f"{rtype},{value}")
+        elif rtype == "GEOIP" and not no_resolve:
+            issues.append(f"GEOIP,{value}")
+        elif rtype == "RULE-SET" and behaviors.get(value) == "ipcidr" \
+                and _FAKEIP_PROVIDER_RE.search(value):
+            issues.append(f"RULE-SET,{value}")
+    return issues
 
 
 def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
@@ -149,6 +208,16 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
                 f"规则 {rtype},{r.get('value', '')} 是兜底规则，不能加 no-track")
     if not has_final:
         errors.append("缺少兜底规则：请添加一条 MATCH 规则")
+
+    # 约束 33（AGENTS.md）：可能命中 Fake-IP 的 IP 类规则必须排在全部
+    # 域名类规则之后——Stash 连接竞速会把内部预解析的 Fake-IP 带进规则
+    # 评估，排在前面的 IP 规则会把域名连接误判成私网直连黑洞。
+    behaviors = {r["name"]: r.get("behavior", "domain")
+                 for r in snapshot["rule_providers"] if r.get("enabled")}
+    for bad in _fakeip_order_issues(snapshot["rules"], behaviors):
+        errors.append(
+            f"IP 类规则“{bad}”排在域名规则之前，可能命中 Fake-IP 段导致直连黑洞"
+            f"（约束 33：IP 规则一律放在全部域名规则之后）")
 
     # 未使用提示
     used_groups = {r["target"] for r in snapshot["rules"] if r.get("enabled", True)}

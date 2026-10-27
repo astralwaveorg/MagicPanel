@@ -1296,15 +1296,16 @@ def test_base_config_defaults_and_crud(client):
     stash = client.get("/api/v1/base-config?engine=stash&platform=ios", headers=h).json()
     assert stash["is_default"] is True
     assert stash["effective"]["mode"] == "rule"
-    # Stash 官方精简：不含端口与 profile
-    assert "mixed-port" not in stash["effective"] and "profile" not in stash["effective"]
+    # Stash 官方基线：不含端口；profile 是通用基线（2026-10-28 固化）
+    assert "mixed-port" not in stash["effective"]
+    assert stash["effective"]["profile"]["store-selected"] is True
     mihomo = client.get("/api/v1/base-config?engine=mihomo&platform=android", headers=h).json()
     assert mihomo["effective"]["mixed-port"] == 7890
     assert mihomo["effective"]["profile"]["store-selected"] is True
 
     # 只改一个键：服务端只把这个键的差异存进本层，其余继续跟随上层
     saved = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h, json={
-        "content": "mode: global\nlog-level: warning\nipv6: false\n"})
+        "content": "mode: global\nlog-level: warning\nallow-lan: false\n"})
     assert saved.status_code == 200, saved.text
     assert saved.json()["effective"]["mode"] == "global"
     assert saved.json()["is_default"] is False
@@ -2318,14 +2319,14 @@ def test_audit_pagination_and_keyword(client):
 
 
 def test_overview_reports_health_snapshot(client):
-    """概览要给出运行状态自检：磁盘、备份、未拉取设备、核心。"""
+    """概览要给出运行状态自检：备份、核心（2026-10-28 起不再含磁盘与设备时效）。"""
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     data = client.get("/api/v1/overview", headers=h).json()
     health = data["health"]
     assert "ok" in health and "issues" in health
     assert isinstance(health["issues"], list)
-    assert health["disk_free_mb"] >= 0
+    assert "disk_free_mb" not in health and "stale_devices" not in health
     assert "core_available" in health
     # 没有任何备份时应该被点出来
     assert any("备份" in i for i in health["issues"]) or health["last_backup_at"]
@@ -2731,17 +2732,17 @@ def test_base_config_leaf_sources(client):
         "name": "Stash-iOS", "engine": "stash", "platform": "ios"})
     content = (
         "mode: rule\n"
-        "dns:\n"
-        "  enable: true\n"
-        "  nameserver:\n"
-        "    - 1.1.1.1\n"
+        "sniffer:\n"
+        "  enable: false\n"
+        "  parse-pure-ip: false\n"
     )
     r = client.put("/api/v1/base-config?engine=stash&platform=ios", headers=h,
                    json={"content": content, "updated_at": ""})
     assert r.status_code == 200, r.text
     body = r.json()
     leaf = body["leaf_sources"]
-    assert leaf["dns.nameserver"] == "引擎平台配置"
+    assert leaf["sniffer.parse-pure-ip"] == "引擎平台配置"
+    assert leaf["sniffer.enable"] == "引擎平台配置"
     assert leaf["mode"] == "引擎默认配置"
 
 
@@ -2856,20 +2857,31 @@ def test_device_config_layer_appends_lists_like_the_other_layers(client):
     dev = client.post("/api/v1/devices", headers=h, json={
         "name": "我的Mac", "platform": "macos", "target_id": target["id"]}).json()
 
-    # 引擎平台配置：一份带过滤列表的 DNS
+    # DNS 段是基线专属：平台层/设备层直接写 dns: 一律拒绝（约束 31）
     r = client.put("/api/v1/base-config", headers=h, json={
-        "content": "dns:\n  fake-ip-filter:\n  - +.lan\n  - +.local\n"},
+        "content": "dns:\n  fake-ip-filter:\n  - +.lan\n"},
+        params={"engine": "stash", "platform": "macos"})
+    assert r.status_code == 400, r.text
+    assert "dns" in r.json()["detail"]
+    r = client.put("/api/v1/base-config", headers=h, json={
+        "content": "dns:\n  fake-ip-filter:\n  - +.lan\n"},
+        params={"engine": "stash", "platform": "macos", "device_id": dev["id"]})
+    assert r.status_code == 400, r.text
+
+    # 引擎平台配置：精简的 Fake-IP 清单（伪键，列表整体替换）
+    r = client.put("/api/v1/base-config", headers=h, json={
+        "content": "_fake_ip_filter:\n  - +.lan\n  - +.local\n"},
         params={"engine": "stash", "platform": "macos"})
     assert r.status_code == 200, r.text
-    # 设备独立配置：把过滤列表换成自己的一份
+    # 设备独立配置：在平台清单基础上追加自己的一条
     r = client.put("/api/v1/base-config", headers=h, json={
-        "content": "dns:\n  fake-ip-filter:\n  - +.lan\n  - +.local\n  - my.example\n"},
+        "content": "_fake_ip_filter:\n  - +.lan\n  - +.local\n  - my.example\n"},
         params={"engine": "stash", "platform": "macos", "device_id": dev["id"]})
     assert r.status_code == 200, r.text
-    # 差异里只保存新增的那一条
-    assert r.json()["overlay"]["dns"]["fake-ip-filter"] == ["my.example"]
+    # 差异里只保存新增的那一条（设备层列表是追加语义）
+    assert r.json()["overlay"]["_fake_ip_filter"] == ["my.example"]
     # 界面里的生效值 = 上层 + 新增
-    assert r.json()["effective"]["dns"]["fake-ip-filter"] == [
+    assert r.json()["effective"]["_fake_ip_filter"] == [
         "+.lan", "+.local", "my.example"]
 
     build = client.post("/api/v1/builds", headers=h, json={}).json()

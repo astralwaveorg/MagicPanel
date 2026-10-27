@@ -124,7 +124,7 @@ def _save_scope(conn, engine: str, platform: str, device_id: int,
                 content: str, operator: str) -> dict:
     try:
         doc = base_config_service.parse_content(content)
-        base_config_service.validate_doc(doc)
+        base_config_service.validate_doc(doc, allow_dns=not platform and not device_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     normalized = base_config_service.normalize(doc)
@@ -277,7 +277,8 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
             raise HTTPException(409, "基础配置已被其他维护者修改，请刷新后再保存")
         try:
             effective = base_config_service.parse_content(body.content)
-            base_config_service.validate_doc(effective, device_scope=bool(dev_id))
+            base_config_service.validate_doc(effective, device_scope=bool(dev_id),
+                                             allow_dns=not plat and not dev_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
@@ -288,7 +289,8 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         lists = (base_config_service.LIST_APPEND if dev_id
                  else base_config_service.LIST_REPLACE)
         overlay = base_config_service.diff_overlay(inherited, effective, lists)
-        base_config_service.validate_doc(overlay, device_scope=bool(dev_id))
+        base_config_service.validate_doc(overlay, device_scope=bool(dev_id),
+                                         allow_dns=not plat and not dev_id)
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])
@@ -429,7 +431,8 @@ def apply(body: ApplyBody, user=CurrentUser):
         docs = _all_docs(conn)
         try:
             effective = base_config_service.parse_content(body.content)
-            base_config_service.validate_doc(effective, device_scope=bool(dev_id))
+            base_config_service.validate_doc(effective, device_scope=bool(dev_id),
+                                             allow_dns=not plat and not dev_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
@@ -438,7 +441,8 @@ def apply(body: ApplyBody, user=CurrentUser):
         lists = (base_config_service.LIST_APPEND if dev_id
                  else base_config_service.LIST_REPLACE)
         overlay = base_config_service.diff_overlay(inherited, effective, lists)
-        base_config_service.validate_doc(overlay, device_scope=bool(dev_id))
+        base_config_service.validate_doc(overlay, device_scope=bool(dev_id),
+                                         allow_dns=not plat and not dev_id)
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])

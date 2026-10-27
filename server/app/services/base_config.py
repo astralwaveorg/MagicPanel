@@ -34,6 +34,8 @@ PROTECTED_KEYS = {
 # 设备配置作用域额外禁止的键：控制面相关。
 # 设备层只用于"这台设备的个性化"，写上对外控制端口等于
 # 把管理接口暴露到局域网，客户端侧也没有对应的鉴权配置。
+# dns 同样禁止：DNS 段固化在引擎默认配置（约束 31/33），
+# 设备层的 dns: 覆盖会静默盖过基线（历史上出过 vpn.jiek.top 残留）。
 DEVICE_FORBIDDEN_KEYS = {
     "external-controller": "设备配置不能开启对外控制端口",
     "external-ui": "设备配置不能指定外部控制器界面",
@@ -74,9 +76,14 @@ FAKE_IP_FILTER_KEY = "_fake_ip_filter"      # Fake-IP 过滤域名 → dns.fake-
 _COMMON_DEFAULTS = {
     "mode": "rule",
     "log-level": "warning",
-    "ipv6": False,
+    # 全部引擎平台的实测取值都是 true（TUN 模式处理 v6），2026-10-28 从
+    # 各平台层固化到这里，平台层不再重复
+    "ipv6": True,
     "allow-lan": False,
     "bind-address": "127.0.0.1",
+    # 客户端记忆：手动选中的节点与 Fake-IP 映射要跨重启保留（原先只在
+    # Mihomo 默认与各平台层出现，现固化为通用基线）
+    "profile": {"store-selected": True, "store-fake-ip": True},
     # 真实延迟（而非握手延迟）、并发拨号、长连接保活
     "unified-delay": True,
     "tcp-concurrent": True,
@@ -86,77 +93,146 @@ _COMMON_DEFAULTS = {
     "geodata-mode": True,
     "geo-auto-update": True,
     "geo-update-interval": 24,
-    # 嗅探真实域名：应用走 IP 直连时也能命中分流规则
+    # 嗅探真实域名：应用走 IP 直连时也能命中分流规则。
+    # 注意：`sniffing` 是 mihomo 官方已废弃的键（官方示例原文「已废弃，
+    # 若 sniffer.sniff 配置则此项无效」），只保留在 Stash 基线里（历史
+    # 配置一直在用，Stash 侧无害），mihomo 一律不写。
     "sniffer": {
         "enable": True,
         "force-dns-mapping": True,
         "parse-pure-ip": True,
         "override-destination": False,
         "sniff": {
-            "HTTP": {"ports": [80, "8080-8880"], "override-destination": True},
+            # 8080-8081 为各平台层多年的实测取值（2026-10-28 固化）；
+            # 官方示例的 8080-8880 覆盖面更宽但没有必要
+            "HTTP": {"ports": [80, "8080-8081"], "override-destination": True},
             "TLS": {},
             "QUIC": {},
         },
-        "sniffing": ["tls", "http", "quic"],
     },
     PANEL_DIRECT_KEY: True,
 }
 
-# ---- DNS 段取值（2026-10-25 国内网络实测后定稿）----
+# ---- 家用个人清单（2026-10-28 从引擎平台配置层固化）----
 #
-# 为什么不用国内解析器：国内能用的 DNS 通道全都会拿到假 IP——
-#   * 明文 UDP（119.29.29.29 / 180.76.76.76 / 223.5.5.5）：被链路注入，
-#     www.google.com 会返回 104.244.42.197 这类假地址；
-#   * 国内 DoH（dns.alidns.com / 223.5.5.5 / doh.pub / dot.pub / 1.12.12.12）：
-#     加密挡住了链路注入，但解析器服务端自己按合规策略投毒，
-#     同一个端点从境外出口查也还是假 IP——是解析器行为，不是链路问题；
-#   * 境外 DoH（1.1.1.1 / 8.8.8.8 / 9.9.9.9 / dns.google / quad9 …）：
-#     国内直连一律不通。
-# 唯一拿到真 IP 的路径：境外 DoH 走代理。
-#   * Mihomo 用 "#策略组" 后缀直接指定出口；
-#   * Stash 没有这个语法，只能开 follow-rule，由分流规则决定 DNS 出口
-#     （规则里已有 IP-CIDR,1.1.1.1/32、8.8.8.8/32 → 🚀 默认代理）。
-# DNS 服务器一律用裸 IP 形式：官方文档要求这样才能避免递归查询
-# （Stash 文档「DNS 查询跟随规则」一节明确列出这一前提）。
+# 此前 8 个引擎平台层各自维护同一份清单（逐字一致），属于典型的
+# 「共有内容」，按分层原则上收到引擎默认配置；设备层仍可追加
+# （设备层列表语义是 append）。
+_PERSONAL_DIRECT_DOMAINS = [
+    "magichub.top", "jiek.top", "homehub.stream",
+    "astralwave.org", "233netcloud.com", "ghfast.top",
+]
+# Fake-IP 排除清单。Stash 与 mihomo 各一份，仅差一个条目：
+# * `geosite:private` 只给 Stash——mihomo 官方文档（wiki.metacubex.one
+#   /config/dns/）明确 fake-ip-filter 的 blacklist 模式「仅支持域名通配
+#   以及引入域名集合」，GEOSITE/RuleSet 语法只在 fake-ip-filter-mode:
+#   rule 下可用；mihomo 里写了会被当字面域名，无效。
+# * +.captive.apple.com 两边都有；+.dnscli.top 来自设备层追加收编
+#   （见约束 31，设备层不许写 dns: 键）。
+# **注意**：清单里的海外域与上方 _OVERSEAS_SENSITIVE 一一对应，
+# 两边要一起改。
+_PERSONAL_FAKE_IP_FILTER = [
+    "+.lan", "+.local", "+.home.arpa", "+.ts.net", "localhost",
+    "localhost.ptlogin2.qq.com",
+    "+.msftconnecttest.com", "+.msftncsi.com",
+    "+.captive.apple.com",
+    "time.*.com", "+.ntp.org", "+.ntp.org.cn", "+.pool.ntp.org",
+    "stun.*.*", "stun.*.*.*", "+.stun.*.*", "+.stun.*.*.*",
+    "+.srv.nintendo.net", "+.stun.playstation.net",
+    "+.xboxlive.com", "+.logon.battle.net", "+.battlenet.com.cn",
+    "+.magichub.top", "+.jiek.top", "+.homehub.stream",
+    "+.eoysky.com", "+.astralwave.org", "+.233netcloud.com", "+.ghfast.top",
+    "geosite:private",
+    "+.microsoft.com", "+.microsoftstore.com", "+.s-microsoft.com",
+    "+.windows.com", "+.windows.net", "+.windowsupdate.com",
+    "+.msftauth.net", "+.msauth.net", "+.live.com",
+    "lens.l.google.com",
+    "*.tailscale.com", "*.tailscale.io",
+    "+.market.xiaomi.com", "*.arpa",
+    "+.dnscli.top",
+]
+
+# ---- DNS 段取值（2026-10-27 重构：默认国内直连，海外敏感域走代理）----
 #
-# 国内域名仍走国内解析器（放在引擎平台配置层的 nameserver-policy 里），
-# 这样国内站点的 CDN 解析不被境外出口改写；国内解析器用 doh.pub
-# （与 alidns 实测返回同一批国内 CDN 节点，且不带阿里云）。
+# 背景（2026-10-25 / 10-27 两次国内网络实测）：
+#   * 国内解析器（alidns / doh.pub / 1.12.12.12 等）解析海外被墙域名返回假 IP，
+#     是解析器服务端行为，链路加密挡不住；对国内域名则给出正确的国内 CDN 节点；
+#   * 境外 DoH（1.1.1.1 / 8.8.8.8 …）国内直连不通，只能走代理出口；
+#   * 明文 UDP 全程可被链路注入，一律不用。
+#
+# 设计原则：本地解析结果只在两种场合真正被使用——
+#   1) 命中 Fake-IP 排除清单的域名（应用拿到真实 IP，答案必须干净）；
+#   2) 走 DIRECT 的连接（必须拿到国内视角的正确 CDN 节点）。
+# 其余域名（海外、走代理）由代理节点在出口侧远程解析，本地答案无关紧要。
+# 因此：
+#   * 默认 nameserver 用国内 DoH 直连（裸 IP）——快、国内视角正确，
+#     且不依赖代理存活；它对海外域名的污染答案反正不会被使用；
+#   * 海外敏感域名（Fake-IP 排除清单里的海外域、走直连的海外集合）
+#     的 nameserver-policy 已整体固化在本文件（2026-10-27 定稿），
+#     指到境外 DoH 走代理；平台层/设备层/拓展模块一律不得再写 dns: 键；
+#   * 不配 fallback / fallback-filter：配置 fallback 会默认启用 geoip CN
+#     过滤（mihomo 文档明示），多一个 geo 数据依赖，且没有"污染值"可筛；
+#   * DNS 服务器一律裸 IP 形式（官方要求，避免引导解析与递归查询）。
+#
+# 出口配套规则（缺任何一组 DNS 都会断）：
+#   * IP-CIDR,1.1.1.1/32 等 → 🚀 默认代理：境外 DoH 经代理可达
+#     （Stash follow-rule 依赖这组规则；Mihomo 平台层用 "#策略组" 后缀）；
+#   * IP-CIDR,120.53.53.53/32 / 223.5.5.5/32 → DIRECT：国内 DoH 保持直连。
+
 _DNS_COMMON = {
     "fake-ip-range": "198.18.0.1/16",
-    # 引导 DNS：只用来解析 DoH 服务器的域名，官方要求必须是纯 IP
-    "default-nameserver": ["119.29.29.29", "180.76.76.76"],
-    # 节点域名解析：独立链路，不跟随规则，必须国内可达
-    "proxy-server-nameserver": ["https://doh.pub/dns-query", "119.29.29.29"],
+    # 节点域名解析：独立链路，不跟随规则，必须国内可达（裸 IP 国内 DoH）
+    "proxy-server-nameserver": ["https://120.53.53.53/dns-query",
+                                "https://223.5.5.5/dns-query"],
 }
 
-# 境外 DoH（裸 IP 形式）：配合 follow-rule / respect-rules 走代理
+# 国内 DoH（裸 IP）：默认解析器。120.53.53.53 = 腾讯 DNSPod（doh.pub），
+# 223.5.5.5 = 阿里 alidns——两家运营商互为冗余。alidns 对海外域名有污染，
+# 但本设计里默认解析器的海外答案永远不会被使用（fake-ip 由节点远程解析、
+# 海外敏感域显式走境外 DoH），它的国内答案与 doh.pub 实测一致。
+_CN_DOH = ["https://120.53.53.53/dns-query", "https://223.5.5.5/dns-query"]
+# 境外 DoH（裸 IP）：海外敏感域名策略的目标，经代理出口。
 _FOREIGN_DOH = ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"]
-# 回退 DNS：另一家解析器兜底，同样走代理
-_FALLBACK_DOH = ["https://9.9.9.9/dns-query", "https://149.112.112.112/dns-query"]
-# 回退过滤：命中这些域名或这些网段时改用回退解析器的结果。
-# 不用 geoip 判定——主 DNS 已经是干净的境外解析器，没有"国内污染值"要筛，
-# 引入 geoip 只会多一个 geo 数据依赖。
-_FALLBACK_FILTER = {
-    "ipcidr": ["240.0.0.0/4", "0.0.0.0/32", "127.0.0.1/32"],
-    "domain": [
-        "+.google.com", "+.googleapis.com", "+.youtube.com", "+.twitter.com",
-        "+.facebook.com", "+.instagram.com", "+.telegram.org", "+.github.com",
-    ],
-}
+
+# 海外敏感域：Fake-IP 排除清单（`_fake_ip_filter` 伪键）里的海外域，
+# 应用拿到的是真实 IP，答案必须干净 → 指到境外 DoH（经代理出口）。
+# 两份清单要一起改：这里加一个域，`_fake_ip_filter` 里也要有它，反之亦然。
+_OVERSEAS_SENSITIVE = [
+    "+.microsoft.com", "+.microsoftstore.com", "+.s-microsoft.com",
+    "+.windows.com", "+.windows.net", "+.windowsupdate.com",
+    "+.msftauth.net", "+.msauth.net", "+.live.com", "lens.l.google.com",
+]
+# 「直连但服务器在境外」的规则集合：同样需要干净答案。**这三个集合被 DNS
+# 策略引用（rule-set: 键），删了它们策略就悬空**——改名或删除前先改这里。
+_OVERSEAS_DIRECT_SETS = ["mirror-accelerate", "pt", "trackers"]
+
+
+def _dns_policy(foreign: list) -> dict:
+    """nameserver-policy：内网走 system，海外敏感域走境外 DoH（经代理出口）。"""
+    p = {"+.lan": "system", "+.local": "system", "+.home.arpa": "system",
+         "+.ts.net": "system", "localhost": "system"}
+    for k in _OVERSEAS_SENSITIVE:
+        p[k] = list(foreign)
+    for r in _OVERSEAS_DIRECT_SETS:
+        p[f"rule-set:{r}"] = list(foreign)
+    return p
 
 # Stash 官方内置 DNS 服务支持的键（https://stash.wiki/features/dns-server）：
 #   nameserver / default-nameserver / proxy-server-nameserver / nameserver-policy
 #   fake-ip-range / fake-ip-filter / ipv6 / fallback / follow-rule / hosts
 # 注意：Stash 常驻 Fake-IP，没有 enhanced-mode，也没有 enable；
 # 跟随规则用 follow-rule（Mihomo 才叫 respect-rules）。
+# follow-rule 必须开：海外敏感域名的策略服务器是境外 DoH 裸 IP，
+# 靠 IP-CIDR 出口规则送进代理；国内 DoH 裸 IP 靠直连 IP 规则保持直连。
+# DNS 段整体固化在引擎默认配置（本文件），平台层/平台扩展/设备层/拓展模块
+# 一律不再写 dns: 键（家用 Fake-IP 清单用伪键 `_fake_ip_filter` 维护，
+# 2026-10-28 起固化在引擎默认配置，设备层仍可追加）。
 STASH_DNS = {
     **_DNS_COMMON,
-    "nameserver": list(_FOREIGN_DOH),
-    "fallback": list(_FALLBACK_DOH),
-    "fallback-filter": deepcopy(_FALLBACK_FILTER),
+    "nameserver": list(_CN_DOH),
     "follow-rule": True,
     "ipv6": False,
+    "nameserver-policy": _dns_policy(_FOREIGN_DOH),
 }
 
 # Google 中国站重定向（Stash HTTP 引擎）：
@@ -177,18 +253,46 @@ STASH_HTTP = {
     ],
 }
 
-# Stash：DNS 段与 HTTP 引擎按官方文档给全
+# Stash：DNS 段与 HTTP 引擎按官方文档给全；个人清单伪键一并固化。
+# `sniffing` 是 Stash 历史配置一直在用的嗅探协议清单（mihomo 已废弃该键，
+# 两引擎的 sniffer 在这里分叉）。
 STASH_OFFICIAL = {
     **_COMMON_DEFAULTS,
+    "sniffer": {
+        **deepcopy(_COMMON_DEFAULTS["sniffer"]),
+        "sniffing": ["tls", "http", "quic"],
+    },
     "dns": deepcopy(STASH_DNS),
     "http": deepcopy(STASH_HTTP),
+    DIRECT_DOMAINS_KEY: list(_PERSONAL_DIRECT_DOMAINS),
+    FAKE_IP_FILTER_KEY: list(_PERSONAL_FAKE_IP_FILTER),
 }
 
 # Mihomo：DNS 由内核接管，需要显式 enable；端口与 profile 由内核读取
+# （profile 已上收到 _COMMON_DEFAULTS）。mihomo 特有：客户端 TLS 指纹、
+# sniffer 的 TLS 端口与跳过域名清单（Mijia Cloud 是 mihomo 嗅探的已知误匹配）。
 MIHOMO_OFFICIAL = {
     **_COMMON_DEFAULTS,
     "mixed-port": 7890,
-    "profile": {"store-selected": True, "store-fake-ip": True},
+    "global-client-fingerprint": "chrome",
+    # Geo 数据下载走官方示例同款 jsdelivr 镜像：客户端 geo-auto-update
+    # 若用默认 GitHub 直连地址，国内环境经常超时失败，geo 文件停留在旧版
+    "geox-url": {
+        "geoip": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat",
+        "geosite": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+        "mmdb": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb",
+    },
+    "sniffer": {
+        **deepcopy(_COMMON_DEFAULTS["sniffer"]),
+        "sniff": {
+            **deepcopy(_COMMON_DEFAULTS["sniffer"]["sniff"]),
+            "TLS": {"ports": [443, 8443]},
+        },
+        "skip-domain": [
+            "Mijia Cloud", "+.push.apple.com",
+            "+.lan", "+.local", "+.home.arpa",
+        ],
+    },
     "dns": {
         **deepcopy(_DNS_COMMON),
         "enable": True,
@@ -196,25 +300,23 @@ MIHOMO_OFFICIAL = {
         "enhanced-mode": "fake-ip",
         "fake-ip-filter-mode": "blacklist",
         "prefer-h3": False,
-        # 境外 DoH 走代理：Mihomo 可以用 "#策略组" 直接指定出口，
-        # 也可以开 respect-rules 交给规则决定（引擎默认配置不写死策略组名，
-        # 具体出口放在引擎平台配置层）。默认走 respect-rules。
+        # DNS 连接遵守路由规则（官方要求配 proxy-server-nameserver，已配）：
+        # 境外 DoH 裸 IP 靠 IP-CIDR 出口规则走代理，国内 DoH 裸 IP 靠直连 IP 规则
+        # 保持直连——引擎默认层因此不用写死策略组名（"#策略组" 后缀留给平台层
+        # 需要指定别的出口时用）。官方文档不建议与 prefer-h3 同用，prefer-h3 为 False。
         "respect-rules": True,
-        "nameserver": list(_FOREIGN_DOH),
-        "fallback": list(_FALLBACK_DOH),
-        "fallback-filter": deepcopy(_FALLBACK_FILTER),
-        # 局域网域名交给系统 DNS，避免把内网解析也发到公网
-        "nameserver-policy": {
-            "+.lan": "system",
-            "+.local": "system",
-            "+.home.arpa": "system",
-        },
-        "fake-ip-filter": [
-            "+.lan", "+.local", "+.home.arpa", "localhost",
-            "localhost.ptlogin2.qq.com", "+.msftconnecttest.com", "+.msftncsi.com",
-            "time.*.com", "+.ntp.org", "+.ntp.org.cn",
-        ],
+        "nameserver": list(_CN_DOH),
+        # 内网走系统 DNS；海外敏感域与直连海外集合走境外 DoH（经代理出口）
+        "nameserver-policy": _dns_policy(_FOREIGN_DOH),
+        "use-hosts": True,
+        # fake-ip-filter 由伪键 _fake_ip_filter 统一维护（渲染时覆盖写回），
+        # 这里不再重复一份
     },
+    DIRECT_DOMAINS_KEY: list(_PERSONAL_DIRECT_DOMAINS),
+    # mihomo 的 blacklist 模式不支持 GEOSITE 语法（见上），剔除该条目
+    FAKE_IP_FILTER_KEY: [
+        x for x in _PERSONAL_FAKE_IP_FILTER if x != "geosite:private"
+    ],
 }
 
 # 兼容现状（补全前的旧默认，保留作预设与迁移基准）
@@ -342,6 +444,13 @@ def cascade(layers: list[tuple[str, dict]]) -> tuple[dict, dict]:
         for key, value in (doc or {}).items():
             if isinstance(value, dict) and isinstance(effective.get(key), dict):
                 effective[key] = merge_docs(effective[key], value, lists)
+            elif (lists == LIST_APPEND and isinstance(value, list)
+                  and isinstance(effective.get(key), list)):
+                # 顶层级列表键（_fake_ip_filter 等伪键）同样追加：
+                # 之前只有嵌在字典里的列表（dns.fake-ip-filter）能追加，
+                # 顶层级列表会被静默替换，与「设备层 = 追加」的文档语义不符
+                effective[key] = list(effective[key]) + [
+                    item for item in value if item not in effective[key]]
             else:
                 effective[key] = deepcopy(value)
             # 后面的层级优先：来源记录最后一次改写该键的层
@@ -414,13 +523,23 @@ def parse_content(content: str) -> dict:
     return data
 
 
-def validate_doc(doc: dict, device_scope: bool = False) -> None:
-    """校验基础配置；不合法时抛 ValueError（中文提示）。"""
+def validate_doc(doc: dict, device_scope: bool = False,
+                 allow_dns: bool = False) -> None:
+    """校验基础配置；不合法时抛 ValueError（中文提示）。
+
+    allow_dns 仅引擎默认配置层为 True：DNS 段固化在源码基线（约束 31），
+    平台层/设备层的 dns: 覆盖会静默盖过基线（曾出过 vpn.jiek.top 残留），
+    一律拒绝；Fake-IP 清单走 `_fake_ip_filter` 伪键。
+    """
     for key in doc:
         if key in PROTECTED_KEYS:
             raise ValueError(f"基础配置不能包含“{key}”：{PROTECTED_KEYS[key]}")
         if device_scope and key in DEVICE_FORBIDDEN_KEYS:
             raise ValueError(DEVICE_FORBIDDEN_KEYS[key])
+        if key == "dns" and not allow_dns:
+            raise ValueError(
+                "DNS 段固化在引擎默认配置，平台/设备层不能写 dns: 键"
+                "（Fake-IP 过滤清单请用 _fake_ip_filter 伪键）")
         if not isinstance(key, str) or not key.strip():
             raise ValueError("基础配置的键名非法")
     if "mode" in doc and doc["mode"] not in MODE_VALUES:
