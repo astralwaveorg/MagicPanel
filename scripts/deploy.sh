@@ -129,7 +129,9 @@ FAIL=0
 # 走 /api/v1/setup/status 而不是 SPA 页面：SPA 兜底对任何路径都返回 200，
 # 反代没把 /api 转发过去时也看不出问题。
 for path in /api/v1/setup/status / /admin/login; do
-  CODE=$(curl -s -o /dev/null -w '%{http_code}' --noproxy '*' --max-time 10 "$DOMAIN$path" || echo 000)
+  # 不要加 --noproxy：本机出网走 TUN，直连公网 IP 不通，会误报成 000。
+  # 走 TUN 同样能验证反代与证书：TLS 有问题照样连不上。
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$DOMAIN$path" || echo 000)
   echo "$CODE $DOMAIN$path"
   [ "$CODE" = "200" ] || FAIL=1
 done
