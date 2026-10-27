@@ -1,7 +1,7 @@
 <template>
   <div>
     <p class="mp-page-desc">
-      每个目标对应一类客户端（引擎 + 平台）。同一策略按目标编译为对应方言；平台扩展用于处理平台差异，按整键覆盖。按住左侧手柄拖动排序；分页时仅重排当前页。
+      每个目标对应一类客户端（引擎 + 平台），同一策略按目标编译为对应方言。平台扩展处理平台差异，按整键覆盖；拖动手柄排序，分页仅重排当前页。
     </p>
 
     <div class="mp-toolbar">
@@ -20,13 +20,9 @@
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small">
-          <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
-            <template #default="{ row, $index }">
-              <div class="order-cell">
-                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
-                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
-                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
-              </div>
+          <el-table-column label="顺序" :width="isMobile ? 56 : 64" align="center">
+            <template #default="{ row }">
+              <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
             </template>
           </el-table-column>
           <el-table-column prop="name" label="名称" min-width="130">
@@ -240,17 +236,6 @@ async function load() {
 onMounted(load)
 onBeforeUnmount(sorter.destroy)
 
-async function move(index, delta) {
-  const ids = rows.value.map((r) => r.id)
-  const [id] = ids.splice(index, 1)
-  ids.splice(index + delta, 0, id)
-  try {
-    await api('/api/v1/targets/reorder', { method: 'POST', body: ids })
-    await load()
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
-}
 
 function openEdit(row) {
   editing.value = row || null

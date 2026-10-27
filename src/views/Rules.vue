@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">分流策略</h2>
     <p class="mp-page-desc">
-      规则按声明顺序自上而下首次匹配，最后一条须为 MATCH 兜底。按住左侧手柄拖动排序；分页时仅重排当前页，调整后于下一次构建生效。筛选后规则在列表里并不相邻，此时暂停排序以免打乱整体顺序。
+      规则按声明顺序自上而下首次匹配，末条须为 MATCH 兜底。拖动手柄或勾选多条批量移动即可排序（触屏长按可拖）；分页仅重排当前页，调整于下次构建生效。筛选状态下规则不相邻，排序自动暂停。
     </p>
 
     <div class="mp-toolbar">
@@ -12,6 +12,8 @@
           <el-button @click="openBatch">批量修改</el-button>
           <el-button @click="batchEnable(true)">批量启用</el-button>
           <el-button @click="batchEnable(false)">批量停用</el-button>
+          <el-button :disabled="hasFilter" @click="moveSelected(-1)">批量上移</el-button>
+          <el-button :disabled="hasFilter" @click="moveSelected(1)">批量下移</el-button>
           <el-button @click="removeSelected" type="danger" plain>批量删除</el-button>
           <el-button link @click="clearSelection">取消选择</el-button>
         </template>
@@ -68,13 +70,10 @@
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
-          <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
-            <template #default="{ row, $index }">
-              <div class="order-cell">
-                <span v-if="!hasFilter" class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
-                <el-button text size="small" :disabled="hasFilter || $index === 0" @click="move($index, -1)">↑</el-button>
-                <el-button text size="small" :disabled="hasFilter || $index === rows.length - 1" @click="move($index, 1)">↓</el-button>
-              </div>
+          <el-table-column label="顺序" :width="isMobile ? 56 : 64" align="center">
+            <template #default="{ row }">
+              <span v-if="!hasFilter" class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+              <span v-else class="mono">{{ row.sort }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="type" label="类型" width="130">
@@ -492,16 +491,38 @@ async function save() {
   }
 }
 
-async function move(index, delta) {
+// 批量上移/下移：把勾选的规则当作一个整体块挪一格，块内相对顺序不变。
+// 提交的是当前页完整顺序，与拖动排序走同一个接口。
+async function moveSelected(delta) {
+  if (!selected.value.length || hasFilter.value) return
   const ids = rows.value.map((r) => r.id)
-  const [id] = ids.splice(index, 1)
-  ids.splice(index + delta, 0, id)
+  const picked = new Set(selected.value.map((r) => r.id))
+  const block = ids.filter((id) => picked.has(id))
+  if (delta < 0) {
+    const first = ids.findIndex((id) => picked.has(id))
+    if (first <= 0) return
+    // 把块前的那条未选中规则挪到块后
+    const mover = ids[first - 1]
+    const rest = ids.filter((id) => id !== mover)
+    rest.splice(rest.indexOf(block[block.length - 1]) + 1, 0, mover)
+    return submitOrder(rest)
+  }
+  const last = ids.map((id) => picked.has(id)).lastIndexOf(true)
+  if (last < 0 || last >= ids.length - 1) return
+  const mover = ids[last + 1]
+  const rest = ids.filter((id) => id !== mover)
+  rest.splice(rest.indexOf(block[0]), 0, mover)
+  return submitOrder(rest)
+}
+
+async function submitOrder(ids) {
   try {
     await api('/api/v1/rules/reorder', { method: 'POST', body: ids })
-    await load()
+    ElMessage.success('顺序已更新')
   } catch (e) {
     ElMessage.error(e.message)
   }
+  await load()
 }
 
 async function remove(row) {

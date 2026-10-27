@@ -35,13 +35,9 @@
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
-          <el-table-column label="顺序" :width="isMobile ? 56 : 96" align="center">
-            <template #default="{ row, $index }">
-              <div class="order-cell">
-                <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
-                <el-button text size="small" :disabled="$index === 0" @click="move($index, -1)">↑</el-button>
-                <el-button text size="small" :disabled="$index === rows.length - 1" @click="move($index, 1)">↓</el-button>
-              </div>
+          <el-table-column label="顺序" :width="isMobile ? 56 : 64" align="center">
+            <template #default="{ row }">
+              <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
             </template>
           </el-table-column>
           <el-table-column label="文件名" min-width="165" :fixed="isMobile ? false : 'left'">
@@ -262,20 +258,6 @@ function clearSelection() {
   tableRef.value?.clearSelection()
 }
 
-async function move(index, delta) {
-  const next = index + delta
-  if (next < 0 || next >= rows.value.length) return
-  const list = [...rows.value]
-  const [item] = list.splice(index, 1)
-  list.splice(next, 0, item)
-  try {
-    await api('/api/v1/devices/reorder', { method: 'POST', body: list.map((r) => r.id) })
-    ElMessage.success('顺序已更新')
-    await load()
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
-}
 
 function openBatch() {
   if (!selected.value.length) return

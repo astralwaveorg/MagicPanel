@@ -25,7 +25,7 @@ const route = useRoute()
 const router = useRouter()
 
 const tab = computed({
-  get: () => (TABS.includes(route.query.tab) ? route.query.tab : 'artifact'),
+  get: () => (TABS.includes(route.query.tab) ? route.query.tab : 'targets'),
   set: (v) => {
     if (route.query.tab === v) return
     router.replace({ path: '/admin/artifact', query: { ...route.query, tab: v } })

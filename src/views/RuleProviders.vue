@@ -115,7 +115,9 @@
                          placement="top">
                 <span class="mp-cell-sub">仍用上次内容</span>
               </el-tooltip>
-              <span v-else style="color:var(--mp-muted)">—</span>
+              <!-- 占位符只属于内联来源（没有抓取概念）；此前 v-else 错挂在
+                   失败提示上，导致抓取成功也跟着一个悬空的 — -->
+              <span v-if="row.kind === 'inline'" style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
           <el-table-column label="规则数" width="90" align="right">

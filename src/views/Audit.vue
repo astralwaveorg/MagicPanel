@@ -36,7 +36,15 @@
             </template>
           </el-table-column>
           <el-table-column label="详情" min-width="200">
-            <template #default="{ row }"><span class="mono">{{ row.detail || '—' }}</span></template>
+            <template #default="{ row }">
+              <el-tooltip v-if="row.detail" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-note-tip mono">{{ row.detail }}</div>
+                </template>
+                <span class="mp-clamp2 mono">{{ row.detail }}</span>
+              </el-tooltip>
+              <span v-else style="color:var(--mp-muted)">—</span>
+            </template>
           </el-table-column>
         </el-table>
       </div>

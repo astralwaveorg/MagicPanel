@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      顺序即声明顺序；拖动左侧手柄排序，分页仅重排当前页。地区筛选为空的组保留 <strong>空组保护</strong>占位，防止客户端隐式改为直连。
+      列表顺序即产物声明顺序：拖动手柄排序，分页仅重排当前页。地区筛选为空的组由「空组保护」占位，防止客户端隐式改为直连。
     </p>
 
     <div class="mp-toolbar">
@@ -75,14 +75,10 @@
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
-          <el-table-column label="顺序" :width="isMobile ? 56 : 104" align="center">
-            <template #default="{ row, $index }">
-              <div class="order-cell">
-                <!-- 筛选后组在列表里并不相邻，这时暂停排序以免打乱整体顺序 -->
-                <span v-if="!hasFilter" class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
-                <el-button text size="small" :disabled="hasFilter || $index === 0" @click="move($index, -1)">↑</el-button>
-                <el-button text size="small" :disabled="hasFilter || $index === rows.length - 1" @click="move($index, 1)">↓</el-button>
-              </div>
+          <el-table-column label="顺序" :width="isMobile ? 56 : 64" align="center">
+            <template #default="{ row }">
+              <!-- 筛选后组在列表里并不相邻，这时暂停排序以免打乱整体顺序 -->
+              <span v-if="!hasFilter" class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
             </template>
           </el-table-column>
           <el-table-column prop="name" label="名称" min-width="110" />
@@ -587,19 +583,6 @@ async function save() {
   }
 }
 
-async function move(index, delta) {
-  // 筛选状态下组并不相邻，排序会打乱整体顺序
-  if (hasFilter.value) return
-  const ids = rows.value.map((r) => r.id)
-  const [id] = ids.splice(index, 1)
-  ids.splice(index + delta, 0, id)
-  try {
-    await api('/api/v1/groups/reorder', { method: 'POST', body: ids })
-    await load()
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
-}
 
 async function remove(row) {
   if (!await confirmBox(`删除策略组 “${row.name}”？`, '删除策略组')) return

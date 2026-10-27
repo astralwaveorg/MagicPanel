@@ -14,6 +14,7 @@
   --mp-muted: #8f959e;
   --mp-secret-bg: #fffbe6;
   --mp-secret-border: #d48806;
+  --mp-active-bg: #ebeeff;
 }
 
 html.dark {
@@ -29,9 +30,28 @@ html.dark {
   --mp-muted: #6b7078;
   --mp-secret-bg: #2b2614;
   --mp-secret-border: #a97e1f;
+  --mp-active-bg: rgba(47, 84, 235, 0.16);
 }
 
 * { box-sizing: border-box; }
+
+/* 表格长文本：最多两行省略，完整内容看悬浮提示 */
+.mp-clamp2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+  line-height: 1.5;
+}
+.mp-note-tip { max-width: 460px; white-space: pre-wrap; word-break: break-all; line-height: 1.6; }
+
+/* 列表斑马纹：隔行极轻色差，长列表读行不串行；hover 仍由组件接管 */
+.mp-table-wrap .el-table .el-table__body tbody tr:nth-child(even) td.el-table__cell {
+  background: var(--mp-zebra);
+}
+:root { --mp-zebra: rgba(31, 35, 41, 0.022); }
+html.dark { --mp-zebra: rgba(255, 255, 255, 0.028); }
 
 html, body, #app {
   height: 100%;

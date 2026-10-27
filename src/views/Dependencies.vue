@@ -65,9 +65,13 @@
                 :key="f.path"
                 class="mp-deps-file"
                 :class="{ active: current && current.path === f.path }"
+                :title="statusTitle(f.status)"
                 @click="openFile(f)"
               >
-                <span class="mp-deps-mark" :data-status="f.status">{{ statusMark(f.status) }}</span>
+                <span class="mp-deps-ico" :data-kind="fileKind(f.path)">
+                  <el-icon><Document /></el-icon>
+                  <i class="mp-deps-dot" :data-status="f.status"></i>
+                </span>
                 <span class="mp-deps-file-name">{{ f.path.split('/').pop() }}</span>
                 <el-tag v-if="f.rule_source" size="small" type="success" effect="plain">来源</el-tag>
               </button>
@@ -85,18 +89,30 @@
             <span v-if="current.binary" class="mp-toolbar-hint">二进制文件，只读</span>
           </div>
           <p v-if="current.desc" class="mp-form-hint">{{ current.desc }}</p>
-          <el-input
+          <div v-if="fileLang" class="mp-deps-editor-tools">
+            <el-tag v-if="validationError" type="danger" effect="plain" size="small">
+              {{ validationError }}
+            </el-tag>
+            <el-tag v-else-if="draftDirty" type="success" effect="plain" size="small">语法检查通过</el-tag>
+            <span class="flex-sp"></span>
+            <el-button size="small" :disabled="!canFormat" @click="formatDraft">格式化</el-button>
+          </div>
+          <p v-if="fileLang === 'yaml' && !canFormat && !current.binary" class="mp-form-hint">
+            文件含注释，格式化会丢失注释，已禁用；语法校验仍然可用。
+          </p>
+          <CodeEditor
+            v-if="!current.binary"
             v-model="draft"
-            type="textarea"
-            :rows="16"
-            :readonly="current.binary"
-            class="mono"
-            placeholder="（内容加载中）"
+            :language="fileLang"
+            :height="'min(56vh, 560px)'"
           />
+          <el-input v-else :model-value="''" type="textarea" :rows="4" readonly
+                    placeholder="二进制文件不可编辑" />
           <div class="mp-deps-detail-actions mp-btn-grid">
-            <el-button :disabled="current.binary || committing || busy" @click="saveFile">保存</el-button>
+            <el-button :disabled="current.binary || committing || busy || !!validationError"
+                       @click="saveFile">保存</el-button>
             <el-button :loading="committing"
-                       :disabled="current.binary || committing || busy"
+                       :disabled="current.binary || committing || busy || !!validationError"
                        @click="saveAndCommit">
               {{ committing ? '提交推送中…' : '保存并提交' }}
             </el-button>
@@ -234,10 +250,13 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Document } from '@element-plus/icons-vue'
+import * as jsYaml from 'js-yaml'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
+import CodeEditor from '../components/CodeEditor.vue'
 import { fmtTime } from '../format'
 
 const router = useRouter()
@@ -287,6 +306,50 @@ const busy = computed(() => !!status.value.busy)
 
 function statusMark(s) {
   return { modified: '●', remote: '▲', conflict: '⚠', clean: '○' }[s] || '○'
+}
+
+function statusTitle(s) {
+  return { modified: '有本地改动（未提交）', remote: '与远端有差异',
+           conflict: '存在合并冲突', clean: '与远端一致' }[s] || ''
+}
+
+// 文件类型 → 编辑器语言；决定高亮与校验行为
+function fileKind(path) {
+  if (/\.(yaml|yml)$/i.test(path)) return 'yaml'
+  if (/\.(js|mjs|cjs)$/i.test(path)) return 'javascript'
+  if (/\.json$/i.test(path)) return 'json'
+  return 'text'
+}
+const fileLang = computed(() => (current.value ? fileKind(current.value.path) : ''))
+
+const draftDirty = computed(() => draft.value.trim().length > 0)
+const hasComments = computed(() =>
+  /^\s*#/m.test(draft.value))
+
+const validationError = computed(() => {
+  if (fileLang.value !== 'yaml' || !draftDirty.value) return ''
+  try {
+    jsYaml.load(draft.value)
+    return ''
+  } catch (e) {
+    const line = ((e.mark && e.mark.line) ?? 0) + 1
+    return `YAML 语法错误（第 ${line} 行）：${e.reason || e.message}`
+  }
+})
+
+// 格式化只对「无注释的 YAML」开放：js-yaml 重排会丢注释，宁可不做
+const canFormat = computed(() =>
+  fileLang.value === 'yaml' && draftDirty.value && !hasComments.value
+  && !validationError.value)
+
+function formatDraft() {
+  try {
+    const doc = jsYaml.load(draft.value)
+    draft.value = jsYaml.dump(doc, { lineWidth: 120, noRefs: true })
+    ElMessage.success('已格式化')
+  } catch (e) {
+    ElMessage.error(`格式化失败：${e.reason || e.message}`)
+  }
 }
 
 // 409 是"后台已有 Git 操作在跑"，属于冲突不是出错，提示用警告色
@@ -590,13 +653,38 @@ function goRuleSources() {
   background: none; border: none; border-radius: 6px; cursor: pointer;
   color: var(--mp-text); font-size: 12.5px; padding: 5px 8px; text-align: left;
 }
+.mp-deps-file {
+  position: relative;
+}
 .mp-deps-file:hover { background: var(--mp-surface-2); }
-.mp-deps-file.active { background: var(--mp-surface-2); color: var(--mp-primary); }
+/* 选中态要一眼可辨：主色浅底 + 左侧主色竖条，明显区别于 hover */
+.mp-deps-file.active {
+  background: var(--mp-active-bg);
+  color: var(--mp-primary);
+  box-shadow: inset 3px 0 0 var(--mp-primary);
+}
 .mp-deps-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mp-deps-mark { width: 14px; text-align: center; color: var(--mp-text-secondary); }
-.mp-deps-mark[data-status='modified'] { color: var(--mp-warn); }
-.mp-deps-mark[data-status='remote'] { color: var(--mp-info, #409eff); }
-.mp-deps-mark[data-status='conflict'] { color: var(--mp-danger); }
+.mp-deps-ico {
+  position: relative; width: 18px; height: 18px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--mp-text-secondary);
+}
+.mp-deps-ico[data-kind='yaml'] { color: #d4a017; }
+.mp-deps-ico[data-kind='javascript'] { color: #b8860b; }
+.mp-deps-ico[data-kind='json'] { color: #7a8aa0; }
+.mp-deps-dot {
+  position: absolute; right: -2px; bottom: -2px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mp-muted); opacity: .9;
+}
+.mp-deps-dot[data-status='modified'] { background: var(--mp-warn); }
+.mp-deps-dot[data-status='remote'] { background: #409eff; }
+.mp-deps-dot[data-status='conflict'] { background: var(--mp-danger); }
+.mp-deps-dot[data-status='clean'] { background: transparent; }
+.mp-deps-editor-tools {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.flex-sp { flex: 1; }
 .mp-deps-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 .mp-deps-detail-actions { margin-top: 12px; }
 .mp-deps-conflict { margin-bottom: 20px; }

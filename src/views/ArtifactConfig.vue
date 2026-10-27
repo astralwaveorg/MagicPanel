@@ -1,10 +1,10 @@
 <template>
   <div class="mp-artifact">
     <p class="mp-page-desc">
-      配置分三层：<strong>引擎默认配置</strong>（引擎内置的能力基线，随程序发布，可直接改）→
-      <strong>引擎平台配置</strong>（按引擎 + 平台，可新增）→
-      <strong>设备独立配置</strong>（对应最终产物的个性化设置）。
-      越靠后优先级越高；每层只保存改动过的部分，其余自动继承上一层。
+      配置分三层：<strong>引擎默认配置</strong>（内置基线，随程序发布）→
+      <strong>引擎平台配置</strong>（按引擎 + 平台）→
+      <strong>设备独立配置</strong>（最终产物个性化）。
+      越靠后优先级越高；每层只保存改动项，其余自动继承上一层。
     </p>
 
     <!-- 手机：作用域改用下拉选择，左侧长列表在窄屏太占版面 -->
@@ -95,7 +95,7 @@
           <div class="mp-effective-toolbar">
             <el-button v-if="!readonly" size="small" @click="openAddParam" type="primary">新增参数</el-button>
             <span class="mp-toolbar-hint">
-              点击「值」即可编辑。修改仅对当前层级生效，保存时仅记录改动项。
+              点「值」或「编辑」在弹窗里改（按值类型给编辑器）；覆盖键会带继承值删除线对比。保存时仅记录改动项。
             </span>
             <span class="mp-legend">
               <span class="mp-legend-item is-added">本层新增</span>
@@ -112,19 +112,11 @@
                         effect="plain">{{ row.source }}</el-tag>
               </div>
               <div class="mp-effective-item-value">
-                <template v-if="editingPath === row.path">
-                  <el-input v-if="row.simple" v-model="editText" size="small" class="mono"
-                            @keyup.enter="commitEdit" @keyup.esc="cancelEdit" />
-                  <el-input v-else v-model="editText" type="textarea" :rows="3" size="small"
-                            class="mono" @keyup.esc="cancelEdit" />
-                  <div class="mp-effective-actions">
-                    <el-button size="small" text @click="commitEdit" type="primary">确定</el-button>
-                    <el-button size="small" text @click="cancelEdit">取消</el-button>
-                  </div>
-                </template>
-                <span v-else class="mono mp-effective-value"
+                <span class="mono mp-effective-value"
                       :class="{ editable: !readonly && !row.isDict }"
-                      @click="startEdit(row)">{{ row.display }}</span>
+                      @click="openKeyEditor(row)">{{ row.display
+                      }}<template v-if="row.change === 'overridden'">
+                        <s class="mp-oldval">{{ formatValue(getPath(baseline, row.path)) }}</s></template></span>
               </div>
             </div>
           </div>
@@ -141,19 +133,11 @@
             </el-table-column>
             <el-table-column label="值" min-width="260">
               <template #default="{ row }">
-                <template v-if="editingPath === row.path">
-                  <el-input v-if="row.simple" v-model="editText" size="small" class="mono"
-                            @keyup.enter="commitEdit" @keyup.esc="cancelEdit" />
-                  <el-input v-else v-model="editText" type="textarea" :rows="3" size="small"
-                            class="mono" @keyup.esc="cancelEdit" />
-                  <div class="mp-effective-actions">
-                    <el-button size="small" text @click="commitEdit" type="primary">确定</el-button>
-                    <el-button size="small" text @click="cancelEdit">取消</el-button>
-                  </div>
-                </template>
-                <span v-else class="mono mp-effective-value"
+                <span class="mono mp-effective-value"
                       :class="{ editable: !readonly && !row.isDict }"
-                      @click="startEdit(row)">{{ row.display }}</span>
+                      @click="openKeyEditor(row)">{{ row.display
+                      }}<template v-if="row.change === 'overridden'">
+                        <s class="mp-oldval">{{ formatValue(getPath(baseline, row.path)) }}</s></template></span>
               </template>
             </el-table-column>
             <el-table-column label="来源" width="110" align="right">
@@ -162,9 +146,12 @@
                         effect="plain">{{ row.source }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column v-if="!readonly" label="" width="90" align="right">
+            <el-table-column v-if="!readonly" label="操作" width="150" align="right">
               <template #default="{ row }">
-                <el-button v-if="!row.isDict && row.overridden" size="small" text @click="revertKey(row)" type="warning">恢复继承</el-button>
+                <el-button v-if="!row.isDict" size="small" text type="primary"
+                           @click="openKeyEditor(row)">编辑</el-button>
+                <el-button v-if="!row.isDict && row.overridden" size="small" text
+                           @click="revertKey(row)" type="warning">恢复继承</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -203,7 +190,7 @@
               </template>
 
               <el-form-item label="高级 YAML（其他顶层键）">
-                <el-input v-model="raw" type="textarea" :rows="10" class="mono" />
+                <CodeEditor v-model="raw" language="yaml" height="300px" />
                 <div class="mp-form-hint">
                   编辑的是最终生效值，保存时只把与上层不同的部分记到当前层级。
                   字典逐层合并，列表整体替换。
@@ -230,7 +217,7 @@
 
           <template v-else>
             <h3 class="mp-section-title">默认内容（可直接修改）</h3>
-            <el-input v-model="raw" type="textarea" :rows="14" class="mono" />
+            <CodeEditor v-model="raw" language="yaml" height="46vh" />
             <div class="mp-form-hint">
               这里是引擎默认配置的完整内容。保存时只把
               <strong>与默认值不同的部分</strong>记下来，其余保持原样；
@@ -240,6 +227,53 @@
         </div>
       </section>
     </div>
+
+    <el-dialog v-model="keyDialog" title="编辑参数" width="min(620px, 94vw)">
+      <div class="mp-key-head">
+        <span class="mono mp-key-path">{{ keyForm.path }}</span>
+        <el-tag size="small" effect="plain"
+                :type="keyChangeType === 'overridden' ? 'warning'
+                  : keyChangeType === 'added' ? 'primary' : 'info'">
+          {{ keyChangeLabel }}
+        </el-tag>
+      </div>
+      <div v-if="keyChangeType === 'overridden'" class="mp-key-inherited">
+        <span class="mp-toolbar-hint">上层继承值</span>
+        <div class="mono mp-key-oldval">{{ formatValue(keyInherited) }}</div>
+      </div>
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item v-if="keyForm.kind === 'bool'" label="布尔值">
+          <el-switch v-model="keyForm.bool" />
+          <span class="mono mp-key-bool">{{ keyForm.bool }}</span>
+        </el-form-item>
+        <el-form-item v-else-if="keyForm.kind === 'number'" label="数字">
+          <el-input-number v-model="keyForm.num" style="width:100%" />
+        </el-form-item>
+        <el-form-item v-else-if="keyForm.kind === 'list'" label="字符串列表">
+          <div class="mp-key-list">
+            <div v-for="(_, i) in keyForm.list" :key="i" class="mp-key-list-row">
+              <el-input v-model="keyForm.list[i]" class="mono" size="small"
+                        :placeholder="'留空保存时忽略'" />
+              <el-button size="small" text type="danger"
+                         @click="keyForm.list.splice(i, 1)">删除</el-button>
+            </div>
+            <el-button size="small" @click="keyForm.list.push('')">添加一项</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item v-else-if="keyForm.kind === 'yaml'" label="值（YAML）">
+          <CodeEditor v-model="keyForm.yaml" language="yaml" height="240px" />
+        </el-form-item>
+        <el-form-item v-else label="文本值（留空保存为 null）">
+          <el-input v-model="keyForm.text" class="mono" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button v-if="keyChangeType === 'overridden'" type="warning" plain
+                   @click="revertInDialog">恢复继承</el-button>
+        <el-button @click="keyDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmKeyEditor">确定</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="addDialog" title="新增参数" width="min(560px, 94vw)">
       <p class="mp-dialog-desc">
@@ -268,7 +302,7 @@
         应用后回到编辑器，确认无误再点「保存」；保存时仍会做键级校验
         （不能包含 proxies / proxy-providers / proxy-groups / rule-providers / rules）。
       </p>
-      <el-input v-model="sourceText" type="textarea" :rows="20" class="mono" />
+      <CodeEditor v-model="sourceText" language="yaml" height="52vh" />
       <template #footer>
         <el-button @click="sourceVisible = false">取消</el-button>
         <el-button @click="applySource" type="primary">应用到编辑器</el-button>
@@ -299,6 +333,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { PLATFORM_LABELS, ENV_LABELS } from '../format'
+import CodeEditor from '../components/CodeEditor.vue'
 
 const scopes = ref([])
 const isMobile = useMobile()
@@ -321,8 +356,12 @@ const previewNote = ref('')
 const previewWarnings = ref([])
 const presetKey = ref('')
 const syncing = ref(false)
-const editingPath = ref('')
-const editText = ref('')
+const keyDialog = ref(false)
+const keyForm = reactive({
+  path: '', kind: 'string', bool: false, num: 0, text: '', list: [], yaml: '',
+})
+const keyInherited = ref(undefined)
+const keyOriginal = ref(undefined)
 const addDialog = ref(false)
 const addForm = reactive({ path: '', value: '' })
 
@@ -487,34 +526,66 @@ function formatValue(value) {
   return String(value)
 }
 
-function startEdit(row) {
+// ---- 键编辑弹窗：按值的类型给编辑器，弹窗内可见上层继承值 ----
+const keyChangeType = computed(() => {
+  if (!keyForm.path) return ''
+  const base = getPath(baseline.value, keyForm.path)
+  if (base === undefined) return 'added'
+  return JSON.stringify(getPath(doc, keyForm.path)) === JSON.stringify(base)
+    ? 'unchanged' : 'overridden'
+})
+const keyChangeLabel = computed(() => ({
+  added: '本层新增', overridden: '本层覆盖', unchanged: '继承上层',
+}[keyChangeType.value] || ''))
+
+function openKeyEditor(row) {
   if (readonly.value || row.isDict) return
-  editingPath.value = row.path
-  editText.value = row.simple ? String(row.value ?? '') : toYaml(row.value)
+  keyForm.path = row.path
+  keyInherited.value = getPath(baseline.value, row.path)
+  const v = getPath(doc, row.path)
+  keyOriginal.value = v
+  if (typeof v === 'boolean') {
+    keyForm.kind = 'bool'; keyForm.bool = v
+  } else if (typeof v === 'number') {
+    keyForm.kind = 'number'; keyForm.num = v
+  } else if (Array.isArray(v) && v.every((x) => x === null || typeof x !== 'object')) {
+    keyForm.kind = 'list'; keyForm.list = v.map((x) => (x === null ? '' : String(x)))
+  } else if (v === null || typeof v === 'string') {
+    keyForm.kind = 'string'; keyForm.text = v ?? ''
+  } else {
+    keyForm.kind = 'yaml'; keyForm.yaml = toYaml(v)
+  }
+  keyDialog.value = true
 }
 
-function cancelEdit() {
-  editingPath.value = ''
-  editText.value = ''
+function revertInDialog() {
+  deletePath(doc, keyForm.path)
+  syncRaw()
+  keyDialog.value = false
+  ElMessage.success(`已恢复 ${keyForm.path} 继承上层，保存后生效`)
 }
 
-function commitEdit() {
-  const path = editingPath.value
-  if (!path) return
+function confirmKeyEditor() {
   let value
-  if (effectiveRows.value.find((r) => r.path === path)?.simple) {
-    value = coerceScalar(editText.value)
+  if (keyForm.kind === 'bool') value = keyForm.bool
+  else if (keyForm.kind === 'number') value = keyForm.num
+  else if (keyForm.kind === 'list') {
+    value = keyForm.list.map((s) => coerceScalar(s))
+      .filter((s) => s !== null && s !== '')
+  } else if (keyForm.kind === 'string') {
+    value = keyForm.text === '' ? null : keyForm.text
   } else {
     try {
-      value = yamlLoad(editText.value)
+      value = yamlLoad(keyForm.yaml) ?? null
     } catch (e) {
-      ElMessage.error(`值格式不正确：${e.message}`)
+      ElMessage.error(`YAML 不合法：${e.message}`)
       return
     }
   }
-  setPath(doc, path, value)
+  setPath(doc, keyForm.path, value)
   syncRaw()
-  cancelEdit()
+  keyDialog.value = false
+  ElMessage.success(`已修改 ${keyForm.path}，保存后生效`)
 }
 
 // 标量按 YAML 习惯转成布尔 / 数字，其余按字符串
@@ -825,7 +896,8 @@ async function doPreview() {
 onMounted(async () => {
   try {
     await loadScopes()
-    const first = scopes.value.find((s) => s.kind === 'general') || scopes.value[0]
+    // 默认落在「引擎默认配置」的第一个（Stash 默认）：这是整条配置链的起点
+    const first = scopes.value.find((s) => s.kind === 'builtin') || scopes.value[0]
     if (first) await select(first)
     const seen = new Set()
     for (const s of scopes.value) {
@@ -840,6 +912,7 @@ onMounted(async () => {
   }
 })
 </script>
+
 
 <style scoped>
 .mp-artifact-picker {
@@ -1002,4 +1075,25 @@ onMounted(async () => {
 /* 表格行底色：改动过的行淡染一下，扫一眼就能看到 */
 .mp-effective-table :deep(.mp-row-added) { background: var(--el-color-primary-light-9); }
 .mp-effective-table :deep(.mp-row-overridden) { background: var(--el-color-warning-light-9); }
+/* 键编辑弹窗 */
+.mp-key-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.mp-key-path { font-size: 13.5px; font-weight: 600; }
+.mp-key-inherited {
+  background: var(--mp-surface-2);
+  border: 1px dashed var(--mp-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.mp-key-oldval { margin-top: 4px; font-size: 12.5px; color: var(--mp-text-secondary); }
+.mp-key-bool { margin-left: 10px; }
+.mp-key-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.mp-key-list-row { display: flex; gap: 8px; align-items: center; }
+
+/* 值列：覆盖键在当前值后面带继承值删除线 */
+.mp-oldval {
+  margin-left: 12px;
+  color: var(--mp-muted);
+  font-size: 12px;
+}
 </style>

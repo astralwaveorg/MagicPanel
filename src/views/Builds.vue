@@ -108,7 +108,15 @@
                 <template #default="{ row }"><span class="mono">{{ shortSha(row.policy_sha) }}</span></template>
               </el-table-column>
               <el-table-column prop="note" label="备注" :min-width="isMobile ? 160 : 200">
-                <template #default="{ row }">{{ row.note || '—' }}</template>
+                <template #default="{ row }">
+                  <el-tooltip v-if="row.note" placement="top" :show-after="200">
+                    <template #content>
+                      <div class="mp-note-tip">{{ row.note }}</div>
+                    </template>
+                    <span class="mp-clamp2">{{ row.note }}</span>
+                  </el-tooltip>
+                  <span v-else style="color:var(--mp-muted)">—</span>
+                </template>
               </el-table-column>
               <el-table-column label="操作" :width="isMobile ? 190 : 240" :fixed="isMobile ? false : 'right'">
                 <template #default="{ row }">

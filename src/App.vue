@@ -106,8 +106,8 @@ const isAuthPage = computed(() =>
 // 再看产物形态与设备，最后是构建发布与运维。高频页面同时尽量靠上，
 // 日常改策略的路径最短——策略组和分流策略挨着，因为规则的目标就是策略组。
 const menu = [
-  { path: '/admin', title: '系统状态', icon: Odometer },
-  { path: '/admin/groups', title: '策 略 组', icon: SetUp },
+  { path: '/admin', title: '系统概览', icon: Odometer },
+  { path: '/admin/groups', title: '策略组', icon: SetUp },
   { path: '/admin/rules', title: '分流策略', icon: Filter },
   { path: '/admin/sources', title: '节点来源', icon: Connection },
   { path: '/admin/rule-providers', title: '规则来源', icon: Collection },
