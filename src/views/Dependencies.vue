@@ -9,6 +9,9 @@
           <span v-if="status.commit" class="mono mp-deps-commit">{{ status.commit }}</span>
         </div>
         <div class="mp-deps-badges">
+          <el-tag v-if="busy" size="small" type="warning" effect="plain">
+            ⏳ {{ status.busy_op || '处理中' }}
+          </el-tag>
           <el-tag v-if="!status.configured" size="small" type="warning" effect="plain">未配置</el-tag>
           <el-tag v-else-if="!status.cloned" size="small" type="warning" effect="plain">未克隆</el-tag>
           <el-tag v-else-if="status.conflicts.length" size="small" type="danger" effect="plain">
@@ -27,9 +30,12 @@
         <p v-if="status.last_error" class="mp-deps-error">{{ status.last_error }}</p>
       </div>
       <div class="mp-deps-bar-actions mp-btn-grid">
-        <el-button :loading="syncing" @click="syncNow" type="primary">立即同步</el-button>
+        <el-button :loading="syncing" :disabled="syncing || busy"
+                   @click="syncNow" type="primary">
+          {{ syncing ? '同步中…' : '立即同步' }}
+        </el-button>
         <el-button @click="openHistory">提交历史</el-button>
-        <el-button @click="settingsOpen = true">仓库设置</el-button>
+        <el-button @click="openSettings">仓库设置</el-button>
       </div>
     </div>
 
@@ -88,11 +94,15 @@
             placeholder="（内容加载中）"
           />
           <div class="mp-deps-detail-actions mp-btn-grid">
-            <el-button :disabled="current.binary" @click="saveFile">保存</el-button>
-            <el-button :disabled="current.binary" @click="saveAndCommit">保存并提交</el-button>
+            <el-button :disabled="current.binary || committing || busy" @click="saveFile">保存</el-button>
+            <el-button :loading="committing"
+                       :disabled="current.binary || committing || busy"
+                       @click="saveAndCommit">
+              {{ committing ? '提交推送中…' : '保存并提交' }}
+            </el-button>
             <el-button v-if="current.rule_source" type="primary" plain
                        @click="goRuleSources">在规则来源查看</el-button>
-            <el-button type="danger" plain @click="removeFile">删除</el-button>
+            <el-button type="danger" plain :disabled="committing || busy" @click="removeFile">删除</el-button>
           </div>
         </template>
         <EmptyState v-else reason="左侧选一个文件查看与编辑。" />
@@ -221,7 +231,7 @@
 <script setup>
 // 自主维护：依赖文件库的文件管理器。浏览、编辑、保存、提交、推送都在这里，
 // 仓库里的 rule/*.yaml 会自动成为规则来源。
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
@@ -241,6 +251,7 @@ const current = ref(null)
 const draft = ref('')
 const error = ref('')
 const syncing = ref(false)
+const committing = ref(false)
 const savingSettings = ref(false)
 const settingsOpen = ref(false)
 const historyOpen = ref(false)
@@ -271,8 +282,17 @@ const treeDirs = computed(() => {
   return [...map.entries()].map(([path, items]) => ({ path, files: items }))
 })
 
+// 后台有 Git 操作在跑（自己点的，或另一个标签页、定时同步）：按钮据此置灰
+const busy = computed(() => !!status.value.busy)
+
 function statusMark(s) {
   return { modified: '●', remote: '▲', conflict: '⚠', clean: '○' }[s] || '○'
+}
+
+// 409 是"后台已有 Git 操作在跑"，属于冲突不是出错，提示用警告色
+function reportError(e) {
+  if (e.status === 409) ElMessage.warning(e.message)
+  else ElMessage.error(e.message)
 }
 
 async function load() {
@@ -282,7 +302,12 @@ async function load() {
       api('/api/v1/deps/status'),
       api('/api/v1/deps/files').catch(() => ({ files: [] })),
     ])
-    status.value = st
+    if (st.busy) {
+      // 操作进行中，后端不查 git 状态：只更新忙碌标记，别把已有状态清空
+      status.value = { ...status.value, busy: true, busy_op: st.busy_op }
+    } else {
+      status.value = st
+    }
     files.value = fs.files || []
     const conf = await api('/api/v1/deps/conflicts').catch(() => ({ conflicts: [] }))
     conflicts.value = conf.conflicts || []
@@ -290,11 +315,40 @@ async function load() {
       if (!conflictDraft[c.path]) conflictDraft[c.path] = c.ours || ''
     }
     if (conflicts.value.length) conflictOpen.value = true
+    if (st.busy) startBusyWatch()
+    else stopBusyWatch()
   } catch (e) {
     error.value = e.message
   }
 }
 onMounted(load)
+onUnmounted(stopBusyWatch)
+
+// 后台有 Git 操作在跑时轮询，等它结束自动把按钮恢复
+let busyTimer = null
+
+function stopBusyWatch() {
+  if (busyTimer) {
+    clearInterval(busyTimer)
+    busyTimer = null
+  }
+}
+
+async function pollBusy() {
+  try {
+    const st = await api('/api/v1/deps/status')
+    if (st.busy) return
+    stopBusyWatch()
+    await load()
+  } catch {
+    // 轮询失败就等下一轮
+  }
+}
+
+function startBusyWatch() {
+  if (busyTimer) return
+  busyTimer = setInterval(pollBusy, 2000)
+}
 
 function toggleDir(path) {
   const i = collapsedDirs.value.indexOf(path)
@@ -327,7 +381,8 @@ async function saveFile() {
 }
 
 async function saveAndCommit() {
-  if (!current.value) return
+  if (!current.value || committing.value) return
+  committing.value = true
   try {
     await api('/api/v1/deps/file', {
       method: 'PUT',
@@ -340,7 +395,9 @@ async function saveAndCommit() {
     ElMessage.success('已提交并推送')
     await load()
   } catch (e) {
-    ElMessage.error(e.message)
+    reportError(e)
+  } finally {
+    committing.value = false
   }
 }
 
@@ -379,6 +436,7 @@ async function createFile() {
 }
 
 async function syncNow() {
+  if (syncing.value || busy.value) return
   syncing.value = true
   try {
     const r = await api('/api/v1/deps/sync', { method: 'POST' })
@@ -392,7 +450,7 @@ async function syncNow() {
     )
     await load()
   } catch (e) {
-    ElMessage.error(e.message)
+    reportError(e)
   } finally {
     syncing.value = false
   }

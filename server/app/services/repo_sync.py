@@ -3,12 +3,15 @@
 业务判断都在这里，Git 动作在 repo_manager。
 仓库里除 rule/ 之外的目录是素材区：面板只管理文件，不消费。
 """
+import logging
 import re
 
 import yaml
 
 from .. import db, security
 from . import repo_manager
+
+logger = logging.getLogger("magicpanel.repo_sync")
 
 
 class SyncError(Exception):
@@ -164,25 +167,30 @@ def run_sync(conn, operator: str, automatic: bool = False) -> dict:
     summary = {"pulled": False, "created": 0, "updated": 0, "skipped": 0,
                "errors": [], "conflicts": [], "pushed": False}
     try:
-        repo_manager.pull(conn)
-        summary["pulled"] = True
-        conflicts = repo_manager.conflicted_files(conn)
-        if conflicts:
-            summary["conflicts"] = conflicts
-            summary["errors"].append(f"存在 {len(conflicts)} 个冲突文件，需要手工解决")
+        with repo_manager.operation("同步仓库"):
+            repo_manager.pull(conn)
+            summary["pulled"] = True
+            conflicts = repo_manager.conflicted_files(conn)
+            if conflicts:
+                summary["conflicts"] = conflicts
+                summary["errors"].append(f"存在 {len(conflicts)} 个冲突文件，需要手工解决")
+                _record(conn, summary)
+                return summary
+            result = sync_content(conn, operator)
+            summary["created"] = result["created"]
+            summary["updated"] = result["updated"]
+            summary["skipped"] = result["skipped"]
+            summary["errors"].extend(result["errors"])
+            cfg = repo_manager.get_settings(conn)
+            if cfg["auto_push"] and repo_manager.dirty_files(conn):
+                repo_manager.commit_all(conn, "面板自动提交：同步仓库内容")
+                repo_manager.push(conn)
+                summary["pushed"] = True
             _record(conn, summary)
-            return summary
-        result = sync_content(conn, operator)
-        summary["created"] = result["created"]
-        summary["updated"] = result["updated"]
-        summary["skipped"] = result["skipped"]
-        summary["errors"].extend(result["errors"])
-        cfg = repo_manager.get_settings(conn)
-        if cfg["auto_push"] and repo_manager.dirty_files(conn):
-            repo_manager.commit_all(conn, "面板自动提交：同步仓库内容")
-            repo_manager.push(conn)
-            summary["pushed"] = True
-        _record(conn, summary)
+    except repo_manager.BusyError:
+        # 别的 Git 操作正在跑（用户在提交，或另一次同步）：本次跳过，不算故障
+        logger.info("依赖仓库正被其它操作占用，本次同步跳过")
+        return summary
     except Exception as exc:
         summary["errors"].append(str(exc))
         _record(conn, summary, error=str(exc))

@@ -14,6 +14,9 @@ router = APIRouter(prefix="/api/v1/deps", tags=["deps"])
 
 def _fail(exc) -> None:
     """把内部异常翻成 400，带上用户看得懂的中文。"""
+    if isinstance(exc, repo_manager.BusyError):
+        # 另一个 Git 操作正在跑：409 让前端知道这是"冲突"而不是"出错"
+        raise HTTPException(409, str(exc))
     raise HTTPException(400, str(exc))
 
 
@@ -112,7 +115,8 @@ def deps_put_settings(body: SettingsBody, user=CurrentUser):
 def deps_clone(user=CurrentUser):
     with db.tx() as conn:
         try:
-            result = repo_manager.clone(conn)
+            with repo_manager.operation("克隆仓库"):
+                result = repo_manager.clone(conn)
         except repo_manager.RepoError as exc:
             _fail(exc)
         security.audit(conn, user["username"], "克隆依赖仓库", "deps", "",
@@ -193,9 +197,12 @@ def deps_delete_file(path: str = Query(...), user=CurrentUser):
 def deps_commit(body: CommitBody, user=CurrentUser):
     with db.tx() as conn:
         try:
-            commit = repo_manager.commit_all(conn, body.message or "面板提交")
-            if body.push:
-                repo_manager.push(conn)
+            # 提交与推送算一整件事：中间不让别的操作插进来，
+            # 否则第二次点击会撞上"没有可提交的改动"。
+            with repo_manager.operation("提交并推送" if body.push else "提交改动"):
+                commit = repo_manager.commit_all(conn, body.message or "面板提交")
+                if body.push:
+                    repo_manager.push(conn)
         except repo_manager.RepoError as exc:
             _fail(exc)
         security.audit(conn, user["username"], "提交仓库改动", "deps", "",
@@ -208,7 +215,8 @@ def deps_sync(user=CurrentUser):
     """立即同步：拉取仓库并把 rule/*.yaml 同步进规则来源。"""
     with db.tx() as conn:
         try:
-            result = repo_sync.run_sync(conn, user["username"])
+            with repo_manager.operation("同步仓库"):
+                result = repo_sync.run_sync(conn, user["username"])
         except repo_sync.SyncError as exc:
             _fail(exc)
         except repo_manager.RepoError as exc:

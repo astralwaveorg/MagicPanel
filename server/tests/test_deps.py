@@ -224,3 +224,56 @@ def test_sync_keeps_non_repo_source_content(client, origin_repo):
         f"/api/v1/rule-providers/{demo['id']}/content", headers=h).json()["content"]
     assert "+.mine.example" in content
     assert "+.example.com" not in content
+
+
+def test_status_reports_idle_when_no_git_operation(client):
+    """状态接口要带上 busy 标记：空闲时为 False，前端据此决定按钮是否置灰。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+
+    st = client.get("/api/v1/deps/status", headers=h).json()
+    assert st["busy"] is False
+    assert st["busy_op"] == ""
+
+
+def test_git_operation_blocks_concurrent_commit(client, origin_repo):
+    """Git 操作进行中时，第二个请求直接被挡下（409），不并发抢同一个仓库。
+
+    连点两次「保存并提交」会同时起两个 git 进程，撞 git 的 index.lock；
+    这里确认后端用互斥把第二个挡在门外。
+    """
+    import threading
+
+    from app.services import repo_manager
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    _configure(client, h, origin_repo)
+    assert client.post("/api/v1/deps/clone", headers=h).status_code == 200
+
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold():
+        with repo_manager.operation("测试占用"):
+            holding.set()
+            release.wait(5)
+
+    worker = threading.Thread(target=hold, daemon=True)
+    worker.start()
+    assert holding.wait(5)
+    try:
+        st = client.get("/api/v1/deps/status", headers=h).json()
+        assert st["busy"] is True
+        assert st["busy_op"] == "测试占用"
+
+        r = client.post("/api/v1/deps/commit", headers=h,
+                        json={"message": "并发提交", "push": False})
+        assert r.status_code == 409
+        assert "进行中" in r.json()["detail"]
+    finally:
+        release.set()
+        worker.join(5)
+
+    st = client.get("/api/v1/deps/status", headers=h).json()
+    assert st["busy"] is False

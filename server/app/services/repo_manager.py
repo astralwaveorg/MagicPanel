@@ -14,6 +14,8 @@ import fnmatch
 import os
 import subprocess
 import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from .. import config, db, security
@@ -25,10 +27,44 @@ DEFAULT_EXCLUDES = ".git,.github,.env,*.bak,.*"
 
 # 所有 Git 操作串行：定时同步与用户手动操作抢锁时，用户优先
 _lock = threading.RLock()
+# 正在进行的 Git 操作。depth 为 0 表示空闲；接口把它带给前端，提交按钮据此置灰。
+_busy = {"depth": 0, "op": "", "since": 0.0}
 
 
 class RepoError(Exception):
     """Git 操作失败。消息面向用户，不回传原始 stderr。"""
+
+
+class BusyError(RepoError):
+    """已有 Git 操作在进行中，本次操作被挡下。"""
+
+
+@contextmanager
+def operation(op: str):
+    """把一次 Git 操作标记成"进行中"。
+
+    同一时刻只允许一个 Git 操作：定时同步与用户手动提交抢同一个仓库时，
+    并发跑会撞 git 的 index.lock。这里抢不到锁就直接报错，不排队。
+    """
+    if not _lock.acquire(blocking=False):
+        raise BusyError(f"上一操作还在进行中（{_busy['op']}），等它结束再试")
+    if _busy["depth"] == 0:
+        _busy["op"] = op
+        _busy["since"] = time.time()
+    _busy["depth"] += 1
+    try:
+        yield
+    finally:
+        _busy["depth"] -= 1
+        if _busy["depth"] == 0:
+            _busy["op"] = ""
+            _busy["since"] = 0.0
+        _lock.release()
+
+
+def busy_state() -> dict:
+    """当前有没有 Git 操作在跑。"""
+    return {"busy": _busy["depth"] > 0, "op": _busy["op"], "since": _busy["since"]}
 
 
 # ---------------------------------------------------------------- 设置读写
@@ -214,8 +250,9 @@ def clone(conn) -> dict:
     ]
     env = _env(conn)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=600, env=env)
+        with operation("克隆仓库"):
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=600, env=env)
     except FileNotFoundError as exc:
         raise RepoError("容器里没有 git，请用带 git 的镜像重新部署") from exc
     finally:
@@ -233,22 +270,25 @@ def head_commit(conn=None) -> str:
 def fetch(conn) -> None:
     require_cloned()
     branch = _setting(conn, "deps_branch", "main") or "main"
-    _git(["fetch", "origin", branch], conn)
+    with operation("拉取远端"):
+        _git(["fetch", "origin", branch], conn)
 
 
 def pull(conn) -> None:
     """拉取并 rebase。有本地改动时先自动提交。"""
     require_cloned()
     branch = _setting(conn, "deps_branch", "main") or "main"
-    if dirty_files(conn):
-        commit_all(conn, "面板自动提交：同步前保留本地改动")
-    _git(["pull", "--rebase", "origin", branch], conn)
+    with operation("拉取远端"):
+        if dirty_files(conn):
+            commit_all(conn, "面板自动提交：同步前保留本地改动")
+        _git(["pull", "--rebase", "origin", branch], conn)
 
 
 def push(conn) -> None:
     require_cloned()
     branch = _setting(conn, "deps_branch", "main") or "main"
-    _git(["push", "origin", f"HEAD:{branch}"], conn)
+    with operation("推送远端"):
+        _git(["push", "origin", f"HEAD:{branch}"], conn)
 
 
 def commit_all(conn, message: str) -> str:
@@ -256,10 +296,11 @@ def commit_all(conn, message: str) -> str:
     require_cloned()
     name = _setting(conn, "deps_commit_name", "MagicPanel")
     email = _setting(conn, "deps_commit_email", "magicpanel@localhost")
-    _git(["add", "-A", "."], conn)
-    _git(["-c", f"user.name={name}", "-c", f"user.email={email}",
-          "commit", "-m", message], conn)
-    return head_commit(conn)
+    with operation("提交改动"):
+        _git(["add", "-A", "."], conn)
+        _git(["-c", f"user.name={name}", "-c", f"user.email={email}",
+              "commit", "-m", message], conn)
+        return head_commit(conn)
 
 
 def dirty_files(conn) -> list[str]:
@@ -327,8 +368,14 @@ def status(conn) -> dict:
         "remote_changed": [],
         "last_sync_at": cfg["last_sync_at"],
         "last_error": cfg["last_error"],
+        "busy": False,
+        "busy_op": "",
     }
-    if not out["cloned"]:
+    busy = busy_state()
+    out["busy"] = busy["busy"]
+    out["busy_op"] = busy["op"]
+    if not out["cloned"] or busy["busy"]:
+        # 操作进行中不查 git 状态：会撞上正在跑的 git，查出来的也是半截状态
         return out
     out["commit"] = head_commit(conn)
     out["dirty"] = dirty_files(conn)
