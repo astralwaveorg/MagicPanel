@@ -1,5 +1,5 @@
 # 运行依赖（锁定版本，保证镜像构建可复现；升级时改这里再重新部署）
-fastapi==0.146.0
+fastapi==0.161.0
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 pyyaml==6.0.3
