@@ -78,6 +78,8 @@
 
     五条硬约束：`MATCH` 永远最后；`ai-cn` / `apple-cn` / `microsoft-cn` / `games-cn` 必须早于对应父集合（`ai-cn` 早于人工智能那三个上游集合 `openai` / `anthropic` / `category-ai-chat-!cn`，`apple-cn` 早于 `apple`，`microsoft-cn` 早于 `microsoft`，`games-cn` 早于 `games`），否则国内子集合整体失效；`steam-cn` 必须早于 `cn`（实测与 cn 重叠 13 条，Steam 中国的域名）；云服务商集合（`aws` / `azure` / `cloudflare` / `cloudflare-ip` / `digitalocean` / `vercel` / `netlify`）与 `proxy-bm7` / `proxy-domain` 放在「🚀 默认代理」块末尾，且**必须早于** `cn` / `cn-ip`；原 `cn-services` 集合已并入 `magic-direct`（只留「上游集合未覆盖 + 实测必须直连」的 3 条：`alimama.com` / `snssdk.com` / `tanx.com`），不要往里塞国内服务的国际版与境外节点——那些直连必然超时，应交给兜底走代理。
 
+    **这些相对顺序已由构建期校验强制（2026-10-31 起，`validate.py` 的「顺序不变量」检查）**：尾部直连块相对顺序（`cn` → `cn-ip` → `direct` → `private-ip`，早于 `MATCH`）、上面四对父子关系、云服务商集合早于 `cn`/`cn-ip`，任何一项被破坏构建直接失败。兜底（MATCH）错位仍走渲染器「自动归位 + 告警」的既有路径，不变量只盯渲染器不会替你修的三组关系。**这个检查的由来**：2026-10-31 排查发现 `games-cn` 已漂移到表尾（排在 `games` 之后，10-26 整体重排的残留），国内游戏域名被父集合抢先送进代理——已移回 `microsoft-cn` 相邻位置，并把五条硬约束写进校验防止再漂移。要调整设计顺序，先改 `validate.py` 的不变量表（并同步本文件），再动规则。
+
     **判断一个集合里的条目还有没有用，要按产物规则顺序模拟「首个命中」，不能只看集合之间的覆盖关系。** 集合之间的覆盖只说明「别的集合也有这条」，还要看那条规则在产物里排在第几位：排在更靠前的集合命中时，留在靠后集合里的同一条就是**死条目**（原 `cn-services` 里的 `wegame.com.cn` 就是这种——`games` 在第 7 块、`cn-services` 在第 10 块，它永远轮不到，删掉也不改路由；该集合后来并入 `magic-direct`）。判定方法：按产物 `rules:` 的顺序遍历，对每个候选域名找第一个能命中的 `RULE-SET`。
 
     改顺序前先读 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则顺序：按目标分组」。
@@ -142,7 +144,7 @@
     - **OpenClash-Mihomo 目标（mihomo/linux，构建 183）**：面向 OpenWrt OpenClash 的 Mihomo 内核，按 Aethersailor/Custom_OpenClash_Rules wiki 的「最小配置」原则设计——产物只提供节点/策略组/规则，入站端口、运行模式（TUN/TPROXY）、DNS、嗅探、external-controller 全部由 OpenClash LuCI 覆写，**平台扩展保持为空，不要往里写 tun 或端口**；平台层只有路由器必需的三键：`allow-lan: true`、`bind-address: "*"`、`find-process-mode: off`（mihomo 官方建议路由器关进程匹配）。该目标暂无设备，属于预留。
 **改 AGENTS.md 这类文档必须改在 mini 仓库再部署——直接改 NAS 侧文件会被 deploy 的 rsync --delete 覆盖掉（2026-10-28 踩过）。**
 
-34. **不做「禁 QUIC」——UDP 443 保持放行（2026-10-28 实测定稿）。** 评估结论：Fake-IP 泄漏修复后 UDP/QUIC 链路本身畅通（连接竞速日志里 QUIC 直连与代理会话均正常），此前的「卡 YouTube」根因是 Fake-IP 直连黑洞而不是 QUIC；禁 UDP 443 只能强迫浏览器回退 TCP，HTTP/3 首包优势全失，且语音/游戏/P2P 类应用必须 UDP。节点侧偶发 TLS 重置（月光系节点）与 QUIC 无关。若未来确需兼容个别 QUIC 异常的应用，用 Stash 客户端侧「QUIC 兼容」覆写按需处理，且不得引用不存在的规则集（历史教训：`RULE-SET,ai` 引用导致整个覆写链失效）。
+34. **QUIC 分轨：直连放行，代理链路强制回退 TCP（2026-10-31 修订 10-28 决策）。** 10-28 的实测结论仍然成立：Fake-IP 修复后 UDP/QUIC 直连链路畅通，语音/游戏/P2P 必须放行 UDP，所以**不做全局禁 QUIC**。但「任何应用都不出现访问异常」的目标下，QUIC 经 VPN 隧道（尤其手机蜂窝网络）的转发质量无法逐设备保证，而官方 FAQ（stash.wiki/faq/effective-stash）明确建议对走代理的流量禁 QUIC。定稿方案是一条逻辑规则：`AND,((NETWORK,udp),(DST-PORT,443)),REJECT`，排在尾部直连块（`private-ip`）之后、`MATCH` 之前——**只拦“本来就要走代理”的 QUIC**，国内直连流量早在 `cn`/`cn-ip` 命中 DIRECT，QUIC 完全不受影响；未命中任何规则的 QUIC 被拒后应用自动回退 TCP/2，兼容性优先于 HTTP/3 首包收益。两引擎语法一致（Stash 与 Mihomo 都支持 AND 逻辑规则），一行配置全覆盖，不需要逐 App 覆写。带 `no-track`（Stash 侧）避免 REJECT 刷屏连接列表；**不要加 `pre-matching`**（旧版本客户端可能加载失败，约束 24）。若未来要把某类代理流量恢复 QUIC，改这条规则而不是加客户端覆写。
 
 ## 改完要做的事
 

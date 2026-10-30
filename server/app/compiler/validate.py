@@ -219,6 +219,55 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
             f"IP 类规则“{bad}”排在域名规则之前，可能命中 Fake-IP 段导致直连黑洞"
             f"（约束 33：IP 规则一律放在全部域名规则之后）")
 
+    # ---- 约束 21/33 的顺序不变量（构建期强制）----
+    # 整张表的排布由界面维护，但下面这些相对关系是路由正确性的地基，
+    # 破坏它们的重排曾造成 v2ex 误直连（2026-10-25）与 games-cn 被父集合
+    # 抢先送进代理（2026-10-31 发现并修复）。要调整设计顺序，先改这里的
+    # 不变量表（并同步 AGENTS.md），再动规则。
+    _TAIL_DIRECT_SETS = ["cn", "cn-ip", "direct", "private-ip"]
+    _CHILD_BEFORE_PARENT = [
+        ("ai-cn", "openai"), ("ai-cn", "anthropic"),
+        ("ai-cn", "category-ai-chat-!cn"),
+        ("apple-cn", "apple"), ("microsoft-cn", "microsoft"),
+        ("games-cn", "games"), ("steam-cn", "cn"),
+    ]
+    _PROXY_FALLBACK_BEFORE_CN = ["aws", "azure", "cloudflare", "cloudflare-ip",
+                                 "digitalocean", "vercel", "netlify",
+                                 "proxy-bm7", "proxy-domain"]
+    in_order = [r for r in snapshot["rules"] if r.get("enabled", True)]
+    set_pos: dict[str, int] = {}
+    for i, r in enumerate(in_order):
+        if r["type"] == "RULE-SET" and r["value"] not in set_pos:
+            set_pos[r["value"]] = i
+    final_at = next((i for i, r in enumerate(in_order)
+                     if r["type"] in ("MATCH", "FINAL")), None)
+    if final_at is not None:
+        # 兜底错位由渲染器自动归位并告警（test_rule_order），这里不重复报错；
+        # 不变量只盯渲染器不会替你修的三组关系：尾部直连块、父子集合、代理兜底。
+        tail = [(n, set_pos[n]) for n in _TAIL_DIRECT_SETS if n in set_pos]
+        if tail and ([n for n, _ in tail]
+                     != [n for n, _ in sorted(tail, key=lambda x: x[1])]
+                     or tail[-1][1] > final_at):
+            errors.append(
+                "尾部直连块顺序错误（约束 21 ⑩ / 约束 33：应为 "
+                + " → ".join(_TAIL_DIRECT_SETS) + " → MATCH）")
+        for child, parent in _CHILD_BEFORE_PARENT:
+            c, p = set_pos.get(child), set_pos.get(parent)
+            if c is not None and p is not None and c > p:
+                errors.append(
+                    f"规则集合“{child}”排在了父集合“{parent}”之后，"
+                    "国内子域名会被父集合抢先送进代理（约束 21：子集合必须早于父集合）")
+        cn_pos = [set_pos.get(n) for n in ("cn", "cn-ip")]
+        cn_pos = [p for p in cn_pos if p is not None]
+        if cn_pos:
+            first_cn = min(cn_pos)
+            for name in _PROXY_FALLBACK_BEFORE_CN:
+                i2 = set_pos.get(name)
+                if i2 is not None and i2 > first_cn:
+                    errors.append(
+                        f"代理兜底集合“{name}”排在了直连集合“cn/cn-ip”之后，"
+                        "云服务商域名会被国内直连抢先命中（约束 21 ⑨⑩）")
+
     # 未使用提示
     used_groups = {r["target"] for r in snapshot["rules"] if r.get("enabled", True)}
     for g in groups:

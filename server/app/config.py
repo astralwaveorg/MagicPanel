@@ -44,6 +44,9 @@ RULE_TYPES = {
     "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-REGEX",
     "IP-CIDR", "IP-CIDR6", "GEOIP", "GEOSITE", "RULE-SET",
     "SRC-IP-CIDR", "DST-PORT", "PROCESS-NAME", "MATCH",
+    # 逻辑规则：QUIC 兼容层用（AND,((NETWORK,udp),(DST-PORT,443)),REJECT，
+    # 排在 MATCH 前：只拦"本来就要走代理"的 QUIC，国内直连流量不受影响）
+    "AND",
 }
 # 各引擎官方支持的规则类型（超出白名单的类型在产物里会导致客户端加载失败）
 # 依据：Stash https://stash.wiki/rules/rule-types ；
