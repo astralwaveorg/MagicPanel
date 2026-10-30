@@ -364,6 +364,24 @@ def validate_rendered(text: str, engine: str = "") -> list[str]:
             continue
         if rtype in ("MATCH", "FINAL"):
             target = parts[1] if len(parts) > 1 else ""
+        elif rtype in ("AND", "OR", "NOT", "SUB-RULE"):
+            # 逻辑规则的匹配值是括号配平的表达式，值里带逗号
+            # （AND,((NETWORK,udp),(DST-PORT,443)),REJECT），朴素按逗号切
+            # 会把目标切在值中间；从第一个逗号后做括号配平，顶层逗号
+            # 之后才是出站。
+            _, _, rest = line.partition(",")
+            depth = 0
+            target = ""
+            for i, ch in enumerate(rest):
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth = max(0, depth - 1)
+                elif ch == "," and depth == 0:
+                    target = rest[i + 1:].split(",")[0].strip()
+                    break
+            if not target:
+                continue
         elif len(parts) >= 3:
             target = parts[2]
         else:

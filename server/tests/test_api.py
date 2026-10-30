@@ -2038,6 +2038,22 @@ def test_validate_rendered_blocks_unsupported_rule_type_and_missing_target():
     assert any("不存在的出站" in e for e in errors)
 
 
+def test_validate_rendered_parses_logic_rule_target():
+    """逻辑规则值里带逗号，目标要做括号配平后解析（QUIC 兼容规则依赖此路径）。"""
+    from app.compiler import validate
+    ok = (
+        "mode: rule\n"
+        "rules:\n"
+        "- AND,((NETWORK,udp),(DST-PORT,443)),REJECT,no-track\n"
+        "- OR,((DOMAIN-SUFFIX,a.com),(DOMAIN-KEYWORD,b)),REJECT\n"
+        "- MATCH,DIRECT\n"
+    )
+    assert validate.validate_rendered(ok, "stash") == []
+    bad = ok.replace("REJECT,no-track", "不存在的组").replace(",REJECT\n", ",不存在的组\n")
+    errors = validate.validate_rendered(bad, "stash")
+    assert len([e for e in errors if "不存在的出站" in e]) == 2, errors
+
+
 def test_mihomo_android_keeps_process_rules():
     """Mihomo 在 Android 上 PROCESS-NAME 可匹配包名，不应被裁剪。"""
     from app.compiler import render
