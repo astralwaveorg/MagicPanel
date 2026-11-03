@@ -165,7 +165,11 @@ def provider_resource(token: str, name: str, request: Request):
         if not device:
             return Response("not found", status_code=404)
         source = db.one(conn, "SELECT * FROM sources WHERE name=?", (name,))
-        if not source or not source["enabled"] or not source["snapshot_enc"]:
+        # 停用不等于删除：快照还在就继续下发。产物不可变、只移动指针，
+        # 客户端手上的配置可能仍写着这个来源的下发地址，此时回 404 会让
+        # 客户端反复重试，并把整个订阅更新判为失败（Stash 会一直刷
+        # "artifact refresh failed ... HTTP 404"，配置再也更新不进来）。
+        if not source or not source["snapshot_enc"]:
             return Response("not found", status_code=404)
         text = security.decrypt_text(source["snapshot_enc"])
         # 开启过滤时只分发测试通过的节点；失败节点对设备不可见
@@ -202,7 +206,8 @@ def rule_resource(token: str, name: str, request: Request):
         if not device:
             return Response("not found", status_code=404)
         rp = db.one(conn, "SELECT * FROM rule_providers WHERE name=?", (name,))
-        if not rp or not rp["enabled"] or not rp["content"]:
+        # 停用不等于删除：内容还在就继续下发（原因同上）。
+        if not rp or not rp["content"]:
             return Response("not found", status_code=404)
         etag = (rp["sha256"] or security.sha256_text(rp["content"]))[:32]
 

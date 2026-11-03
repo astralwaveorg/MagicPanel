@@ -278,6 +278,22 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
                     ],
                     "rename_to": body.name,
                 })
+            released = refs.release_resource_refs(conn, "rule", old["name"])
+            if released and not force:
+                raise HTTPException(409, detail={
+                    "code": "rule_provider_in_use",
+                    "message": (f"规则来源“{old['name']}”仍被当前生产版本"
+                                f"（构建 {released[0]['build_id']}）的产物引用；"
+                                f"改名后仍在使用旧产物的设备会拉取失败，"
+                                f"请先发布新版本再改名。"),
+                    "provider": {"id": rp_id, "name": old["name"]},
+                    "references": [
+                        {"id": r["build_id"], "name": f"生产构建 #{r['build_id']}",
+                         "type": "生产产物", "extra": r["artifact"]}
+                        for r in released
+                    ],
+                    "rename_to": body.name,
+                })
             if used_by:
                 renamed_rules = refs.rename_rule_provider(conn, old["name"], body.name)
         content = old["content"]
@@ -363,6 +379,21 @@ def delete_provider(rp_id: int, force: bool = False, user=CurrentUser):
                     {"id": r["id"], "name": f"#{r['id']}", "type": "分流规则",
                      "extra": r["target"] + ("（已停用）" if not r["enabled"] else "")}
                     for r in used_by
+                ],
+            })
+        released = refs.release_resource_refs(conn, "rule", row["name"])
+        if released and not force:
+            raise HTTPException(409, detail={
+                "code": "rule_provider_in_use",
+                "message": (f"规则来源“{row['name']}”仍被当前生产版本"
+                            f"（构建 {released[0]['build_id']}）的产物引用；"
+                            f"删除后仍在使用旧产物的设备会拉取失败，"
+                            f"请先发布新版本再删除。"),
+                "provider": {"id": rp_id, "name": row["name"]},
+                "references": [
+                    {"id": r["build_id"], "name": f"生产构建 #{r['build_id']}",
+                     "type": "生产产物", "extra": r["artifact"]}
+                    for r in released
                 ],
             })
         removed = refs.detach_rule_provider(conn, row["name"]) if used_by else []

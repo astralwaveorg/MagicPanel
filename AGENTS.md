@@ -146,6 +146,8 @@
 
 34. **QUIC 分轨：直连放行，代理链路强制回退 TCP（2026-10-31 修订 10-28 决策）。** 10-28 的实测结论仍然成立：Fake-IP 修复后 UDP/QUIC 直连链路畅通，语音/游戏/P2P 必须放行 UDP，所以**不做全局禁 QUIC**。但「任何应用都不出现访问异常」的目标下，QUIC 经 VPN 隧道（尤其手机蜂窝网络）的转发质量无法逐设备保证，而官方 FAQ（stash.wiki/faq/effective-stash）明确建议对走代理的流量禁 QUIC。定稿方案是一条逻辑规则：`AND,((NETWORK,udp),(DST-PORT,443)),REJECT`，排在尾部直连块（`private-ip`）之后、`MATCH` 之前——**只拦“本来就要走代理”的 QUIC**，国内直连流量早在 `cn`/`cn-ip` 命中 DIRECT，QUIC 完全不受影响；未命中任何规则的 QUIC 被拒后应用自动回退 TCP/2，兼容性优先于 HTTP/3 首包收益。两引擎语法一致（Stash 与 Mihomo 都支持 AND 逻辑规则），一行配置全覆盖，不需要逐 App 覆写。带 `no-track`（Stash 侧）避免 REJECT 刷屏连接列表；**不要加 `pre-matching`**（旧版本客户端可能加载失败，约束 24）。若未来要把某类代理流量恢复 QUIC，改这条规则而不是加客户端覆写。
 
+35. **停用 ≠ 删除：feed 必须继续下发已有内容的资源；删除或改名被当前生产产物引用时一律拦住（2026-11-04 定案）。** 根因：产物不可变、只移动指针，客户端手上的配置里写着 `/res/rule/<name>`、`/res/provider/<name>` 这些下发地址，它会**持续**来取——哪怕面板里已经把对应来源停用或删除。feed 一旦回 404，客户端（实测 Stash 4.4.0）会把这条资源留在运行时会话里每 60 秒重试一次，日志刷 `runtime::session: artifact refresh failed ... HTTP 404`，并把整个订阅更新判为失败：配置**下载得到**（服务端 `last_pull_at` 一直在涨）却永远**不生效**（客户端 `lastCompletedCheck` 停在原地）。线上实证：2026-10-31 停用规则来源 `AWAvenue-Ads` 后，两台 macOS 设备每分钟各刷一次 404；Mac mini 的订阅自 2026-11-03 01:39 起再也更新不进来，界面上的「更新配置」必然报错。定稿两条：**（1）** `routers/feed.py` 的 `rule_resource` / `provider_resource` 只要内容还在就照发——`enabled` 只决定是否进入**新**构建，不再决定是否下发（停用是业务语义，删除才是资源消失）；**（2）** 删除或改名一个**当前生产产物仍在引用**的规则来源 / 节点来源，返回 409 + 引用明细（复用既有 code `rule_provider_in_use` / `source_in_use`，前端自动弹二次确认，`force=1` 才放行），提示语是「请先发布新版本再删除/改名」。判断依据是 `services/refs.py` 的 `release_resource_refs(conn, "rule"|"provider", name)`——扫当前生产构建目录下的产物，看是否还写着这个下发地址。停用（`enabled=0`）不受此限制。
+
 ## 改完要做的事
 
 ```bash

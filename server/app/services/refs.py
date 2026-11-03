@@ -6,6 +6,8 @@
 用户二次确认后，由这里自动把引用摘掉再删。
 """
 import json
+import re
+import urllib.parse
 
 from .. import db
 
@@ -208,3 +210,40 @@ def rename_rule_provider(conn, old: str, new: str) -> list[dict]:
         conn.execute("UPDATE rules SET value=?, updated_at=? WHERE id=?",
                      (new, db.now(), r["id"]))
     return rows
+
+
+# ---- 当前生产产物的引用 ----
+
+def _live_build_id(conn) -> int | None:
+    """当前生效的生产构建 id（产物不可变，发布只移动指针）。"""
+    row = db.one(conn, "SELECT id FROM builds WHERE status='PRODUCTION' LIMIT 1")
+    return int(row["id"]) if row else None
+
+
+def release_resource_refs(conn, kind: str, name: str) -> list[dict]:
+    """当前生产产物里是否还引用着某个下发资源。
+
+    kind 取 "rule"（规则来源）或 "provider"（节点来源）。产物一旦发布就不可变，
+    客户端手上的配置里写着这个资源的下发地址，它就会持续来取；此时把资源
+    内容删掉或改名，正在使用旧产物的设备会直接 404，订阅更新随即失败。
+    """
+    from .. import config
+
+    build_id = _live_build_id(conn)
+    if not build_id:
+        return []
+    directory = config.BUILDS_DIR / str(build_id)
+    if not directory.is_dir():
+        return []
+    pattern = re.compile(r"/res/" + re.escape(kind) + r"/([^'\"\s}]+)")
+    out: list[dict] = []
+    for path in sorted(directory.glob("*.yaml")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for m in pattern.finditer(text):
+            if urllib.parse.unquote(m.group(1)) == name:
+                out.append({"artifact": path.name, "build_id": build_id})
+                break
+    return out

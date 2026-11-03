@@ -241,6 +241,22 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
                     "references": used_by,
                     "rename_to": body.name,
                 })
+            released = refs.release_resource_refs(conn, "provider", row["name"])
+            if released and not force:
+                raise HTTPException(409, detail={
+                    "code": "source_in_use",
+                    "message": (f"节点来源“{row['name']}”仍被当前生产版本"
+                                f"（构建 {released[0]['build_id']}）的产物引用；"
+                                f"改名后仍在使用旧产物的设备会拉取失败，"
+                                f"请先发布新版本再改名。"),
+                    "source": {"id": source_id, "name": row["name"]},
+                    "references": [
+                        {"id": r["build_id"], "name": f"生产构建 #{r['build_id']}",
+                         "type": "生产产物", "extra": r["artifact"]}
+                        for r in released
+                    ],
+                    "rename_to": body.name,
+                })
             if used_by:
                 renamed_groups = refs.rename_source(conn, row["name"], body.name)
         url_enc = row["url_enc"]
@@ -303,6 +319,21 @@ def delete_source(source_id: int, force: bool = False, user=CurrentUser):
                 "message": f"节点来源“{row['name']}”仍被 {len(used_by)} 个策略组引用",
                 "source": {"id": row["id"], "name": row["name"]},
                 "references": used_by,
+            })
+        released = refs.release_resource_refs(conn, "provider", row["name"])
+        if released and not force:
+            raise HTTPException(409, detail={
+                "code": "source_in_use",
+                "message": (f"节点来源“{row['name']}”仍被当前生产版本"
+                            f"（构建 {released[0]['build_id']}）的产物引用；"
+                            f"删除后仍在使用旧产物的设备会拉取失败，"
+                            f"请先发布新版本再删除。"),
+                "source": {"id": source_id, "name": row["name"]},
+                "references": [
+                    {"id": r["build_id"], "name": f"生产构建 #{r['build_id']}",
+                     "type": "生产产物", "extra": r["artifact"]}
+                    for r in released
+                ],
             })
         detached, warnings = (refs.detach_source(conn, row["name"])
                               if used_by else ([], []))
