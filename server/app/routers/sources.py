@@ -1,4 +1,5 @@
 """节点来源：订阅地址加密存储，列表与详情只返回脱敏形式。"""
+import base64
 import json
 import re
 
@@ -7,9 +8,38 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
-from ..services import fetcher, refs, tester, updater
+from ..services import fetcher, refs, source_nodes, tester, updater
 
 router = APIRouter(prefix="/api/v1/sources", tags=["sources"])
+
+
+# HTTP 头名字：RFC 7230 的 token，不含分隔符；值里禁止换行（头部注入）
+HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$")
+MAX_HEADERS = 32
+MAX_HEADER_VALUE = 2048
+
+
+class SourceHeader(BaseModel):
+    """来源自定义的一个请求头。值按凭据处理：密文存储、接口不回显。
+
+    value 为 null 表示「保持原值」——值不回显，编辑时不填就等于没改。
+    """
+    name: str = Field(min_length=1, max_length=64)
+    value: str | None = Field(default=None, max_length=MAX_HEADER_VALUE)
+
+
+class SourceFileBody(BaseModel):
+    """上传订阅文件用的表单（文件内容走 base64，避免引入 multipart 依赖）。"""
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[^\s/?#%&]+$")
+    content_b64: str = Field(min_length=1)
+    filter: str = Field(default="", max_length=512)
+    suffix: str = Field(default="", max_length=32)
+    mode: str = Field(default=config.SOURCE_MODE_INLINE, max_length=16)
+    enabled: bool = True
+    auto_test: bool = True
+    filter_unavailable: bool = False
+    interval: int = Field(default=21600, ge=600, le=604800)
+    test_interval: int = Field(default=21600, ge=0, le=604800)
 
 
 class SourceBody(BaseModel):
@@ -35,6 +65,8 @@ class SourceBody(BaseModel):
     filter_unavailable: bool = False
     # 抓取走代理：服务端出不去机场订阅站时经指定代理中转；留空表示直连
     proxy_url: str | None = Field(default=None, max_length=512)
+    # 自定义请求头（Cookie 等）。None 表示不变，空列表表示清空
+    headers: list[SourceHeader] | None = Field(default=None)
 
 
 class BatchIds(BaseModel):
@@ -62,6 +94,65 @@ def _check_mode(value: str) -> str:
     return value
 
 
+def _check_headers(headers: list[SourceHeader] | None) -> list[dict]:
+    """校验自定义请求头：名字合法、值里没有换行、数量与长度有上限。"""
+    if headers is None:
+        return []
+    if len(headers) > MAX_HEADERS:
+        raise HTTPException(400, f"自定义请求头最多 {MAX_HEADERS} 条")
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in headers:
+        name = item.name.strip()
+        if not HEADER_NAME_RE.match(name):
+            raise HTTPException(400, f"请求头名字不合法：{name}")
+        if name.lower() in seen:
+            raise HTTPException(400, f"请求头重复：{name}")
+        seen.add(name.lower())
+        value = item.value
+        if value is not None and ("\r" in value or "\n" in value):
+            raise HTTPException(400, f"请求头 {name} 的值不能包含换行")
+        out.append({"name": name, "value": value})
+    return out
+
+
+def _merge_headers(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """合并自定义请求头：值为 null 表示保持原值，其余按新值写入。
+
+    值是凭据、接口不回显，所以编辑时不能回填原值，只能靠"留空即不改"。
+    """
+    old = {str(h.get("name", "")).lower(): h for h in existing}
+    out: list[dict] = []
+    for item in incoming:
+        name = item["name"]
+        if item.get("value") is None:
+            prev = old.get(name.lower())
+            if not prev:
+                raise HTTPException(400, f"新请求头 {name} 必须填写值")
+            out.append({"name": prev["name"], "value": prev["value"]})
+        else:
+            out.append({"name": name, "value": item["value"]})
+    return out
+
+
+def _headers_enc(headers: list[dict]) -> str:
+    """自定义请求头按凭据处理：密文存储。"""
+    if not headers:
+        return ""
+    return security.encrypt_text(json.dumps(headers, ensure_ascii=False))
+
+
+def _headers_of(row) -> list[dict]:
+    """取出自定义请求头；加密内容损坏时按没有处理，不让列表页整个挂掉。"""
+    raw = row["headers_enc"] if "headers_enc" in row.keys() else ""
+    if not raw:
+        return []
+    try:
+        return json.loads(security.decrypt_text(raw) or "[]")
+    except Exception:
+        return []
+
+
 def _public(row, with_meta: bool = True) -> dict:
     url = security.decrypt_text(row["url_enc"])
     data = {
@@ -81,6 +172,10 @@ def _public(row, with_meta: bool = True) -> dict:
         "auto_test": bool(row["auto_test"]),
         "allow_private": bool(row["allow_private"]),
         "filter_unavailable": bool(row["filter_unavailable"]),
+        "source_kind": (row["source_kind"] if "source_kind" in row.keys()
+                        else "remote"),
+        # 自定义请求头只回显名字：值是凭据（Cookie 等），不回显
+        "headers": [{"name": h["name"]} for h in _headers_of(row)],
         "use_proxy": bool(row["proxy_url_enc"] or ""),
         "proxy_url_masked": (security.mask_url(security.decrypt_text(row["proxy_url_enc"]))
                              if row["proxy_url_enc"] else ""),
@@ -200,14 +295,18 @@ def create_source(body: SourceBody, user=CurrentUser):
             cur = db.insert_unique(conn,
                 "INSERT INTO sources(name, url_enc, enabled, filter, ua, suffix, interval, "
                 "client_interval, test_interval, auto_fetch, auto_test, allow_private, "
-                "filter_unavailable, proxy_url_enc, mode, created_at, updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "filter_unavailable, proxy_url_enc, mode, headers_enc, source_kind, "
+                "created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (body.name, security.encrypt_text(body.url), int(body.enabled),
                  body.filter, body.ua, body.suffix, body.interval, body.client_interval,
                  body.test_interval, int(body.auto_fetch), int(body.auto_test),
                  int(body.allow_private), int(body.filter_unavailable),
                  security.encrypt_text(body.proxy_url) if body.proxy_url else "",
-                 body.mode, now, now),
+                 body.mode,
+                 _headers_enc([{"name": h["name"], "value": h["value"] or ""}
+                               for h in _check_headers(body.headers)]),
+                 "remote", now, now),
             )
             security.audit(conn, user["username"], "新增节点来源", "source", cur.lastrowid,
                            {"name": body.name})
@@ -262,6 +361,10 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
         url_enc = row["url_enc"]
         if body.url:
             url_enc = security.encrypt_text(body.url)
+        headers_enc = row["headers_enc"] if "headers_enc" in row.keys() else ""
+        if body.headers is not None:
+            headers_enc = _headers_enc(
+                _merge_headers(_headers_of(row), _check_headers(body.headers)))
         # proxy_url 留空表示不改；要改成直连传空字符串
         proxy_enc = row["proxy_url_enc"]
         if body.proxy_url is not None:
@@ -270,11 +373,11 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
             "UPDATE sources SET name=?, url_enc=?, enabled=?, filter=?, ua=?, "
             "suffix=?, interval=?, client_interval=?, test_interval=?, auto_fetch=?, "
             "auto_test=?, allow_private=?, filter_unavailable=?, proxy_url_enc=?, "
-            "mode=?, updated_at=? WHERE id=?",
+            "mode=?, headers_enc=?, updated_at=? WHERE id=?",
             (body.name, url_enc, int(body.enabled), body.filter, body.ua,
              body.suffix, body.interval, body.client_interval, body.test_interval,
              int(body.auto_fetch), int(body.auto_test), int(body.allow_private),
-             int(body.filter_unavailable), proxy_enc, body.mode,
+             int(body.filter_unavailable), proxy_enc, body.mode, headers_enc,
              db.now(), source_id),
         )
         security.audit(conn, user["username"], "更新节点来源", "source", source_id,
@@ -417,7 +520,88 @@ def reveal_source(source_id: int, user=CurrentUser):
         url = security.decrypt_text(row["url_enc"])
         security.audit(conn, user["username"], "查看节点来源订阅地址", "source",
                        source_id, {"name": row["name"]})
-    return {"id": source_id, "url": url}
+    return {"id": source_id, "url": url, "headers": _headers_of(row)}
+
+
+def _file_nodes(content_b64: str) -> tuple[bytes, list[dict]]:
+    """把上传的文件解析成节点定义；解析不了就给出可照着做的提示。"""
+    try:
+        raw = base64.b64decode(content_b64 + "=" * (-len(content_b64) % 4))
+    except Exception:
+        raise HTTPException(400, "文件内容不是合法的 base64")
+    if not raw.strip():
+        raise HTTPException(400, "文件内容为空")
+    try:
+        return raw, source_nodes.extract(raw)
+    except source_nodes.SourceError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/import-file", status_code=201)
+def import_source_file(body: SourceFileBody, user=CurrentUser):
+    """从上传的订阅文件建立节点来源。
+
+    文件来源没有在线地址：内容解析后存成快照（source_kind=file），
+    后续与普通来源一样参与分组、测速与下发；内容更新靠重新上传。
+    """
+    _check_filter(body.filter)
+    _check_mode(body.mode)
+    _raw, nodes = _file_nodes(body.content_b64)
+    text = source_nodes.dump(nodes)
+    meta = [{"name": str(n["name"]), "type": str(n["type"])} for n in nodes]
+    with db.tx() as conn:
+        if db.one(conn, "SELECT id FROM sources WHERE name=?", (body.name,)):
+            raise HTTPException(409, "同名节点来源已存在")
+        now = db.now()
+        cur = db.insert_unique(
+            conn,
+            "INSERT INTO sources(name, url_enc, enabled, filter, ua, suffix, "
+            "interval, client_interval, test_interval, auto_fetch, auto_test, "
+            "allow_private, filter_unavailable, proxy_url_enc, mode, headers_enc, "
+            "source_kind, node_count, sha256, last_status, last_fetched_at, "
+            "nodes_meta, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (body.name, security.encrypt_text(""), int(body.enabled),
+             body.filter, config.DEFAULT_UA, body.suffix, body.interval, 0,
+             body.test_interval, 0, int(body.auto_test), 0,
+             int(body.filter_unavailable), "", body.mode, "", "file",
+             len(nodes), security.sha256_text(text), "ok", now,
+             json.dumps(meta, ensure_ascii=False), now, now),
+        )
+        conn.execute(
+            "UPDATE sources SET snapshot_enc=?, test_results='{}', tested_at=NULL, "
+            "test_attempt_at=NULL WHERE id=?",
+            (security.encrypt_text(text), cur.lastrowid),
+        )
+        security.audit(conn, user["username"], "导入节点来源文件", "source",
+                       cur.lastrowid, {"name": body.name, "node_count": len(nodes)})
+        row = _get_or_404(conn, cur.lastrowid)
+    return _public(row)
+
+
+@router.put("/{source_id}/file")
+def replace_source_file(source_id: int, body: SourceFileBody, user=CurrentUser):
+    """替换文件来源的内容（重新上传订阅文件）。"""
+    _raw, nodes = _file_nodes(body.content_b64)
+    text = source_nodes.dump(nodes)
+    meta = [{"name": str(n["name"]), "type": str(n["type"])} for n in nodes]
+    with db.tx() as conn:
+        row = _get_or_404(conn, source_id)
+        kind = row["source_kind"] if "source_kind" in row.keys() else "remote"
+        if kind != "file":
+            raise HTTPException(400, "该来源是在线来源，没有可替换的文件")
+        now = db.now()
+        conn.execute(
+            "UPDATE sources SET snapshot_enc=?, node_count=?, sha256=?, last_status='ok', "
+            "last_error='', last_fetched_at=?, nodes_meta=?, test_results='{}', "
+            "tested_at=NULL, test_attempt_at=NULL, fail_count=0, updated_at=? WHERE id=?",
+            (security.encrypt_text(text), len(nodes), security.sha256_text(text),
+             now, json.dumps(meta, ensure_ascii=False), now, source_id),
+        )
+        security.audit(conn, user["username"], "更新节点来源文件", "source", source_id,
+                       {"name": row["name"], "node_count": len(nodes)})
+        out = _get_or_404(conn, source_id)
+    return _public(out)
 
 
 @router.post("/{source_id}/refresh")

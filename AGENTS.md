@@ -150,6 +150,17 @@
 
 36. **「配置本体」与「子资源」的拉取时间必须分开记，设备配置陈旧要在界面上看得见（2026-11-04 定案）。** `devices.last_pull_at` 记录的是**任意资源**（配置本体 + 规则集 + 节点来源）的拉取，**不能**拿它判断设备有没有拿到新配置——规则集本身就按小时级刷新，界面上的「最近下载」与概览的「24 小时内拉取过」因此永远是绿的。线上实证：Mac mini 的配置本体自 2026-11-03 01:39 起就没再生效（客户端 `lastCompletedCheck` 停在原地、界面报「更新配置」失败），而面板显示它「3 小时前刚下载过」——**故障完全隐形**。定稿：`devices.last_config_at` 只在 `config.yaml` 下发时更新（`routers/feed.py` 的 `device_config`）；`routers/targets_devices.py` 的 `config_age_hours()` / `config_stale()` 按 `profile-update-interval` 的 3 倍（不足 6 小时按 6 小时算）判定陈旧，设备列表标「未更新」，概览统计 `counts.devices_stale`。**HTTP 200 只代表文件取回，不代表配置加载、VPN 启动或规则生效**（概览页原有提示保留）——判断"设备是否生效"只看配置本体的时间戳，不要看子资源。新增字段走 `db.py` 的 `_migrate_device_config_pull` 一次性迁移并回填。
 
+37. **节点来源支持自定义请求头与文件来源；请求头的值是凭据（2026-11-04 定案）。** 机场订阅常常要带特定 Cookie / User-Agent 才给内容（风控页、加密订阅），来源因此要能带自定义请求头：
+  * `sources.headers_enc` —— 请求头列表（名字 + 值）**密文存储**，与订阅地址同一套处理；列表接口只回显名字（`headers: [{name}]`），原文只在「查看」接口（`POST /api/v1/sources/{id}/reveal`，记审计）里返回；
+  * 编辑时**值不回显**，所以请求头值支持 `null` = 保持原值（`_merge_headers`）；新建的请求头必须给值，否则报「必须填写值」；
+  * 请求头名字必须是 RFC 7230 token、值里不许换行（头部注入），条数上限 32；
+  * **`Accept-Encoding` 一律丢弃**：httpx 只声明自己能解码的编码（镜像里没有 brotli），用户自定义的 `br` 会让响应解不开；
+  * 文件来源（`source_kind='file'`）：没有在线地址，内容由上传解析成快照，照常参与分组、测速与下发；`auto_fetch=0`，定时抓取跳过，「一键抓取」明确报「文件来源没有在线地址，请重新上传订阅文件」。上传走 `POST /api/v1/sources/import-file`（内容 base64 传输，**不引入 multipart 依赖**），替换走 `PUT /api/v1/sources/{id}/file`；
+  * 内容解析认两种格式：Clash YAML（`proxies:`）与 base64 的 URI 列表（`ss://` / `trojan://` / `vmess://` / `vless://`）。认不出来时给出**可照着做的提示**，不要只说「格式错误」——机场的**加密订阅**（内容是密文、密钥不在订阅地址里）面板解不开，提示里要写明「请在客户端导出成 Clash YAML 后再上传」；
+  * 前端「从 curl 命令导入」：粘一条 curl 就能填好地址与请求头（Host 由地址决定，忽略），解析在**前端**做，填进表单让用户确认后再保存。
+
+38. **面板自己的域名必须留在 Fake-IP 之外（2026-11-04）。** 客户端（Stash 增强模式）拿面板域名的真实 IP 去更新订阅：Fake-IP 命中与否由服务端 DNS 决定，客户端本地缓存过期就拿不到。`substitute_feed` 在下发时把 `+.<面板域名>` **追加**进 `dns.fake-ip-filter`（追加而不是替换：用户自己维护的排除清单原样保留）。面板域名同时由 `_panel_direct_rule` 置顶成 `DOMAIN-SUFFIX,<域名>,DIRECT`——VPN 运行中节点失效也不影响订阅更新。**但这两条都救不了家宽公网 IP 变动**：PPPoE 重连后公网 IP 会变，客户端 DNS 缓存里的旧 IP 让订阅取不到（2026-11-04 实测：mini 解析 magichub.top 拿到旧 IP，连接 4 毫秒即被拒；规则与 Fake-IP 都没错）。根治要在**路由器上做分流 DNS**（magichub.top → NAS 内网地址），面板侧代替不了——家宽公网 IP 只能由路由器知道。
+
 ## 改完要做的事
 
 ```bash

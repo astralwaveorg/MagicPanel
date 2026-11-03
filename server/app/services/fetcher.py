@@ -64,17 +64,29 @@ def _check_url(url: str, allow_private: bool) -> None:
 
 
 def fetch(url: str, ua: str = config.DEFAULT_UA, allow_private: bool = False,
-          proxy: str = "") -> bytes:
+          proxy: str = "", headers: list[dict] | None = None) -> bytes:
     """抓取远程内容：逐跳校验重定向、流式限制体积。
 
     proxy 非空时经该代理出网（例如服务端出不去机场订阅站时走 Stash）。
+    headers 是来源自定义的请求头（Cookie 等凭据），与默认的 User-Agent
+    合并；同名时自定义的值优先。
     """
     current = url
+    request_headers = {"User-Agent": ua}
+    for item in headers or []:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        # Accept-Encoding 交给 httpx 自己声明：它只声明自己能解码的编码
+        # （镜像里没有 brotli），用户自定义的 br 会让响应解不开。
+        if name.lower() == "accept-encoding":
+            continue
+        request_headers[name] = str(item.get("value") or "")
     # 不继承进程环境中的代理变量，保证抓取路径确定（proxy 参数是显式指定的）
     with httpx.Client(
         timeout=config.FETCH_TIMEOUT,
         follow_redirects=False,
-        headers={"User-Agent": ua},
+        headers=request_headers,
         trust_env=False,
         proxy=proxy or None,
     ) as client:

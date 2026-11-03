@@ -106,8 +106,10 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
         nodes: list = []
         text = ""
         try:
+            headers = json.loads(security.decrypt_text(row["headers_enc"]) or "[]") \
+                if row["headers_enc"] else []
             body = fetcher.fetch(url, ua=ua, allow_private=allow_private,
-                                 proxy=proxy)
+                                 proxy=proxy, headers=headers)
             nodes = source_nodes.extract(body)
             # 只留 proxies 段：机场订阅里的 rules / dns / 策略组与面板无关，
             # 留着既撑大快照，也会让内联模式把机场的规则和策略组混进产物。

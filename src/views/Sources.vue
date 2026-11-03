@@ -46,6 +46,7 @@
           <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting" @click="refreshMany(rows)" type="primary">一键抓取</el-button>
           <el-button :loading="batchTesting" :disabled="batchRefreshing || batchTesting" @click="testMany(rows)" type="success" plain>一键测速</el-button>
           <el-button class="mp-push-right" @click="openEdit()" type="primary">添加订阅</el-button>
+          <el-button @click="openFileImport()" type="primary" plain>上传订阅文件</el-button>
           <el-button @click="openLocalEdit()" type="primary">添加节点</el-button>
           <span v-if="batchRefreshing" class="mp-toolbar-hint">
             正在抓取 {{ refreshDone }}/{{ refreshTotal }}…
@@ -112,9 +113,13 @@
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column prop="name" label="名称" min-width="100" :fixed="isMobile ? false : 'left'" />
-          <el-table-column label="订阅地址" width="110">
+          <el-table-column label="订阅地址" width="130">
             <template #default="{ row }">
-              <el-button size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
+              <el-button v-if="row.source_kind === 'file'" size="small" type="info" plain disabled>文件来源</el-button>
+              <el-button v-else size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
+              <div v-if="(row.headers || []).length" class="mp-cell-flag">
+                <i class="mp-dot warn" />{{ row.headers.length }} 个请求头
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="抓取状态" min-width="110">
@@ -356,8 +361,21 @@
       <el-form :model="form" label-position="top">
         <el-form-item label="名称">
           <el-input v-model="form.name" placeholder="例如：XX机场" />
+          <div class="mp-form-hint">
+            <el-button link type="primary" size="small" @click="openCurlImport">
+              从 curl 命令导入地址与请求头
+            </el-button>
+            <span>机场订阅常要带 Cookie 与特定 UA 才给内容，粘一条 curl 就能填好。</span>
+          </div>
         </el-form-item>
-        <el-form-item :label="editing ? '订阅地址（留空表示不修改）' : '订阅地址'">
+        <el-form-item v-if="isFileSource" label="订阅来源">
+          <el-input model-value="文件来源：内容来自上传的订阅文件" readonly />
+          <div class="mp-form-hint">
+            <el-button link type="primary" size="small" @click="openFileReplace">替换文件</el-button>
+            <span>文件来源没有在线地址，内容更新靠重新上传。</span>
+          </div>
+        </el-form-item>
+        <el-form-item v-else :label="editing ? '订阅地址（留空表示不修改）' : '订阅地址'">
           <el-input v-model="form.url" type="password" show-password
                     :placeholder="editing ? 'https://…（留空表示不修改）' : 'https://…'"
                     autocomplete="off" />
@@ -373,6 +391,19 @@
               <el-button @click="copyRevealed">复制</el-button>
             </template>
           </el-input>
+        </el-form-item>
+        <el-form-item v-if="!isFileSource" label="自定义请求头（可选）">
+          <div v-for="(hd, i) in headers" :key="i" class="mp-header-row">
+            <el-input v-model="hd.name" class="mono" placeholder="名称，如 Cookie" />
+            <el-input v-model="hd.value" class="mono" show-password
+                      placeholder="值（留空表示不修改）" />
+            <el-button link type="danger" size="small" @click="removeHeader(i)">删除</el-button>
+          </div>
+          <el-button link type="primary" size="small" @click="addHeader">添加请求头</el-button>
+          <div class="mp-form-hint">
+            有些机场要带特定 Cookie 或 UA 才给订阅内容。值是访问凭据，
+            加密存储、列表不展示；已设置的值留空即保持原值。
+          </div>
         </el-form-item>
         <el-form-item label="过滤正则（可选，过滤套餐提示等无效节点）">
           <el-input v-model="form.filter" class="mono" placeholder="(?i)^(?!.*(?:剩余|到期|官网)).+$" />
@@ -465,6 +496,48 @@
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
         <el-button :loading="saving" @click="save" type="primary">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="curlDialog" title="从 curl 命令导入" width="min(640px, 94vw)">
+      <el-input v-model="curlText" type="textarea" :rows="6" class="mono"
+                placeholder="粘贴 curl 命令，例如：curl -k -X GET -H &quot;Cookie: acw_tc=…&quot; &quot;https://…/subscribe?token=…&quot;" />
+      <div class="mp-form-hint">
+        会自动取出订阅地址与请求头（Host 由地址决定，忽略）。
+        导入后仍可逐项修改，保存才生效。
+      </div>
+      <div v-if="curlNote" class="mp-form-hint">{{ curlNote }}</div>
+      <template #footer>
+        <el-button @click="curlDialog = false">取消</el-button>
+        <el-button type="primary" @click="applyCurl">导入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="fileDialog" title="上传订阅文件" width="min(560px, 94vw)">
+      <el-form label-position="top">
+        <el-form-item label="名称">
+          <el-input v-model="fileForm.name" placeholder="例如：机场A（文件）" />
+        </el-form-item>
+        <el-form-item label="订阅文件">
+          <el-upload :auto-upload="false" :show-file-list="false" :on-change="pickSourceFile">
+            <el-button>选择文件</el-button>
+          </el-upload>
+          <div v-if="fileForm.fileName" class="mp-form-hint">已选：{{ fileForm.fileName }}</div>
+          <div class="mp-form-hint">
+            支持 Clash YAML 与 base64 节点列表：机场导出的订阅文件直接传上来即可。
+            文件来源没有在线地址，内容更新靠重新上传。
+          </div>
+        </el-form-item>
+        <el-form-item label="下发方式">
+          <el-radio-group v-model="fileForm.mode">
+            <el-radio value="inline">内联 · 写进配置</el-radio>
+            <el-radio value="provider">订阅 · 客户端自己下载</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="fileDialog = false">取消</el-button>
+        <el-button :loading="fileSaving" type="primary" @click="submitFileImport">导入</el-button>
       </template>
     </el-dialog>
 
@@ -658,6 +731,126 @@ const emptyForm = () => ({
   use_proxy: false, proxy_url: '', current_proxy: '',
 })
 const form = reactive(emptyForm())
+
+// ---- 自定义请求头 ----
+// 值是凭据、不回显：已设置的值在编辑时留空即保持原值。
+const headers = ref([])
+function addHeader() {
+  headers.value.push({ name: '', value: '' })
+}
+function removeHeader(index) {
+  headers.value.splice(index, 1)
+}
+function buildHeadersPayload() {
+  const existing = new Set((editing.value?.headers || []).map((h) => h.name.toLowerCase()))
+  const out = []
+  for (const item of headers.value) {
+    const name = (item.name || '').trim()
+    if (!name) continue
+    const value = item.value || ''
+    if (!value && !existing.has(name.toLowerCase())) continue
+    out.push({ name, value: value === '' ? null : value })
+  }
+  return out
+}
+
+// ---- 从 curl 命令导入 ----
+const curlDialog = ref(false)
+const curlText = ref('')
+const curlNote = ref('')
+function openCurlImport() {
+  curlText.value = ''
+  curlNote.value = ''
+  curlDialog.value = true
+}
+function parseCurl(text) {
+  const urlMatch = text.match(/https?:\/\/[^\s'"]+/)
+  const url = urlMatch ? urlMatch[0].replace(/['"]+$/, '') : ''
+  const found = []
+  const re = /(?:-H|--header)\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/g
+  let m = re.exec(text)
+  while (m !== null) {
+    const raw = m[1] ?? m[2] ?? m[3] ?? ''
+    const idx = raw.indexOf(':')
+    if (idx > 0) {
+      const name = raw.slice(0, idx).trim()
+      const value = raw.slice(idx + 1).trim()
+      // Host 由地址决定，重复设置没有意义
+      if (name && !/^host$/i.test(name)) found.push({ name, value })
+    }
+    m = re.exec(text)
+  }
+  return { url, headers: found }
+}
+function applyCurl() {
+  const parsed = parseCurl(curlText.value)
+  if (!parsed.url) {
+    curlNote.value = '没找到订阅地址：命令里应当包含 http(s) 链接'
+    return
+  }
+  form.url = parsed.url
+  headers.value = parsed.headers
+  curlDialog.value = false
+  ElMessage.success(`已导入地址与 ${parsed.headers.length} 个请求头，保存后生效`)
+}
+
+// ---- 上传订阅文件 ----
+const fileDialog = ref(false)
+const fileSaving = ref(false)
+const fileTarget = ref(null)
+const fileForm = reactive({ name: '', mode: 'inline', fileName: '', contentB64: '' })
+function openFileImport() {
+  fileTarget.value = null
+  Object.assign(fileForm, { name: '', mode: 'inline', fileName: '', contentB64: '' })
+  fileDialog.value = true
+}
+function openFileReplace() {
+  fileTarget.value = editing.value
+  Object.assign(fileForm, {
+    name: editing.value?.name || '',
+    mode: editing.value?.mode || 'inline',
+    fileName: '',
+    contentB64: '',
+  })
+  fileDialog.value = true
+}
+function pickSourceFile(file) {
+  const raw = file?.raw
+  if (!raw) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    const text = String(reader.result || '')
+    const comma = text.indexOf(',')
+    fileForm.contentB64 = comma >= 0 ? text.slice(comma + 1) : text
+    fileForm.fileName = raw.name
+    if (!fileForm.name) fileForm.name = raw.name.replace(/\.[^.]+$/, '')
+  }
+  reader.readAsDataURL(raw)
+}
+async function submitFileImport() {
+  if (!fileForm.name) return ElMessage.warning('请填写名称')
+  if (!fileForm.contentB64) return ElMessage.warning('请选择订阅文件')
+  fileSaving.value = true
+  try {
+    const body = {
+      name: fileForm.name,
+      content_b64: fileForm.contentB64,
+      mode: fileForm.mode,
+    }
+    if (fileTarget.value) {
+      await api(`/api/v1/sources/${fileTarget.value.id}/file`, { method: 'PUT', body })
+    } else {
+      await api('/api/v1/sources/import-file', { method: 'POST', body })
+    }
+    fileDialog.value = false
+    ElMessage.success(fileTarget.value ? '文件已更新' : '已导入')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    fileSaving.value = false
+  }
+}
 
 // 抓取走代理时的默认地址：Mac mini 上的 Stash 混合端口。
 // 面板跑在 NAS 上、抓取也是从 NAS 出网，所以这里必须写 Mac mini 的内网地址；
@@ -861,6 +1054,7 @@ function openEdit(row) {
     proxy_url: '',
     current_proxy: row.proxy_url_masked || '',
   } : {})
+  headers.value = (row?.headers || []).map((h) => ({ name: h.name, value: '' }))
   dialog.value = true
 }
 
@@ -870,6 +1064,7 @@ async function save() {
   saving.value = true
   try {
     const body = { ...form }
+    body.headers = buildHeadersPayload()
     if (body.use_proxy) {
       body.proxy_url = (body.proxy_url || '').trim() || PROXY_HINT
     } else {

@@ -402,6 +402,7 @@ def init_db() -> None:
         _migrate_scope_all_sentinel(conn)
         _migrate_device_base_config_keys(conn)
         _migrate_device_config_pull(conn)
+        _migrate_source_headers(conn)
 
 
 def _migrate_release_state_machine(conn) -> None:
@@ -841,6 +842,22 @@ def _migrate_device_config_pull(conn) -> None:
                  "WHERE last_config_at IS NULL AND last_pull_at IS NOT NULL")
     conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
                  "VALUES('device_config_pull_v1', ?)", (now(),))
+
+
+def _migrate_source_headers(conn) -> None:
+    """节点来源加两个字段：自定义请求头与来源种类。
+
+    * headers_enc —— 来源自定义的请求头（Cookie 等凭据），**密文存储**，
+      API 不回显原文（与订阅地址同一套处理）；
+    * source_kind —— remote（在线抓取）/ file（上传的文件）。
+      文件来源没有在线地址，内容由上传时解析成快照。
+    """
+    _ensure_column(conn, "sources", "headers_enc",
+                   "headers_enc TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "sources", "source_kind",
+                   "source_kind TEXT NOT NULL DEFAULT 'remote'")
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('source_headers_v1', ?)", (now(),))
 
 
 def _migrate_settings(conn) -> None:

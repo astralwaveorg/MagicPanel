@@ -501,6 +501,17 @@ def substitute_feed(text: str, feed_base: str) -> str:
                 line = line.replace("{FEED_HOST}", host)
             fixed.append(line)
         data["rules"] = fixed
+    # 面板自己的域名一律留在 Fake-IP 之外：客户端拿到真实 IP，
+    # 订阅更新走的是面板域名而不是 Fake-IP 映射，客户端本地 DNS 缓存
+    # 过期也不影响更新（增强模式下这条路径是订阅能不能更新的关键）。
+    # 追加而不是替换：用户自己维护的排除清单原样保留。
+    dns = data.get("dns")
+    if isinstance(dns, dict) and host:
+        flt = dns.get("fake-ip-filter")
+        if isinstance(flt, list):
+            pattern = f"+.{host}"
+            if pattern not in flt:
+                dns["fake-ip-filter"] = flt + [pattern]
     out = yaml.safe_dump(data, allow_unicode=True, sort_keys=False,
                          default_flow_style=False, width=4096)
     return dedupe_rules(out)
