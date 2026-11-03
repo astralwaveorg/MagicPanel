@@ -151,8 +151,9 @@ def device_config(token: str, request: Request):
             with db.tx() as wconn:
                 wconn.execute(
                     "UPDATE devices SET last_pull_at=?, last_pull_ip=?, "
-                    "pull_count=pull_count+1 WHERE id=?",
-                    (db.now(), request.client.host if request.client else "", device["id"]),
+                    "last_config_at=?, pull_count=pull_count+1 WHERE id=?",
+                    (db.now(), request.client.host if request.client else "",
+                     db.now(), device["id"]),
                 )
 
         return _respond(request, text, etag, extra, record=record)

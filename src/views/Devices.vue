@@ -61,9 +61,12 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="最近下载" min-width="150">
+          <el-table-column label="最近配置" min-width="180">
             <template #default="{ row }">
-              <span class="mp-nowrap">{{ fmtTime(row.last_pull_at) }}</span>
+              <span class="mp-nowrap">{{ fmtTime(row.last_config_at) }}</span>
+              <span v-if="row.config_stale" class="mp-cell-flag">
+                <i class="mp-dot warn" />未更新
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="pull_count" label="下载次数" width="90" align="right" />

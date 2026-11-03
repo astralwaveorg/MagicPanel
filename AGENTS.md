@@ -148,6 +148,8 @@
 
 35. **停用 ≠ 删除：feed 必须继续下发已有内容的资源；删除或改名被当前生产产物引用时一律拦住（2026-11-04 定案）。** 根因：产物不可变、只移动指针，客户端手上的配置里写着 `/res/rule/<name>`、`/res/provider/<name>` 这些下发地址，它会**持续**来取——哪怕面板里已经把对应来源停用或删除。feed 一旦回 404，客户端（实测 Stash 4.4.0）会把这条资源留在运行时会话里每 60 秒重试一次，日志刷 `runtime::session: artifact refresh failed ... HTTP 404`，并把整个订阅更新判为失败：配置**下载得到**（服务端 `last_pull_at` 一直在涨）却永远**不生效**（客户端 `lastCompletedCheck` 停在原地）。线上实证：2026-10-31 停用规则来源 `AWAvenue-Ads` 后，两台 macOS 设备每分钟各刷一次 404；Mac mini 的订阅自 2026-11-03 01:39 起再也更新不进来，界面上的「更新配置」必然报错。定稿两条：**（1）** `routers/feed.py` 的 `rule_resource` / `provider_resource` 只要内容还在就照发——`enabled` 只决定是否进入**新**构建，不再决定是否下发（停用是业务语义，删除才是资源消失）；**（2）** 删除或改名一个**当前生产产物仍在引用**的规则来源 / 节点来源，返回 409 + 引用明细（复用既有 code `rule_provider_in_use` / `source_in_use`，前端自动弹二次确认，`force=1` 才放行），提示语是「请先发布新版本再删除/改名」。判断依据是 `services/refs.py` 的 `release_resource_refs(conn, "rule"|"provider", name)`——扫当前生产构建目录下的产物，看是否还写着这个下发地址。停用（`enabled=0`）不受此限制。
 
+36. **「配置本体」与「子资源」的拉取时间必须分开记，设备配置陈旧要在界面上看得见（2026-11-04 定案）。** `devices.last_pull_at` 记录的是**任意资源**（配置本体 + 规则集 + 节点来源）的拉取，**不能**拿它判断设备有没有拿到新配置——规则集本身就按小时级刷新，界面上的「最近下载」与概览的「24 小时内拉取过」因此永远是绿的。线上实证：Mac mini 的配置本体自 2026-11-03 01:39 起就没再生效（客户端 `lastCompletedCheck` 停在原地、界面报「更新配置」失败），而面板显示它「3 小时前刚下载过」——**故障完全隐形**。定稿：`devices.last_config_at` 只在 `config.yaml` 下发时更新（`routers/feed.py` 的 `device_config`）；`routers/targets_devices.py` 的 `config_age_hours()` / `config_stale()` 按 `profile-update-interval` 的 3 倍（不足 6 小时按 6 小时算）判定陈旧，设备列表标「未更新」，概览统计 `counts.devices_stale`。**HTTP 200 只代表文件取回，不代表配置加载、VPN 启动或规则生效**（概览页原有提示保留）——判断"设备是否生效"只看配置本体的时间戳，不要看子资源。新增字段走 `db.py` 的 `_migrate_device_config_pull` 一次性迁移并回填。
+
 ## 改完要做的事
 
 ```bash

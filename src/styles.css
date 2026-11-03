@@ -323,6 +323,7 @@ html, body, #app {
   text-overflow: ellipsis;
 }
 .mp-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.mp-cell-flag { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--mp-warn); font-size: 12.5px; white-space: nowrap; }
 .mp-dot.ok { background: var(--mp-ok); }
 .mp-dot.warn { background: var(--mp-warn); }
 .mp-dot.danger { background: var(--mp-danger); }

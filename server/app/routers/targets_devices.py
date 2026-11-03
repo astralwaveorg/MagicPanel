@@ -5,6 +5,7 @@
 """
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from datetime import datetime, timezone
 import json
 
 import yaml
@@ -74,8 +75,40 @@ def _device_public(row, base_url: str = "") -> dict:
         "created_at": row["created_at"],
         "last_pull_at": row["last_pull_at"],
         "last_pull_ip": row["last_pull_ip"],
+        "last_config_at": row["last_config_at"],
         "pull_count": row["pull_count"],
     }
+
+
+def config_age_hours(row) -> float | None:
+    """配置本体最后一次拉取距今多少小时；从没拉过返回 None。"""
+    at = row["last_config_at"]
+    if not at:
+        return None
+    try:
+        when = datetime.fromisoformat(at)
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return round((datetime.now(timezone.utc) - when).total_seconds() / 3600, 1)
+
+
+def config_stale(conn, row) -> bool:
+    """设备是不是很久没拿到新配置了。
+
+    客户端按 profile-update-interval 拉配置（默认 1 小时），超过 3 倍间隔
+    没更新就当作卡住。设备配置卡住不更新时，界面上必须看得见——
+    「文件下载成功」不等于「配置生效」。
+    """
+    try:
+        interval = int(db.get_setting(conn, "profile_update_interval", "12") or 12)
+    except (TypeError, ValueError):
+        interval = 12
+    age = config_age_hours(row)
+    if age is None:
+        return True
+    return age > max(interval * 3, 6)
 
 
 def _get_target(conn, tid: int):
@@ -350,7 +383,13 @@ def list_devices_paged(limit: int = 50, offset: int = 0, keyword: str = "",
 def list_devices(user=CurrentUser):
     with db.connect() as conn:
         rows = db.all_(conn, "SELECT * FROM devices ORDER BY sort, id")
-    return [_device_public(r) for r in rows]
+        out = []
+        for r in rows:
+            item = _device_public(r)
+            item["config_age_hours"] = config_age_hours(r)
+            item["config_stale"] = config_stale(conn, r)
+            out.append(item)
+    return out
 
 
 @router.post("/devices", status_code=201)

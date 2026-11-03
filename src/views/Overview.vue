@@ -46,8 +46,13 @@
           {{ data.devices?.length || 0 }}<span class="stat-unit">台</span>
         </div>
         <div class="stat-sub">
-          最近下载 {{ latestPull ? fmtTime(latestPull) : '—' }}<br />
-          {{ pulledRecently }}/{{ data.devices?.length || 0 }} 台 24 小时内拉取过
+          最近更新 {{ latestConfig ? fmtTime(latestConfig) : '—' }}<br />
+          {{ configPulledRecently }}/{{ data.devices?.length || 0 }} 台 24 小时内更新过配置
+        </div>
+        <div v-if="data.counts?.devices_stale > 0" class="stat-sub">
+          <span class="mp-cell-flag">
+            <i class="mp-dot warn" />{{ data.counts.devices_stale }} 台配置未更新
+          </span>
         </div>
       </div>
 
@@ -206,14 +211,16 @@ const totalRate = computed(() =>
 const lastTestedAt = computed(() =>
   testedSources.value.map((s) => s.tested_at).sort().pop() || '')
 
-const latestPull = computed(() => (data.value.devices || [])
-  .map((d) => d.last_pull_at).filter(Boolean).sort().pop() || '')
+// 只看「配置本体」的更新：规则集、节点来源这些子资源也会刷新拉取时间，
+// 混在一起会让"设备很久没拿到新配置"这件事在概览上完全看不出来。
+const latestConfig = computed(() => (data.value.devices || [])
+  .map((d) => d.last_config_at).filter(Boolean).sort().pop() || '')
 
-const pulledRecently = computed(() => {
+const configPulledRecently = computed(() => {
   const dayAgo = Date.now() - 24 * 3600 * 1000
   return (data.value.devices || []).filter((d) => {
-    if (!d.last_pull_at) return false
-    const t = Date.parse(d.last_pull_at)
+    if (!d.last_config_at) return false
+    const t = Date.parse(d.last_config_at)
     return Number.isFinite(t) && t >= dayAgo
   }).length
 })

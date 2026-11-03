@@ -401,6 +401,7 @@ def init_db() -> None:
         _migrate_device_scope(conn)
         _migrate_scope_all_sentinel(conn)
         _migrate_device_base_config_keys(conn)
+        _migrate_device_config_pull(conn)
 
 
 def _migrate_release_state_machine(conn) -> None:
@@ -821,6 +822,25 @@ def _migrate_verification_wording(conn) -> None:
                          (json.dumps(data, ensure_ascii=False), row["id"]))
     conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
                  "VALUES('verification_wording_v1', ?)", (now(),))
+
+
+def _migrate_device_config_pull(conn) -> None:
+    """devices 增加 last_config_at：只记「配置本体」的拉取时间。
+
+    以前 last_pull_at 被规则来源、节点来源这些**子资源**的拉取一起刷新，
+    面板上的「最近下载」「24 小时内拉取过」因此看不出设备到底多久没拿到
+    新配置——设备配置卡住不更新时，界面完全正常，故障是隐形的
+    （2026-11-04 线上实证：Mac mini 的配置本体自 11-03 01:39 起就没再
+    生效，而面板显示它「3 小时前刚下载过」）。
+
+    last_pull_at 保留原义（任意资源拉取），last_config_at 只在
+    config.yaml 下发时更新。
+    """
+    _ensure_column(conn, "devices", "last_config_at", "last_config_at TEXT")
+    conn.execute("UPDATE devices SET last_config_at=last_pull_at "
+                 "WHERE last_config_at IS NULL AND last_pull_at IS NOT NULL")
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('device_config_pull_v1', ?)", (now(),))
 
 
 def _migrate_settings(conn) -> None:

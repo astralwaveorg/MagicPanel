@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from .. import config, db, security
 from ..deps import CurrentUser
 from ..services import direct, releases, tester, webdav
+from . import targets_devices
 
 router = APIRouter(prefix="/api/v1", tags=["misc"])
 
@@ -55,6 +56,8 @@ def overview(user=CurrentUser):
              "display_name": r["note"] or r["name"],
              "platform": r["platform"],
              "env": r["env"], "last_pull_at": r["last_pull_at"],
+             "last_config_at": r["last_config_at"],
+             "config_stale": targets_devices.config_stale(conn, r),
              "pull_count": r["pull_count"]}
             for r in db.all_(conn, "SELECT * FROM devices ORDER BY id")
         ]
@@ -67,6 +70,8 @@ def overview(user=CurrentUser):
             "groups": db.one(conn, "SELECT COUNT(*) c FROM proxy_groups")["c"],
             "rules": db.one(conn, "SELECT COUNT(*) c FROM rules")["c"],
             "rules_enabled": db.one(conn, "SELECT COUNT(*) c FROM rules WHERE enabled=1")["c"],
+            # 配置本体没更新的设备数：这类故障在界面上必须看得见
+            "devices_stale": sum(1 for d in devices if d["config_stale"]),
         }
     return {
         "release_state": release_state,
