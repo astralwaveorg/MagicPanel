@@ -1037,8 +1037,9 @@ def test_auto_publish_waits_for_filtered_speed_test(client, monkeypatch):
 
     with db.tx() as conn:
         conn.execute(
-            "UPDATE sources SET filter_unavailable=1, test_results='{}', "
-            "tested_at=NULL, test_attempt_at=NULL WHERE id=?", (source["id"],),
+            "UPDATE sources SET filter_unavailable=1, node_count=1, "
+            "test_results='{}', tested_at=NULL, test_attempt_at=NULL WHERE id=?",
+            (source["id"],),
         )
     summary = scheduler.run_once(force=True)
     assert summary["build"] is None
@@ -1537,6 +1538,11 @@ def test_scheduler_records_gate_reason_once(client):
     client.post("/api/v1/sources", headers=h, json={
         "name": "门禁机场", "url": "https://airport.example.com/sub",
         "filter_unavailable": True, "auto_fetch": False})
+    # 有节点但没有测速结果 → 门禁要拦住（没有节点的来源不参与门禁，
+    # 见 tests/test_publish_gate.py）
+    from app import db
+    with db.tx() as conn:
+        conn.execute("UPDATE sources SET node_count=1 WHERE name='门禁机场'")
     client.post("/api/v1/groups", headers=h, json={
         "name": "门禁组", "type": "select", "proxies": ["DIRECT"]})
     client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "门禁组"})

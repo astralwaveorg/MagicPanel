@@ -233,11 +233,16 @@ def _run_deps_sync(summary: dict, now: datetime, force: bool = False) -> None:
         logger.warning("依赖仓库同步失败：%s", exc)
 
 
-def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
+def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str], list[str]]:
     """自动构建发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。
 
     关闭了自动测速（auto_test=0）或测速间隔为 0 的来源不会产生测速结果，
     不参与门禁，否则会永久阻塞自动构建发布。
+
+    **一个节点都没有的来源同样不参与门禁**：它还没抓到内容、进不了产物，
+    也就不会违反“只分发可用节点”的承诺。留着它会把自动构建发布永久卡住
+    （2026-11-04 线上实证：新建但抓取失败的来源卡住了整条自动发布链路，
+    面板上的「立即发布」与定时发布都推不出去新版本）。
     """
     skipped = [
         r["name"] for r in db.all_(
@@ -246,12 +251,19 @@ def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
             "AND (auto_test=0 OR test_interval<=0) ORDER BY id",
         )
     ]
+    empty = [
+        r["name"] for r in db.all_(
+            conn,
+            "SELECT name FROM sources WHERE enabled=1 AND filter_unavailable=1 "
+            "AND (node_count IS NULL OR node_count<=0) ORDER BY id",
+        )
+    ]
 
     rows = db.all_(
         conn,
         "SELECT name, test_results, tested_at, last_fetched_at FROM sources "
         "WHERE enabled=1 AND filter_unavailable=1 AND auto_test=1 "
-        "AND test_interval>0 ORDER BY id",
+        "AND test_interval>0 AND node_count>0 ORDER BY id",
     )
     missing: list[str] = []
     for row in rows:
@@ -271,7 +283,7 @@ def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str]]:
             missing.append(f"{row['name']}（无测速结果）")
         elif fetched and tested < fetched:
             missing.append(f"{row['name']}（测速早于最近抓取）")
-    return not missing, missing, skipped
+    return not missing, missing, skipped, empty
 
 
 def _unchecked_core_targets(results: dict) -> list[str]:
@@ -329,9 +341,14 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
             summary["build"] = "策略未变化，跳过"
             return
         if publish:
-            ready, missing, skipped = _publish_tests_ready(conn)
+            ready, missing, skipped, empty = _publish_tests_ready(conn)
+            notes = []
             if skipped:
-                summary["skipped"] = "未开启测速的来源不参与门禁：" + "、".join(skipped)
+                notes.append("未开启测速的来源不参与门禁：" + "、".join(skipped))
+            if empty:
+                notes.append("没有节点的来源不参与门禁：" + "、".join(empty))
+            if notes:
+                summary["skipped"] = "；".join(notes)
             if not ready:
                 summary["build_error"] = (
                     "自动构建发布等待测速结果：" + "、".join(missing)
