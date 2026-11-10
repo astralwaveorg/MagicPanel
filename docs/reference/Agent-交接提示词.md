@@ -23,15 +23,15 @@
 
 | 机器 | 地址 | 跑什么 |
 | --- | --- | --- |
-| Mac mini（开发机，**也是代理机**） | `10.0.1.8` | Stash 混合端口 `7890`；仓库克隆在这台机器上 |
+| 路由器（网关，**代理在这里**） | `10.0.1.1` | OpenClash 全屋透明代理与分流 |
+| Mac mini（开发机） | `10.0.1.8` | 仓库克隆在这台机器上，不再承担代理 |
 | NAS（主机名 `Altair`） | `10.0.1.2` | 面板容器 `magicpanel`；**所有服务端的事都在这里** |
 
 - **抓取订阅、抓规则集、测速、构建、发布**——都发生在 NAS 容器里。
-- 因此 `proxy_url` 这类「服务端用」的代理字段必须填 `http://10.0.1.8:7890`
-  （Mac mini 的内网地址）。填 `127.0.0.1` 会连到 NAS 自己，实测 connection refused，抓取全挂。
-- **在开发机上跑的脚本**（`release.sh` / `fetch_geo_data.sh`）用 `127.0.0.1:7890`
-  或 `10.0.1.8:7890` 都行；但 `deploy.sh` 的 `DEPLOY_PROXY` 是注入 **NAS 端构建过程**的，
-  必须用 `10.0.1.8`。
+- 因此 `proxy_url` 这类「服务端用」的代理字段**留空**即可：NAS 走路由器 OpenClash 透明代理。
+  填 `127.0.0.1` 会连到容器自己；填已下线的 `10.0.1.8` 会直接失败（2026-11-10 已全量清空）。
+- `release.sh` 的 `GH_PROXY`、`fetch_geo_data.sh` 的 `PROXY`、`deploy.sh` 的 `DEPLOY_PROXY`
+  默认都留空，直连即可。
 
 完整地址表、端口归属与自检命令见 [环境与地址速查](环境与地址.md)。
 
@@ -159,11 +159,10 @@ official-example/ 官方配置样例，核对引擎默认配置用
 cd server && ../.venv/bin/python -m pytest tests -q      # 后端测试，全绿才能往下走
 npm run build                                             # 前端产物输出到 server/app/static
 .venv/bin/python scripts/check_secrets.py                 # 凭据扫描
-DEPLOY_PROXY=http://10.0.1.8:7890 bash scripts/deploy.sh # 发布（自带数据自检与域名验证）
+bash scripts/deploy.sh                                    # 发布（自带数据自检与域名验证）
 ```
 
-`DEPLOY_PROXY` 指向 Mac mini 上的 Stash 混合端口。它是通过 ssh 注入到 **NAS 端构建过程**的
-（构建时要拉 npm/pip 包），必须写内网地址 `10.0.1.8`；写 `127.0.0.1` 会让 NAS 连自己、拉包失败。
+`DEPLOY_PROXY` 默认不需要设置：NAS 走路由器 OpenClash 透明代理，构建拉包直连即可。
 
 首次 clone 先装依赖：`python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt && npm install`
 
@@ -173,7 +172,7 @@ DEPLOY_PROXY=http://10.0.1.8:7890 bash scripts/deploy.sh # 发布（自带数据
 
 - 你可能在别的机器上，但**同一内网**，发布链路是通的
 - `scripts/deploy.sh` 做的事：跑测试 → 同步代码 → 重建容器 → 等健康检查 → 数据自检 → 域名验证
-- 只想快速验证前端用 `--fast`；走代理加 `DEPLOY_PROXY=http://10.0.1.8:7890`
+- 只想快速验证前端用 `--fast`
 - 线上：容器 `magicpanel`，数据目录 `/app/data`，对外 `https://magichub.top:8443`
 - **改完代码 ≠ 客户端拿到新配置**：配置类改动还要在「构建发布」里发一版才生效
   （只有设备独立配置例外，它在分发时实时叠加）

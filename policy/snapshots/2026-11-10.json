@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "exported_at": "2026-11-10T00:41:24+00:00",
+  "exported_at": "2026-11-10T00:54:22+00:00",
   "meta": {
-    "build_id": 223,
+    "build_id": 226,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "7295088bf64f44f35628930f09d95897e4df385700b9769c5d44fb6ef9a20b27",
-    "build_created_at": "2026-11-10T08:39:40+08:00"
+    "policy_sha": "89c96a9b76db98e49946e08ee1c76c1740a3b9d9dccf849dd8e3ed11d7771014",
+    "build_created_at": "2026-11-10T08:53:32+08:00"
   },
   "rules": [
     {
@@ -1844,7 +1844,7 @@
       "created_at": "2026-10-25T01:29:24+08:00",
       "updated_at": "2026-10-26T01:27:35+08:00",
       "no_resolve": 0,
-      "targets": "[\"1\", \"2\", \"6\", \"7\", \"8\", \"9\", \"10\", \"14\"]",
+      "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "no_track": 0,
       "pre_matching": 0
@@ -4045,5 +4045,5 @@
       "enabled": 1
     }
   ],
-  "digest": "12ad6b79f4b03b041b7ec5223768095d3c5d1c6d3444c44a90dd8d20bf87de9a"
+  "digest": "bc3dceb794d5bd1bd0ec5b4e9120a7cf228940b9ac5635b686ffe2151b2fac01"
 }

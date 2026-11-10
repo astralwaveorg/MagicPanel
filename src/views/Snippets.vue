@@ -158,7 +158,7 @@
           <el-form-item label="抓取走代理">
             <el-switch v-model="form.useProxy" />
             <span class="mp-form-hint" style="margin-left:12px">
-              服务端直连抓不到时经指定代理中转（例如 http://10.0.1.8:7890）
+              服务端直连抓不到时经指定代理中转（通常留空，走路由器透明代理）
             </span>
           </el-form-item>
           <el-form-item label="抓取代理地址">

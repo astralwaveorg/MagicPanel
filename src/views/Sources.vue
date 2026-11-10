@@ -485,11 +485,11 @@
         </el-form-item>
         <el-form-item v-if="form.use_proxy" label="代理地址">
           <el-input v-model="form.proxy_url" class="mono"
-                    :placeholder="PROXY_HINT" />
+                    placeholder="http://内网代理:端口" />
           <div class="mp-form-hint" style="margin-top:6px">
             <template v-if="currentProxy">当前：{{ currentProxy }}　</template>
-            留空表示使用默认地址 {{ PROXY_HINT }}；需要直连就取消上面的勾选。
-            面板跑在 NAS 上，这里要填 Mac mini 的内网地址，不要写 127.0.0.1。
+            面板跑在 NAS 上，默认走路由器 OpenClash 透明代理，通常不需要开这个开关。
+            确实要指定时填内网可达的代理地址，不要写 127.0.0.1（那是容器自己）。
           </div>
         </el-form-item>
       </el-form>
@@ -855,7 +855,6 @@ async function submitFileImport() {
 // 抓取走代理时的默认地址：Mac mini 上的 Stash 混合端口。
 // 面板跑在 NAS 上、抓取也是从 NAS 出网，所以这里必须写 Mac mini 的内网地址；
 // 写 127.0.0.1 会连到 NAS 自己（实测 connection refused）。
-const PROXY_HINT = 'http://10.0.1.8:7890'
 const currentProxy = computed(() => form.current_proxy || '')
 
 const intervalHint = computed(() => {
@@ -1066,7 +1065,7 @@ async function save() {
     const body = { ...form }
     body.headers = buildHeadersPayload()
     if (body.use_proxy) {
-      body.proxy_url = (body.proxy_url || '').trim() || PROXY_HINT
+      body.proxy_url = (body.proxy_url || '').trim()
     } else {
       body.proxy_url = ''
     }

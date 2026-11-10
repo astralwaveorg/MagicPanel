@@ -12,11 +12,11 @@ def test_direct_env_strips_proxy_vars():
     """子进程环境必须没有代理变量，并写死 NO_PROXY=*。"""
     base = {
         "PATH": "/usr/bin",
-        "HTTP_PROXY": "http://10.0.1.8:6152",
-        "http_proxy": "http://10.0.1.8:6152",
-        "HTTPS_PROXY": "http://10.0.1.8:6152",
-        "https_proxy": "http://10.0.1.8:6152",
-        "ALL_PROXY": "socks5://10.0.1.8:6153",
+        "HTTP_PROXY": "http://proxy.example:6152",
+        "http_proxy": "http://proxy.example:6152",
+        "HTTPS_PROXY": "http://proxy.example:6152",
+        "https_proxy": "http://proxy.example:6152",
+        "ALL_PROXY": "socks5://proxy.example:6153",
         "NO_PROXY": "localhost",
     }
     env = direct.direct_env(base)
@@ -53,8 +53,8 @@ def test_check_reports_state(monkeypatch):
 
 def test_check_lists_env_proxies(monkeypatch):
     """环境里的代理变量要被列出来（面板不用它们，但要让人看见）。"""
-    monkeypatch.setenv("HTTP_PROXY", "http://10.0.1.8:6152")
-    monkeypatch.setenv("HTTPS_PROXY", "http://10.0.1.8:6152")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:6152")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:6152")
     monkeypatch.setattr(direct, "_fetch_egress", lambda: {
         "ip": "1.2.3.4", "country": "中国", "country_code": "CN", "org": "ISP",
     })
@@ -90,7 +90,7 @@ def test_core_subprocess_gets_clean_env(monkeypatch):
         captured["cmd"] = cmd
         return FakeProc()
 
-    monkeypatch.setenv("HTTP_PROXY", "http://10.0.1.8:6152")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:6152")
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr(tester, "core_status",
                         lambda: {"available": True, "version": "v1.19.32"})

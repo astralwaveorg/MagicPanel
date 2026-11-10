@@ -3,13 +3,13 @@
 # 用法：scripts/release.sh [版本号]
 #   版本号省略时在上一个标签基础上递增补丁位（首个标签为 v1.0.0）
 # 配置 GITHUB_TOKEN 后自动创建 Release 并上传产物；否则推送标签后给出创建链接。
-# GitHub API 访问不通时自动尝试 GH_PROXY（默认 http://10.0.1.8:7890）。
-# 代理是 Mac mini 上的 Stash 混合端口；这个 curl 跑在本机，写 127.0.0.1:7890 也一样。
+# GitHub API 访问不通时可用 GH_PROXY 显式指定代理
+# （家庭网络已由路由器 OpenClash 透明代理，通常无需设置）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REPO="astralwaveorg/MagicPanel"
-GH_PROXY="${GH_PROXY:-http://10.0.1.8:7890}"
+GH_PROXY="${GH_PROXY:-}"
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "工作区有未提交改动，请先提交再发布。" >&2
@@ -59,13 +59,14 @@ if [ -z "$TOKEN" ]; then
   exit 0
 fi
 
-# GitHub API 请求：先试直连，失败再走代理（本机到 github.com 通常需要代理）
+# GitHub API 请求：先试直连，失败且有 GH_PROXY 时再走代理
 api() {
   shift_method="$1"; shift
   env -u http_proxy -u https_proxy -u all_proxy \
     curl -fsS --max-time 30 -X "$shift_method" -H "Authorization: Bearer $TOKEN" \
-    -H "Accept: application/vnd.github+json" "$@" \
-  || curl -fsS --max-time 60 -x "$GH_PROXY" -X "$shift_method" \
+    -H "Accept: application/vnd.github+json" "$@" && return 0
+  [ -n "$GH_PROXY" ] || return 1
+  curl -fsS --max-time 60 -x "$GH_PROXY" -X "$shift_method" \
     -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"
 }
 

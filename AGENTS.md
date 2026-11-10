@@ -171,9 +171,9 @@
 cd server && ../.venv/bin/python -m pytest tests -q     # 后端测试
 npm run build                                           # 前端构建
 .venv/bin/python scripts/check_secrets.py               # 凭据扫描
-DEPLOY_PROXY=http://10.0.1.8:7890 bash scripts/deploy.sh   # 发布（脚本自带数据自检与域名验证）
-# DEPLOY_PROXY 会注入 NAS 端的 docker build，构建时要拉 npm 与 pip 包，
-# 所以必须写 Mac mini 的内网地址 10.0.1.8，不能写 127.0.0.1
+bash scripts/deploy.sh                                  # 发布（脚本自带数据自检与域名验证）
+# NAS 走路由器 OpenClash 透明代理，构建拉包无需额外代理；
+# 仅在异常时用 DEPLOY_PROXY=<可用的内网代理> 显式指定。
 ```
 
 配置类改动还要**重新构建发布**才生效（只有设备独立配置例外，分发时实时叠加）。
