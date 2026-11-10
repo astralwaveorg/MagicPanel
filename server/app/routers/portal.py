@@ -276,10 +276,13 @@ def portal_data(body: PinBody, request: Request):
                 "note": r["note"],
                 "last_pull_at": r["last_pull_at"],
                 "subscription_url": "",
+                # 「看配置源码」用：同一份内容，但不记拉取、内联展示
+                "preview_url": "",
             }
             if r["token_enc"]:
                 token = security.decrypt_text(r["token_enc"])
                 item["subscription_url"] = f"{base}/feed/{token}/config.yaml"
+                item["preview_url"] = f"{base}/feed/{token}/config.yaml?preview=1"
             else:
                 item["note"] = (item["note"] + "；" if item["note"] else "") \
                     + "缺少可展示的令牌，请在后台轮换一次"

@@ -39,7 +39,8 @@ def _base_url(request: Request, conn) -> str:
 
 
 def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
-             record=None, data: bytes | None = None) -> Response:
+             record=None, data: bytes | None = None,
+             allow_304: bool = True) -> Response:
     headers = dict(YAML_HEADERS)
     quoted = f'"{etag}"'
     headers["ETag"] = quoted
@@ -47,10 +48,11 @@ def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
         headers.update(extra)
     if request.method == "HEAD":
         return Response(status_code=200, headers=headers)
-    if_none = request.headers.get("if-none-match", "")
-    candidates = [t.strip() for t in if_none.split(",") if t.strip()]
-    if quoted in candidates or etag in candidates or "*" in candidates:
-        return Response(status_code=304, headers=headers)
+    if allow_304:
+        if_none = request.headers.get("if-none-match", "")
+        candidates = [t.strip() for t in if_none.split(",") if t.strip()]
+        if quoted in candidates or etag in candidates or "*" in candidates:
+            return Response(status_code=304, headers=headers)
     if record:
         record()
     if data is not None:
@@ -92,8 +94,14 @@ def _device_build(conn, device):
 
 
 @router.api_route("/{token}/config.yaml", methods=["GET", "HEAD"])
-def device_config(token: str, request: Request):
-    # 读用只读连接：设备拉取是高频请求，不能每次都抢 SQLite 的写锁
+def device_config(token: str, request: Request, preview: bool = False):
+    # 预览模式（?preview=1）：给门户的「看配置源码」用。
+    # 与正常下发**内容一致**，但三件事不同：
+    #   1. 不记拉取——预览是人在看，不是客户端在更新，不能污染「配置时效」；
+    #   2. 不加 #SUBSCRIBED——那是给客户端的更新提示行，不是配置内容；
+    #   3. Content-Disposition 用 inline——新标签页打开时直接显示文本，
+    #      而不是触发下载。
+    # read 用只读连接：设备拉取是高频请求，不能每次都抢 SQLite 的写锁
     with db.connect() as conn:
         device = _resolve_device(conn, token)
         if not device:
@@ -130,7 +138,7 @@ def device_config(token: str, request: Request):
         # Stash 保存订阅时会自己补一行 #SUBSCRIBED，服务端再补一行就会重复；
         # 浏览器下载（门户「下载配置」）仍需要这行，导入后客户端才知道从哪更新。
         agent = (request.headers.get("user-agent") or "").lower()
-        if "stash" not in agent:
+        if not preview and "stash" not in agent:
             text = f"#SUBSCRIBED {subscribe_url}\n" + text
         # ETag 必须覆盖最终正文：正文会随 base_url、User-Agent、
         # 设备覆盖变化，只用 build_id 会让客户端拿到 304 却仍是旧内容。
@@ -145,6 +153,10 @@ def device_config(token: str, request: Request):
                 f"attachment; filename=\"{ascii_name}.yaml\"; "
                 f"filename*=UTF-8''{quoted_name}.yaml",
         }
+        if preview:
+            extra["Content-Disposition"] = f'inline; filename="{ascii_name}.yaml"'
+            # 预览不进浏览器缓存：缓存的 ETag 会让第二次预览拿到 304 空响应。
+            extra["Cache-Control"] = "no-store"
 
         def record():
             # 计数与审计放在独立短事务里，避免长时间占着写锁
@@ -156,6 +168,9 @@ def device_config(token: str, request: Request):
                      db.now(), device["id"]),
                 )
 
+        if preview:
+            # 不记拉取；也不做 304 协商（预览正文与客户端下发正文不同）
+            return _respond(request, text, etag, extra, allow_304=False)
         return _respond(request, text, etag, extra, record=record)
 
 

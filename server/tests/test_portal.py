@@ -3,6 +3,7 @@
 TestClient 会保留登录 Cookie；凡匿名访问用例先清 Cookie。
 """
 from conftest import auth_headers, setup_admin
+from test_api import make_policy, publish_to_prod
 
 
 def _anonymous(client):
@@ -171,3 +172,54 @@ def test_portal_provider_detail(client):
                        json={"name": "demo"}).status_code == 401
     assert client.post("/api/v1/portal/provider-detail",
                        json={"name": "nope", "pin": "1357"}).status_code == 404
+
+
+def test_portal_preview_url_points_to_same_token(client):
+    """门户给每个设备一个「看配置源码」的地址：同一枚令牌，只多一个 preview 标记。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    _make_device(client, h)
+    client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "1357"})
+    _anonymous(client)
+    data = client.post("/api/v1/portal/data", json={"pin": "1357"}).json()
+    dev = data["devices"][0]
+    assert dev["preview_url"].endswith("/config.yaml?preview=1")
+    sub_token = dev["subscription_url"].split("/feed/")[1].split("/")[0]
+    prev_token = dev["preview_url"].split("/feed/")[1].split("/")[0]
+    assert sub_token == prev_token
+
+
+def test_preview_is_same_content_but_not_a_pull(client):
+    """预览与下发同一份产物，但不记拉取、不带 #SUBSCRIBED、内联展示。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    target = client.get("/api/v1/targets", headers=h).json()[0]
+    dev = client.post("/api/v1/devices", headers=h, json={
+        "name": "预览机", "platform": target["platform"], "target_id": target["id"]}).json()
+    bid = client.post("/api/v1/builds", headers=h, json={}).json()["id"]
+    publish_to_prod(client, h, bid)
+    token = dev["token"]
+
+    normal = client.get(f"/feed/{token}/config.yaml")
+    assert normal.status_code == 200, normal.text
+    assert normal.headers["content-disposition"].startswith("attachment")
+    assert normal.text.startswith("#SUBSCRIBED ")
+
+    row = client.get("/api/v1/devices", headers=h).json()[0]
+    pulled_at = row["last_config_at"]
+    pulls = row["pull_count"]
+    assert pulled_at is not None
+
+    preview = client.get(f"/feed/{token}/config.yaml?preview=1")
+    assert preview.status_code == 200, preview.text
+    # 新标签页直接显示文本，而不是触发下载
+    assert preview.headers["content-disposition"].startswith("inline")
+    # 内容与下发完全一致，只差 #SUBSCRIBED 那一行提示
+    assert not preview.text.startswith("#SUBSCRIBED ")
+    assert preview.text == normal.text.split("\n", 1)[1]
+
+    # 预览不计入拉取：不能把「人在看」记成「客户端刚更新过」
+    row2 = client.get("/api/v1/devices", headers=h).json()[0]
+    assert row2["last_config_at"] == pulled_at
+    assert row2["pull_count"] == pulls

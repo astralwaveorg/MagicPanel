@@ -99,7 +99,12 @@
               <div class="pt-grid">
                 <article v-for="d in g.devices" :key="d.name" class="pt-card" :data-platform="d.platform">
                   <div class="pt-card-head">
-                    <span class="pt-card-name">{{ cardTitle(d) }}</span>
+                    <button
+                      class="pt-card-name pt-card-name-btn"
+                      :disabled="!d.subscription_url"
+                      :title="d.subscription_url ? '查看配置源码' : '暂无可预览的订阅地址'"
+                      @click="openPreview(d)"
+                    >{{ cardTitle(d) }}</button>
                     <span class="pt-tag" :data-env="d.env">
                       {{ d.env === 'production' ? '生产环境' : '测试环境' }}
                     </span>
@@ -310,6 +315,37 @@
           </div>
         </div>
       </div>
+      <!-- 配置源码预览 -->
+      <div v-if="previewDevice" class="pt-modal" @click.self="closePreview">
+        <div class="pt-modal-card pt-preview-card">
+          <p class="pt-modal-title">{{ previewDevice.display_name || previewDevice.name }}</p>
+          <p class="pt-preview-meta">
+            {{ platformLabel(previewDevice.platform) }} · {{ previewDevice.target_name }}
+            <template v-if="previewState === 'loading'"> · 载入中…</template>
+            <template v-else-if="previewState === 'error'"> · {{ previewError }}</template>
+            <template v-else> · {{ previewLines }} 行 · {{ previewSize }}</template>
+          </p>
+          <div v-if="previewState === 'ready'" class="pt-yaml">
+            <pre class="pt-yaml-gutter">{{ previewGutter }}</pre>
+            <pre class="pt-yaml-code" v-html="previewHtml"></pre>
+          </div>
+          <div class="pt-detail-actions">
+            <button
+              class="pt-btn"
+              :disabled="previewState !== 'ready'"
+              @click="copy(previewText, 'preview')"
+            >{{ copied === 'preview' ? '已复制' : '复制内容' }}</button>
+            <a
+              v-if="previewRawUrl"
+              class="pt-btn"
+              :href="previewRawUrl"
+              target="_blank"
+              rel="noopener"
+            >新标签打开原文</a>
+            <button class="pt-btn" @click="closePreview">关闭</button>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -319,6 +355,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { api } from '../api'
+import { highlightYaml, lineGutter } from '../yamlHighlight'
 
 const GATE_TITLE = 'MagicPanel - 订阅配置服务中心'
 const CONTENT_TITLE = '订阅中心 · MagicPanel'
@@ -343,6 +380,16 @@ const qrUrl = ref('')
 const qrText = ref('')
 const qrDevice = ref('')
 const qrCache = new Map()
+// 配置源码预览
+const previewDevice = ref(null)
+const previewText = ref('')
+const previewHtml = ref('')
+const previewGutter = ref('')
+const previewState = ref('')
+const previewError = ref('')
+const previewLines = ref(0)
+const previewSize = ref('')
+const previewRawUrl = ref('')
 let lockTimer = null
 
 const CATEGORY_LABELS = {
@@ -651,6 +698,43 @@ async function showQr(d) {
 }
 
 function closeQr() { qrUrl.value = ''; qrText.value = ''; qrDevice.value = '' }
+
+// 点设备标题看配置源码。
+// 走 ?preview=1 的同一个 feed 地址：内容与客户端下发的完全一致，
+// 但服务端不记这次拉取（人在看 ≠ 客户端在更新），也不加 #SUBSCRIBED 行。
+async function openPreview(d) {
+  const url = d.preview_url || ''
+  if (!url) return
+  previewDevice.value = d
+  previewText.value = ''
+  previewHtml.value = ''
+  previewGutter.value = ''
+  previewLines.value = 0
+  previewSize.value = ''
+  previewError.value = ''
+  previewState.value = 'loading'
+  previewRawUrl.value = url
+  try {
+    const resp = await fetch(url, { credentials: 'same-origin' })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const text = await resp.text()
+    previewText.value = text
+    const lines = text.split('\n')
+    previewLines.value = lines.length
+    previewSize.value = sizeText(new Blob([text]).size)
+    previewGutter.value = lineGutter(text)
+    previewHtml.value = highlightYaml(text)
+    previewState.value = 'ready'
+  } catch (e) {
+    previewError.value = `载入失败：${e.message || e}`
+    previewState.value = 'error'
+  }
+}
+
+function closePreview() {
+  previewDevice.value = null
+  previewState.value = ''
+}
 
 function startLockCountdown(seconds) {
   locked.value = true
@@ -996,6 +1080,24 @@ onMounted(async () => {
 .pt-link-card:hover { border-color: rgba(108, 123, 255, 0.6); transform: translateY(-2px); }
 .pt-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .pt-card-name { font-weight: 600; font-size: 15px; }
+/* 标题做成按钮：外观与原来的 span 完全一致，只是多了一个可点开的语义 */
+.pt-card-name-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.15s ease;
+}
+.pt-card-name-btn:hover:not(:disabled) { color: #8ea2ff; }
+.pt-card-name-btn:disabled { cursor: default; opacity: 0.75; }
 .pt-tag {
   font-size: 11px;
   padding: 2px 9px;
@@ -1185,6 +1287,64 @@ onMounted(async () => {
 }
 .pt-detail-note { color: #6d7490; font-size: 11.5px; margin: 8px 0 0; }
 .pt-detail-actions { display: flex; gap: 10px; margin-top: 16px; }
+
+/* 配置源码预览 */
+.pt-preview-card {
+  width: min(1080px, 100%);
+  max-width: 100%;
+  text-align: left;
+  padding: 22px 24px;
+}
+.pt-preview-meta {
+  color: #79809a;
+  font-size: 12.5px;
+  margin: 0 0 12px;
+}
+.pt-yaml {
+  display: flex;
+  max-height: 64vh;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.36);
+}
+.pt-yaml-gutter {
+  margin: 0;
+  padding: 12px 8px 12px 14px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #5b6b86;
+  text-align: right;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.03);
+  position: sticky;
+  left: 0;
+  flex: none;
+}
+.pt-yaml-code {
+  margin: 0;
+  padding: 12px 16px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #c9d3e4;
+  white-space: pre;
+  tab-size: 2;
+  flex: 1 0 auto;
+}
+/* YAML 着色（GitHub Dark 配色） */
+.pt-yaml-code .y-key { color: #79c0ff; }
+.pt-yaml-code .y-str { color: #a5d6ff; }
+.pt-yaml-code .y-num { color: #ffa657; }
+.pt-yaml-code .y-ip { color: #ffa657; }
+.pt-yaml-code .y-bool { color: #ff7b72; }
+.pt-yaml-code .y-null { color: #ff7b72; }
+.pt-yaml-code .y-url { color: #d2a8ff; }
+.pt-yaml-code .y-anchor { color: #ffa657; }
+.pt-yaml-code .y-flow { color: #79c0ff; }
+.pt-yaml-code .y-cm { color: #7d8590; font-style: italic; }
+.pt-yaml-code .y-punct { color: #8b949e; }
 
 .pt-empty {
   color: #79809a; font-size: 13px;
