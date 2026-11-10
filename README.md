@@ -23,6 +23,9 @@ MagicPanel 是个自托管的代理订阅配置服务：把机场订阅、规则
 - 不提供旁路由，不做透明代理。
 - 不做公网 SaaS：设计前提是自托管、数据不出门。
 
+它产出的是**给 Stash / Mihomo / OpenClash 消费的配置**。家庭部署里，路由器上的
+OpenClash 拿这份配置做全屋透明代理与分流——那是消费方，不是本服务的一部分。
+
 ## 有什么
 
 | 页面 | 干什么 |
@@ -35,7 +38,7 @@ MagicPanel 是个自托管的代理订阅配置服务：把机场订阅、规则
 | 引擎平台 | 引擎 + 平台（Stash-macOS、Mihomo-Windows、OpenClash-Mihomo……），一套客户端对应一个 |
 | 基础配置 | 产物顶层键分三层：引擎默认配置 → 引擎平台配置 → 设备独立配置 |
 | 拓展模块 | 可复用的 YAML 片段（Stash 磁贴、Mihomo TUN、DNS 策略、脚本改写……） |
-| 设备管理 | 每台设备一个固定订阅地址，一个订阅环境；拖拽排序；标注配置是否已更新 |
+| 设备管理 | 每台设备一个固定订阅地址，一个订阅环境；拖拽排序；标注配置是否已更新；**点设备标题可预览配置源码**（YAML 语法高亮，走 `?preview=1`，不记拉取、不加 `#SUBSCRIBED`） |
 | 自主维护 | magic-sets 仓库的文件管理器：语法高亮编辑、YAML 校验、提交与同步 |
 | 构建发布 | 产物快照、校验结果、发布与回滚、版本对比 |
 | 自动构建发布 | 定时抓取、测速，策略有变化就自动构建并发布 |
@@ -100,22 +103,31 @@ server/app/            后端
   compiler/             产物编译与校验
   db.py                 表结构与迁移
 src/                    前端（Vue3 + Element Plus），views/ 里一个页面对应一个文件
-scripts/                部署、备份、自检脚本
+scripts/                部署、备份、自检、策略快照脚本
+policy/snapshots/       线上策略的无凭据快照（规则顺序 / 策略组 / 规则来源）
 docs/                   文档
 android/                管理端的安卓壳
 official-example/       官方配置样例，核对引擎默认配置用
 ```
 
+`policy/snapshots/*.json` 是规则与策略组的版本化存档——这些内容只存在数据库里，
+git 看不到。导出/导入见 [AGENTS.md](AGENTS.md) 的「策略快照」一节。
+
 ## 开发与发布
+
+**开工前先对齐代码**：仓库是唯一事实源，NAS 上的 `/opt/magicpanel` 是部署副本。
+
+```bash
+git pull --ff-only                              # 拉最新
+git status --short                              # 应为空，脏工作区会把半成品发上去
+```
+
+本地自检与发布：
 
 ```bash
 cd server && ../.venv/bin/python -m pytest tests -q     # 后端测试
 npm run build                                            # 前端产物（输出到 server/app/static）
-```
 
-推到 NAS：
-
-```bash
 ./scripts/deploy.sh            # 测试 → 同步代码 → 重建容器 → 健康检查 → 数据自检 → 域名验证
 ./scripts/deploy.sh --fast     # 跳过测试，适合只改前端时快速验证
 ./scripts/release.sh [版本]    # 打包 → 打标签推送 → 配了 GITHUB_TOKEN 时自动建 Release
@@ -123,7 +135,26 @@ npm run build                                            # 前端产物（输出
 
 `release.sh` 要求工作区是干净的（改动先提交），并会自己跑一遍后端测试。
 
-代码改完只是让面板跑新代码，**订阅内容要生效还得在「构建发布」里发一版**。
+### 两类改动，生效方式不同
+
+| 类型 | 内容 | 怎么生效 |
+| --- | --- | --- |
+| 代码 | `server/`、`src/`、`scripts/` | `deploy.sh` 重建容器后立即生效 |
+| 策略数据 | 规则、策略组、规则来源（数据库里） | 必须再走一次「创建构建 → 发布测试 → 发布生产」 |
+
+**代码改完只是让面板跑新代码，订阅内容要生效还得发一版。** 渲染器（`compiler/render.py`）
+的改动也算策略侧——自动构建的指纹只看策略快照，不看渲染器代码，必须手动发一次。
+
+### 部署后怎么确认没坏
+
+```bash
+ssh archon@10.0.1.2 'docker inspect magicpanel --format "{{.State.Health.Status}}"'
+ssh archon@10.0.1.2 'docker exec magicpanel curl -s -o /dev/null -w "%{http_code}\n" \
+  -m 10 https://www.gstatic.com/generate_204'          # 期望 204（经路由器透明代理出网）
+```
+
+更细的流程、约束与核对清单见 [AGENTS.md](AGENTS.md)（Agent 必读）与
+[开发文档](docs/开发文档.md)。
 
 ## 安卓客户端
 

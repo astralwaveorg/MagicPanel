@@ -14,6 +14,61 @@
 [Agent 交接提示词](docs/reference/Agent-交接提示词.md)，里面写清了架构、硬性约束、
 改配置的方式和发布流程，再动手。
 
+## 0. 开工前：先让代码与环境对齐
+
+**唯一事实源是 GitHub 的 `astralwaveorg/MagicPanel` `main`。** NAS 上的
+`/opt/magicpanel` 是**部署副本**，由 `scripts/deploy.sh` 从工作区同步过去。
+两边不一致时以仓库为准，先把差异查清楚再动手，不要直接在 NAS 上改代码。
+
+```bash
+git pull --ff-only            # 拉最新；有未提交改动会失败，先提交或 stash
+git log --oneline -5          # 确认自己在哪个提交上
+git status --short            # 应为空——脏工作区 deploy.sh 照样发布，容易带出半成品
+```
+
+核对线上跑的是哪一版：
+
+```bash
+ssh archon@10.0.1.2 'docker inspect magicpanel \
+  --format "{{.Image}} {{.State.StartedAt}} {{.State.Health.Status}}"'
+ssh archon@10.0.1.2 'docker images --format "{{.ID}} {{.CreatedSince}}" | grep magicpanel'
+```
+
+镜像构建时间应与你最近一次 `deploy.sh` 对得上；对不上说明线上不是你以为的那版代码。
+
+**一次改动必须走完的链路**（缺一步就不算完成）：
+
+```text
+git pull → 改代码/策略 → 本地自检 → deploy.sh → 构建发布 → 客户端拉取 → 核对
+```
+
+**注意区分两类改动**，它们的生效方式完全不同：
+
+| 类型 | 内容 | 生效条件 |
+| --- | --- | --- |
+| **代码** | `server/`、`src/`、`scripts/` | `deploy.sh` 重建容器后立即生效 |
+| **策略数据** | 规则、策略组、规则来源（存在 NAS 的 `data/magicpanel.db`） | 必须再走一次「创建构建 → 发布测试 → 发布生产」，否则设备拿到的还是旧产物 |
+
+策略数据**不在 git 里**，靠 `policy/snapshots/*.json` 存档，见下节。
+
+## 策略快照（让不在 git 里的策略可复现）
+
+规则顺序、策略组这些内容只存在数据库里，git 看不见。改动前后各导一份：
+
+```bash
+# 导出（无凭据，可入库）
+python scripts/export_policy.py --db /opt/magicpanel/data/magicpanel.db \
+  --out policy/snapshots/$(date +%F).json
+
+# 复现（先 dry-run 看 digest 与条数，再正式导入；会自动备份数据库）
+python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
+  --in policy/snapshots/2026-11-10.json --dry-run
+```
+
+快照只含 `rules` / `proxy_groups` / `rule_providers` 三张表，且 `rule_providers`
+走**列白名单**，**不含** `content`（MRS 二进制缓存）与 `proxy_url_enc`（加密订阅地址）；
+`sources` / `local_nodes` / `devices`（含令牌与节点凭据）整体不导出。
+
 ## 硬性约束
 
 1. **结构化内容不能被配置层覆盖。** `proxies` / `proxy-providers` / `proxy-groups` / `rule-providers` / `rules` 五个键，基础配置（引擎默认配置 / 引擎平台配置 / 设备独立配置）、平台扩展、拓展模块都不许写，服务端硬校验。
@@ -27,6 +82,17 @@
 9. **改引擎默认配置要核对官方文档。** `scripts/check_engine_defaults.py` 逐键对账，出处要落在 `official-example/`。
 10. **命名只有三个层级名**：引擎默认配置 / 引擎平台配置 / 设备独立配置，代码、注释、界面、文档保持一致；页面叫「基础配置」，引擎平台自己的片段叫「平台扩展」。
 11. **地区线路的自动测速一律 `url-test`，跨地区只留一个「⚡️ 自动测速」组。** 日常组按实测延迟自动选（`interval` 600、`tolerance` 100）。跨地区择优用 url-test（成员 = 各地区自动组 + 本地机房节点），不另建 `fallback` 兜底组：fallback 只保证连得上、不保证快，限速节点会被一直用下去。同一地区不要建「稳定 / 优选」两套组。注意 url-test 组是**隐藏**的（前台不显示），规则不能直接指向它，要用可见 select 包住（见约束 14）。
+
+    **2026-11-10 起有四个例外，都是有明确业务理由的 `fallback`，不要改回 url-test：**
+
+    | 组 | 类型与顺序 | 为什么必须是 fallback |
+    | --- | --- | --- |
+    | `🏢 自建优先` | fallback：日本机房01→02 → 美国01→02 → 香港01→02 → `⚡️ 自动测速` | 自建机房节点质量高于机场，需要**按序优先**；url-test 会随延迟抖动在日/美/港之间乱跳，长连接与会话粘性变差。注意 `local_first=1`，否则渲染时 `⚡️ 自动测速` 会排到自建节点前面，fallback 永远选不到自建 |
+    | `🔍 谷歌服务` | fallback：美国机房 → 美国自动 → 日本机房 → 日本自动 | **Google 全家（含 Gemini / YouTube）必须美国出口**，美国全挂才退日本；url-test 会选到香港/新加坡，Gemini 直接不可用 |
+    | `🧠 人工智能` | fallback：美国机房 → 美国自动 → 日本机房 → 日本自动 → 新加坡自动 | AI 对 IP 质量与地区敏感，部分服务不支持香港，**明确排除香港**；顺序固定 美→日→新 |
+    | `🎞️ 国际影音` | fallback：新加坡自动 → 日本自动 → 香港自动 | 流媒体解锁按地区，逐级降级而不是按延迟择优 |
+
+    规则顺序同样有要求：**Google 三件套（`search`/`youtube`/`google`）必须排在 AI 规则之前**，否则 `gemini.google.com` 会先命中 `category-ai-chat-!cn` 落到 `🧠` 组（虽然也是美国，但语义不对且改 AI 组会连带影响 Google）。
 12. **兜底规则是 `MATCH → 默认代理`，不是直连。** 面板采用"先分流、未列出的全部走代理"：漏配一条规则只会让线路不最优，不会让服务打不开。改兜底方向前先想清楚影响面。
 13. **地区维度只保留两类组**：各地区单独命名的组 + 机房组（🇺🇸 美国机房 / 🇯🇵 日本机房）。机房组只放本地机房节点，供"重点标注"用；不要按"散节点"另开同地区组。每个地区是**两层**：内层 `XX自动`（隐藏 `url-test`，自动测速）+ 外层 `XX`（可见 `select`，规则只指向它）。命名规范：内层带"自动"后缀且有空格（`🇭🇰 香港自动`），外层无空格（`🇭🇰香港`）。
 14. **规则目标必须是前台可见的策略组。** 客户端前台只显示可见组，指向隐藏组等于"分流了但用户选不了节点"。做法是可见 `select` 包住隐藏 `url-test`：规则指向可见组，可见组成员是隐藏自动组 + 地区正则过滤出的节点。产物里不允许出现任何指向 `hidden: true` 组的规则。
@@ -38,6 +104,8 @@
 20. **规则内容源是独立仓库 `astralwaveorg/magic-sets`，由后台「自主维护」页托管。** 主仓库不再有 submodule 引用（`.gitmodules` 与 `magic-sets/` 已删除）；仓库地址、分支、鉴权凭据存在 `settings.deps_*`，容器运行时把仓库 clone 到 `/app/data/deps/rule-repo`，面板在「自主维护」页里浏览、编辑、提交、推送。仓库分 `rule/`（规则集合）、`script/`（Stash 脚本）、`rewrite/`（HTTP 重写）三个目录。
 
     面板的规则集分四层：**自维护层**（仓库里的 `rule/*.yaml`，当前 13 个集合，在面板里是 `kind='repo'`，内容由同步写入，**不再经 jsDelivr 中转——推上去面板的 `/res/rule/<name>` feed 立刻是新内容，没有 12 小时 CDN 缓存**）；**上游通用层**（MetaCubeX/meta-rules-dat 的 mrs，`kind='remote'`）；**上游应用集合层**（blackmatrix7/ios_rule_script 的 `rule/Clash/<集合名>/<集合名>.yaml`，yaml，行为 `classical`，一条文件混多种规则类型，如 `XiaoMi`——**不进自维护仓库**，那是自维护层）；**第三方成品库**直接引别人的成品规则直链（mrs、行为 `domain`）。**广告拦截原则（2026-10-31 向阳定稿）：宁可不拦截，不能误拦截。** 曾引入 `TG-Twilight/AWAvenue-Ads-Rule` 的 `No.Unwelcome` 变体（875 条）做广告拦截，排查发现黑盒列表里混有功能性域名（京东 `mapi.m.jd.com`、京东图片 `img2.360buyimg.com`、淘宝风控 `audid-api.taobao.com`、微信视频号 `wxsnsdy.tc.qq.com`、乐播投屏认证 `vipauth.hpplay.cn`、小米系统组件 `api.installer.xiaomi.com` 等），且 mrs 整体生效无法逐条裁剪——已删除其两条规则并停用该来源（来源保留，随时可重启用）。现行广告拦截只走自维护 `magic-reject`（4 条纯 Google 广告域，零误杀）。要扩充广告拦截，往 `magic-reject` 里逐条加自己核实过的域名，不要整包引第三方列表。
+
+    **注意区分两个广告拦截层（2026-11-10 补充）**：上面说的是**客户端配置层**（mihomo/Stash 的 `magic-reject`），仍然只保留 4 条纯 Google 广告域。家庭网络另有**路由器 DNS 层**（R6S 上的 AdGuard Home，配置在 `/etc/adguardhome/adguardhome.yaml`，属部署环境、不在本仓库）：启用 AdGuard DNS filter（约 18.7 万条）+ AWAvenue `Only.Ads` 变体（661 条，只广告、不含遥测/钓鱼），并配 35 条白名单（微信/淘宝/Apple 全系/Steam/支付，小米只放行功能性接口 `a0.app`/`api.installer`/`a.market`/`video.market`）。两层职责不同：DNS 层对全屋生效、能用白名单精确收敛；客户端层要跟配置走，过激会污染所有人的解析。**改 DNS 层请动路由器，不要把列表塞进 `magic-sets`。**
 
     **自维护层的集合一律用 `behavior: classical`**：条目量不大，但类型可以混着写，域名、IP 段、进程名放进同一个文件，一个规则就能表达一整类分流意图。`classical` 里没有 `domain` 行为那种「`+.` 是后缀、不带是精确」的简写，`+.example.com` 要写成 `DOMAIN-SUFFIX,example.com`，`example.com` 要写成 `DOMAIN,example.com`——写错会把精确匹配放宽成整个域。
 
@@ -171,16 +239,55 @@
 
 ## 改完要做的事
 
+按顺序走，前一步不过不要往下走：
+
 ```bash
+# 1) 本地自检
 cd server && ../.venv/bin/python -m pytest tests -q     # 后端测试
-npm run build                                           # 前端构建
-.venv/bin/python scripts/check_secrets.py               # 凭据扫描
-bash scripts/deploy.sh                                  # 发布（脚本自带数据自检与域名验证）
+cd .. && npm run build                                  # 前端构建（产物进 server/app/static）
+.venv/bin/python scripts/check_secrets.py               # 凭据扫描（有人把令牌贴进代码会在这里被拦）
+
+# 2) 发布到 NAS：同步代码 → 重建容器 → 健康检查 → 数据自检 → 域名验证
+bash scripts/deploy.sh                                  # 全量（含后端测试）
+bash scripts/deploy.sh --fast                           # 只改前端时跳过测试
 # NAS 走路由器 OpenClash 透明代理，构建拉包无需额外代理；
 # 仅在异常时用 DEPLOY_PROXY=<可用的内网代理> 显式指定。
+
+# 3) 策略类改动：构建 → 发布测试 → 发布生产（渲染器改动也必须走这一步，见约束 40）
+docker exec magicpanel python -c "
+from app.routers import builds
+from app.services import releases
+from app import db
+bid, v = builds.create_build('agent', note='说明这次改了什么')
+print('build=', bid, v)
+with db.connect() as conn:
+    b = dict(conn.execute('select * from builds where id=?', (bid,)).fetchone()); releases.publish_to_testing(conn, b, 'agent', '验证')
+with db.connect() as conn:
+    b = dict(conn.execute('select * from builds where id=?', (bid,)).fetchone()); releases.publish_to_production(conn, b, 'agent', '上线')
+"
+
+# 4) 客户端拉取：路由器 OpenClash 每日 04:00 自动更新，需要立刻生效时手动触发
+ssh root@10.0.1.1 'U=$(uci -q get openclash.@config_subscribe[0].address); \
+  curl -sk --max-time 60 "$U" -o /etc/openclash/config/magic.yaml; \
+  /etc/init.d/openclash restart'
 ```
 
-配置类改动还要**重新构建发布**才生效（只有设备独立配置例外，分发时实时叠加）。
+**部署后必须自己验一遍**，不要只看脚本输出：
+
+```bash
+ssh archon@10.0.1.2 'docker inspect magicpanel --format "{{.State.Health.Status}}" && \
+  docker exec magicpanel curl -s -o /dev/null -w "%{http_code}\n" -m 10 \
+  https://www.gstatic.com/generate_204'          # 期望 healthy + 204
+```
+
+策略类改动还要在路由器上确认规则真的进了产物：
+
+```bash
+ssh root@10.0.1.1 'grep -n "RULE-SET,steam-cn" /etc/openclash/magic.yaml'   # 换成你改的那条
+```
+
+配置类改动要**重新构建发布**才生效（只有设备独立配置例外，分发时实时叠加）。
+部署脚本里的「数据自检」会拦下引用不存在的平台/组/节点——它不过就说明数据层有问题，按提示修完再发布。
 
 ## 客户端侧核对
 
