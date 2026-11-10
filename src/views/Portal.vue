@@ -1289,9 +1289,13 @@ onMounted(async () => {
 .pt-detail-actions { display: flex; gap: 10px; margin-top: 16px; }
 
 /* 配置源码预览 */
-.pt-preview-card {
+/* 用复合选择器：.pt-modal-card 定义在本文件更靠后的位置，
+   同优先级的单类选择器会被它覆盖（宽度与 text-align 都归它管）。
+   项目里 .pt-modal-card.wide 也是同样的写法。 */
+.pt-modal-card.pt-preview-card {
   width: min(1080px, 100%);
   max-width: 100%;
+  max-height: 92vh;
   text-align: left;
   padding: 22px 24px;
 }
@@ -1300,6 +1304,9 @@ onMounted(async () => {
   font-size: 12.5px;
   margin: 0 0 12px;
 }
+/* 窄屏下三个按钮别把文字挤成两行 */
+.pt-preview-card .pt-detail-actions { flex-wrap: wrap; }
+.pt-preview-card .pt-detail-actions .pt-btn { white-space: nowrap; }
 .pt-yaml {
   display: flex;
   max-height: 64vh;
@@ -1330,21 +1337,24 @@ onMounted(async () => {
   line-height: 1.6;
   color: #c9d3e4;
   white-space: pre;
+  text-align: left;
   tab-size: 2;
   flex: 1 0 auto;
 }
-/* YAML 着色（GitHub Dark 配色） */
-.pt-yaml-code .y-key { color: #79c0ff; }
-.pt-yaml-code .y-str { color: #a5d6ff; }
-.pt-yaml-code .y-num { color: #ffa657; }
-.pt-yaml-code .y-ip { color: #ffa657; }
-.pt-yaml-code .y-bool { color: #ff7b72; }
-.pt-yaml-code .y-null { color: #ff7b72; }
-.pt-yaml-code .y-url { color: #d2a8ff; }
-.pt-yaml-code .y-anchor { color: #ffa657; }
-.pt-yaml-code .y-flow { color: #79c0ff; }
-.pt-yaml-code .y-cm { color: #7d8590; font-style: italic; }
-.pt-yaml-code .y-punct { color: #8b949e; }
+/* YAML 着色（GitHub Dark 配色）
+   必须用 :deep()——代码内容是 v-html 注入的，
+   不带 scoped 的 data-v 属性，普通后代选择器匹配不上。 */
+.pt-yaml-code :deep(.y-key) { color: #79c0ff; }
+.pt-yaml-code :deep(.y-str) { color: #a5d6ff; }
+.pt-yaml-code :deep(.y-num) { color: #ffa657; }
+.pt-yaml-code :deep(.y-ip) { color: #ffa657; }
+.pt-yaml-code :deep(.y-bool) { color: #ff7b72; }
+.pt-yaml-code :deep(.y-null) { color: #ff7b72; }
+.pt-yaml-code :deep(.y-url) { color: #d2a8ff; }
+.pt-yaml-code :deep(.y-anchor) { color: #ffa657; }
+.pt-yaml-code :deep(.y-flow) { color: #79c0ff; }
+.pt-yaml-code :deep(.y-cm) { color: #7d8590; font-style: italic; }
+.pt-yaml-code :deep(.y-punct) { color: #8b949e; }
 
 .pt-empty {
   color: #79809a; font-size: 13px;
