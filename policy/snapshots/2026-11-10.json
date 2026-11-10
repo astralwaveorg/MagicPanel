@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "exported_at": "2026-11-10T00:54:22+00:00",
+  "exported_at": "2026-11-10T08:36:40+00:00",
   "meta": {
-    "build_id": 226,
+    "build_id": 227,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "89c96a9b76db98e49946e08ee1c76c1740a3b9d9dccf849dd8e3ed11d7771014",
-    "build_created_at": "2026-11-10T08:53:32+08:00"
+    "policy_sha": "eff1cb7b35d5d792e9a5c3c7029ee3a41e5220175df696d843caf37747aebf00",
+    "build_created_at": "2026-11-10T16:27:34+08:00"
   },
   "rules": [
     {
@@ -154,8 +154,24 @@
       "pre_matching": 0
     },
     {
-      "id": 674,
+      "id": 696,
       "sort": 9,
+      "type": "DST-PORT",
+      "value": "22",
+      "target": "DIRECT",
+      "enabled": 1,
+      "note": "SSH 管理端口始终直连：避免依赖代理节点是否放行 22 端口",
+      "created_at": "2026-11-10T16:27:26",
+      "updated_at": "2026-11-10T16:27:26",
+      "no_resolve": 0,
+      "targets": "[\"*\"]",
+      "devices": "[\"*\"]",
+      "no_track": 0,
+      "pre_matching": 0
+    },
+    {
+      "id": 674,
+      "sort": 10,
       "type": "RULE-SET",
       "value": "magic-direct",
       "target": "DIRECT",
@@ -171,7 +187,7 @@
     },
     {
       "id": 486,
-      "sort": 10,
+      "sort": 11,
       "type": "RULE-SET",
       "value": "private",
       "target": "DIRECT",
@@ -187,7 +203,7 @@
     },
     {
       "id": 482,
-      "sort": 11,
+      "sort": 12,
       "type": "IP-CIDR6",
       "value": "::1/128",
       "target": "DIRECT",
@@ -203,7 +219,7 @@
     },
     {
       "id": 480,
-      "sort": 12,
+      "sort": 13,
       "type": "IP-CIDR",
       "value": "224.0.0.0/4",
       "target": "DIRECT",
@@ -219,7 +235,7 @@
     },
     {
       "id": 481,
-      "sort": 13,
+      "sort": 14,
       "type": "IP-CIDR",
       "value": "255.255.255.255/32",
       "target": "DIRECT",
@@ -235,7 +251,7 @@
     },
     {
       "id": 591,
-      "sort": 14,
+      "sort": 15,
       "type": "RULE-SET",
       "value": "connectivity-check",
       "target": "DIRECT",
@@ -251,7 +267,7 @@
     },
     {
       "id": 590,
-      "sort": 15,
+      "sort": 16,
       "type": "RULE-SET",
       "value": "mirror-accelerate",
       "target": "DIRECT",
@@ -267,7 +283,7 @@
     },
     {
       "id": 592,
-      "sort": 16,
+      "sort": 17,
       "type": "RULE-SET",
       "value": "lvsp-direct",
       "target": "DIRECT",
@@ -283,7 +299,7 @@
     },
     {
       "id": 588,
-      "sort": 17,
+      "sort": 18,
       "type": "RULE-SET",
       "value": "dns-direct",
       "target": "DIRECT",
@@ -299,7 +315,7 @@
     },
     {
       "id": 598,
-      "sort": 18,
+      "sort": 19,
       "type": "RULE-SET",
       "value": "direct-ports",
       "target": "DIRECT",
@@ -315,7 +331,7 @@
     },
     {
       "id": 513,
-      "sort": 19,
+      "sort": 20,
       "type": "RULE-SET",
       "value": "ai-cn",
       "target": "DIRECT",
@@ -331,7 +347,7 @@
     },
     {
       "id": 530,
-      "sort": 20,
+      "sort": 21,
       "type": "RULE-SET",
       "value": "apple-cn",
       "target": "DIRECT",
@@ -347,7 +363,7 @@
     },
     {
       "id": 587,
-      "sort": 21,
+      "sort": 22,
       "type": "RULE-SET",
       "value": "apple-push",
       "target": "DIRECT",
@@ -363,7 +379,7 @@
     },
     {
       "id": 596,
-      "sort": 22,
+      "sort": 23,
       "type": "RULE-SET",
       "value": "apple-push-ip",
       "target": "DIRECT",
@@ -379,7 +395,7 @@
     },
     {
       "id": 614,
-      "sort": 23,
+      "sort": 24,
       "type": "RULE-SET",
       "value": "XiaoMi",
       "target": "DIRECT",
@@ -395,7 +411,7 @@
     },
     {
       "id": 658,
-      "sort": 24,
+      "sort": 25,
       "type": "RULE-SET",
       "value": "AmazonCN",
       "target": "DIRECT",
@@ -411,7 +427,7 @@
     },
     {
       "id": 531,
-      "sort": 25,
+      "sort": 26,
       "type": "RULE-SET",
       "value": "microsoft-cn",
       "target": "DIRECT",
@@ -427,7 +443,7 @@
     },
     {
       "id": 533,
-      "sort": 26,
+      "sort": 27,
       "type": "RULE-SET",
       "value": "games-cn",
       "target": "DIRECT",
@@ -443,7 +459,7 @@
     },
     {
       "id": 532,
-      "sort": 27,
+      "sort": 28,
       "type": "RULE-SET",
       "value": "steam-cn",
       "target": "DIRECT",
@@ -459,7 +475,7 @@
     },
     {
       "id": 619,
-      "sort": 28,
+      "sort": 29,
       "type": "RULE-SET",
       "value": "PrivateTracker",
       "target": "DIRECT",
@@ -475,7 +491,7 @@
     },
     {
       "id": 534,
-      "sort": 29,
+      "sort": 30,
       "type": "RULE-SET",
       "value": "pt",
       "target": "DIRECT",
@@ -491,7 +507,7 @@
     },
     {
       "id": 535,
-      "sort": 30,
+      "sort": 31,
       "type": "RULE-SET",
       "value": "trackers",
       "target": "DIRECT",
@@ -507,7 +523,7 @@
     },
     {
       "id": 675,
-      "sort": 31,
+      "sort": 32,
       "type": "RULE-SET",
       "value": "magic-reject",
       "target": "REJECT",
@@ -523,7 +539,7 @@
     },
     {
       "id": 528,
-      "sort": 32,
+      "sort": 33,
       "type": "RULE-SET",
       "value": "search",
       "target": "🔍 谷歌服务",
@@ -539,7 +555,7 @@
     },
     {
       "id": 538,
-      "sort": 33,
+      "sort": 34,
       "type": "RULE-SET",
       "value": "youtube",
       "target": "🔍 谷歌服务",
@@ -555,7 +571,7 @@
     },
     {
       "id": 550,
-      "sort": 34,
+      "sort": 35,
       "type": "RULE-SET",
       "value": "google",
       "target": "🔍 谷歌服务",
@@ -571,7 +587,7 @@
     },
     {
       "id": 595,
-      "sort": 35,
+      "sort": 36,
       "type": "RULE-SET",
       "value": "apple-intelligence",
       "target": "🧠 人工智能",
@@ -587,7 +603,7 @@
     },
     {
       "id": 515,
-      "sort": 36,
+      "sort": 37,
       "type": "RULE-SET",
       "value": "openai",
       "target": "🧠 人工智能",
@@ -603,7 +619,7 @@
     },
     {
       "id": 517,
-      "sort": 37,
+      "sort": 38,
       "type": "RULE-SET",
       "value": "anthropic",
       "target": "🧠 人工智能",
@@ -619,7 +635,7 @@
     },
     {
       "id": 668,
-      "sort": 38,
+      "sort": 39,
       "type": "RULE-SET",
       "value": "category-ai-chat-!cn",
       "target": "🧠 人工智能",
@@ -635,7 +651,7 @@
     },
     {
       "id": 678,
-      "sort": 39,
+      "sort": 40,
       "type": "RULE-SET",
       "value": "magic-us",
       "target": "🧠 人工智能",
@@ -651,7 +667,7 @@
     },
     {
       "id": 529,
-      "sort": 40,
+      "sort": 41,
       "type": "RULE-SET",
       "value": "tiktok",
       "target": "🎵 TikTok",
@@ -667,7 +683,7 @@
     },
     {
       "id": 691,
-      "sort": 41,
+      "sort": 42,
       "type": "RULE-SET",
       "value": "github",
       "target": "💻 开发工具",
@@ -683,7 +699,7 @@
     },
     {
       "id": 669,
-      "sort": 42,
+      "sort": 43,
       "type": "RULE-SET",
       "value": "docker",
       "target": "💻 开发工具",
@@ -699,7 +715,7 @@
     },
     {
       "id": 670,
-      "sort": 43,
+      "sort": 44,
       "type": "RULE-SET",
       "value": "npmjs",
       "target": "💻 开发工具",
@@ -715,7 +731,7 @@
     },
     {
       "id": 671,
-      "sort": 44,
+      "sort": 45,
       "type": "RULE-SET",
       "value": "jetbrains",
       "target": "💻 开发工具",
@@ -731,7 +747,7 @@
     },
     {
       "id": 672,
-      "sort": 45,
+      "sort": 46,
       "type": "RULE-SET",
       "value": "stackexchange",
       "target": "💻 开发工具",
@@ -747,7 +763,7 @@
     },
     {
       "id": 554,
-      "sort": 49,
+      "sort": 50,
       "type": "RULE-SET",
       "value": "games",
       "target": "🎮 海外游戏",
@@ -763,7 +779,7 @@
     },
     {
       "id": 642,
-      "sort": 50,
+      "sort": 51,
       "type": "RULE-SET",
       "value": "Amazon",
       "target": "🛒 跨境电商",
@@ -779,7 +795,7 @@
     },
     {
       "id": 643,
-      "sort": 51,
+      "sort": 52,
       "type": "RULE-SET",
       "value": "eBay",
       "target": "🛒 跨境电商",
@@ -795,7 +811,7 @@
     },
     {
       "id": 644,
-      "sort": 52,
+      "sort": 53,
       "type": "RULE-SET",
       "value": "Shopify",
       "target": "🛒 跨境电商",
@@ -811,7 +827,7 @@
     },
     {
       "id": 542,
-      "sort": 53,
+      "sort": 54,
       "type": "RULE-SET",
       "value": "payment-finance",
       "target": "🛒 跨境电商",
@@ -827,7 +843,7 @@
     },
     {
       "id": 618,
-      "sort": 54,
+      "sort": 55,
       "type": "RULE-SET",
       "value": "PayPal",
       "target": "🛒 跨境电商",
@@ -843,7 +859,7 @@
     },
     {
       "id": 645,
-      "sort": 55,
+      "sort": 56,
       "type": "RULE-SET",
       "value": "Cryptocurrency",
       "target": "🪙 加密货币",
@@ -859,7 +875,7 @@
     },
     {
       "id": 546,
-      "sort": 56,
+      "sort": 57,
       "type": "RULE-SET",
       "value": "telegram",
       "target": "💬 即时通讯",
@@ -875,7 +891,7 @@
     },
     {
       "id": 547,
-      "sort": 57,
+      "sort": 58,
       "type": "RULE-SET",
       "value": "telegram-ip",
       "target": "💬 即时通讯",
@@ -891,7 +907,7 @@
     },
     {
       "id": 646,
-      "sort": 58,
+      "sort": 59,
       "type": "RULE-SET",
       "value": "Discord",
       "target": "💬 即时通讯",
@@ -907,7 +923,7 @@
     },
     {
       "id": 647,
-      "sort": 59,
+      "sort": 60,
       "type": "RULE-SET",
       "value": "Slack",
       "target": "💬 即时通讯",
@@ -923,7 +939,7 @@
     },
     {
       "id": 661,
-      "sort": 60,
+      "sort": 61,
       "type": "RULE-SET",
       "value": "Snap",
       "target": "💬 即时通讯",
@@ -939,7 +955,7 @@
     },
     {
       "id": 622,
-      "sort": 61,
+      "sort": 62,
       "type": "RULE-SET",
       "value": "Whatsapp",
       "target": "💬 即时通讯",
@@ -955,7 +971,7 @@
     },
     {
       "id": 656,
-      "sort": 62,
+      "sort": 63,
       "type": "RULE-SET",
       "value": "KakaoTalk",
       "target": "💬 即时通讯",
@@ -971,7 +987,7 @@
     },
     {
       "id": 662,
-      "sort": 63,
+      "sort": 64,
       "type": "RULE-SET",
       "value": "Line",
       "target": "💬 即时通讯",
@@ -987,7 +1003,7 @@
     },
     {
       "id": 663,
-      "sort": 64,
+      "sort": 65,
       "type": "RULE-SET",
       "value": "Zalo",
       "target": "💬 即时通讯",
@@ -1003,7 +1019,7 @@
     },
     {
       "id": 665,
-      "sort": 65,
+      "sort": 66,
       "type": "RULE-SET",
       "value": "category-communication",
       "target": "💬 即时通讯",
@@ -1019,7 +1035,7 @@
     },
     {
       "id": 639,
-      "sort": 66,
+      "sort": 67,
       "type": "RULE-SET",
       "value": "Pinterest",
       "target": "👥 海外社交",
@@ -1035,7 +1051,7 @@
     },
     {
       "id": 667,
-      "sort": 67,
+      "sort": 68,
       "type": "RULE-SET",
       "value": "Reddit",
       "target": "👥 海外社交",
@@ -1051,7 +1067,7 @@
     },
     {
       "id": 548,
-      "sort": 68,
+      "sort": 69,
       "type": "RULE-SET",
       "value": "social-extra",
       "target": "👥 海外社交",
@@ -1067,7 +1083,7 @@
     },
     {
       "id": 549,
-      "sort": 69,
+      "sort": 70,
       "type": "RULE-SET",
       "value": "social",
       "target": "👥 海外社交",
@@ -1083,7 +1099,7 @@
     },
     {
       "id": 635,
-      "sort": 70,
+      "sort": 71,
       "type": "RULE-SET",
       "value": "HuluUSA",
       "target": "🇺🇸美国",
@@ -1099,7 +1115,7 @@
     },
     {
       "id": 637,
-      "sort": 71,
+      "sort": 72,
       "type": "RULE-SET",
       "value": "DiscoveryPlus",
       "target": "🇺🇸美国",
@@ -1115,7 +1131,7 @@
     },
     {
       "id": 638,
-      "sort": 72,
+      "sort": 73,
       "type": "RULE-SET",
       "value": "FOXNOW",
       "target": "🇺🇸美国",
@@ -1131,7 +1147,7 @@
     },
     {
       "id": 636,
-      "sort": 73,
+      "sort": 74,
       "type": "RULE-SET",
       "value": "HBOUSA",
       "target": "🇺🇸美国",
@@ -1147,7 +1163,7 @@
     },
     {
       "id": 633,
-      "sort": 74,
+      "sort": 75,
       "type": "RULE-SET",
       "value": "myTVSUPER",
       "target": "🇭🇰香港",
@@ -1163,7 +1179,7 @@
     },
     {
       "id": 634,
-      "sort": 75,
+      "sort": 76,
       "type": "RULE-SET",
       "value": "JOOX",
       "target": "🇭🇰香港",
@@ -1179,7 +1195,7 @@
     },
     {
       "id": 629,
-      "sort": 76,
+      "sort": 77,
       "type": "RULE-SET",
       "value": "Niconico",
       "target": "🇯🇵日本",
@@ -1195,7 +1211,7 @@
     },
     {
       "id": 628,
-      "sort": 77,
+      "sort": 78,
       "type": "RULE-SET",
       "value": "DMM",
       "target": "🇯🇵日本",
@@ -1211,7 +1227,7 @@
     },
     {
       "id": 627,
-      "sort": 78,
+      "sort": 79,
       "type": "RULE-SET",
       "value": "Pixiv",
       "target": "🇯🇵日本",
@@ -1227,7 +1243,7 @@
     },
     {
       "id": 657,
-      "sort": 79,
+      "sort": 80,
       "type": "RULE-SET",
       "value": "Naver",
       "target": "🇰🇷韩国",
@@ -1243,7 +1259,7 @@
     },
     {
       "id": 631,
-      "sort": 80,
+      "sort": 81,
       "type": "RULE-SET",
       "value": "LineTV",
       "target": "🇹🇼台湾",
@@ -1259,7 +1275,7 @@
     },
     {
       "id": 630,
-      "sort": 81,
+      "sort": 82,
       "type": "RULE-SET",
       "value": "KKBOX",
       "target": "🇹🇼台湾",
@@ -1275,7 +1291,7 @@
     },
     {
       "id": 632,
-      "sort": 82,
+      "sort": 83,
       "type": "RULE-SET",
       "value": "TVB",
       "target": "🇸🇬 新加坡",
@@ -1291,7 +1307,7 @@
     },
     {
       "id": 640,
-      "sort": 83,
+      "sort": 84,
       "type": "RULE-SET",
       "value": "BBC",
       "target": "🌍欧洲",
@@ -1307,7 +1323,7 @@
     },
     {
       "id": 648,
-      "sort": 84,
+      "sort": 85,
       "type": "RULE-SET",
       "value": "Twitch",
       "target": "🎞️ 国际影音",
@@ -1323,7 +1339,7 @@
     },
     {
       "id": 649,
-      "sort": 85,
+      "sort": 86,
       "type": "RULE-SET",
       "value": "LastFM",
       "target": "🎞️ 国际影音",
@@ -1339,7 +1355,7 @@
     },
     {
       "id": 651,
-      "sort": 86,
+      "sort": 87,
       "type": "RULE-SET",
       "value": "Qobuz",
       "target": "🎞️ 国际影音",
@@ -1355,7 +1371,7 @@
     },
     {
       "id": 650,
-      "sort": 87,
+      "sort": 88,
       "type": "RULE-SET",
       "value": "PrimeVideo",
       "target": "🎞️ 国际影音",
@@ -1371,7 +1387,7 @@
     },
     {
       "id": 652,
-      "sort": 88,
+      "sort": 89,
       "type": "RULE-SET",
       "value": "Emby",
       "target": "🎞️ 国际影音",
@@ -1387,7 +1403,7 @@
     },
     {
       "id": 539,
-      "sort": 89,
+      "sort": 90,
       "type": "RULE-SET",
       "value": "netflix",
       "target": "🎞️ 国际影音",
@@ -1403,7 +1419,7 @@
     },
     {
       "id": 540,
-      "sort": 90,
+      "sort": 91,
       "type": "RULE-SET",
       "value": "disney",
       "target": "🎞️ 国际影音",
@@ -1419,7 +1435,7 @@
     },
     {
       "id": 541,
-      "sort": 91,
+      "sort": 92,
       "type": "RULE-SET",
       "value": "spotify",
       "target": "🎞️ 国际影音",
@@ -1435,7 +1451,7 @@
     },
     {
       "id": 553,
-      "sort": 92,
+      "sort": 93,
       "type": "RULE-SET",
       "value": "media",
       "target": "🎞️ 国际影音",
@@ -1451,7 +1467,7 @@
     },
     {
       "id": 605,
-      "sort": 93,
+      "sort": 94,
       "type": "RULE-SET",
       "value": "biliintl",
       "target": "🎞️ 国际影音",
@@ -1467,7 +1483,7 @@
     },
     {
       "id": 555,
-      "sort": 94,
+      "sort": 95,
       "type": "RULE-SET",
       "value": "apple",
       "target": "🍎 苹果服务",
@@ -1483,7 +1499,7 @@
     },
     {
       "id": 556,
-      "sort": 95,
+      "sort": 96,
       "type": "RULE-SET",
       "value": "microsoft",
       "target": "Ⓜ️ 微软服务",
@@ -1499,7 +1515,7 @@
     },
     {
       "id": 606,
-      "sort": 96,
+      "sort": 97,
       "type": "RULE-SET",
       "value": "onedrive",
       "target": "Ⓜ️ 微软服务",
@@ -1515,7 +1531,7 @@
     },
     {
       "id": 615,
-      "sort": 97,
+      "sort": 98,
       "type": "RULE-SET",
       "value": "magic-jp",
       "target": "🇯🇵日本",
@@ -1531,7 +1547,7 @@
     },
     {
       "id": 688,
-      "sort": 98,
+      "sort": 99,
       "type": "RULE-SET",
       "value": "oracle",
       "target": "🇯🇵日本",
@@ -1547,7 +1563,7 @@
     },
     {
       "id": 641,
-      "sort": 99,
+      "sort": 100,
       "type": "RULE-SET",
       "value": "Yandex",
       "target": "🌍欧洲",
@@ -1563,7 +1579,7 @@
     },
     {
       "id": 681,
-      "sort": 100,
+      "sort": 101,
       "type": "RULE-SET",
       "value": "aws",
       "target": "🚀 默认代理",
@@ -1579,7 +1595,7 @@
     },
     {
       "id": 682,
-      "sort": 101,
+      "sort": 102,
       "type": "RULE-SET",
       "value": "azure",
       "target": "🚀 默认代理",
@@ -1595,7 +1611,7 @@
     },
     {
       "id": 683,
-      "sort": 102,
+      "sort": 103,
       "type": "RULE-SET",
       "value": "cloudflare",
       "target": "🚀 默认代理",
@@ -1611,7 +1627,7 @@
     },
     {
       "id": 687,
-      "sort": 103,
+      "sort": 104,
       "type": "RULE-SET",
       "value": "cloudflare-ip",
       "target": "🚀 默认代理",
@@ -1627,7 +1643,7 @@
     },
     {
       "id": 684,
-      "sort": 104,
+      "sort": 105,
       "type": "RULE-SET",
       "value": "digitalocean",
       "target": "🚀 默认代理",
@@ -1643,7 +1659,7 @@
     },
     {
       "id": 685,
-      "sort": 105,
+      "sort": 106,
       "type": "RULE-SET",
       "value": "vercel",
       "target": "🚀 默认代理",
@@ -1659,7 +1675,7 @@
     },
     {
       "id": 686,
-      "sort": 106,
+      "sort": 107,
       "type": "RULE-SET",
       "value": "netlify",
       "target": "🚀 默认代理",
@@ -1675,7 +1691,7 @@
     },
     {
       "id": 603,
-      "sort": 107,
+      "sort": 108,
       "type": "RULE-SET",
       "value": "proxy-bm7",
       "target": "🚀 默认代理",
@@ -1691,7 +1707,7 @@
     },
     {
       "id": 604,
-      "sort": 108,
+      "sort": 109,
       "type": "RULE-SET",
       "value": "proxy-domain",
       "target": "🚀 默认代理",
@@ -1707,7 +1723,7 @@
     },
     {
       "id": 673,
-      "sort": 109,
+      "sort": 110,
       "type": "RULE-SET",
       "value": "magic-proxy",
       "target": "🚀 默认代理",
@@ -1723,7 +1739,7 @@
     },
     {
       "id": 689,
-      "sort": 110,
+      "sort": 111,
       "type": "RULE-SET",
       "value": "magic-adult",
       "target": "🚀 默认代理",
@@ -1739,7 +1755,7 @@
     },
     {
       "id": 690,
-      "sort": 111,
+      "sort": 112,
       "type": "RULE-SET",
       "value": "magic-dev",
       "target": "🚀 默认代理",
@@ -1755,7 +1771,7 @@
     },
     {
       "id": 664,
-      "sort": 112,
+      "sort": 113,
       "type": "RULE-SET",
       "value": "magic-chat",
       "target": "💬 即时通讯",
@@ -1771,7 +1787,7 @@
     },
     {
       "id": 666,
-      "sort": 113,
+      "sort": 114,
       "type": "RULE-SET",
       "value": "magic-social",
       "target": "👥 海外社交",
@@ -1787,7 +1803,7 @@
     },
     {
       "id": 679,
-      "sort": 114,
+      "sort": 115,
       "type": "RULE-SET",
       "value": "magic-google",
       "target": "🔍 谷歌服务",
@@ -1803,7 +1819,7 @@
     },
     {
       "id": 677,
-      "sort": 115,
+      "sort": 116,
       "type": "RULE-SET",
       "value": "magic-game",
       "target": "🎮 海外游戏",
@@ -1819,7 +1835,7 @@
     },
     {
       "id": 680,
-      "sort": 116,
+      "sort": 117,
       "type": "RULE-SET",
       "value": "magic-microsoft",
       "target": "Ⓜ️ 微软服务",
@@ -1835,7 +1851,7 @@
     },
     {
       "id": 626,
-      "sort": 117,
+      "sort": 118,
       "type": "RULE-SET",
       "value": "magic-process",
       "target": "DIRECT",
@@ -1851,7 +1867,7 @@
     },
     {
       "id": 536,
-      "sort": 118,
+      "sort": 119,
       "type": "RULE-SET",
       "value": "cn",
       "target": "DIRECT",
@@ -1867,7 +1883,7 @@
     },
     {
       "id": 561,
-      "sort": 119,
+      "sort": 120,
       "type": "RULE-SET",
       "value": "cn-ip",
       "target": "DIRECT",
@@ -1883,7 +1899,7 @@
     },
     {
       "id": 692,
-      "sort": 120,
+      "sort": 121,
       "type": "RULE-SET",
       "value": "direct",
       "target": "DIRECT",
@@ -1899,7 +1915,7 @@
     },
     {
       "id": 487,
-      "sort": 121,
+      "sort": 122,
       "type": "RULE-SET",
       "value": "private-ip",
       "target": "DIRECT",
@@ -1915,7 +1931,7 @@
     },
     {
       "id": 695,
-      "sort": 122,
+      "sort": 123,
       "type": "AND",
       "value": "((NETWORK,udp),(DST-PORT,443))",
       "target": "REJECT",
@@ -1931,7 +1947,7 @@
     },
     {
       "id": 562,
-      "sort": 123,
+      "sort": 124,
       "type": "MATCH",
       "value": "",
       "target": "🚀 默认代理",
@@ -4045,5 +4061,5 @@
       "enabled": 1
     }
   ],
-  "digest": "bc3dceb794d5bd1bd0ec5b4e9120a7cf228940b9ac5635b686ffe2151b2fac01"
+  "digest": "e3f278177d554f0d842a29a00f4e992787de08f0646a281c33fa13ed463d2ad2"
 }
