@@ -341,7 +341,8 @@
               :href="previewRawUrl"
               target="_blank"
               rel="noopener"
-            >新标签打开原文</a>
+              title="在新标签页打开原始文件"
+            >原文</a>
             <button class="pt-btn" @click="closePreview">关闭</button>
           </div>
         </div>
