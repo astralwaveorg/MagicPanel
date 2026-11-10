@@ -276,13 +276,16 @@ def portal_data(body: PinBody, request: Request):
                 "note": r["note"],
                 "last_pull_at": r["last_pull_at"],
                 "subscription_url": "",
-                # 「看配置源码」用：同一份内容，但不记拉取、内联展示
+                # 「看配置源码」用：同一份内容，但不记拉取、内联展示。
+                # 用**相对路径**：门户与 feed 是同一个服务，相对路径天然同源，
+                # 从内网 IP、容器端口还是公网域名打开都能预览；写绝对地址会让
+                # 前两种场景变成跨源请求，被浏览器 CORS 拦掉。
                 "preview_url": "",
             }
             if r["token_enc"]:
                 token = security.decrypt_text(r["token_enc"])
                 item["subscription_url"] = f"{base}/feed/{token}/config.yaml"
-                item["preview_url"] = f"{base}/feed/{token}/config.yaml?preview=1"
+                item["preview_url"] = f"/feed/{token}/config.yaml?preview=1"
             else:
                 item["note"] = (item["note"] + "；" if item["note"] else "") \
                     + "缺少可展示的令牌，请在后台轮换一次"

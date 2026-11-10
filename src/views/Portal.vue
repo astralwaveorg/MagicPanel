@@ -727,7 +727,12 @@ async function openPreview(d) {
     previewHtml.value = highlightYaml(text)
     previewState.value = 'ready'
   } catch (e) {
-    previewError.value = `载入失败：${e.message || e}`
+    // 预览走相对路径，正常情况下不会跨源；TypeError 基本只有网断/
+    // 服务不可达两种可能，给一句能自查的提示，比光秃秃的 Failed to fetch 有用。
+    const msg = String(e && e.message ? e.message : e)
+    previewError.value = e instanceof TypeError
+      ? `载入失败：无法连接面板（${msg}），请确认服务在运行后重试`
+      : `载入失败：${msg}`
     previewState.value = 'error'
   }
 }
