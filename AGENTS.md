@@ -313,3 +313,17 @@ python3 scripts/docs_lookup.py read <官方页面 URL>
 ```
 
 流程与要求见 [官方文档查阅流程](docs/reference/Official-Docs-Workflow.md)。
+
+42. **多套分流方案（variants）：每个方案是一套完整、独立的策略组 + 分流规则副本（2026-11-13 定稿）。** 设计与实现细节见 [方案设计](docs/reference/方案设计-多套分流方案.md)。要点：
+
+    - **数据模型**：`variants` 表（`默认` 方案 id=0，`is_system` 保护，禁删禁改名禁停用）；`proxy_groups` / `rules` 挂 `variant_id`，`UNIQUE(variant_id, name)`——不同方案允许同名组，同一方案内唯一。`sort` 按方案分段（方案 N 占 `[N*10000, (N+1)*10000)`），拖拽排序永不跨方案，默认方案的 sort 值不动（约束 27/28 自动满足）。
+    - **引用全部方案内解析**：规则目标、组成员引用、改名重映射、删除解绑、`validate_policy`（逐方案返回 `{方案id: (errors, warnings)}`，方案之间互不阻塞）都只看同一 `variant_id` 的行。**`refs.detach_group` 必须传 `variant_id`**——2026-11-13 线上事故：删「自建美日」的港台组时把默认方案里指向同名组的 8 条规则一并删了（有回归测试 `test_deleting_group_in_one_variant_keeps_other_variants_rules`）。
+    - **构建矩阵**：`create_build` 对每个启用方案 × 每个引擎平台渲染一份产物——默认方案沿用 `{target}.yaml` / `{device}.yaml` 命名，方案 V 是 `{target}@V.yaml` / `{device}@V.yaml`。产物文件名冲突在构建期报错。`results` 键 = 产物名，value 带 `"variant": V`。
+    - **来源/集合按引用过滤**：渲染时展开各组的 `use`（含 `["*"]`）取并集，顶层 `proxies` 只展开被引用的 inline 来源，`proxy-providers` 只写被引用的 provider 来源；`rule-providers` 只写「本方案规则引用 ∪ DNS `rule-set:` 引用」的集合。默认方案所有组 `use=["*"]` → 行为不变；「自建美日」无来源引用 → 产物无机场节点、无 providers 段。「只分发可用节点」等既有开关不受影响。
+    - **分发**：`GET /feed/{token}/config.yaml?variant=<方案名>` 取方案产物（设备专属优先，缺省回退目标产物）；不带参数 = 默认方案 = 历史路径，老订阅零影响。`?preview=1` 与 `?variant=` 可组合。
+    - **守卫**：删除/改名被当前生产**或测试**产物引用的方案 → 409 `variant_in_use`（复用约束 35 语义）；停用只是不进新构建，已有产物照常下发。
+    - **「自建美日」方案**：23 组 / 114 规则，节点池只含日美自建节点（含 AWS日本机房——它此前未进任何组，是历史遗漏）；精编脚本 `scripts/configure_selfbuilt_variant.py` 可重复执行。门户设备卡片有方案选择芯片，复制/导入/二维码/预览全部联动。
+
+43. **「指到家里」的域名必须用 system DNS 解析（2026-11-13 定案，构建 239）。** `magichub.top` / `homehub.stream` 的服务器就在家里：路由器分流 DNS 给 **NAS 内网地址**（10.0.1.2），公网 DoH 给**家宽公网 IP**。代理接管 DNS 后用国内 DoH 解析出公网 IP，局域网设备访问自己的公网 IP 会被 **NAT 回环**挡住——线上实证「homehub 相关域名内网打不开、关代理立刻恢复」。修复：这两个域在引擎默认配置 `nameserver-policy` 固化为 `system`（内网直达 NAS，外网正常回家），伪键 `_system_dns_domains` 供界面追加（渲染时与基线合并）。判断标准：系统 DNS 与公网 DoH 答案不一致且系统侧是内网地址 → 该域必须进清单。与 `_direct_domains` / `_fake_ip_filter` 是三件套，加域要三处一起改。
+
+44. **约束 23 的 cn-ip 例外有构建期校验**（2026-11-13 起）：`RULE-SET,cn-ip` 带 `no-resolve` 直接构建失败（validate.py 强制）。2026-11-13 实证违反过：cn-ip 被 no-resolve 后未收录国内域名全部落进 `MATCH → 🚀 默认代理`，大量大陆服务异常。修复这类报错时改规则，不要绕过校验。

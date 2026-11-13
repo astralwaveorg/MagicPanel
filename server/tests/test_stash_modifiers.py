@@ -136,7 +136,7 @@ def test_validate_blocks_pre_matching_with_group_target():
         ],
         "snippets": [],
     }
-    errors, _ = validate.validate_policy(snapshot)
+    errors, _ = validate.validate_policy(snapshot)[0]
     assert any("pre-matching" in e for e in errors), errors
 
 
@@ -160,7 +160,7 @@ def test_same_ruleset_on_disjoint_platforms_is_not_duplicate():
         {"type": "MATCH", "value": "", "target": "DIRECT", "enabled": True,
          "targets": ["*"], "devices": ["*"]},
     ])
-    _, warnings = validate.validate_policy(disjoint)
+    _, warnings = validate.validate_policy(disjoint)[0]
     assert not any("规则重复" in w for w in warnings), warnings
 
     overlapping = dict(base, rules=[
@@ -173,5 +173,5 @@ def test_same_ruleset_on_disjoint_platforms_is_not_duplicate():
         {"type": "MATCH", "value": "", "target": "DIRECT", "enabled": True,
          "targets": ["*"], "devices": ["*"]},
     ])
-    _, warnings = validate.validate_policy(overlapping)
+    _, warnings = validate.validate_policy(overlapping)[0]
     assert any("规则重复" in w for w in warnings), warnings

@@ -97,10 +97,15 @@ def main() -> int:
                     if key in doc:
                         problems.append(f"引擎平台 {t['name']} 的目标扩展含结构键 {key}")
 
-    # ---- 2. 策略组与规则 ----
-    groups = rows("SELECT id, name, proxies, use_sources, targets, devices, "
-                  "local_nodes FROM proxy_groups ORDER BY sort, id")
-    group_names = {g["name"] for g in groups}
+    # ---- 2. 策略组与规则（按分流方案逐套校验引用）----
+    groups = rows("SELECT id, variant_id, name, proxies, use_sources, targets, "
+                  "devices, local_nodes FROM proxy_groups ORDER BY sort, id")
+    variants = {int(r["id"]): r["name"] for r in rows("SELECT id, name FROM variants")}
+    # 同名组允许存在于不同方案：引用判定一律 (variant_id, name) 内解析
+    group_names_by_variant: dict[int, set[str]] = {}
+    for g in groups:
+        group_names_by_variant.setdefault(int(g["variant_id"]), set()).add(g["name"])
+    seen_group_keys: set[tuple[int, str]] = set()
     devices = rows("SELECT id, name, target_id FROM devices")
     device_names = {d["name"] for d in devices}
     sources = {r["name"] for r in rows("SELECT name FROM sources")}
@@ -113,40 +118,65 @@ def main() -> int:
     # 停用的节点不会进产物，不算合法成员。
     local_display = local_node_service.display_index(local_node_rows)
 
+    def vlabel(vid: int) -> str:
+        return "" if vid == 0 else f"（方案{variants.get(vid, vid)}）"
+
     for g in groups:
+        vid = int(g["variant_id"] or 0)
+        if vid not in variants:
+            problems.append(f"策略组「{g['name']}」挂在不存在方案 #{vid}")
+        if (vid, g["name"]) in seen_group_keys:
+            problems.append(f"方案内策略组重名{vlabel(vid)}：「{g['name']}」")
+        seen_group_keys.add((vid, g["name"]))
+        scope_names = group_names_by_variant.get(vid, set())
         for name in json.loads(g["targets"] or "[]"):
             if name != "*" and name not in target_names:
-                problems.append(f"策略组「{g['name']}」适用了不存在的引擎平台「{name}」")
+                problems.append(
+                    f"策略组「{g['name']}」{vlabel(vid)}适用了不存在的引擎平台「{name}」")
         for name in json.loads(g["devices"] or "[]"):
             if name != "*" and name not in device_names:
-                problems.append(f"策略组「{g['name']}」适用了不存在的设备「{name}」")
+                problems.append(
+                    f"策略组「{g['name']}」{vlabel(vid)}适用了不存在的设备「{name}」")
         for member in json.loads(g["proxies"] or "[]"):
-            if member not in group_names and member not in local_display \
+            if member not in scope_names and member not in local_display \
                     and member not in bc.__dict__.get(
                     "BUILTIN_TARGETS", ()) and member not in ("DIRECT", "REJECT", "PASS", "COMPATIBLE"):
-                problems.append(f"策略组「{g['name']}」的成员「{member}」不存在")
+                problems.append(
+                    f"策略组「{g['name']}」{vlabel(vid)}的成员「{member}」不存在")
         for src in json.loads(g["use_sources"] or "[]"):
             if src != "*" and src not in sources:
-                problems.append(f"策略组「{g['name']}」引用了不存在的节点来源「{src}」")
+                problems.append(
+                    f"策略组「{g['name']}」{vlabel(vid)}引用了不存在的节点来源「{src}」")
         for nid in json.loads(g["local_nodes"] or "[]"):
             if nid not in local_nodes:
-                problems.append(f"策略组「{g['name']}」引用了不存在的本地节点 {nid}")
+                problems.append(
+                    f"策略组「{g['name']}」{vlabel(vid)}引用了不存在的本地节点 {nid}")
         if bad_name(g["name"]):
             problems.append(f"策略组名称「{g['name']}」命名不规范")
 
     # 规则按实际生效顺序取（sort 就是产物里的先后顺序）
-    rules = rows("SELECT id, type, value, target, targets, devices FROM rules "
-                 "ORDER BY sort, id")
+    rules = rows("SELECT id, variant_id, type, value, target, targets, devices "
+                 "FROM rules ORDER BY sort, id")
     for r in rules:
+        vid = int(r["variant_id"] or 0)
+        if vid not in variants:
+            problems.append(f"规则「{r['type']},{r['value']}」挂在不存在方案 #{vid}")
+        scope_names = group_names_by_variant.get(vid, set())
         for name in json.loads(r["targets"] or "[]"):
             if name != "*" and name not in target_names:
-                problems.append(f"规则「{r['type']},{r['value']}」适用了不存在的引擎平台「{name}」")
+                problems.append(
+                    f"规则「{r['type']},{r['value']}」{vlabel(vid)}"
+                    f"适用了不存在的引擎平台「{name}」")
         for name in json.loads(r["devices"] or "[]"):
             if name != "*" and name not in device_names:
-                problems.append(f"规则「{r['type']},{r['value']}」适用了不存在的设备「{name}」")
-        if r["target"] not in group_names and r["target"] not in (
+                problems.append(
+                    f"规则「{r['type']},{r['value']}」{vlabel(vid)}"
+                    f"适用了不存在的设备「{name}」")
+        if r["target"] not in scope_names and r["target"] not in (
                 "DIRECT", "REJECT", "PASS", "COMPATIBLE"):
-            problems.append(f"规则「{r['type']},{r['value']}」指向不存在的策略组「{r['target']}」")
+            problems.append(
+                f"规则「{r['type']},{r['value']}」{vlabel(vid)}"
+                f"指向不存在的策略组「{r['target']}」")
 
     # ---- 3. 设备 ----
     for d in devices:
@@ -215,15 +245,41 @@ def main() -> int:
             notes.append(f"规则集合「{name}」已启用但没有任何规则引用它（白拿流量）")
         elif not prov["enabled"] and name not in used_providers:
             notes.append(f"规则集合「{name}」已停用且无人引用，可清理")
-    # 兜底规则之后还有规则 = 永远不生效
-    for i, r in enumerate(rules):
-        if r["type"] in ("MATCH", "FINAL"):
-            after = rules[i + 1:]
-            if after:
-                problems.append(
-                    f"兜底规则之后还有 {len(after)} 条规则，永远不会命中："
-                    + "、".join(f"{x['type']},{x['value'][:16]}" for x in after[:3]))
-            break
+    # DNS nameserver-policy 的 rule-set: 引用必须真实存在（约束 31）：
+    # 渲染器按「DNS 引用 ∩ 已启用集合」下发，集合不存在时解析策略键悬空
+    dns_docs = rows("SELECT engine, platform, device_id, content FROM base_configs")
+    dns_refs: set[str] = set()
+    for row in dns_docs:
+        try:
+            doc = bc.parse_content(row["content"] or "")
+        except Exception:
+            continue
+        policy = (doc.get("dns") or {}).get("nameserver-policy") if isinstance(doc, dict) else None
+        if not isinstance(policy, dict):
+            continue
+        for key in policy:
+            text = str(key)
+            if text.startswith("rule-set:"):
+                dns_refs.update(p.strip() for p in text.split(":", 1)[1].split(",") if p.strip())
+    for name in sorted(dns_refs):
+        if name not in providers:
+            notes.append(
+                f"DNS 解析策略引用的规则集合「{name}」不存在，"
+                f"该解析策略键当前不生效（约束 31：建议补建该集合）")
+        elif not providers[name]["enabled"]:
+            notes.append(
+                f"DNS 解析策略引用的规则集合「{name}」已停用，该解析策略键不生效")
+    # 兜底规则之后还有规则 = 永远不生效（按方案逐套检查）
+    for vid in group_names_by_variant:
+        vrules = [r for r in rules if int(r["variant_id"] or 0) == vid]
+        for i, r in enumerate(vrules):
+            if r["type"] in ("MATCH", "FINAL"):
+                after = vrules[i + 1:]
+                if after:
+                    problems.append(
+                        f"兜底规则之后还有 {len(after)} 条规则{vlabel(vid)}，永远不会命中："
+                        + "、".join(f"{x['type']},{x['value'][:16]}" for x in after[:3]))
+                break
     # 范围交集为空 = 这条规则在哪儿都不生效
     device_target = {}
     for d in devices:
@@ -249,11 +305,12 @@ def main() -> int:
             problems.append(
                 f"规则「{r['type']},{r['value']}」的引擎平台范围 {sorted(ts)} "
                 "与现有引擎平台没有交集 —— 不会生效")
-    # 规则的目标组与规则本身的适用范围必须相交
-    group_scope = {g["name"]: (set(json.loads(g["targets"] or "[]")),
-                              set(json.loads(g["devices"] or "[]"))) for g in groups}
+    # 规则的目标组与规则本身的适用范围必须相交（同名组按方案内解析）
+    group_scope = {(int(g["variant_id"] or 0), g["name"]):
+                   (set(json.loads(g["targets"] or "[]")),
+                    set(json.loads(g["devices"] or "[]"))) for g in groups}
     for r in rules:
-        gscope = group_scope.get(r["target"])
+        gscope = group_scope.get((int(r["variant_id"] or 0), r["target"]))
         if not gscope:
             continue
         gts, gds = gscope
@@ -271,17 +328,21 @@ def main() -> int:
                 f"规则「{r['type']},{r['value']}」与目标组「{r['target']}」"
                 "的适用引擎平台没有交集 —— 规则会被自动剔除")
     # 被更早的同类型规则完全遮蔽（后缀按标签边界判定，域名的后缀匹配同理）
+    # 同方案内比较：不同方案的规则互不相干
     def suffix_covers(broad: str, narrow: str) -> bool:
         return narrow == broad or narrow.endswith("." + broad)
 
     for i, r in enumerate(rules):
         if r["type"] != "DOMAIN-SUFFIX" or not (r["value"] or "").strip():
             continue
+        vid = int(r["variant_id"] or 0)
         narrow = r["value"].strip().lower()
         rts = set(json.loads(r["targets"] or "[]"))
         rds = set(json.loads(r["devices"] or "[]"))
         for j in range(i):
             p_rule = rules[j]
+            if int(p_rule["variant_id"] or 0) != vid:
+                continue
             if p_rule["type"] != "DOMAIN-SUFFIX" or not (p_rule["value"] or "").strip():
                 continue
             broad = p_rule["value"].strip().lower()

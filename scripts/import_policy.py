@@ -24,7 +24,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-TABLES = ("rules", "proxy_groups", "rule_providers")
+TABLES = ("variants", "rules", "proxy_groups", "rule_providers")
 
 
 def _load(path: Path) -> dict[str, object]:

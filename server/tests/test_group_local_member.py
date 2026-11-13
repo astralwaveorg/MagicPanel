@@ -41,7 +41,7 @@ def test_local_node_can_be_group_member():
             "targets": ["*"], "devices": ["*"],
         }],
     )
-    errors, warnings = validate.validate_policy(snap)
+    errors, warnings = validate.validate_policy(snap)[0]
     assert not [e for e in errors if "香港机房" in e], errors
     # 通用组引用本地节点会扩散密钥，必须有告警
     assert any("香港机房" in w and "下发给全部设备" in w for w in warnings), warnings
@@ -59,7 +59,7 @@ def test_disabled_local_node_member_is_rejected():
             "targets": ["*"], "devices": ["*"],
         }],
     )
-    errors, _ = validate.validate_policy(snap)
+    errors, _ = validate.validate_policy(snap)[0]
     assert any("已停用的本地节点" in e for e in errors), errors
 
 

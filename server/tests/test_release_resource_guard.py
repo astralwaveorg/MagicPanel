@@ -31,15 +31,23 @@ def _device(client, h, name="iPhone"):
 
 
 def _publish_with_provider(client, h, rp):
-    """把策略发布到生产，返回设备令牌。
+    """把「规则引用该来源」的策略发布到生产，返回设备令牌。
 
-    产物会带上**全部已启用**的规则来源（不只看有没有规则引用），
-    所以这里不额外建 RULE-SET 规则——那样会先被"仍被分流规则引用"的
-    守卫拦掉，测不到"被生产产物引用"这条。
+    产物按引用下发规则来源：先建一条 RULE-SET 规则让来源进产物。
+    发布后把规则删掉——复现线上常见时序（面板先改、老产物还在）：
+    此时数据库里已无引用，唯一能拦住删除的就是"生产产物还写着地址"，
+    正是本组用例要测的守卫。
     """
     dev = _device(client, h)
+    r = client.post("/api/v1/rules", headers=h, json={
+        "type": "RULE-SET", "value": rp["name"], "target": "DIRECT"})
+    assert r.status_code == 201, r.text
     bid = client.post("/api/v1/builds", headers=h, json={}).json()["id"]
     publish_to_prod(client, h, bid)
+    rules = client.get("/api/v1/rules", headers=h).json()
+    rid = next(x["id"] for x in rules
+               if x["type"] == "RULE-SET" and x["value"] == rp["name"])
+    assert client.delete(f"/api/v1/rules/{rid}", headers=h).status_code == 200
     return dev["token"]
 
 

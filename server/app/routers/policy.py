@@ -14,6 +14,8 @@ router = APIRouter(prefix="/api/v1", tags=["policy"])
 
 class GroupBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
+    # 所属分流方案：0 = 默认方案。同名组允许存在于不同方案。
+    variant_id: int = config.DEFAULT_VARIANT_ID
     type: str = "select"
     hidden: bool = False
     filter: str = Field(default="", max_length=512)
@@ -34,6 +36,8 @@ class GroupBody(BaseModel):
 
 
 class RuleBody(BaseModel):
+    # 所属分流方案：0 = 默认方案。规则目标在方案内解析。
+    variant_id: int = config.DEFAULT_VARIANT_ID
     type: str
     value: str = Field(default="", max_length=512)
     target: str = Field(min_length=1, max_length=64)
@@ -124,11 +128,20 @@ def _get_group(conn, gid: int):
     return row
 
 
+def _check_variant(conn, vid: int) -> int:
+    """方案归属校验：variant_id 必须真实存在，写错会被静默隔离在空列表里。"""
+    vid = int(vid or 0)
+    if not db.one(conn, "SELECT id FROM variants WHERE id=?", (vid,)):
+        raise HTTPException(400, f"分流方案不存在：#{vid}")
+    return vid
+
+
 @router.get("/groups/page")
 def list_groups_paged(limit: int = 50, offset: int = 0, keyword: str = "",
                       gtype: str = "", hidden: str = "", scope: str = "",
-                      member: str = "", user=CurrentUser):
-    """策略组分页列表。
+                      member: str = "", variant: int = config.DEFAULT_VARIANT_ID,
+                      user=CurrentUser):
+    """策略组分页列表（variant = 所属分流方案 id，0 = 默认方案）。
 
     keyword 匹配名称；gtype 精确匹配类型；hidden 取 "0"（显示）/"1"（隐藏）；
     scope 限定适用范围，口径与分流规则页一致：
@@ -141,7 +154,8 @@ def list_groups_paged(limit: int = 50, offset: int = 0, keyword: str = "",
       manual 不含节点来源也没有本地节点
     """
     with db.connect() as conn:
-        where, args = [], []
+        where = ["variant_id = ?"]
+        args = [_check_variant(conn, variant)]
         if keyword:
             where.append("name LIKE ?")
             args.append(f"%{keyword}%")
@@ -168,16 +182,20 @@ def list_groups_paged(limit: int = 50, offset: int = 0, keyword: str = "",
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         data = db.paged(conn, "proxy_groups", clause, args, "sort, id", limit, offset)
         data["items"] = [_group_public(r) for r in data["items"]]
-        # 未筛选时的总数，界面好写"筛选出 N 个（共 M 个）"
-        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM proxy_groups")["c"]
+        # 未筛选时的总数（同一方案内），界面好写"筛选出 N 个（共 M 个）"
+        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM proxy_groups "
+                                 "WHERE variant_id=?", (variant,))["c"]
     data["total_all"] = total_all
     return data
 
 
 @router.get("/groups")
-def list_groups(user=CurrentUser):
+def list_groups(variant: int = config.DEFAULT_VARIANT_ID, user=CurrentUser):
+    """不分页的策略组列表（分流规则页的目标下拉用，按方案过滤）。"""
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM proxy_groups ORDER BY sort, id")
+        _check_variant(conn, variant)
+        rows = db.all_(conn, "SELECT * FROM proxy_groups WHERE variant_id=? "
+                             "ORDER BY sort, id", (variant,))
     return [_group_public(r) for r in rows]
 
 
@@ -186,7 +204,9 @@ def create_group(body: GroupBody, user=CurrentUser):
     _check_group(body)
     try:
         with db.tx() as conn:
-            if db.one(conn, "SELECT id FROM proxy_groups WHERE name=?", (body.name,)):
+            _check_variant(conn, body.variant_id)
+            if db.one(conn, "SELECT id FROM proxy_groups WHERE name=? AND variant_id=?",
+                      (body.name, body.variant_id)):
                 raise HTTPException(409, "同名策略组已存在")
             _check_group_refs(conn, body)
             body.use_sources = _collapse_if_complete(conn, body.use_sources, "sources")
@@ -195,14 +215,17 @@ def create_group(body: GroupBody, user=CurrentUser):
             if body.type == "relay":
                 body.use_sources = []
             local_ids = _check_local_ids(conn, body.local_nodes)
-            sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups"))["s"]
+            # 排序键按方案分段：新组排在所属方案当前末尾，不碰其它方案的 sort 值
+            sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups "
+                                 "WHERE variant_id=?", (body.variant_id,)))["s"]
             now = db.now()
             cur = db.insert_unique(conn,
-                "INSERT INTO proxy_groups(name, type, sort, hidden, filter, use_sources, "
-                "local_nodes, proxies, url, interval, timeout, tolerance, lazy, strategy, "
-                "targets, devices, local_first, created_at, updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (body.name, body.type, sort, int(body.hidden), body.filter,
+                "INSERT INTO proxy_groups(variant_id, name, type, sort, hidden, filter, "
+                "use_sources, local_nodes, proxies, url, interval, timeout, tolerance, "
+                "lazy, strategy, targets, devices, local_first, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (body.variant_id, body.name, body.type, sort, int(body.hidden),
+                 body.filter,
                  json.dumps(body.use_sources, ensure_ascii=False),
                  json.dumps(local_ids, ensure_ascii=False),
                  json.dumps(body.proxies, ensure_ascii=False),
@@ -226,8 +249,12 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
     _check_group(body)
     with db.tx() as conn:
         current = _get_group(conn, gid)
+        _check_variant(conn, body.variant_id)
+        if current["variant_id"] != body.variant_id:
+            raise HTTPException(400, "策略组不能跨方案移动（请在目标方案里重新创建）")
         clash = db.one(
-            conn, "SELECT id FROM proxy_groups WHERE name=? AND id!=?", (body.name, gid)
+            conn, "SELECT id FROM proxy_groups WHERE name=? AND variant_id=? AND id!=?",
+            (body.name, body.variant_id, gid),
         )
         if clash:
             raise HTTPException(409, "同名策略组已存在")
@@ -238,10 +265,10 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         if body.type == "relay":
             body.use_sources = []
         local_ids = _check_local_ids(conn, body.local_nodes)
-        # 改名时同步改写引用（规则目标 + 其它组的成员列表），
+        # 改名时同步改写引用（同方案内规则目标 + 其它组的成员列表），
         # 否则引用会指向不存在的组，构建全线失败且无法发布。
         if current["name"] != body.name:
-            _remap_group_refs(conn, current["name"], body.name)
+            _remap_group_refs(conn, current["name"], body.name, body.variant_id)
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
             "local_nodes=?, proxies=?, url=?, interval=?, timeout=?, tolerance=?, "
@@ -263,16 +290,16 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
 
 @router.delete("/groups/{gid}")
 def delete_group(gid: int, force: bool = False, user=CurrentUser):
-    """删除策略组。
+    """删除策略组（方案内）。
 
-    被其它策略组当作成员、或被分流规则指向时默认拒绝，并返回引用明细
-    （前端据此弹二次确认）；带 force=1 时自动解绑：把成员引用摘掉，
-    并删除指向它的分流规则。
+    被同方案其它策略组当作成员、或被同方案分流规则指向时默认拒绝，
+    并返回引用明细（前端据此弹二次确认）；带 force=1 时自动解绑：
+    把成员引用摘掉，并删除指向它的分流规则。
     """
     with db.tx() as conn:
         row = _get_group(conn, gid)
-        members = refs.group_members(conn, row["name"])
-        rules = refs.rules_targeting(conn, row["name"])
+        members = refs.group_members(conn, row["name"], row["variant_id"])
+        rules = refs.rules_targeting(conn, row["name"], row["variant_id"])
         if (members or rules) and not force:
             detail = []
             if members:
@@ -292,7 +319,8 @@ def delete_group(gid: int, force: bool = False, user=CurrentUser):
                        for r in rules]
                 ),
             })
-        changed, removed, warns = refs.detach_group(conn, row["name"])
+        changed, removed, warns = refs.detach_group(conn, row["name"],
+                                                    row["variant_id"])
         conn.execute("DELETE FROM proxy_groups WHERE id=?", (gid,))
         security.audit(conn, user["username"], "删除策略组", "group", gid,
                        {"name": row["name"], "detached_groups": changed,
@@ -352,7 +380,6 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
     skipped: list[dict] = []
     missing: list[int] = []
     with db.tx() as conn:
-        group_names = {r["name"] for r in db.all_(conn, "SELECT name FROM proxy_groups")}
         source_names = {r["name"] for r in db.all_(conn, "SELECT name FROM sources")}
         local_ids = {int(r["id"]) for r in db.all_(
             conn, "SELECT id FROM local_nodes WHERE enabled=1")}
@@ -362,6 +389,10 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
             if not row:
                 missing.append(gid)
                 continue
+            # 成员引用在组所在方案内解析
+            group_names = {r["name"] for r in db.all_(
+                conn, "SELECT name FROM proxy_groups WHERE variant_id=?",
+                (row["variant_id"],))}
             fields: list[str] = []
             args: list = []
             notes: list[str] = []
@@ -444,8 +475,9 @@ def batch_delete_groups(body: BatchIds, user=CurrentUser):
                 blocked.append({"id": gid, "name": f"#{gid}",
                                 "reason": "策略组不存在（可能已被删除）"})
                 continue
-            members = [m for m in refs.group_members(conn, row["name"])]
-            rules = refs.rules_targeting(conn, row["name"])
+            members = [m for m in refs.group_members(conn, row["name"],
+                                                     row["variant_id"])]
+            rules = refs.rules_targeting(conn, row["name"], row["variant_id"])
             if (members or rules) and not body.force:
                 blocked.append({
                     "id": gid, "name": row["name"],
@@ -486,7 +518,6 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
     skipped: list[dict] = []
     missing: list[int] = []
     with db.tx() as conn:
-        group_names = {r["name"] for r in db.all_(conn, "SELECT name FROM proxy_groups")}
         target_names = {r["name"] for r in db.all_(conn, "SELECT name FROM targets")}
         device_names = {r["name"] for r in db.all_(conn, "SELECT name FROM devices")}
         for rid in ids:
@@ -494,6 +525,10 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
             if not row:
                 missing.append(rid)
                 continue
+            # 目标组在规则所在方案内解析
+            group_names = {r["name"] for r in db.all_(
+                conn, "SELECT name FROM proxy_groups WHERE variant_id=?",
+                (row["variant_id"],))}
             fields: list[str] = []
             args: list = []
             notes: list[str] = []
@@ -601,9 +636,11 @@ def reorder_groups(ids: list[int], user=CurrentUser):
     with db.tx() as conn:
         if len(set(ids)) != len(ids):
             raise HTTPException(400, "排序列表里有重复项")
-        known = {r["id"] for r in db.all_(conn, "SELECT id FROM proxy_groups")}
-        if any(i not in known for i in ids):
+        rows = {r["id"]: r for r in db.all_(conn, "SELECT id, variant_id FROM proxy_groups")}
+        if any(i not in rows for i in ids):
             raise HTTPException(400, "排序列表包含不存在的记录")
+        if len({rows[i]["variant_id"] for i in ids}) > 1:
+            raise HTTPException(400, "不能跨方案拖拽排序")
         if not db.reorder_subset(conn, "proxy_groups", ids):
             raise HTTPException(400, "排序未生效")
         security.audit(conn, user["username"], "调整策略组顺序", "group", "")
@@ -640,13 +677,16 @@ def _check_rule(body: RuleBody) -> None:
                      "（官方只允许连接建立前就能判断的类型）")
 
 
-def _remap_group_refs(conn, old_name: str, new_name: str) -> int:
-    """策略组改名后，同步更新规则目标与其它组的成员列表。"""
+def _remap_group_refs(conn, old_name: str, new_name: str,
+                      variant_id: int = config.DEFAULT_VARIANT_ID) -> int:
+    """策略组改名后，同步更新同方案内规则目标与其它组的成员列表。"""
     changed = 0
-    for row in db.all_(conn, "SELECT id, target FROM rules WHERE target=?", (old_name,)):
+    for row in db.all_(conn, "SELECT id, target FROM rules WHERE target=? "
+                             "AND variant_id=?", (old_name, variant_id)):
         conn.execute("UPDATE rules SET target=? WHERE id=?", (new_name, row["id"]))
         changed += 1
-    for row in db.all_(conn, "SELECT id, proxies FROM proxy_groups WHERE proxies IS NOT NULL"):
+    for row in db.all_(conn, "SELECT id, proxies FROM proxy_groups "
+                             "WHERE variant_id=? AND proxies IS NOT NULL", (variant_id,)):
         try:
             members = json.loads(row["proxies"] or "[]")
         except (TypeError, ValueError):
@@ -693,36 +733,45 @@ def _check_target_names(conn, names: list[str]) -> None:
 def _check_rule_refs(conn, body: RuleBody) -> None:
     _check_target_names(conn, body.targets)
     _check_device_names(conn, body.devices)
-
+    # 规则目标在本方案内解析：目标组必须属于同一方案（或内置字面量）
+    if body.target not in config.BUILTIN_TARGETS and not db.one(
+            conn, "SELECT id FROM proxy_groups WHERE name=? AND variant_id=?",
+            (body.target, body.variant_id)):
+        raise HTTPException(400, f"目标策略组“{body.target}”在本方案中不存在")
 
 # 兜底规则类型：命中即结束，其后的规则永远匹配不到
 FALLBACK_TYPES = ("MATCH", "FINAL")
 
 
-def _rule_insert_sort(conn, is_fallback: bool) -> int:
-    """新规则的排序位。
+def _rule_insert_sort(conn, is_fallback: bool,
+                      variant_id: int = config.DEFAULT_VARIANT_ID) -> int:
+    """新规则的排序位（方案内）。
 
     普通规则：插在兜底规则之前。客户端是"从上往下第一条命中即生效"，
     撞到兜底（MATCH/FINAL）就结束了，排在其后的规则永远匹配不到。
 
-    兜底规则：追加到末尾。客户端只认第一条兜底，多一条不改变行为
+    兜底规则：追加到本方案末尾。客户端只认第一条兜底，多一条不改变行为
     （编译器会给出"客户端只认第一条"的告警），追加最可预期。
 
     排序键是整数：兜底与其前驱之间有空位就占用空位；没有空位时，
     把兜底及之后的规则整体后移一位，空出来的位置就是新的排序位。
     """
     if is_fallback:
-        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
+        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules "
+                             "WHERE variant_id=?", (variant_id,)))["s"]
     fb = db.one(conn, "SELECT MIN(sort) AS s FROM rules "
-                     "WHERE type IN ('MATCH','FINAL')")
+                     "WHERE type IN ('MATCH','FINAL') AND variant_id=?", (variant_id,))
     pos = fb["s"] if fb else None
     if pos is None:
-        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules"))["s"]
-    prev = db.one(conn, "SELECT MAX(sort) AS s FROM rules WHERE sort < ?", (pos,))
+        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules "
+                             "WHERE variant_id=?", (variant_id,)))["s"]
+    prev = db.one(conn, "SELECT MAX(sort) AS s FROM rules "
+                        "WHERE sort < ? AND variant_id=?", (pos, variant_id))
     if prev and prev["s"] is not None and pos - prev["s"] >= 2:
         return prev["s"] + 1
     # 整体后移：sort >= pos 的全部 +1，与原值集合不会撞车（整体后移是单射）
-    conn.execute("UPDATE rules SET sort = sort + 1 WHERE sort >= ?", (pos,))
+    conn.execute("UPDATE rules SET sort = sort + 1 WHERE sort >= ? AND variant_id=?",
+                 (pos, variant_id))
     return pos
 
 
@@ -770,8 +819,9 @@ def _check_group_refs(conn, body: GroupBody) -> None:
 @router.get("/rules/page")
 def list_rules_paged(limit: int = 50, offset: int = 0, keyword: str = "",
                      rtype: str = "", target: str = "", enabled: str = "",
-                     scope: str = "", user=CurrentUser):
-    """分流规则分页列表。
+                     scope: str = "", variant: int = config.DEFAULT_VARIANT_ID,
+                     user=CurrentUser):
+    """分流规则分页列表（variant = 所属分流方案 id，0 = 默认方案）。
 
     keyword 匹配匹配值、目标、备注或类型；rtype/target/enabled 精确匹配；
     scope 限定适用范围：
@@ -781,7 +831,8 @@ def list_rules_paged(limit: int = 50, offset: int = 0, keyword: str = "",
       device   限定了设备
     """
     with db.connect() as conn:
-        where, args = [], []
+        where = ["variant_id = ?"]
+        args = [_check_variant(conn, variant)]
         if keyword:
             like = f"%{keyword}%"
             where.append("(value LIKE ? OR target LIKE ? OR note LIKE ? OR type LIKE ?)")
@@ -805,16 +856,19 @@ def list_rules_paged(limit: int = 50, offset: int = 0, keyword: str = "",
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         data = db.paged(conn, "rules", clause, args, "sort, id", limit, offset)
         data["items"] = [_rule_public(r) for r in data["items"]]
-        # 一并给出未筛选时的总数，界面好写"筛选出 N 条（共 M 条）"
-        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM rules")["c"]
+        # 未筛选时的总数（同一方案内），界面好写"筛选出 N 条（共 M 条）"
+        total_all = db.one(conn, "SELECT COUNT(*) AS c FROM rules "
+                                 "WHERE variant_id=?", (variant,))["c"]
     data["total_all"] = total_all
     return data
 
 
 @router.get("/rules")
-def list_rules(user=CurrentUser):
+def list_rules(variant: int = config.DEFAULT_VARIANT_ID, user=CurrentUser):
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM rules ORDER BY sort, id")
+        _check_variant(conn, variant)
+        rows = db.all_(conn, "SELECT * FROM rules WHERE variant_id=? "
+                             "ORDER BY sort, id", (variant,))
     return [_rule_public(r) for r in rows]
 
 
@@ -823,16 +877,19 @@ def create_rule(body: RuleBody, user=CurrentUser):
     _check_rule(body)
     try:
         with db.tx() as conn:
+            _check_variant(conn, body.variant_id)
             _check_rule_refs(conn, body)
             body.targets = _collapse_if_complete(conn, body.targets, "targets")
             body.devices = _collapse_if_complete(conn, body.devices, "devices")
-            sort = _rule_insert_sort(conn, body.type in FALLBACK_TYPES)
+            sort = _rule_insert_sort(conn, body.type in FALLBACK_TYPES,
+                                     body.variant_id)
             now = db.now()
             cur = db.insert_unique(conn,
-                "INSERT INTO rules(sort, type, value, target, enabled, note, no_resolve, "
-                "no_track, pre_matching, targets, devices, created_at, updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (sort, body.type, body.value, body.target, int(body.enabled),
+                "INSERT INTO rules(variant_id, sort, type, value, target, enabled, "
+                "note, no_resolve, no_track, pre_matching, targets, devices, "
+                "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (body.variant_id, sort, body.type, body.value, body.target,
+                 int(body.enabled),
                  body.note, int(body.no_resolve), int(body.no_track),
                  int(body.pre_matching),
                  json.dumps(body.targets, ensure_ascii=False),
@@ -851,10 +908,13 @@ def create_rule(body: RuleBody, user=CurrentUser):
 def update_rule(rid: int, body: RuleBody, user=CurrentUser):
     _check_rule(body)
     with db.tx() as conn:
+        current = _get_rule(conn, rid)
+        _check_variant(conn, body.variant_id)
+        if current["variant_id"] != body.variant_id:
+            raise HTTPException(400, "分流规则不能跨方案移动（请在目标方案里重新创建）")
         _check_rule_refs(conn, body)
         body.targets = _collapse_if_complete(conn, body.targets, "targets")
         body.devices = _collapse_if_complete(conn, body.devices, "devices")
-        _get_rule(conn, rid)
         conn.execute(
             "UPDATE rules SET type=?, value=?, target=?, enabled=?, note=?, "
             "no_resolve=?, no_track=?, pre_matching=?, targets=?, devices=?, "
@@ -887,9 +947,11 @@ def reorder_rules(ids: list[int], user=CurrentUser):
     with db.tx() as conn:
         if len(set(ids)) != len(ids):
             raise HTTPException(400, "排序列表里有重复项")
-        rows = {r["id"]: r for r in db.all_(conn, "SELECT id, type FROM rules")}
+        rows = {r["id"]: r for r in db.all_(conn, "SELECT id, type, variant_id FROM rules")}
         if any(i not in rows for i in ids):
             raise HTTPException(400, "排序列表包含不存在的记录")
+        if len({rows[i]["variant_id"] for i in ids}) > 1:
+            raise HTTPException(400, "不能跨方案拖拽排序")
         # 拖拽也不能把规则排到兜底后面：兜底之后的规则永远匹配不到
         if not db.reorder_subset(conn, "rules", _fallbacks_last(ids, rows)):
             raise HTTPException(400, "排序未生效")

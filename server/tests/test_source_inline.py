@@ -50,7 +50,8 @@ def test_inline_nodes_go_to_top_level_proxies():
 
     snap = _snapshot(
         sources=[_source("机场A", nodes=[_node("香港 01")])],
-        groups=[_group("🚀 默认代理", "select", proxies=["🇭🇰 香港"])],
+        groups=[_group("🚀 默认代理", "select", proxies=["🇭🇰 香港"],
+                       use_sources=["机场A"])],
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     names = [p["name"] for p in cfg["proxies"]]
@@ -66,6 +67,8 @@ def test_inline_source_suffix_makes_names_unique():
     snap = _snapshot(
         sources=[_source("机场A", nodes=[_node("香港 01")], suffix="-A"),
                  _source("机场B", nodes=[_node("香港 01")], suffix="-B")],
+        # 来源按引用进产物：得有组引用这两个来源，节点才会展开
+        groups=[_group("🚀 默认代理", "select", use_sources=["机场A", "机场B"])],
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     names = [p["name"] for p in cfg["proxies"]]
@@ -81,6 +84,7 @@ def test_inline_source_filter_removes_pseudo_nodes():
         sources=[_source("机场A",
                          nodes=[_node("香港 01"), _node("剩余流量")],
                          filter=r"(?i)^(?!.*剩余).+$")],
+        groups=[_group("🚀 默认代理", "select", use_sources=["机场A"])],
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     names = [p["name"] for p in cfg["proxies"]]
@@ -188,6 +192,16 @@ def test_rule_provider_path_matches_format():
         {"name": "inline-set", "behavior": "classical", "format": "yaml",
          "kind": "inline", "interval": 86400, "client_interval": 0, "enabled": True},
     ])
+    # 集合按引用进产物：补 RULE-SET 规则与目标组
+    snap["groups"] = [_group("PROXY", "select", proxies=["DIRECT"])]
+    snap["rules"] = [
+        {"type": "RULE-SET", "value": "cn", "target": "PROXY", "enabled": True,
+         "targets": ["*"], "devices": ["*"]},
+        {"type": "RULE-SET", "value": "inline-set", "target": "PROXY", "enabled": True,
+         "targets": ["*"], "devices": ["*"]},
+        {"type": "MATCH", "value": "", "target": "PROXY", "enabled": True,
+         "targets": ["*"], "devices": ["*"]},
+    ]
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "mihomo"}))
     paths = {name: entry["path"] for name, entry in cfg["rule-providers"].items()}
     assert paths["cn"] == "./rules/cn.mrs"

@@ -194,6 +194,9 @@
           <div class="mp-artifact-head">
             <h3 class="mp-artifact-title">
               <span class="mono mp-artifact-name">{{ name }}</span>
+              <el-tag v-if="result.variant" size="small" class="mp-artifact-variant">
+                方案 {{ result.variant }}
+              </el-tag>
               <StatusDot :kind="result.ok ? 'ok' : 'danger'"
                          :text="result.ok ? result.verification : '未通过'" />
             </h3>
@@ -203,7 +206,8 @@
             </div>
           </div>
           <div style="font-size:12.5px;color:var(--mp-text-secondary)">
-            {{ result.engine }} / {{ PLATFORM_LABELS[result.platform] || result.platform }} ·
+            {{ result.engine }} / {{ PLATFORM_LABELS[result.platform] || result.platform }}
+            <template v-if="result.device"> · 设备 {{ result.device }}</template> ·
             {{ result.size }} 字节 · 摘要 <span class="mono">{{ shortSha(result.sha256) }}</span>
           </div>
           <template v-if="result.errors?.length">
@@ -564,6 +568,9 @@ async function removeSelected() {
 .mp-artifact-name {
   white-space: nowrap;      /* 目标名不能被挤成一列竖排 */
   font-weight: 600;
+}
+.mp-artifact-variant {
+  flex: none;
 }
 .mp-artifact-actions {
   display: flex;

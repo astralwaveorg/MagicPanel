@@ -28,7 +28,8 @@ sys.path.insert(0, str(REPO / "server"))
 from app.services import base_config as bc  # noqa: E402
 
 # 面板私有键：不写进产物，不在官方文档里
-PANEL_KEYS = {bc.PANEL_DIRECT_KEY, bc.DIRECT_DOMAINS_KEY, bc.FAKE_IP_FILTER_KEY}
+PANEL_KEYS = {bc.PANEL_DIRECT_KEY, bc.DIRECT_DOMAINS_KEY, bc.FAKE_IP_FILTER_KEY,
+              bc.SYSTEM_DNS_KEY}
 
 # Stash 官方文档里没有、但客户端兼容支持的键（逐条注明出处）
 EXTRA_ALLOWED = {

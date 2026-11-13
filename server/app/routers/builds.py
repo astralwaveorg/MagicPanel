@@ -62,7 +62,8 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT * FROM local_nodes ORDER BY sort, id")
     ]
     groups = [
-        {"name": r["name"], "type": r["type"], "hidden": bool(r["hidden"]),
+        {"variant_id": int(r["variant_id"] or 0) if "variant_id" in r.keys() else 0,
+         "name": r["name"], "type": r["type"], "hidden": bool(r["hidden"]),
          "filter": r["filter"], "use_sources": json.loads(r["use_sources"] or "[]"),
          "local_nodes": json.loads(r["local_nodes"] or "[]"),
          "proxies": json.loads(r["proxies"] or "[]"), "url": r["url"],
@@ -75,7 +76,8 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT * FROM proxy_groups ORDER BY sort, id")
     ]
     rules = [
-        {"type": r["type"], "value": r["value"], "target": r["target"],
+        {"variant_id": int(r["variant_id"] or 0) if "variant_id" in r.keys() else 0,
+         "type": r["type"], "value": r["value"], "target": r["target"],
          "enabled": bool(r["enabled"]), "no_resolve": bool(r["no_resolve"]),
          "no_track": bool(r["no_track"]) if "no_track" in r.keys() else False,
          "pre_matching": bool(r["pre_matching"]) if "pre_matching" in r.keys() else False,
@@ -119,11 +121,16 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(
             conn, "SELECT * FROM snippets WHERE enabled=1 ORDER BY sort, id")
     ]
+    variants = [
+        {"id": int(r["id"]), "name": r["name"], "note": r["note"],
+         "enabled": bool(r["enabled"]), "is_system": bool(r["is_system"])}
+        for r in db.all_(conn, "SELECT * FROM variants ORDER BY sort, id")
+    ] or [{"id": 0, "name": "默认", "note": "", "enabled": True, "is_system": True}]
     return {
         "sources": sources, "rule_providers": rule_providers,
         "local_nodes": local_nodes, "groups": groups, "rules": rules,
         "targets": targets, "snippets": snippets, "base": base_docs,
-        "base_devices": base_devices, "devices": devices,
+        "base_devices": base_devices, "devices": devices, "variants": variants,
     }
 
 
@@ -229,10 +236,9 @@ def create_build(operator: str, note: str = "",
         policy_sha = security.sha256_text(
             json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
         )
-    policy_errors, policy_warnings = validate.validate_policy(snapshot)
+    # 逐方案校验：返回 {方案id: (errors, warnings)}，方案之间互不阻塞
+    validations = validate.validate_policy(snapshot)
     now = db.now()
-    results: dict = {}
-    overall = "success"
     with db.tx() as conn:
         cur = conn.execute(
             "INSERT INTO builds(created_at, created_by, status, verify_status, "
@@ -243,19 +249,61 @@ def create_build(operator: str, note: str = "",
              "{}", note, now),
         )
         build_id = cur.lastrowid
-    for target in snapshot["targets"]:
+
+    def scoped_devices(variant_id: int) -> list[dict]:
+        """该方案下出现在「适用设备」里的设备：需要单独出设备专属产物。"""
+        names = set()
+        for item in snapshot["groups"] + snapshot["rules"]:
+            if int(item.get("variant_id", 0)) != variant_id:
+                continue
+            names.update(d for d in (item.get("devices") or []) if d != "*")
+        by_name = {d["name"]: d for d in snapshot.get("devices", [])}
+        return [by_name[n] for n in sorted(names) if n in by_name]
+
+    # 产物计划：(产物名, 目标, 设备或 None, 方案或 None)。
+    # 默认方案沿用 {target}.yaml / {device}.yaml 命名；自定义方案带 @方案 后缀。
+    plan: list[tuple[str, dict, dict | None, dict | None]] = []
+    for variant in [v for v in snapshot["variants"] if v.get("enabled", True)]:
+        vid = int(variant["id"])
+        suffix = "" if vid == 0 else f"@{variant['name']}"
+        for target in snapshot["targets"]:
+            plan.append((target["name"] + suffix, target, None, variant))
+        target_by_id = {int(t["id"]): t for t in snapshot["targets"]}
+        for device in scoped_devices(vid):
+            target = target_by_id.get(int(device["target_id"]))
+            if target:
+                plan.append((device["name"] + suffix, target, device, variant))
+    # 产物文件名冲突（target/device 名 × 方案名组合重复）会让两份产物互相覆盖
+    seen_names: dict[str, str] = {}
+    for artifact_name, _, _, variant in plan:
+        vid = int(variant["id"]) if variant else 0
+        label = "" if vid == 0 else f"方案{variant['name']}"
+        if artifact_name in seen_names:
+            plan = [p for p in plan if p[0] != artifact_name]
+            validations.setdefault(vid, ([], []))
+            validations[vid][0].append(
+                f"产物文件名冲突：{artifact_name}（{label}），请调整方案或目标/设备名称")
+        else:
+            seen_names[artifact_name] = label
+
+    results: dict = {}
+    overall = "success"
+    for artifact_name, target, device, variant in plan:
+        vid = int(variant["id"]) if variant else 0
+        policy_errors, policy_warnings = validations.get(vid, ([], []))
         errors = list(policy_errors)
         warnings = list(policy_warnings)
         text = ""
         verification = "未通过"
+        core_checked = False
         if not policy_errors:
             try:
-                text = render.render_target(snapshot, target, warnings)
+                text = render.render_target(snapshot, target, warnings,
+                                            device=device, variant=variant)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
         # Mihomo 目标在核心可用时追加官方配置检查（mihomo -t）
-        core_checked = False
         if not errors and target["engine"] == "mihomo":
             checked, core_error = tester.validate_config(text)
             if checked:
@@ -273,92 +321,36 @@ def create_build(operator: str, note: str = "",
             overall = "failed"
             verification = "未通过"
         else:
-            path = artifact_path(build_id, target["name"])
+            path = artifact_path(build_id, artifact_name)
             path.write_text(text, encoding="utf-8")
             try:
                 path.chmod(0o600)   # 产物含明文节点凭据
             except OSError:
                 pass
-        results[target["name"]] = {
+        results[artifact_name] = {
             "ok": not errors,
             "engine": target["engine"],
             "platform": target["platform"],
+            **({"device": device["name"]} if device else {}),
+            "target": target["name"],
+            **({"variant": variant["name"]} if variant and vid != 0 else {}),
             "errors": errors,
             "warnings": warnings,
             "sha256": security.sha256_text(text) if text else "",
             "size": len(text.encode()),
             "verification": verification,
+            # 必须与平台产物一样写出来：自动构建发布的闸门据此判断
+            # Mihomo 目标到底做没做核心校验，缺字段会被误判成"没校验"。
             "core_checked": core_checked,
         }
-    # 设备专属产物：同一引擎平台下，个别设备有专属策略组 / 规则时单独出一份。
-    # 引擎平台 = 引擎 + 平台，个性化落在设备上，所以产物也要分设备。
-    scoped = set()
-    for item in list(snapshot.get("rules", [])) + list(snapshot.get("groups", [])):
-        scoped.update(item.get("devices") or [])
-    if scoped:
-        target_by_id = {int(t["id"]): t for t in snapshot["targets"]}
-        for device in snapshot.get("devices", []):
-            if device["name"] not in scoped:
-                continue
-            target = target_by_id.get(int(device["target_id"]))
-            if not target:
-                continue
-            errors: list[str] = []
-            warnings = list(policy_warnings)
-            text = ""
-            verification = "未通过"
-            core_checked = False
-            try:
-                text = render.render_target(snapshot, target, warnings, device=device)
-                errors.extend(validate.validate_rendered(text, target["engine"]))
-            except Exception as exc:
-                errors.append(f"渲染失败：{exc}")
-            # Mihomo 目标在核心可用时追加官方配置检查（mihomo -t）
-            if not errors and target["engine"] == "mihomo":
-                checked, core_error = tester.validate_config(text)
-                if checked:
-                    core_checked = True
-                    if core_error:
-                        errors.append(core_error)
-                    else:
-                        verification = "核心校验通过（mihomo -t）"
-            if not errors and not verification.startswith("核心"):
-                # Stash 无官方无头校验工具；核心缺失时 Mihomo 也只有静态校验
-                verification = ("静态通过（未做核心校验）"
-                                if target["engine"] == "mihomo" and not core_checked
-                                else "静态通过")
-            if errors:
-                overall = "failed"
-                verification = "未通过"
-            else:
-                path = artifact_path(build_id, device["name"])
-                path.write_text(text, encoding="utf-8")
-                try:
-                    path.chmod(0o600)
-                except OSError:
-                    pass
-            results[device["name"]] = {
-                "ok": not errors,
-                "engine": target["engine"],
-                "platform": target["platform"],
-                "device": device["name"],
-                "target": target["name"],
-                "errors": errors,
-                "warnings": warnings,
-                "sha256": security.sha256_text(text) if text else "",
-                "size": len(text.encode()),
-                "verification": verification,
-                # 必须与平台产物一样写出来：自动构建发布的闸门据此判断
-                # Mihomo 目标到底做没做核心校验，缺字段会被误判成"没校验"。
-                "core_checked": core_checked,
-            }
     with db.tx() as conn:
         conn.execute(
             "UPDATE builds SET verify_status=?, results=? WHERE id=?",
             (overall, json.dumps(results, ensure_ascii=False), build_id),
         )
         security.audit(conn, operator, "创建构建", "build", build_id,
-                       {"status": overall, "note": note})
+                       {"status": overall, "note": note,
+                        "artifacts": len(results)})
     return build_id, overall
 
 

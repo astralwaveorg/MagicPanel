@@ -3,7 +3,10 @@
     <h2 class="mp-page-title">分流策略</h2>
     <p class="mp-page-desc">
       规则按声明顺序自上而下首次匹配，末条须为 MATCH 兜底。拖动手柄或勾选多条批量移动即可排序（触屏长按可拖）；分页仅重排当前页，调整于下次构建生效。筛选状态下规则不相邻，排序自动暂停。
+      列表只显示所选分流方案里的规则；规则目标在方案内解析。
     </p>
+
+    <VariantBar page="rules" v-model="variantId" @changed="onVariantsChanged" />
 
     <div class="mp-toolbar">
       <div class="left">
@@ -271,7 +274,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
@@ -285,6 +288,7 @@ import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
 import ScopeSelect from '../components/ScopeSelect.vue'
 import ErrorState from '../components/ErrorState.vue'
+import VariantBar from '../components/VariantBar.vue'
 
 // 与后端 config.RULE_TYPES 保持一致（少一种就会导致该类型根本建不出来）
 const ruleTypes = [
@@ -297,6 +301,8 @@ const route = useRoute()
 const router = useRouter()
 const rows = ref([])
 const isMobile = useMobile()
+// 当前分流方案：0 = 默认方案；列表、新建与目标下拉都限定在这个方案里
+const variantId = ref(0)
 const selected = ref([])
 const batchDialog = ref(false)
 const batchSaving = ref(false)
@@ -410,6 +416,7 @@ async function load() {
     const params = new URLSearchParams({
       limit: String(limit.value),
       offset: String((page.value - 1) * limit.value),
+      variant: String(variantId.value),
     })
     const kw = query.value.trim()
     if (kw) params.set('keyword', kw)
@@ -419,7 +426,8 @@ async function load() {
     if (filters.scope) params.set('scope', filters.scope)
     const [paged, gs, rps, targetList, deviceList] = await Promise.all([
       api(`/api/v1/rules/page?${params.toString()}`),
-      api('/api/v1/groups'), api('/api/v1/rule-providers'),
+      api(`/api/v1/groups?variant=${variantId.value}`),
+      api('/api/v1/rule-providers'),
       api('/api/v1/targets'), api('/api/v1/devices'),
     ])
     rows.value = paged.items
@@ -443,6 +451,17 @@ onMounted(async () => {
 })
 onBeforeUnmount(sorter.destroy)
 
+function onVariantsChanged() {
+  page.value = 1
+  load()
+}
+
+// 切换方案即重载列表（方案之间互不可见）
+watch(variantId, () => {
+  page.value = 1
+  load()
+})
+
 // 支持从别处跳过来直接编辑某条规则：/admin/rules?edit=123
 async function openFromQuery() {
   const id = Number(route.query.edit)
@@ -452,6 +471,11 @@ async function openFromQuery() {
   if (!row) {
     ElMessage.warning('这条规则已经不存在了')
     return
+  }
+  // 规则可能不在当前方案里：切到它所在的方案再打开编辑
+  if ((row.variant_id ?? 0) !== variantId.value) {
+    variantId.value = row.variant_id ?? 0
+    await load()
   }
   openEdit(row)
   router.replace({ path: '/admin/rules' })
@@ -477,8 +501,11 @@ async function save() {
     body.targets = collapseIfComplete(body.targets, targets.value.map((t) => t.name))
     body.devices = collapseIfComplete(body.devices, devices.value.map((d) => d.name))
     if (editing.value) {
+      // 编辑时不换方案：variant_id 跟随原规则，后端也拒绝跨方案移动
+      body.variant_id = editing.value.variant_id ?? 0
       await api(`/api/v1/rules/${editing.value.id}`, { method: 'PUT', body })
     } else {
+      body.variant_id = variantId.value
       await api('/api/v1/rules', { method: 'POST', body })
     }
     dialog.value = false

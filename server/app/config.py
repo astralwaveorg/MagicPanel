@@ -80,6 +80,13 @@ PRE_MATCHING_TYPES = {
 }
 # pre-matching 的目标只能是这两个字面量；用策略组会让客户端配置加载失败
 PRE_MATCHING_TARGETS = {"REJECT", "REJECT-DROP"}
+# 分流方案（variants）：0 = 默认方案（迁移播种，is_system 保护）。
+# 方案 N 的组/规则 sort 占 [N*10000, (N+1)*10000) 一段，各方案拖拽排序
+# 互不干扰，也保证默认方案的 sort 值永不被新方案改动（AGENTS 约束 27/28）。
+DEFAULT_VARIANT_ID = 0
+VARIANT_SORT_STRIDE = 10000
+# 方案名会拼进产物文件名（{target}@方案.yaml），禁文件名不安全字符
+VARIANT_NAME_FORBIDDEN = set('@/\\:*?"<>|')
 TOKEN_PREFIX = "mp_"
 DEFAULT_UA = "Stash"
 FETCH_MAX_BYTES = 10 * 1024 * 1024

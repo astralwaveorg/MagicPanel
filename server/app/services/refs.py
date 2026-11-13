@@ -12,10 +12,16 @@ import urllib.parse
 from .. import db
 
 
-def _groups(conn) -> list:
+def _groups(conn, variant_id: int | None = None) -> list:
+    """策略组列表；variant_id 为 None 时跨全部方案（来源/节点删除用）。"""
+    if variant_id is None:
+        return db.all_(
+            conn, "SELECT id, variant_id, name, type, proxies, use_sources, "
+                  "local_nodes FROM proxy_groups ORDER BY name")
     return db.all_(
-        conn, "SELECT id, name, type, proxies, use_sources, local_nodes "
-              "FROM proxy_groups ORDER BY name")
+        conn, "SELECT id, variant_id, name, type, proxies, use_sources, "
+              "local_nodes FROM proxy_groups WHERE variant_id=? ORDER BY name",
+        (variant_id,))
 
 
 def source_refs(conn, name: str) -> list[dict]:
@@ -124,24 +130,32 @@ def detach_rule_provider(conn, name: str) -> list[dict]:
 
 # ---- 策略组 ----
 
-def group_members(conn, name: str) -> list[dict]:
-    """把该策略组当作成员的其它策略组。"""
+def group_members(conn, name: str, variant_id: int | None = None) -> list[dict]:
+    """把该策略组当作成员的其它策略组（方案内）。"""
     out = []
-    for g in _groups(conn):
+    for g in _groups(conn, variant_id):
         if name in json.loads(g["proxies"] or "[]"):
             out.append({"id": g["id"], "name": g["name"], "type": "策略组",
                         "group_type": g["type"]})
     return out
 
 
-def rules_targeting(conn, name: str) -> list[dict]:
-    """指向该策略组的分流规则。"""
-    rows = db.all_(
-        conn,
-        "SELECT id, type, value, target, enabled FROM rules WHERE target=? "
-        "ORDER BY sort, id",
-        (name,),
-    )
+def rules_targeting(conn, name: str, variant_id: int | None = None) -> list[dict]:
+    """指向该策略组的分流规则（方案内）。"""
+    if variant_id is None:
+        rows = db.all_(
+            conn,
+            "SELECT id, type, value, target, enabled FROM rules WHERE target=? "
+            "ORDER BY sort, id",
+            (name,),
+        )
+    else:
+        rows = db.all_(
+            conn,
+            "SELECT id, type, value, target, enabled FROM rules WHERE target=? "
+            "AND variant_id=? ORDER BY sort, id",
+            (name, variant_id),
+        )
     return [
         {"id": r["id"], "enabled": bool(r["enabled"]), "type": r["type"],
          "value": r["value"]}
@@ -149,14 +163,15 @@ def rules_targeting(conn, name: str) -> list[dict]:
     ]
 
 
-def detach_group(conn, name: str) -> tuple[list[str], list[dict], list[str]]:
-    """解绑策略组：其它组里的成员引用摘掉，指向它的分流规则删掉。
+def detach_group(conn, name: str, variant_id: int | None = None
+                 ) -> tuple[list[str], list[dict], list[str]]:
+    """解绑策略组：同方案其它组里的成员引用摘掉，指向它的分流规则删掉。
 
     返回 (被改动的策略组名, 被删除的规则, 警告文案)。
     """
     changed: list[str] = []
     warnings: list[str] = []
-    for g in _groups(conn):
+    for g in _groups(conn, variant_id):
         proxies = json.loads(g["proxies"] or "[]")
         if name not in proxies:
             continue
@@ -169,7 +184,7 @@ def detach_group(conn, name: str) -> tuple[list[str], list[dict], list[str]]:
         warnings.extend(_warnings(
             g, json.loads(g["use_sources"] or "[]"),
             json.loads(g["local_nodes"] or "[]"), proxies=rest))
-    removed = rules_targeting(conn, name)
+    removed = rules_targeting(conn, name, variant_id)
     for r in removed:
         conn.execute("DELETE FROM rules WHERE id=?", (r["id"],))
     return changed, removed, warnings

@@ -59,6 +59,13 @@ BOOL_KEYS = ("allow-lan", "ipv6")
 PANEL_DIRECT_KEY = "_panel_direct_rule"
 DIRECT_DOMAINS_KEY = "_direct_domains"      # 个人直连域名 → 置顶 DOMAIN-SUFFIX 规则
 FAKE_IP_FILTER_KEY = "_fake_ip_filter"      # Fake-IP 过滤域名 → dns.fake-ip-filter
+# 「指到家里/内网」的域名 → dns.nameserver-policy 用 system 解析。
+# 这些域名的服务器就在家里：路由器上有分流 DNS（域名 → NAS 内网地址）。
+# 代理接管 DNS 后如果用国内 DoH 解析，拿到的是家宽公网 IP——
+# 局域网设备访问自己的公网 IP 会被 NAT 回环挡住（2026-11-13 实证：
+# homehub.stream / magichub.top 内网打不开、关代理立刻恢复）。
+# 用 system 解析后：内网拿到 NAS 内网地址直达，外网拿到公网 IP 正常回家。
+SYSTEM_DNS_KEY = "_system_dns_domains"
 
 # ---- 引擎默认配置（按官方文档补全）----
 #
@@ -206,11 +213,25 @@ _OVERSEAS_SENSITIVE = [
 # 策略引用（rule-set: 键），删了它们策略就悬空**——改名或删除前先改这里。
 _OVERSEAS_DIRECT_SETS = ["mirror-accelerate", "pt", "trackers"]
 
+# 「指到家里」的域名：system 解析（见 SYSTEM_DNS_KEY 的说明）。
+# 判断标准：系统 DNS（路由器分流 DNS）与公网 DoH 的答案不一致——
+#   magichub.top：系统 → 10.0.1.2（NAS 内网），公网 DoH → 家宽公网 IP；
+#   homehub.stream：同上。
+# 与 `_direct_domains` / `_fake_ip_filter` 是三件套：直连规则、Fake-IP
+# 排除、system 解析——加域名时三份清单一起改。
+_HOME_SYSTEM_DOMAINS = ["magichub.top", "homehub.stream"]
+
 
 def _dns_policy(foreign: list) -> dict:
-    """nameserver-policy：内网走 system，海外敏感域走境外 DoH（经代理出口）。"""
+    """nameserver-policy：内网走 system，海外敏感域走境外 DoH（经代理出口）。
+
+    「指到家里」的域名同样用 system：答案来自路由器分流 DNS，
+    内网场景直达 NAS，避开家宽 NAT 回环。
+    """
     p = {"+.lan": "system", "+.local": "system", "+.home.arpa": "system",
          "+.ts.net": "system", "localhost": "system"}
+    for d in _HOME_SYSTEM_DOMAINS:
+        p[f"+.{d}"] = "system"
     for k in _OVERSEAS_SENSITIVE:
         p[k] = list(foreign)
     for r in _OVERSEAS_DIRECT_SETS:
@@ -266,6 +287,7 @@ STASH_OFFICIAL = {
     "http": deepcopy(STASH_HTTP),
     DIRECT_DOMAINS_KEY: list(_PERSONAL_DIRECT_DOMAINS),
     FAKE_IP_FILTER_KEY: list(_PERSONAL_FAKE_IP_FILTER),
+    SYSTEM_DNS_KEY: list(_HOME_SYSTEM_DOMAINS),
 }
 
 # Mihomo：DNS 由内核接管，需要显式 enable；端口与 profile 由内核读取
@@ -313,6 +335,7 @@ MIHOMO_OFFICIAL = {
         # 这里不再重复一份
     },
     DIRECT_DOMAINS_KEY: list(_PERSONAL_DIRECT_DOMAINS),
+    SYSTEM_DNS_KEY: list(_HOME_SYSTEM_DOMAINS),
     # mihomo 的 blacklist 模式不支持 GEOSITE 语法（见上），剔除该条目
     FAKE_IP_FILTER_KEY: [
         x for x in _PERSONAL_FAKE_IP_FILTER if x != "geosite:private"
@@ -559,6 +582,7 @@ def validate_doc(doc: dict, device_scope: bool = False,
     if PANEL_DIRECT_KEY in doc and not isinstance(doc[PANEL_DIRECT_KEY], bool):
         raise ValueError("面板域名强制直连开关必须是布尔值")
     for key, label in ((DIRECT_DOMAINS_KEY, "个人直连域名"),
+                       (SYSTEM_DNS_KEY, "system 解析域名（指到家里的域）"),
                        (FAKE_IP_FILTER_KEY, "Fake-IP 过滤域名")):
         if key in doc:
             value = doc[key]
@@ -701,6 +725,9 @@ SCHEMA = [
     _field(DIRECT_DOMAINS_KEY, "个人直连域名（每行一个）", "list",
            group="personal", engines=["stash", "mihomo"],
            placeholder="例如：example.com"),
+    _field(SYSTEM_DNS_KEY, "system 解析域名（每行一个，指到家里/内网的域）",
+           "list", group="personal", engines=["stash", "mihomo"],
+           placeholder="例如：homehub.stream"),
     _field(FAKE_IP_FILTER_KEY, "Fake-IP 过滤域名（每行一个）", "list",
            group="personal", engines=["stash", "mihomo"],
            placeholder="例如：+.lan 或 geosite:private"),

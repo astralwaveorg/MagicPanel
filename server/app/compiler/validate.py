@@ -77,10 +77,15 @@ def _fakeip_order_issues(rules: list[dict], behaviors: dict[str, str]) -> list[s
     return issues
 
 
-def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
-    errors: list[str] = []
-    warnings: list[str] = []
+def validate_policy(snapshot: dict) -> dict[int, tuple[list[str], list[str]]]:
+    """按分流方案逐套校验：组引用、规则目标、兜底、顺序不变量都在方案内成立。
 
+    只校验启用的方案（停用方案不进构建，报错只会造成困扰；
+    重新启用时构建自然会再校验一遍）。
+
+    返回 `{方案id: (errors, warnings)}`：方案之间互不阻塞，
+    一个方案的数据坏了不能连累其它方案的产物（默认方案优先保住）。
+    """
     sources = {s["name"] for s in snapshot["sources"] if s.get("enabled")}
     providers = {r["name"] for r in snapshot["rule_providers"] if r.get("enabled")}
     local_nodes = {
@@ -90,23 +95,50 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
     local_display = local_node_service.display_index(local_nodes.values())
     local_display_all = local_node_service.display_index(
         local_nodes.values(), enabled_only=False)
-    groups = snapshot["groups"]
+    behaviors = {r["name"]: r.get("behavior", "domain")
+                 for r in snapshot["rule_providers"] if r.get("enabled")}
+
+    variants = [v for v in snapshot.get("variants", []) if v.get("enabled", True)]
+    if not variants:
+        variants = [{"id": 0, "name": "默认"}]
+    results: dict[int, tuple[list[str], list[str]]] = {}
+    for variant in variants:
+        vid = int(variant.get("id", 0))
+        label = "" if vid == 0 else f"「方案{variant.get('name', vid)}」"
+        groups = [g for g in snapshot["groups"] if g.get("variant_id", 0) == vid]
+        rules = [r for r in snapshot["rules"] if r.get("variant_id", 0) == vid]
+        errors: list[str] = []
+        warnings: list[str] = []
+        _validate_one_variant(
+            label, groups, rules, sources, providers, local_nodes,
+            local_display, local_display_all, behaviors, errors, warnings)
+        results[vid] = (errors, warnings)
+    return results
+
+
+def _validate_one_variant(
+        label: str, groups: list, rules: list,
+        sources: set[str], providers: set[str],
+        local_nodes: dict, local_display: dict, local_display_all: dict,
+        behaviors: dict[str, str],
+        errors: list[str], warnings: list[str]) -> None:
+    """校验单个方案的组与规则（报错带方案前缀）。"""
     group_names = [g["name"] for g in groups]
     group_set = set(group_names)
 
     if len(group_names) != len(group_set):
-        errors.append("策略组名称重复")
+        errors.append(f"{label}策略组名称重复")
 
     # 策略组引用与环路
     edges: dict[str, list[str]] = {}
     for g in groups:
         if g["type"] not in config.GROUP_TYPES:
-            errors.append(f"策略组“{g['name']}”类型不支持：{g['type']}")
+            errors.append(f"{label}策略组“{g['name']}”类型不支持：{g['type']}")
         if g.get("filter"):
             try:
                 re.compile(g["filter"])
             except re.error as exc:
-                errors.append(f"策略组“{g['name']}”过滤正则无效：{exc}")
+                errors.append(f"{label}策略组“{g['name']}”过滤正则无效：{exc}")
         refs = []
         for p in g.get("proxies") or []:
             if p in config.BUILTIN_TARGETS or p == config.GUARD_PROXY:
@@ -118,26 +150,26 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
                 # 判定靠 display_name() 的权威索引，不在这里复刻名字格式。
                 if "*" in (g.get("devices") or []):
                     warnings.append(
-                        f"策略组“{g['name']}”适用于所有设备，成员里的本地节点"
+                        f"{label}策略组“{g['name']}”适用于所有设备，成员里的本地节点"
                         f"“{p}”会连同其密钥一起下发给全部设备")
             elif p in local_display_all:
                 errors.append(
-                    f"策略组“{g['name']}”的成员“{p}”是已停用的本地节点，不会进入产物")
+                    f"{label}策略组“{g['name']}”的成员“{p}”是已停用的本地节点，不会进入产物")
             else:
-                errors.append(f"策略组“{g['name']}”引用了不存在的策略组“{p}”")
+                errors.append(f"{label}策略组“{g['name']}”引用了不存在的策略组“{p}”")
         for u in g.get("use_sources") or []:
             if u == config.ALL_SCOPE:
                 continue          # 「包含所有」由渲染时展开，不做具体校验
             if u not in sources:
-                errors.append(f"策略组“{g['name']}”引用了不可用节点来源“{u}”")
+                errors.append(f"{label}策略组“{g['name']}”引用了不可用节点来源“{u}”")
         enabled_local: list[int] = []
         for node_id in dict.fromkeys(g.get("local_nodes") or []):
             node = local_nodes.get(node_id)
             if not node:
-                errors.append(f"策略组“{g['name']}”引用了不存在的本地节点 #{node_id}")
+                errors.append(f"{label}策略组“{g['name']}”引用了不存在的本地节点 #{node_id}")
             elif not node.get("enabled"):
                 warnings.append(
-                    f"策略组“{g['name']}”引用了已停用的本地节点“{node['name']}”")
+                    f"{label}策略组“{g['name']}”引用了已停用的本地节点“{node['name']}”")
             else:
                 enabled_local.append(node_id)
         # "包含所有"要按实际能取到的来源算：没有任何来源时它等于空
@@ -145,9 +177,9 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
         if config.ALL_SCOPE in (g.get("use_sources") or []):
             uses = list(sources)
         if not (g.get("proxies") or uses or enabled_local):
-            errors.append(f"策略组“{g['name']}”为空：既无成员也无节点来源")
+            errors.append(f"{label}策略组“{g['name']}”为空：既无成员也无节点来源")
         if g["type"] == "relay" and len(g.get("proxies") or []) + len(enabled_local) < 2:
-            errors.append(f"relay 策略组“{g['name']}”至少需要两个可用成员")
+            errors.append(f"{label}策略组“{g['name']}”至少需要两个可用成员")
         edges[g["name"]] = refs
 
     visiting: set[str] = set()
@@ -158,7 +190,7 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
             return
         if name in visiting:
             cycle = " → ".join(path + [name])
-            errors.append(f"策略组存在循环引用：{cycle}")
+            errors.append(f"{label}策略组存在循环引用：{cycle}")
             return
         visiting.add(name)
         for nxt in edges.get(name, []):
@@ -171,52 +203,58 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
 
     # 分流规则
     # 同一个规则集可能在互斥的引擎平台各挂一条（例如 Stash 侧用 REJECT + pre-matching，
-    # Mihomo 侧用策略组），适用范围不重叠就不算重复。
+    # Mihomo 侧用策略组），适用范围不重叠就不算重复。不同方案的规则互不相干。
     seen: dict[tuple[str, str], list[list[str]]] = {}
     has_final = False
-    for r in snapshot["rules"]:
+    for r in rules:
         if not r.get("enabled", True):
             continue
         rtype = r["type"]
         if rtype not in config.RULE_TYPES:
-            errors.append(f"规则类型不支持：{rtype}（{r.get('value', '')}）")
+            errors.append(f"{label}规则类型不支持：{rtype}（{r.get('value', '')}）")
             continue
         if rtype == "RULE-SET":
             if r["value"] not in providers:
-                errors.append(f"规则引用了不存在的规则来源“{r['value']}”")
+                errors.append(f"{label}规则引用了不存在的规则来源“{r['value']}”")
+            # 约束 23 的例外：cn-ip 是「未列入任何集合的国内域名」的最后直连
+            # 机会，不能带 no-resolve——带了这些域名会被整条跳过、落到
+            # MATCH 走代理（2026-11-13 实证违反过：大陆小站全部被送进代理）。
+            if r["value"] == "cn-ip" and r.get("no_resolve"):
+                errors.append(
+                    f"{label}规则 RULE-SET,cn-ip 不能带 no-resolve"
+                    "（约束 23：它是未收录国内域名的最后直连机会）")
         elif rtype in ("MATCH", "FINAL"):
             has_final = True
         elif not r.get("value"):
-            errors.append(f"规则 {rtype} 缺少匹配值")
+            errors.append(f"{label}规则 {rtype} 缺少匹配值")
         key = (rtype, r["value"])
         scope = r.get("targets") or []
         prev_scopes = seen.setdefault(key, [])
         if any(_scope_overlap(scope, prev) for prev in prev_scopes):
-            warnings.append(f"规则重复：{rtype},{r['value']}")
+            warnings.append(f"{label}规则重复：{rtype},{r['value']}")
         prev_scopes.append(scope)
         target = r["target"]
         if target not in group_set and target not in config.BUILTIN_TARGETS:
-            errors.append(f"规则 {rtype},{r.get('value', '')} 指向不存在的目标“{target}”")
+            errors.append(
+                f"{label}规则 {rtype},{r.get('value', '')} 指向不存在的目标“{target}”")
         # pre-matching 的目标只能是 REJECT / REJECT-DROP 字面量，
         # 用策略组会让客户端配置加载失败（官方原文）。
         if r.get("pre_matching") and target not in config.PRE_MATCHING_TARGETS:
             errors.append(
-                f"规则 {rtype},{r.get('value', '')} 带 pre-matching，"
+                f"{label}规则 {rtype},{r.get('value', '')} 带 pre-matching，"
                 f"目标“{target}”只能是 REJECT / REJECT-DROP，否则客户端加载失败")
         if r.get("no_track") and rtype in ("MATCH", "FINAL"):
             errors.append(
-                f"规则 {rtype},{r.get('value', '')} 是兜底规则，不能加 no-track")
+                f"{label}规则 {rtype},{r.get('value', '')} 是兜底规则，不能加 no-track")
     if not has_final:
-        errors.append("缺少兜底规则：请添加一条 MATCH 规则")
+        errors.append(f"{label}缺少兜底规则：请添加一条 MATCH 规则")
 
     # 约束 33（AGENTS.md）：可能命中 Fake-IP 的 IP 类规则必须排在全部
     # 域名类规则之后——Stash 连接竞速会把内部预解析的 Fake-IP 带进规则
     # 评估，排在前面的 IP 规则会把域名连接误判成私网直连黑洞。
-    behaviors = {r["name"]: r.get("behavior", "domain")
-                 for r in snapshot["rule_providers"] if r.get("enabled")}
-    for bad in _fakeip_order_issues(snapshot["rules"], behaviors):
+    for bad in _fakeip_order_issues(rules, behaviors):
         errors.append(
-            f"IP 类规则“{bad}”排在域名规则之前，可能命中 Fake-IP 段导致直连黑洞"
+            f"{label}IP 类规则“{bad}”排在域名规则之前，可能命中 Fake-IP 段导致直连黑洞"
             f"（约束 33：IP 规则一律放在全部域名规则之后）")
 
     # ---- 约束 21/33 的顺序不变量（构建期强制）----
@@ -234,7 +272,7 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
     _PROXY_FALLBACK_BEFORE_CN = ["aws", "azure", "cloudflare", "cloudflare-ip",
                                  "digitalocean", "vercel", "netlify",
                                  "proxy-bm7", "proxy-domain"]
-    in_order = [r for r in snapshot["rules"] if r.get("enabled", True)]
+    in_order = [r for r in rules if r.get("enabled", True)]
     set_pos: dict[str, int] = {}
     for i, r in enumerate(in_order):
         if r["type"] == "RULE-SET" and r["value"] not in set_pos:
@@ -249,13 +287,13 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
                      != [n for n, _ in sorted(tail, key=lambda x: x[1])]
                      or tail[-1][1] > final_at):
             errors.append(
-                "尾部直连块顺序错误（约束 21 ⑩ / 约束 33：应为 "
+                f"{label}尾部直连块顺序错误（约束 21 ⑩ / 约束 33：应为 "
                 + " → ".join(_TAIL_DIRECT_SETS) + " → MATCH）")
         for child, parent in _CHILD_BEFORE_PARENT:
             c, p = set_pos.get(child), set_pos.get(parent)
             if c is not None and p is not None and c > p:
                 errors.append(
-                    f"规则集合“{child}”排在了父集合“{parent}”之后，"
+                    f"{label}规则集合“{child}”排在了父集合“{parent}”之后，"
                     "国内子域名会被父集合抢先送进代理（约束 21：子集合必须早于父集合）")
         cn_pos = [set_pos.get(n) for n in ("cn", "cn-ip")]
         cn_pos = [p for p in cn_pos if p is not None]
@@ -265,24 +303,22 @@ def validate_policy(snapshot: dict) -> tuple[list[str], list[str]]:
                 i2 = set_pos.get(name)
                 if i2 is not None and i2 > first_cn:
                     errors.append(
-                        f"代理兜底集合“{name}”排在了直连集合“cn/cn-ip”之后，"
+                        f"{label}代理兜底集合“{name}”排在了直连集合“cn/cn-ip”之后，"
                         "云服务商域名会被国内直连抢先命中（约束 21 ⑨⑩）")
 
     # 未使用提示
-    used_groups = {r["target"] for r in snapshot["rules"] if r.get("enabled", True)}
+    used_groups = {r["target"] for r in rules if r.get("enabled", True)}
     for g in groups:
         if g["name"] not in used_groups and not any(
             g["name"] in (x.get("proxies") or []) for x in groups
         ):
-            warnings.append(f"策略组“{g['name']}”未被任何规则或策略组引用")
+            warnings.append(f"{label}策略组“{g['name']}”未被任何规则或策略组引用")
     used_providers = {
-        r["value"] for r in snapshot["rules"]
+        r["value"] for r in rules
         if r.get("enabled", True) and r["type"] == "RULE-SET"
     }
     for name in providers - used_providers:
-        warnings.append(f"规则来源“{name}”已启用但未被规则引用")
-
-    return errors, warnings
+        warnings.append(f"{label}规则来源“{name}”已启用但未被规则引用")
 
 
 def validate_rendered(text: str, engine: str = "") -> list[str]:
@@ -322,6 +358,9 @@ def validate_rendered(text: str, engine: str = "") -> list[str]:
                     f"{len(after)} 条普通规则永远匹配不到，请把兜底规则放到最后"
                 )
 
+    # DNS nameserver-policy 的 rule-set: 引用：渲染器会把「DNS 引用 ∩ 已启用
+    # 集合」写进产物（存在即带上），全新面板还没有这些集合时策略键会悬空——
+    # 这是既有合法状态（约束 31 的三个集合由数据自检提示补建），不拦构建。
 
     allowed = config.ENGINE_RULE_TYPES.get(engine)
     group_names = [g.get("name") for g in (data.get("proxy-groups") or [])

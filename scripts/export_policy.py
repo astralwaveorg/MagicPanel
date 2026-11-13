@@ -24,6 +24,7 @@ from pathlib import Path
 
 TABLES: dict[str, str] = {
     # 表名 -> 排序子句（顺序本身就是策略的一部分）
+    "variants": "ORDER BY id",
     "rules": "ORDER BY sort, id",
     "proxy_groups": "ORDER BY sort, id",
     "rule_providers": "ORDER BY name",
@@ -87,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         payload: dict[str, object] = {
-            "schema": 1,
+            "schema": 2,
             "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "meta": _build_meta(conn),
         }

@@ -115,11 +115,30 @@
                       · 设备：{{ d.display_name }}
                     </template>
                   </p>
+                  <!-- 分流方案选择：这台设备要用哪一套策略组与规则。
+                       只有一个可选方案时不渲染，避免无意义的控件。 -->
+                  <div v-if="deviceVariants(d).length > 1" class="pt-variant-row">
+                    <button
+                      v-for="v in deviceVariants(d)"
+                      :key="v"
+                      class="pt-variant-chip"
+                      :class="{ active: pickOf(d) === v }"
+                      :title="variantTitle(v)"
+                      :aria-pressed="pickOf(d) === v"
+                      @click="setPick(d, v)"
+                    >{{ v === '' ? '默认' : v }}</button>
+                  </div>
+                  <div
+                    v-if="d.subscription_url"
+                    class="pt-card-url"
+                    :title="urlFor(d) + '（点击复制）'"
+                    @click="copy(urlFor(d), 'url-' + d.name)"
+                  >{{ urlFor(d) }}</div>
                   <div class="pt-card-actions">
                     <button
                       class="pt-btn primary"
                       :disabled="!d.subscription_url"
-                      @click="copy(d.subscription_url, 'dev-' + d.name)"
+                      @click="copy(urlFor(d), 'dev-' + d.name)"
                     >{{ copied === 'dev-' + d.name ? '已复制' : '复制地址' }}</button>
                     <a
                       v-if="d.subscription_url"
@@ -318,7 +337,10 @@
       <!-- 配置源码预览 -->
       <div v-if="previewDevice" class="pt-modal" @click.self="closePreview">
         <div class="pt-modal-card pt-preview-card">
-          <p class="pt-modal-title">{{ previewDevice.display_name || previewDevice.name }}</p>
+          <p class="pt-modal-title">
+            {{ previewDevice.display_name || previewDevice.name }}
+            <span v-if="pickOf(previewDevice)" class="pt-tag soft">{{ pickOf(previewDevice) }} 方案</span>
+          </p>
           <p class="pt-preview-meta">
             {{ platformLabel(previewDevice.platform) }} · {{ previewDevice.target_name }}
             <template v-if="previewState === 'loading'"> · 载入中…</template>
@@ -352,7 +374,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { api } from '../api'
@@ -675,23 +697,72 @@ async function copy(text, key) {
 
 function copyRule(r, i) { copy(ruleLine(r), 'rule-' + i) }
 
+// ---- 分流方案选择（按设备记忆）----
+// 每台设备可选「用哪一套策略组与规则」；'' = 默认方案（地址不带参数，
+// 与历史链接完全一致）。方案名单独存一份说明，芯片悬浮时给一句提示。
+const variantPick = reactive({})
+const variantNotes = computed(() =>
+  Object.fromEntries((data.value?.variants || []).map((v) => [v.name, v.note])))
+
+function deviceVariants(d) {
+  // 后端已按当前生效构建算好该设备真正能下载到的方案，默认方案排第一
+  return d.variants || []
+}
+
+function pickOf(d) {
+  return variantPick[d.name] ?? ''
+}
+
+function setPick(d, name) {
+  variantPick[d.name] = name
+}
+
+function isDefaultPick(name) {
+  if (!name) return true
+  const meta = (data.value?.variants || []).find((v) => v.name === name)
+  return meta ? meta.id === 0 : false
+}
+
+function variantTitle(name) {
+  if (isDefaultPick(name)) return '默认方案：与默认订阅地址完全一致'
+  return variantNotes.value[name] || name
+}
+
+// 设备的订阅地址：选了自定义方案就带 ?variant=<方案名>
+function urlFor(d) {
+  if (!d.subscription_url) return ''
+  const pick = pickOf(d)
+  if (isDefaultPick(pick)) return d.subscription_url
+  return `${d.subscription_url}?variant=${encodeURIComponent(pick)}`
+}
+
+// 预览地址是相对路径且已带 ?preview=1，追加方案参数用 &
+function previewUrlFor(d) {
+  if (!d.preview_url) return ''
+  const pick = pickOf(d)
+  if (!pick) return d.preview_url
+  return `${d.preview_url}&variant=${encodeURIComponent(pick)}`
+}
+
 // Stash 与 Mihomo/Clash 均支持 install-config URL Scheme 一键导入
 function installUrl(d) {
   const scheme = d.engine === 'stash' ? 'stash' : 'clash'
-  return `${scheme}://install-config?url=${encodeURIComponent(d.subscription_url)}`
+  return `${scheme}://install-config?url=${encodeURIComponent(urlFor(d))}`
 }
 
 async function showQr(d) {
-  qrDevice.value = d.display_name || d.name
-  qrText.value = d.subscription_url
-  if (qrCache.has(d.subscription_url)) {
-    qrUrl.value = qrCache.get(d.subscription_url)
+  qrDevice.value = (d.display_name || d.name)
+    + (pickOf(d) ? `（${pickOf(d)}）` : '')
+  const url = urlFor(d)
+  qrText.value = url
+  if (qrCache.has(url)) {
+    qrUrl.value = qrCache.get(url)
     return
   }
   try {
-    const url = await QRCode.toDataURL(d.subscription_url, { width: 440, margin: 1 })
-    qrCache.set(d.subscription_url, url)
-    qrUrl.value = url
+    const qr = await QRCode.toDataURL(url, { width: 440, margin: 1 })
+    qrCache.set(url, qr)
+    qrUrl.value = qr
   } catch {
     qrDevice.value = '二维码生成失败'
     qrText.value = ''
@@ -704,7 +775,7 @@ function closeQr() { qrUrl.value = ''; qrText.value = ''; qrDevice.value = '' }
 // 走 ?preview=1 的同一个 feed 地址：内容与客户端下发的完全一致，
 // 但服务端不记这次拉取（人在看 ≠ 客户端在更新），也不加 #SUBSCRIBED 行。
 async function openPreview(d) {
-  const url = d.preview_url || ''
+  const url = previewUrlFor(d)
   if (!url) return
   previewDevice.value = d
   previewText.value = ''
@@ -1131,6 +1202,47 @@ onMounted(async () => {
   overflow: hidden;
 }
 .pt-card-actions { display: flex; gap: 10px; margin-top: 14px; }
+
+/* 分流方案选择芯片：当前选中的高亮，悬浮给说明 */
+.pt-variant-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.pt-variant-chip {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 3px 12px;
+  border-radius: 99px;
+  color: #aab1c8;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.pt-variant-chip:hover { border-color: rgba(255, 255, 255, 0.4); color: #fff; }
+.pt-variant-chip.active {
+  color: #fff;
+  background: #5468f0;
+  border-color: #5468f0;
+}
+/* 订阅地址一行预览：点击即复制，让"我复制了什么"看得见 */
+.pt-card-url {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #7e93c9;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-top: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.pt-card-url:hover { color: #9db4e8; }
 .pt-btn {
   flex: 1;
   padding: 9px 0;

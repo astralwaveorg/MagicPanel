@@ -12,12 +12,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 
 def _snapshot(sources=None, rule_providers=None):
+    # 来源 / 集合按引用进产物：补一个 PROXY 组，来源挂在 use、集合挂在规则上
+    groups = [{
+        "name": "PROXY", "type": "select", "hidden": False, "filter": "",
+        "use_sources": [s["name"] for s in (sources or [])],
+        "local_nodes": [], "proxies": ["DIRECT"], "targets": ["*"], "devices": ["*"],
+        "interval": 600, "timeout": 8000, "tolerance": 100, "lazy": True, "strategy": "",
+    }]
+    rules = [{"type": "MATCH", "value": "", "target": "PROXY", "enabled": True,
+              "targets": ["*"], "devices": ["*"]}]
+    for rp in rule_providers or []:
+        rules.insert(0, {"type": "RULE-SET", "value": rp["name"], "target": "PROXY",
+                         "enabled": True, "targets": ["*"], "devices": ["*"]})
     return {
         "sources": sources or [],
-        "groups": [],
+        "groups": groups,
         "rule_providers": rule_providers or [],
-        "rules": [{"type": "MATCH", "value": "", "target": "PROXY", "enabled": True,
-                   "targets": ["*"], "devices": ["*"]}],
+        "rules": rules,
         "snippets": [],
     }
 

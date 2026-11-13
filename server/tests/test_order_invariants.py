@@ -49,7 +49,7 @@ def _compliant_rules():
 
 
 def test_compliant_order_passes():
-    errors, _ = validate.validate_policy(_snapshot(_compliant_rules()))
+    errors, _ = validate.validate_policy(_snapshot(_compliant_rules()))[0]
     assert not [e for e in errors if "约束 21" in e or "约束 33" in e], errors
     # AND 逻辑规则在通用白名单里，不再报"规则类型不支持"
     assert not [e for e in errors if "规则类型不支持" in e], errors
@@ -60,7 +60,7 @@ def test_child_after_parent_is_build_error():
         _rset("games"), _rset("games-cn"),          # 父集合跑到了子集合前面
         {"type": "MATCH", "value": "", "target": "DIRECT", **_ALL},
     ]
-    errors, _ = validate.validate_policy(_snapshot(rules))
+    errors, _ = validate.validate_policy(_snapshot(rules))[0]
     assert any("games-cn" in e and "games" in e and "父集合" in e for e in errors), errors
 
 
@@ -69,7 +69,7 @@ def test_tail_block_disorder_is_build_error():
         _rset("cn-ip"), _rset("cn"),                # 顺序颠倒
         {"type": "MATCH", "value": "", "target": "DIRECT", **_ALL},
     ]
-    errors, _ = validate.validate_policy(_snapshot(rules))
+    errors, _ = validate.validate_policy(_snapshot(rules))[0]
     assert any("尾部直连块顺序错误" in e for e in errors), errors
 
 
@@ -79,7 +79,7 @@ def test_rule_after_match_left_to_renderer():
         {"type": "MATCH", "value": "", "target": "DIRECT", **_ALL},
         _rset("cn"),                                # 排到兜底后面
     ]
-    errors, _ = validate.validate_policy(_snapshot(rules))
+    errors, _ = validate.validate_policy(_snapshot(rules))[0]
     assert not [e for e in errors if "兜底规则之后" in e], errors
     # 但尾部直连块的不变量仍然生效（cn 在 MATCH 之后 = 尾块顺序被破坏）
     assert any("尾部直连块顺序错误" in e for e in errors), errors
@@ -91,5 +91,5 @@ def test_cloud_fallback_after_cn_is_build_error():
         _rset("cn-ip"),
         {"type": "MATCH", "value": "", "target": "DIRECT", **_ALL},
     ]
-    errors, _ = validate.validate_policy(_snapshot(rules))
+    errors, _ = validate.validate_policy(_snapshot(rules))[0]
     assert any("aws" in e and "cn/cn-ip" in e for e in errors), errors

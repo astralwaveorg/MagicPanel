@@ -94,13 +94,17 @@ def _device_build(conn, device):
 
 
 @router.api_route("/{token}/config.yaml", methods=["GET", "HEAD"])
-def device_config(token: str, request: Request, preview: bool = False):
+def device_config(token: str, request: Request, preview: bool = False,
+                  variant: str = ""):
     # 预览模式（?preview=1）：给门户的「看配置源码」用。
     # 与正常下发**内容一致**，但三件事不同：
     #   1. 不记拉取——预览是人在看，不是客户端在更新，不能污染「配置时效」；
     #   2. 不加 #SUBSCRIBED——那是给客户端的更新提示行，不是配置内容；
     #   3. Content-Disposition 用 inline——新标签页打开时直接显示文本，
     #      而不是触发下载。
+    # ?variant=<方案名>：选择分流方案。方案产物是同一构建里的另一份文件
+    # （{device}@方案.yaml / {target}@方案.yaml），下发逻辑与默认方案完全一致。
+    # 不带参数 = 默认方案 = 历史路径，老订阅链接不受任何影响。
     # read 用只读连接：设备拉取是高频请求，不能每次都抢 SQLite 的写锁
     with db.connect() as conn:
         device = _resolve_device(conn, token)
@@ -110,12 +114,26 @@ def device_config(token: str, request: Request, preview: bool = False):
         if not build or not target:
             return Response("no release", status_code=503)
         # 设备有专属策略组 / 规则时，构建会单独产出一份设备专属产物；
-        # 没有就用该引擎平台的共享产物。
-        path = artifact_file(build["id"], device["name"])
+        # 没有就用该引擎平台的共享产物。方案产物同理：先找设备专属的，
+        # 没有再找引擎平台的共享方案产物。
+        artifact = device["name"]
+        if variant:
+            row = db.one(conn, "SELECT name FROM variants WHERE name=?", (variant,))
+            if not row:
+                return Response(f"variant not found: {variant}", status_code=404)
+            artifact += f"@{row['name']}"
+        path = artifact_file(build["id"], artifact)
+        if not path.exists() and variant:
+            path = artifact_file(build["id"], f"{target['name']}@{row['name']}")
         if not path.exists():
-            path = artifact_file(build["id"], target["name"])
-        if not path.exists():
-            return Response("artifact missing", status_code=503)
+            if not variant:
+                path = artifact_file(build["id"], target["name"])
+            if not path.exists():
+                if variant:
+                    return Response(
+                        f"当前版本没有方案“{variant}”的产物，请先在后台构建发布",
+                        status_code=404)
+                return Response("artifact missing", status_code=503)
         feed_base = f"{_base_url(request, conn)}/feed/{token}"
         raw = path.read_text(encoding="utf-8")
         # 设备专属配置：叠加在该设备目标产物之上（结构键受保护）

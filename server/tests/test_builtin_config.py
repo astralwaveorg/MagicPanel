@@ -134,3 +134,66 @@ def test_apply_on_builtin_scope_stores_only_the_diff(client):
     saved = client.get("/api/v1/base-config?engine=stash").json()
     assert list(saved["overlay"].keys()) == ["mode"], "只应保存与默认值不同的差异"
     assert saved["effective"]["mode"] == doc["mode"]
+
+
+def test_home_system_domains_are_built_in():
+    """「指到家里」的域名用 system 解析（约束 38 同源问题的面板侧修复）。
+
+    2026-11-13 实证：homehub.stream / magichub.top 指向家里 NAS，
+    路由器分流 DNS 给内网地址、公网 DoH 给家宽公网 IP——代理接管 DNS
+    后从内网访问自己的公网 IP 会被 NAT 回环挡住（关代理立刻恢复）。
+    引擎默认配置的 nameserver-policy 必须带 system 解析。
+    """
+    from app.services import base_config as bc
+    for engine in ("stash", "mihomo"):
+        doc = bc.default_doc(engine)
+        policy = (doc.get("dns") or {}).get("nameserver-policy") or {}
+        for domain in bc._HOME_SYSTEM_DOMAINS:
+            assert policy.get(f"+.{domain}") == "system", (engine, domain)
+        assert doc.get(bc.SYSTEM_DNS_KEY) == list(bc._HOME_SYSTEM_DOMAINS)
+
+
+def test_render_merges_system_dns_domains():
+    """渲染把伪键里的 system 解析域合成进 nameserver-policy（追加不覆盖）。"""
+    import yaml
+    from app.compiler import render
+    snap = {
+        "sources": [], "rule_providers": [], "local_nodes": [],
+        "groups": [{"name": "PROXY", "type": "select", "hidden": False,
+                    "filter": "", "use_sources": [], "local_nodes": [],
+                    "proxies": ["DIRECT"], "targets": ["*"], "devices": ["*"],
+                    "interval": 600, "timeout": 8000, "tolerance": 100,
+                    "lazy": True, "strategy": ""}],
+        "rules": [{"type": "MATCH", "value": "", "target": "PROXY",
+                   "enabled": True, "targets": ["*"], "devices": ["*"]}],
+        "snippets": [],
+        "base": {"stash|": {"_system_dns_domains": ["myhome.example",
+                                                    "homehub.stream"]}},
+    }
+    cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
+    policy = cfg["dns"]["nameserver-policy"]
+    assert policy["+.myhome.example"] == "system"
+    assert policy["+.homehub.stream"] == "system"
+    # 基线的海外敏感域策略保留
+    assert policy["+.microsoft.com"]
+
+
+def test_cn_ip_must_not_have_no_resolve():
+    """约束 23：cn-ip 是未收录国内域名的最后直连机会，不能带 no-resolve。"""
+    from app.compiler import validate
+    snap = {
+        "sources": [], "rule_providers": [{"name": "cn-ip", "enabled": True,
+                                           "behavior": "ipcidr"}],
+        "local_nodes": [], "groups": [], "rules": [], "snippets": [],
+    }
+    snap["rules"] = [{"type": "MATCH", "value": "", "target": "DIRECT",
+                      "enabled": True, "targets": ["*"], "devices": ["*"],
+                      "variant_id": 0}]
+    errors, _ = validate.validate_policy(snap)[0]
+    assert not errors
+    snap["rules"].insert(0, {"type": "RULE-SET", "value": "cn-ip",
+                             "target": "DIRECT", "enabled": True,
+                             "no_resolve": True, "targets": ["*"],
+                             "devices": ["*"], "variant_id": 0})
+    errors, _ = validate.validate_policy(snap)[0]
+    assert any("cn-ip" in e and "no-resolve" in e for e in errors), errors

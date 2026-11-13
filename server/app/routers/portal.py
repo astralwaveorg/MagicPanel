@@ -5,6 +5,7 @@ PIN 统一为 4 位数字，只保存散列；验证有简单的失败锁定（�
 """
 import hashlib
 import hmac
+import json
 import secrets
 import re
 import time
@@ -249,6 +250,38 @@ def clear_my_pin(user=CurrentUser):
     return {"ok": True}
 
 
+def _build_ok_artifacts(conn, env: str) -> set[str]:
+    """某个环境当前生效构建里构建成功的产物名集合。"""
+    status = "PRODUCTION" if env == "production" else "TESTING"
+    build = db.one(conn, "SELECT results FROM builds WHERE status=? LIMIT 1", (status,))
+    if not build:
+        return set()
+    try:
+        results = json.loads(build["results"] or "{}")
+    except (TypeError, ValueError):
+        return set()
+    return {key for key, value in results.items()
+            if isinstance(value, dict) and value.get("ok")}
+
+
+def _available_variants(ok_artifacts: set[str], variants: list[dict],
+                        target_name: str, device_name: str) -> list[str]:
+    """该设备当前能下载到的方案：产物真实存在才给选项，避免 404 链接。
+
+    默认方案的产物不带方案后缀；自定义方案产物是 {目标/设备}@方案名.yaml。
+    """
+    out = []
+    for v in variants:
+        if int(v["id"]) == 0:
+            ok = target_name in ok_artifacts or device_name in ok_artifacts
+        else:
+            ok = (f"{target_name}@{v['name']}" in ok_artifacts
+                  or f"{device_name}@{v['name']}" in ok_artifacts)
+        if ok:
+            out.append(v["name"])
+    return out
+
+
 @router.post("/data")
 def portal_data(body: PinBody, request: Request):
     """门户数据：设备订阅链接、客户端资源、导入指引与个人规则。
@@ -263,6 +296,12 @@ def portal_data(body: PinBody, request: Request):
             _check_pin(conn, request, body.pin)
         base = db.get_setting(conn, "base_url", "").rstrip("/") \
             or str(request.base_url).rstrip("/")
+        variants = [
+            {"id": int(r["id"]), "name": r["name"], "note": r["note"]}
+            for r in db.all_(
+                conn, "SELECT id, name, note FROM variants WHERE enabled=1 "
+                      "ORDER BY sort, id")
+        ]
         devices = []
         for r in db.all_(conn, "SELECT * FROM devices ORDER BY id"):
             target = db.one(conn, "SELECT * FROM targets WHERE id=?", (r["target_id"],))
@@ -281,11 +320,16 @@ def portal_data(body: PinBody, request: Request):
                 # 从内网 IP、容器端口还是公网域名打开都能预览；写绝对地址会让
                 # 前两种场景变成跨源请求，被浏览器 CORS 拦掉。
                 "preview_url": "",
+                # 该设备当前能选的分流方案（按生效构建的真实产物计算）
+                "variants": [],
             }
             if r["token_enc"]:
                 token = security.decrypt_text(r["token_enc"])
                 item["subscription_url"] = f"{base}/feed/{token}/config.yaml"
                 item["preview_url"] = f"/feed/{token}/config.yaml?preview=1"
+                item["variants"] = _available_variants(
+                    _build_ok_artifacts(conn, r["env"]), variants,
+                    item["target_name"], r["name"])
             else:
                 item["note"] = (item["note"] + "；" if item["note"] else "") \
                     + "缺少可展示的令牌，请在后台轮换一次"
@@ -296,7 +340,7 @@ def portal_data(body: PinBody, request: Request):
             for r in db.all_(
                 conn,
                 "SELECT * FROM rules WHERE enabled=1 AND type!='RULE-SET' "
-                "ORDER BY sort, id",
+                "AND variant_id=0 ORDER BY sort, id",
             )
         ]
         # 规则来源仅展示元信息，随配置下发，不展示原始内容
@@ -318,6 +362,7 @@ def portal_data(body: PinBody, request: Request):
     return {
         "base_url": base,
         "devices": devices,
+        "variants": variants,
         "clients": CLIENT_RESOURCES,
         "guides": IMPORT_GUIDES,
         "rules": rules,

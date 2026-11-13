@@ -93,9 +93,23 @@ CREATE TABLE IF NOT EXISTS local_nodes (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS proxy_groups (
+CREATE TABLE IF NOT EXISTS variants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  is_system INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- 分流方案维度：variant_id 0 = 默认方案（迁移播种，is_system 保护）。
+-- 同名组允许存在于不同方案（UNIQUE 落在 (variant_id, name) 上），
+-- 同一方案内组名仍然唯一。旧库由 _migrate_variants 整表重建。
+CREATE TABLE IF NOT EXISTS proxy_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  variant_id INTEGER NOT NULL DEFAULT 0,
+  name TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'select',
   sort INTEGER NOT NULL DEFAULT 0,
   hidden INTEGER NOT NULL DEFAULT 0,
@@ -110,10 +124,12 @@ CREATE TABLE IF NOT EXISTS proxy_groups (
   lazy INTEGER NOT NULL DEFAULT 1,
   strategy TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  UNIQUE(variant_id, name)
 );
 CREATE TABLE IF NOT EXISTS rules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  variant_id INTEGER NOT NULL DEFAULT 0,
   sort INTEGER NOT NULL DEFAULT 0,
   type TEXT NOT NULL,
   value TEXT NOT NULL DEFAULT '',
@@ -403,6 +419,64 @@ def init_db() -> None:
         _migrate_device_base_config_keys(conn)
         _migrate_device_config_pull(conn)
         _migrate_source_headers(conn)
+        _migrate_variants(conn)
+
+
+def _migrate_variants(conn) -> None:
+    """分流方案维度：variants 表 + 组/规则的 variant_id。
+
+    - 播种「默认」方案（id=0，系统保护，禁删禁改名）；
+    - rules 直接补列；
+    - proxy_groups 的 UNIQUE(name) 放宽为 UNIQUE(variant_id, name)：
+      不同方案允许同名组（两个方案各有一套「🇯🇵日本」是合法的），
+      同一方案内组名仍然唯一。SQLite 改不了表约束，只能整表重建；
+      重建放在全部 _ensure_column 之后，旧表此刻已补齐所有列，
+      按列名拷贝数据，缺的列走新表默认值。
+    """
+    _ensure_column(conn, "rules", "variant_id",
+                   "variant_id INTEGER NOT NULL DEFAULT 0")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(proxy_groups)")}
+    if "variant_id" not in cols:
+        old_cols = [r["name"] for r in conn.execute("PRAGMA table_info(proxy_groups)")]
+        conn.execute("DROP TABLE IF EXISTS proxy_groups_variants_new")
+        conn.execute("""CREATE TABLE proxy_groups_variants_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          variant_id INTEGER NOT NULL DEFAULT 0,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'select',
+          sort INTEGER NOT NULL DEFAULT 0,
+          hidden INTEGER NOT NULL DEFAULT 0,
+          filter TEXT NOT NULL DEFAULT '',
+          use_sources TEXT NOT NULL DEFAULT '[]',
+          local_nodes TEXT NOT NULL DEFAULT '[]',
+          proxies TEXT NOT NULL DEFAULT '[]',
+          url TEXT NOT NULL DEFAULT 'https://www.gstatic.com/generate_204',
+          interval INTEGER NOT NULL DEFAULT 600,
+          timeout INTEGER NOT NULL DEFAULT 8000,
+          tolerance INTEGER NOT NULL DEFAULT 150,
+          lazy INTEGER NOT NULL DEFAULT 1,
+          strategy TEXT NOT NULL DEFAULT '',
+          local_first INTEGER NOT NULL DEFAULT 0,
+          targets TEXT NOT NULL DEFAULT '[]',
+          devices TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(variant_id, name))""")
+        new_cols = {r["name"] for r in
+                    conn.execute("PRAGMA table_info(proxy_groups_variants_new)")}
+        shared = [c for c in old_cols if c in new_cols]
+        names = ", ".join(shared)
+        conn.execute(f"INSERT INTO proxy_groups_variants_new({names}) "
+                     f"SELECT {names} FROM proxy_groups")
+        conn.execute("DROP TABLE proxy_groups")
+        conn.execute("ALTER TABLE proxy_groups_variants_new RENAME TO proxy_groups")
+    # 播种默认方案：显式 id=0，与 variant_id 的默认值对应。幂等。
+    conn.execute(
+        "INSERT OR IGNORE INTO variants(id, name, note, enabled, is_system, sort, "
+        "created_at, updated_at) VALUES(0, '默认', '', 1, 1, 0, ?, ?)",
+        (now(), now()))
+    conn.execute("INSERT OR REPLACE INTO schema_version(key, value) "
+                 "VALUES('variants_v1', ?)", (now(),))
 
 
 def _migrate_release_state_machine(conn) -> None:

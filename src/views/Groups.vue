@@ -3,7 +3,10 @@
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
       列表顺序即产物声明顺序：拖动手柄排序，分页仅重排当前页。地区筛选为空的组由「空组保护」占位，防止客户端隐式改为直连。
+      列表只显示所选分流方案里的组；每个方案是一套完整的组与规则，构建时各出一套产物。
     </p>
+
+    <VariantBar page="groups" v-model="variantId" @changed="onVariantsChanged" />
 
     <div class="mp-toolbar">
       <div class="left">
@@ -370,7 +373,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { confirmBox } from '../confirm'
@@ -385,9 +388,12 @@ import MultiSelectClear from '../components/MultiSelectClear.vue'
 import ScopeSelect from '../components/ScopeSelect.vue'
 import ErrorState from '../components/ErrorState.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
+import VariantBar from '../components/VariantBar.vue'
 
 const rows = ref([])
 const isMobile = useMobile()
+// 当前分流方案：0 = 默认方案；列表、新建、批量都限定在这个方案里
+const variantId = ref(0)
 const selected = ref([])
 const refDialog = reactive({
   visible: false, title: '', message: '', references: [], warnings: [],
@@ -512,6 +518,7 @@ async function load() {
     const params = new URLSearchParams({
       limit: String(limit.value),
       offset: String((page.value - 1) * limit.value),
+      variant: String(variantId.value),
     })
     const kw = query.value.trim()
     if (kw) params.set('keyword', kw)
@@ -541,6 +548,17 @@ async function load() {
 }
 onMounted(load)
 
+function onVariantsChanged() {
+  page.value = 1
+  load()
+}
+
+// 切换方案即重载列表（方案之间互不可见）
+watch(variantId, () => {
+  page.value = 1
+  load()
+})
+
 onBeforeUnmount(sorter.destroy)
 
 function openEdit(row) {
@@ -569,8 +587,11 @@ async function save() {
     body.targets = collapseIfComplete(body.targets, targets.value.map((t) => t.name))
     body.devices = collapseIfComplete(body.devices, devices.value.map((d) => d.name))
     if (editing.value) {
+      // 编辑时不换方案：variant_id 跟随原组，后端也拒绝跨方案移动
+      body.variant_id = editing.value.variant_id ?? 0
       await api(`/api/v1/groups/${editing.value.id}`, { method: 'PUT', body })
     } else {
+      body.variant_id = variantId.value
       await api('/api/v1/groups', { method: 'POST', body })
     }
     dialog.value = false

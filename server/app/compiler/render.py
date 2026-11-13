@@ -234,8 +234,12 @@ def applies_to(item: dict, target_name: str, device_name: str | None = None) -> 
 
 def _select_structure(snapshot: dict, target: dict, warnings: list | None,
                       device_name: str | None = None,
-                      local_display: set | None = None) -> tuple[list, list]:
+                      local_display: set | None = None,
+                      variant_id: int = 0) -> tuple[list, list]:
     """按目标过滤策略组与规则，并剔除当前平台必然无效的规则。
+
+    方案维度：只取 `variant_id` 匹配的组与规则（0 = 默认方案）；
+    方案是完整副本，组与规则的引用都在方案内解析。
 
     安全约束：
     1. 兜底规则（MATCH/FINAL）永远保留，其指向的策略组强制保留；
@@ -253,8 +257,10 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
     # 复制一份再改，避免污染快照（同一快照会渲染多个目标）
     groups = [dict(g, proxies=list(g.get("proxies") or []))
               for g in snapshot.get("groups", [])
-              if applies_to(g, target_name, device_name)]
+              if g.get("variant_id", 0) == variant_id
+              and applies_to(g, target_name, device_name)]
     rules = [r for r in snapshot.get("rules", []) if r.get("enabled", True)
+             and r.get("variant_id", 0) == variant_id
              and applies_to(r, target_name, device_name)]
 
     trimmed = [r for r in rules if r["type"] in unsupported]
@@ -273,7 +279,8 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
         if name in group_names or name in config.BUILTIN_TARGETS:
             continue
         original = next((g for g in snapshot.get("groups", [])
-                         if g["name"] == name), None)
+                         if g["name"] == name and g.get("variant_id", 0) == variant_id),
+                        None)
         if original:
             groups.append(dict(original, proxies=list(original.get("proxies") or [])))
             group_names.add(name)
@@ -330,11 +337,13 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
 
 
 def render_target(snapshot: dict, target: dict, warnings: list | None = None,
-                  device: dict | None = None) -> str:
+                  device: dict | None = None,
+                  variant: dict | None = None) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
     传入设备 = 渲染这台设备自己的产物（含只属于它的策略组与规则）。
+    variant 为空 = 默认方案；传入 {"id", "name"} = 渲染该方案的产物。
     """
     engine = target["engine"]
     # ① 基础配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
@@ -358,6 +367,11 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         base.pop(base_config_service.DIRECT_DOMAINS_KEY, None))
     fake_ip_filter = base_config_service.normalize_filter(
         base.pop(base_config_service.FAKE_IP_FILTER_KEY, None))
+    # 「指到家里」的域名用 system 解析：路由器分流 DNS 内网直达 NAS，
+    # 避开家宽 NAT 回环（默认清单固化在源码基线的 nameserver-policy 里，
+    # 这里把用户在伪键里追加的域合成进去）
+    system_dns_domains = base_config_service.normalize_domains(
+        base.pop(base_config_service.SYSTEM_DNS_KEY, None))
     cfg: dict = base_config_service.ordered(base)
 
     # 本地节点跟随本目标实际生效的策略组，避免把其他设备的私有隧道及密钥
@@ -365,9 +379,10 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     # 节点也可以直接作为组成员被引用（用产物标识），这时它同样跟着这个组走。
     local_index = local_node_service.display_index(
         [n for n in snapshot.get("local_nodes", []) if n.get("enabled")])
+    variant_id = int((variant or {}).get("id", 0))
     groups, rules = _select_structure(
         snapshot, target, warnings, (device or {}).get("name"),
-        set(local_index))
+        set(local_index), variant_id)
     used_local = {
         node_id for group in groups for node_id in (group.get("local_nodes") or [])
     }
@@ -380,7 +395,19 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         node["id"]: node for node in snapshot.get("local_nodes", [])
         if node.get("enabled") and node["id"] in used_local
     }
-    sources = [s for s in snapshot["sources"] if s.get("enabled")]
+    # 本方案实际引用的来源：展开每组的 use（含「包含所有」）取并集。
+    # 默认方案所有组 use=["*"] → 全部来源，行为不变；不引用任何来源的方案
+    # （如「自建美日」）产物不含机场节点，也没有 proxy-providers 段。
+    enabled_sources = [s for s in snapshot["sources"] if s.get("enabled")]
+    source_names = [s["name"] for s in enabled_sources]
+    used_sources: set[str] = set()
+    for group in groups:
+        use = list(group.get("use_sources") or [])
+        if config.ALL_SCOPE in use:
+            used_sources.update(source_names)
+        else:
+            used_sources.update(use)
+    sources = [s for s in enabled_sources if s["name"] in used_sources]
     inline_sources = [s for s in sources
                       if s.get("mode") == config.SOURCE_MODE_INLINE]
     provider_sources = [s for s in sources
@@ -438,7 +465,22 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 _group_entry(group, engine, names,
                              [s["name"] for s in sources], inline_names))
 
-    rps = [r for r in snapshot["rule_providers"] if r.get("enabled")]
+    # 本方案引用的规则来源：规则里的 RULE-SET ∪ DNS nameserver-policy 的
+    # rule-set: 引用（约束 31 的三个 DNS 集合因此永不悬空）。
+    # 未被引用的启用集合不再写进产物，客户端不白下载用不到的集合。
+    used_rule_sets = {r["value"] for r in rules if r["type"] == "RULE-SET"}
+    dns_cfg = cfg.get("dns")
+    if isinstance(dns_cfg, dict):
+        ns_policy = dns_cfg.get("nameserver-policy")
+        if isinstance(ns_policy, dict):
+            for key in ns_policy:
+                text = str(key)
+                if text.startswith("rule-set:"):
+                    used_rule_sets.update(
+                        p.strip() for p in text.split(":", 1)[1].split(",")
+                        if p.strip())
+    rps = [r for r in snapshot["rule_providers"]
+           if r.get("enabled") and r["name"] in used_rule_sets]
     if rps:
         cfg["rule-providers"] = {r["name"]: _rule_provider_entry(r) for r in rps}
 
@@ -455,6 +497,21 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     if fake_ip_filter:
         # 个人维护的过滤列表整体替换内置列表
         cfg.setdefault("dns", {})["fake-ip-filter"] = fake_ip_filter
+
+    # 「指到家里」的域名 → system：与基线 nameserver-policy 的清单合并
+    # （追加不覆盖：默认域已在基线里，这里只合成用户新增的）。放在 policy
+    # 最前——system 答案优先于任何通用解析器。
+    if system_dns_domains:
+        dns_cfg = cfg.setdefault("dns", {})
+        policy = dns_cfg.get("nameserver-policy")
+        policy = dict(policy) if isinstance(policy, dict) else {}
+        merged: dict = {}
+        for domain in system_dns_domains:
+            merged[f"+.{domain}"] = "system"
+        for key, value in policy.items():
+            if key not in merged:
+                merged[key] = value
+        dns_cfg["nameserver-policy"] = merged
 
     # 拓展模块按引擎合并，平台扩展最后应用、优先级最高
     for snip in snapshot.get("snippets", []):
