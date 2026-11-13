@@ -118,6 +118,7 @@
                   <!-- 分流方案选择：这台设备要用哪一套策略组与规则。
                        只有一个可选方案时不渲染，避免无意义的控件。 -->
                   <div v-if="deviceVariants(d).length > 1" class="pt-variant-row">
+                    <span class="pt-variant-label">方案</span>
                     <button
                       v-for="v in deviceVariants(d)"
                       :key="v"
@@ -140,6 +141,13 @@
                       :disabled="!d.subscription_url"
                       @click="copy(urlFor(d), 'dev-' + d.name)"
                     >{{ copied === 'dev-' + d.name ? '已复制' : '复制地址' }}</button>
+                    <a
+                      v-if="d.subscription_url"
+                      class="pt-btn"
+                      :href="urlFor(d)"
+                      :download="downloadName(d)"
+                      title="把当前方案的配置文件下载到本地"
+                    >下载</a>
                     <a
                       v-if="d.subscription_url"
                       class="pt-btn"
@@ -736,6 +744,13 @@ function urlFor(d) {
   return `${d.subscription_url}?variant=${encodeURIComponent(pick)}`
 }
 
+// 「下载」保存到本地的文件名：设备名[@方案].yaml
+function downloadName(d) {
+  const pick = pickOf(d)
+  const suffix = isDefaultPick(pick) ? '' : `@${pick}`
+  return `${d.name}${suffix}.yaml`
+}
+
 // 预览地址是相对路径且已带 ?preview=1，追加方案参数用 &
 function previewUrlFor(d) {
   if (!d.preview_url) return ''
@@ -1201,14 +1216,21 @@ onMounted(async () => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.pt-card-actions { display: flex; gap: 10px; margin-top: 14px; }
+.pt-card-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.pt-card-actions .pt-btn { min-width: 82px; }
 
 /* 分流方案选择芯片：当前选中的高亮，悬浮给说明 */
 .pt-variant-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-top: 10px;
+}
+.pt-variant-label {
+  font-size: 12px;
+  color: #79809a;
+  flex: none;
 }
 .pt-variant-chip {
   font-size: 12px;

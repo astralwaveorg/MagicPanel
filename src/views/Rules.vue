@@ -154,6 +154,10 @@
             <el-option value="REJECT" label="REJECT（拒绝）" />
             <el-option value="REJECT-DROP" label="REJECT-DROP（静默丢弃）" />
           </el-select>
+          <div class="mp-form-hint">
+            下拉里列出的就是**本方案**的策略组（与「策略组」页当前所选方案一致）：
+            规则只作用于本方案，跨方案引用会被拒绝；同名组在不同方案里是两个独立的组。
+          </div>
         </el-form-item>
         <el-form-item label="适用引擎平台">
           <ScopeSelect v-model="form.targets" all-label="包含所有引擎平台"

@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-"""配置「自建美日」分流方案：剔除非日美的组与规则，精编组成员与节点池。
+"""配置「自建美日」分流方案：精简策略组 + 改写规则指向，可重复执行。
 
-通过管理 API 操作（有校验、有审计），可重复执行（幂等：已删的跳过，
-成员列表按目标值整体写入）。用法：
+终态结构（2026-11-13 向阳定稿：只有日美两类节点，客户端组列表要简化）：
+
+  可见组（一般设备只有前三个）：
+    🚀 默认代理  select  [🇯🇵日本, 🇺🇸美国]        —— 入口组，MATCH 与兜底代理指向它
+    🇯🇵日本      select  [🇯🇵 日本自动, +日本节点]  —— 低延迟/日本区服务
+    🇺🇸美国      select  [🇺🇸 美国自动, +美国节点]  —— AI/谷歌/风控类服务
+    🏠 路由回家  select  （仅 LVSP 设备可见，不动）
+  隐藏组：
+    🇯🇵 日本自动 / 🇺🇸 美国自动  url-test 自动测速（约束 11/13/14：内层自动 + 外层可见）
+
+其余组（自建优先、谷歌服务、人工智能、开发工具、海外游戏、国际影音、TikTok、
+即时通讯、海外社交、苹果服务、微软服务、跨境电商、加密货币、自动测速、
+日本机房、美国机房、美国NTT落地、港台韩新欧及其自动组）全部删除；
+指向它们的规则改指向 🇯🇵日本 / 🇺🇸美国 / DIRECT。
+
+用法（通过管理 API，有校验有审计）：
 
     python scripts/configure_selfbuilt_variant.py \
         --base https://magichub.top:8443 --username agent --password ***
-
-步骤：
-1. 确保方案存在（不存在则从默认方案复制，use_sources_empty=True）；
-2. 更新保留组的成员列表（剔除港台韩新欧成员、节点池换成日美自建节点）；
-3. 删除 8 条指向被剔除组的规则；
-4. 删除 10 个非日美组（含隐藏自动组）；
-5. 校验终态：23 个组、114 条规则。
 """
 from __future__ import annotations
 
@@ -25,23 +32,25 @@ import urllib.request
 
 VARIANT_NAME = "自建美日"
 
-# 需要删除的非日美组（可见组 + 隐藏自动组）
+# 全部要删除的组（精简 + 原区域锁组）。删除前先改写规则指向与组成员引用。
 DELETE_GROUPS = [
+    # 区域锁组（第一版就删）
     "🇹🇼台湾", "🇹🇼 台湾自动", "🇰🇷韩国", "🇰🇷 韩国自动",
     "🇸🇬 新加坡", "🇸🇬 新加坡自动", "🇭🇰香港", "🇭🇰 香港自动",
     "🌍欧洲", "🌍 欧洲自动",
-]
-# 指向被剔除组的规则（RULE-SET 的集合名）
-DELETE_RULE_SETS = [
-    "myTVSUPER", "JOOX", "Naver", "LineTV", "KKBOX", "TVB", "BBC", "Yandex",
+    # 精简：服务分组并入 日本 / 美国 / DIRECT
+    "🏢 自建优先", "🔍 谷歌服务", "🧠 人工智能", "💻 开发工具",
+    "🎮 海外游戏", "🎞️ 国际影音", "🎵 TikTok", "💬 即时通讯",
+    "👥 海外社交", "🍎 苹果服务", "Ⓜ️ 微软服务", "🛒 跨境电商",
+    "🪙 加密货币", "⚡️ 自动测速",
+    "🇯🇵 日本机房", "🇺🇸 美国机房", "🇺🇸 美国NTT落地",
 ]
 
-# 保留组的成员精编（proxies / local_nodes 整体写入）。
-# 节点 id 在运行时按节点名解析，不写死。
+# 保留组的成员精编（proxies / local_nodes / filter 整体写入）
 LOCAL_FIRST_JP = ["🇯🇵 日本机房 01", "🇯🇵 日本机房 02", "🇯🇵 AWS日本机房"]
 LOCAL_REST_US = ["🇺🇸 美国机房 01", "🇺🇸 美国机房 02"] \
     + [f"🇺🇸 美国NTT {i:02d}" for i in range(1, 11)]
-JP_IDS, US_IDS = [], []          # 运行时填充
+JP_IDS, US_IDS = [], []
 
 
 def jp_us_ids() -> list[int]:
@@ -49,64 +58,61 @@ def jp_us_ids() -> list[int]:
 
 
 GROUP_UPDATES: dict[str, dict] = {
-    "🚀 默认代理": {
-        "proxies": ["🏢 自建优先", "🇺🇸 美国NTT落地", "⚡️ 自动测速",
-                    "🇯🇵 日本机房", "🇺🇸 美国机房", "🇯🇵日本", "🇺🇸美国"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "🏢 自建优先": {"local_nodes": lambda: jp_us_ids()},
-    "🧠 人工智能": {
-        "proxies": ["🇺🇸 美国机房", "🇺🇸 美国自动", "🇯🇵 日本机房", "🇯🇵 日本自动"],
-    },
-    "💻 开发工具": {
-        "proxies": ["🚀 默认代理", "🇺🇸 美国NTT落地", "🇯🇵日本", "🇺🇸美国"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "🎮 海外游戏": {
-        "proxies": ["🏢 自建优先", "🇺🇸 美国NTT落地", "⚡️ 自动测速",
-                    "🇯🇵日本", "🇺🇸美国", "🚀 默认代理"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "🎞️ 国际影音": {
-        "proxies": ["🇯🇵 日本自动", "🇺🇸 美国自动"],
-    },
-    "🎵 TikTok": {
-        "proxies": ["🇯🇵 日本机房", "🇺🇸 美国NTT落地", "🇺🇸 美国机房",
-                    "🇯🇵日本", "🇺🇸美国", "🚀 默认代理"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "💬 即时通讯": {
-        "proxies": ["⚡️ 自动测速", "🇺🇸 美国NTT落地", "🇯🇵日本",
-                    "🇺🇸 美国自动", "🚀 默认代理"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "👥 海外社交": {
-        "proxies": ["🚀 默认代理", "🇺🇸 美国NTT落地", "🇯🇵日本", "🇺🇸美国"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "🍎 苹果服务": {
-        "proxies": ["DIRECT", "🇺🇸 美国NTT落地", "🇺🇸美国", "🇯🇵日本", "🚀 默认代理"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "Ⓜ️ 微软服务": {
-        "proxies": ["🚀 默认代理", "🇺🇸 美国NTT落地", "DIRECT",
-                    "🇯🇵日本", "🇺🇸美国"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "🛒 跨境电商": {
-        "proxies": ["🇺🇸美国", "🇺🇸 美国NTT落地", "🇯🇵日本", "⚡️ 自动测速"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "🪙 加密货币": {
-        "proxies": ["🇺🇸美国", "🇺🇸 美国NTT落地", "🇺🇸 美国机房",
-                    "🇯🇵日本", "🇯🇵 日本机房", "🚀 默认代理"],
-        "local_nodes": lambda: jp_us_ids(),
-    },
-    "⚡️ 自动测速": {"local_nodes": lambda: jp_us_ids()},
-    # AWS日本机房（本地节点 12）此前未进任何组：并入本方案的日本节点池
-    "🇯🇵 日本机房": {"local_nodes": lambda: JP_IDS},
-    "🇯🇵 日本自动": {"local_nodes": lambda: JP_IDS},
+    # 入口组：只有日本 / 美国两个策略，客户端里一眼能懂
+    "🚀 默认代理": {"proxies": ["🇯🇵日本", "🇺🇸美国"], "local_nodes": [],
+                    "filter": "", "use_sources": []},
+    # 地区两层：可见 select 包住隐藏 url-test（约束 11/14），节点池全自建
+    "🇯🇵日本": {"proxies": ["🇯🇵 日本自动"], "local_nodes": lambda: JP_IDS,
+                "filter": "", "use_sources": []},
+    "🇺🇸美国": {"proxies": ["🇺🇸 美国自动"], "local_nodes": lambda: US_IDS,
+                "filter": "", "use_sources": []},
+    "🇯🇵 日本自动": {"local_nodes": lambda: JP_IDS, "filter": "", "use_sources": []},
+    "🇺🇸 美国自动": {"local_nodes": lambda: US_IDS, "filter": "", "use_sources": []},
+    # 🏠 路由回家不动：LVSP 设备专属（组与规则都带设备作用域）
 }
+
+# 规则改指向：被删组的服务按「美国 / 日本 / 直连」三向归位（向阳定稿原则：
+# AI、谷歌等选美国；要低延迟的选日本；国内可达的直连）
+RULE_RETARGET = {
+    # 谷歌系 → 美国
+    "search": "🇺🇸美国", "youtube": "🇺🇸美国", "google": "🇺🇸美国",
+    "magic-google": "🇺🇸美国",
+    # AI → 美国
+    "apple-intelligence": "🇺🇸美国", "openai": "🇺🇸美国",
+    "anthropic": "🇺🇸美国", "category-ai-chat-!cn": "🇺🇸美国",
+    "magic-us": "🇺🇸美国",
+    # 开发工具 → 美国（GitHub / Docker / npm 等服务主力在美国）
+    "github": "🇺🇸美国", "docker": "🇺🇸美国", "npmjs": "🇺🇸美国",
+    "jetbrains": "🇺🇸美国", "stackexchange": "🇺🇸美国",
+    # 游戏 → 日本（低延迟优先）
+    "games": "🇯🇵日本", "magic-game": "🇯🇵日本",
+    # 国际影音 → 日本（低延迟；DMM/Pixiv 等 Japan 原本就是日本）
+    "Twitch": "🇯🇵日本", "LastFM": "🇯🇵日本", "Qobuz": "🇯🇵日本",
+    "PrimeVideo": "🇯🇵日本", "Emby": "🇯🇵日本", "netflix": "🇯🇵日本",
+    "disney": "🇯🇵日本", "spotify": "🇯🇵日本", "media": "🇯🇵日本",
+    "biliintl": "🇯🇵日本",
+    # TikTok → 日本（低延迟）
+    "tiktok": "🇯🇵日本",
+    # 即时通讯 → 美国（Telegram/Discord 等基础设施在美国/欧洲）
+    "telegram": "🇺🇸美国", "telegram-ip": "🇺🇸美国", "Discord": "🇺🇸美国",
+    "Slack": "🇺🇸美国", "Snap": "🇺🇸美国", "Whatsapp": "🇺🇸美国",
+    "KakaoTalk": "🇺🇸美国", "Line": "🇺🇸美国", "Zalo": "🇺🇸美国",
+    "category-communication": "🇺🇸美国", "magic-chat": "🇺🇸美国",
+    # 海外社交 → 美国（Reddit/X 等主力在美国）
+    "Pinterest": "🇺🇸美国", "Reddit": "🇺🇸美国", "social-extra": "🇺🇸美国",
+    "social": "🇺🇸美国", "magic-social": "🇺🇸美国",
+    # 苹果国内可达 → 直连（apple-cn 已在前置直连）
+    "apple": "DIRECT",
+    # 微软国际服务 → 美国
+    "microsoft": "🇺🇸美国", "onedrive": "🇺🇸美国", "magic-microsoft": "🇺🇸美国",
+    # 跨境电商 / 加密货币：账号风控，固定美国出口
+    "Amazon": "🇺🇸美国", "eBay": "🇺🇸美国", "Shopify": "🇺🇸美国",
+    "payment-finance": "🇺🇸美国", "PayPal": "🇺🇸美国",
+    "Cryptocurrency": "🇺🇸美国",
+}
+
+EXPECTED_GROUPS = 6
+EXPECTED_RULES = 114
 
 
 class Api:
@@ -118,8 +124,7 @@ class Api:
         )
         data = json.dumps({"username": username, "password": password}).encode()
         resp = self._raw("POST", "/api/v1/auth/login", data, csrf=False)
-        body = json.loads(resp)
-        self.csrf = body["csrf_token"]
+        self.csrf = json.loads(resp)["csrf_token"]
 
     def _raw(self, method: str, path: str, data: bytes | None = None,
              csrf: bool = True) -> bytes:
@@ -137,7 +142,7 @@ class Api:
     def get(self, path: str):
         return json.loads(self._raw("GET", path))
 
-    def post(self, path: str, body: dict, ok: tuple = (200, 201)):
+    def post(self, path: str, body: dict):
         raw = self._raw("POST", path, json.dumps(body, ensure_ascii=False).encode())
         return json.loads(raw) if raw else {}
 
@@ -159,7 +164,7 @@ def main() -> int:
 
     api = Api(args.base, args.username, args.password)
 
-    # 0. 节点 id 按名称解析（改写组时引用的是本地节点 id）
+    # 0. 节点 id 按名称解析
     nodes = api.get("/api/v1/local-nodes")
     by_name = {n["name"]: n["id"] for n in nodes}
     missing = [n for n in LOCAL_FIRST_JP + LOCAL_REST_US if n not in by_name]
@@ -175,7 +180,8 @@ def main() -> int:
     if variant is None:
         variant = api.post("/api/v1/variants", {
             "name": VARIANT_NAME,
-            "note": "只有自建节点（日美），分流按 AI/谷歌→美国、低延迟→日本",
+            "note": "只有自建节点（日美）：客户端只有 默认代理/日本/美国 三个组，"
+                    "分流按 AI/谷歌→美国、低延迟→日本、国内可达→直连",
             "copy_from": 0,
             "use_sources_empty": True,
         })
@@ -186,7 +192,7 @@ def main() -> int:
     groups = {g["name"]: g for g in api.get(f"/api/v1/groups?variant={vid}")}
     rules = api.get(f"/api/v1/rules?variant={vid}")
 
-    # 2. 更新保留组的成员
+    # 2. 更新保留组的成员（幂等：整体写入）
     for name, patch in GROUP_UPDATES.items():
         g = groups.get(name)
         if g is None:
@@ -206,20 +212,31 @@ def main() -> int:
             body[key] = value() if callable(value) else value
         api.put(f"/api/v1/groups/{g['id']}", body)
         print(f"  已更新组：{name}")
-        groups[name] = {**g, **{k: v for k, v in body.items() if k != "variant_id"}}
 
-    # 3. 删除指向被剔除组的规则
+    # 3. 规则改指向（被删组的服务三向归位）
+    retargeted = 0
     for r in rules:
-        if r["type"] == "RULE-SET" and r["value"] in DELETE_RULE_SETS:
-            api.delete(f"/api/v1/rules/{r['id']}")
-            print(f"  已删除规则：RULE-SET,{r['value']} -> {r['target']}")
+        new_target = RULE_RETARGET.get(r["value"]) if r["type"] == "RULE-SET" else None
+        if not new_target or r["target"] == new_target:
+            continue
+        api.put(f"/api/v1/rules/{r['id']}", {
+            "variant_id": vid, "type": r["type"], "value": r["value"],
+            "target": new_target, "enabled": r["enabled"], "note": r["note"],
+            "no_resolve": r["no_resolve"], "no_track": r["no_track"],
+            "pre_matching": r["pre_matching"], "targets": r["targets"],
+            "devices": r["devices"],
+        })
+        retargeted += 1
+        print(f"  已改指向：RULE-SET,{r['value']}  {r['target']} → {new_target}")
+    print(f"  共改写 {retargeted} 条规则指向")
 
-    # 4. 删除非日美组（成员引用已在第 2 步清掉）
+    # 4. 删除被精简的组（规则与组成员引用已先行改写，force 兜底解绑）
+    groups = {g["name"]: g for g in api.get(f"/api/v1/groups?variant={vid}")}
     for name in DELETE_GROUPS:
         g = groups.get(name)
         if g is None:
             continue
-        api.delete(f"/api/v1/groups/{g['id']}")
+        api.delete(f"/api/v1/groups/{g['id']}?force=1")
         print(f"  已删除组：{name}")
 
     # 5. 终态校验
@@ -227,10 +244,10 @@ def main() -> int:
     rules = api.get(f"/api/v1/rules?variant={vid}")
     print(f"终态：{len(groups)} 个组、{len(rules)} 条规则")
     problems = []
-    if len(groups) != 23:
-        problems.append(f"组数应为 23，实际 {len(groups)}")
-    if len(rules) != 114:
-        problems.append(f"规则数应为 114，实际 {len(rules)}")
+    if len(groups) != EXPECTED_GROUPS:
+        problems.append(f"组数应为 {EXPECTED_GROUPS}，实际 {len(groups)}")
+    if len(rules) != EXPECTED_RULES:
+        problems.append(f"规则数应为 {EXPECTED_RULES}，实际 {len(rules)}")
     names = {g["name"] for g in groups}
     for g in groups:
         for member in g["proxies"]:
@@ -240,13 +257,19 @@ def main() -> int:
         for src in g["use_sources"]:
             if src != "*":
                 problems.append(f"组「{g['name']}」仍引用节点来源：{src}")
+    # 规则指向必须落在本方案的组或内置字面量上
+    for r in rules:
+        if r["target"] not in names and r["target"] not in (
+                "DIRECT", "REJECT", "REJECT-DROP"):
+            problems.append(
+                f"规则 RULE-SET,{r['value']} 指向已删除的组：{r['target']}")
     if problems:
         for p in problems:
             print(f"  ✗ {p}", file=sys.stderr)
         return 1
-    print("✓ 自建美日方案配置完成")
+    print("✓ 自建美日方案精简配置完成（默认代理/日本/美国 + 路由回家 + 两个隐藏自动组）")
     if args.build:
-        build = api.post("/api/v1/builds", {"note": "自建美日方案配置后构建"})
+        build = api.post("/api/v1/builds", {"note": "自建美日方案精简后构建"})
         print(f"构建 #{build['id']}：{build['verify_status']}")
         bad = {k: v for k, v in (build.get("results") or {}).items() if not v["ok"]}
         if bad:
