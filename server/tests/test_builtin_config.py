@@ -197,3 +197,34 @@ def test_cn_ip_must_not_have_no_resolve():
                              "devices": ["*"], "variant_id": 0})
     errors, _ = validate.validate_policy(snap)[0]
     assert any("cn-ip" in e and "no-resolve" in e for e in errors), errors
+
+
+def test_platform_layer_accepts_effective_value_with_inherited_dns(client):
+    """回归：平台层提交「完整生效值」（含继承的 dns 键）必须能保存。
+
+    2026-11-13 实证：有效值里的 dns 键继承自引擎默认层，保存时按
+    allow_dns=False 拦 effective 会让平台/设备层永远保存不了配置。
+    dns 位置约束由「对 overlay 的校验」把关：继承的 dns 被差异计算剔除，
+    本层新写的 dns 键依然会被拒绝。
+    """
+    csrf = setup_admin(client)
+    hdr = auth_headers(csrf)
+    default = client.get("/api/v1/base-config?engine=mihomo").json()
+    doc = dict(default["effective"])
+    assert "dns" in doc, "mihomo 引擎默认层带 dns 段"
+    doc["ipv6"] = not doc.get("ipv6", False)
+
+    resp = client.put("/api/v1/base-config?engine=mihomo&platform=linux",
+                      headers=hdr, json={"content": _yaml(doc)})
+    assert resp.status_code == 200, resp.text
+    saved = resp.json()
+    assert saved["effective"]["ipv6"] == doc["ipv6"]
+    assert "dns" not in saved["overlay"], "继承的 dns 键不应进入本层差异"
+
+    # 本层新写 dns 键仍然被拒：位置约束由 overlay 校验把关
+    doc2 = dict(doc)
+    doc2["dns"] = dict(doc2["dns"] or {})
+    doc2["dns"]["nameserver"] = ["https://1.2.3.4/dns-query"]
+    resp = client.put("/api/v1/base-config?engine=mihomo&platform=linux",
+                      headers=hdr, json={"content": _yaml(doc2)})
+    assert resp.status_code == 400, resp.text

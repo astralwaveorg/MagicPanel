@@ -277,8 +277,12 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
             raise HTTPException(409, "基础配置已被其他维护者修改，请刷新后再保存")
         try:
             effective = base_config_service.parse_content(body.content)
+            # 生效值里的 dns 键可能继承自上层，位置约束（dns 只允许出现在
+            # 引擎默认配置层）由下方对 overlay 的校验把关——这里若按
+            # allow_dns=False 拦 effective，平台/设备层会因为继承来的
+            # dns 键永远保存不了任何配置。
             base_config_service.validate_doc(effective, device_scope=bool(dev_id),
-                                             allow_dns=not plat and not dev_id)
+                                             allow_dns=True)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
@@ -288,9 +292,12 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
         # 其余两层是"这一层的完整配置"语义：列表存整份（替换）。
         lists = (base_config_service.LIST_APPEND if dev_id
                  else base_config_service.LIST_REPLACE)
-        overlay = base_config_service.diff_overlay(inherited, effective, lists)
-        base_config_service.validate_doc(overlay, device_scope=bool(dev_id),
-                                         allow_dns=not plat and not dev_id)
+        try:
+            overlay = base_config_service.diff_overlay(inherited, effective, lists)
+            base_config_service.validate_doc(overlay, device_scope=bool(dev_id),
+                                             allow_dns=not plat and not dev_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])
@@ -431,8 +438,9 @@ def apply(body: ApplyBody, user=CurrentUser):
         docs = _all_docs(conn)
         try:
             effective = base_config_service.parse_content(body.content)
+            # 同「保存」接口：dns 位置约束由下方对 overlay 的校验把关
             base_config_service.validate_doc(effective, device_scope=bool(dev_id),
-                                             allow_dns=not plat and not dev_id)
+                                             allow_dns=True)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
@@ -440,9 +448,12 @@ def apply(body: ApplyBody, user=CurrentUser):
         inherited = _baseline(engine, plat, dev_id, layers)
         lists = (base_config_service.LIST_APPEND if dev_id
                  else base_config_service.LIST_REPLACE)
-        overlay = base_config_service.diff_overlay(inherited, effective, lists)
-        base_config_service.validate_doc(overlay, device_scope=bool(dev_id),
-                                         allow_dns=not plat and not dev_id)
+        try:
+            overlay = base_config_service.diff_overlay(inherited, effective, lists)
+            base_config_service.validate_doc(overlay, device_scope=bool(dev_id),
+                                             allow_dns=not plat and not dev_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])
