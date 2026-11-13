@@ -69,9 +69,10 @@
         <el-table-column label="操作" width="230">
           <template #default="{ row, $index }">
             <div class="op-grid">
-              <el-button size="small" @click="move(row, -1)" :disabled="$index === 0">上移</el-button>
+              <el-button size="small" @click="move(row, -1)"
+                         :disabled="$index === 0 || row.is_system">上移</el-button>
               <el-button size="small" @click="move(row, 1)"
-                         :disabled="$index === variants.length - 1">下移</el-button>
+                         :disabled="$index === variants.length - 1 || row.is_system">下移</el-button>
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" :disabled="row.is_system" @click="remove(row)" type="danger" plain>删除</el-button>
             </div>
