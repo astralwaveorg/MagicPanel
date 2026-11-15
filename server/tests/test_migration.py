@@ -65,6 +65,9 @@ CREATE TABLE settings (
 
 def _prepare_old_db(path) -> sqlite3.Connection:
     """造一个"通道双轨"时代的数据库。"""
+    from cryptography.fernet import Fernet
+    # 历史安装携带独立密钥；缺钥保护由 V2 私密资源测试单独验证。
+    (path.parent / "secret.key").write_bytes(Fernet.generate_key())
     conn = sqlite3.connect(path)
     conn.executescript(OLD_SCHEMA)
     conn.execute("INSERT INTO builds(id, created_at, created_by, status, policy_sha, "

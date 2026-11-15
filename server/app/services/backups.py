@@ -1,6 +1,7 @@
 """逻辑快照与先校验后恢复；外部文件仍须由完整私密归档携带。"""
 from contextlib import contextmanager
 from datetime import datetime
+import base64
 import hashlib
 import json
 import math
@@ -89,10 +90,14 @@ def _resource_path(root: Path, relative: str) -> Path:
 def _file_record(root: Path, relative: str) -> dict:
     path = _resource_path(root, relative)
     try:
-        content = path.read_bytes()
+        digest, size = hashlib.sha256(), 0
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                size += len(chunk)
+                digest.update(chunk)
     except OSError:
         raise ValueError("backup_missing_resource") from None
-    return {"path": relative, "size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+    return {"path": relative, "size": size, "sha256": digest.hexdigest()}
 
 
 def _validate_files(conn, payload: dict, tables: dict, *, legacy: bool) -> None:
@@ -131,6 +136,12 @@ def export_logical(conn) -> dict:
     files = [_file_record(_data_dir(conn), path) for path in sorted(required)]
     if any(record != required[record["path"]] for record in files):
         raise ValueError("backup_missing_resource")
+    for table, column in backup_tables.BLOB_COLUMNS:
+        for row in tables[table]:
+            value = row[column]
+            if not isinstance(value, bytes):
+                raise ValueError("backup_invalid")
+            row[column] = {"encoding": "base64", "data": base64.b64encode(value).decode("ascii")}
     return {"version": 2, "exported_at": db.now(), "tables": tables,
             "files": files, "key_required": True}
 
@@ -168,11 +179,22 @@ def _normalize(conn, payload: dict) -> tuple[dict, bool]:
                 kind = int if "INT" in column["type"].upper() else str
                 if type(value) is not kind:
                     raise ValueError("backup_invalid")
-            for value in row.values():
+            row = dict(row)
+            for column, value in row.items():
+                if (table, column) in backup_tables.BLOB_COLUMNS:
+                    try:
+                        if (not isinstance(value, dict) or set(value) != {"encoding", "data"} or
+                                value["encoding"] != "base64" or not isinstance(value["data"], str)):
+                            raise ValueError
+                        row[column] = base64.b64decode(value["data"], validate=True)
+                    except (ValueError, TypeError):
+                        raise ValueError("backup_invalid") from None
+                    continue
                 if (value is not None and type(value) not in {str, int, float, bool}) or (
                         isinstance(value, float) and not math.isfinite(value)):
                     raise ValueError("backup_invalid")
-        tables[table] = [dict(row) for row in rows]
+            tables.setdefault(table, []).append(row)
+        tables.setdefault(table, [])
     if "variants" not in supplied:
         used = {row.get("variant_id", 0) for table in ("proxy_groups", "rules") for row in tables[table]}
         if not legacy or used - {0}:
@@ -345,6 +367,8 @@ def restore_logical(conn, payload: dict) -> dict:
         for table in reversed(backup_tables.BACKUP_TABLES):
             conn.execute(f"DELETE FROM {_quote(table)}")
         _insert(conn, tables)
+        from .backup_archive import sanitize_restored
+        sanitize_restored(conn)
     except Exception:
         conn.execute("ROLLBACK TO logical_restore")
         conn.execute("RELEASE logical_restore")
@@ -374,5 +398,21 @@ def restore_legacy_database(conn, source) -> dict:
         if present - allowed or required - present:
             raise ValueError("backup_invalid")
     tables = {table: _rows(source, table) for table in backup_tables.BACKUP_TABLES if table in actual}
+    for table, column in backup_tables.BLOB_COLUMNS:
+        for row in tables.get(table, []):
+            value = row[column]
+            if not isinstance(value, bytes):
+                raise ValueError("backup_invalid")
+            row[column] = {"encoding": "base64", "data": base64.b64encode(value).decode("ascii")}
     payload = {"version": 1, "exported_at": db.now(), "tables": tables}
     return restore_logical(conn, payload)
+
+
+def create_archive(conn, destination: Path) -> dict:
+    from .backup_archive import create_archive as create
+    return create(conn, destination)
+
+
+def restore_archive(archive: Path, destination: Path, *, key_path: Path) -> dict:
+    from .backup_archive import restore_archive as restore
+    return restore(archive, destination, key_path=key_path)

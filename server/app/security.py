@@ -3,11 +3,14 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from . import config, db
 
@@ -47,26 +50,79 @@ def new_device_token() -> str:
 _fernet_cache: dict = {}
 
 
-def _fernet() -> Fernet:
-    """取主密钥。已加载则复用（避免每次加解密都读盘）。"""
-    if "fernet" in _fernet_cache:
-        return _fernet_cache["fernet"]
-    config.ensure_dirs()
+def derive_subkey(master: bytes, *, purpose: str, version: int = 1) -> bytes:
+    """主密钥按用途分域；派生值不进入公开对象。"""
+    if (not isinstance(master, bytes) or len(master) != 32 or type(version) is not int or version != 1 or
+            not isinstance(purpose, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", purpose)):
+        raise ValueError("key_derivation_invalid")
+    return HKDF(algorithm=hashes.SHA256(), length=32,
+                salt=b"MagicPanel/v2/key-derivation",
+                info=("v1:" + purpose).encode("ascii")).derive(master)
+
+
+def read_master_material(path) -> bytes:
+    """只读显式密钥，绝不替代丢失的密钥。"""
+    try:
+        if path.is_symlink():
+            raise ValueError
+        encoded = path.read_bytes().strip()
+        material = base64.b64decode(encoded, altchars=b"-_", validate=True)
+        if len(material) != 32:
+            raise ValueError
+        return material
+    except FileNotFoundError:
+        raise DecryptError("key_required") from None
+    except (OSError, ValueError):
+        raise DecryptError("key_invalid") from None
+
+
+def load_master_material(require_existing: bool = True) -> bytes:
+    """仅全新空目录可建钥，已有安装缺钥必须停止。"""
     path = config.SECRET_KEY_PATH
     if not path.exists():
-        key = Fernet.generate_key()
-        path.write_bytes(key)
-    # 无论新建还是从备份还原，都强制 600，避免同机其它用户读取密钥
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
-    material = path.read_bytes().strip()
-    if not material:
-        raise DecryptError("主密钥 data/secret.key 为空，无法解密任何密文")
-    fernet = Fernet(material)
+        root = config.DATA_DIR
+        if require_existing or (root.exists() and any(root.iterdir())):
+            raise DecryptError("key_required")
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root.chmod(0o700)
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(Fernet.generate_key())
+                handle.flush()
+                os.fsync(handle.fileno())
+        except FileExistsError:
+            pass
+    material = read_master_material(path)
+    path.chmod(0o600)
+    return material
+
+
+def _fernet() -> Fernet:
+    """取主密钥。已加载则复用（避免每次加解密都读盘）。"""
+    path = config.SECRET_KEY_PATH
+    if not path.exists():
+        raise DecryptError("key_required")
+    if "fernet" in _fernet_cache and _fernet_cache.get("path") == path:
+        return _fernet_cache["fernet"]
+    material = load_master_material()
+    fernet = Fernet(base64.urlsafe_b64encode(material))
     _fernet_cache["fernet"] = fernet
+    _fernet_cache["path"] = path
     return fernet
+
+
+def encrypt_bytes(plain: bytes) -> bytes:
+    return _fernet().encrypt(plain)
+
+
+def decrypt_bytes(token: bytes) -> bytes:
+    try:
+        return _fernet().decrypt(token)
+    except DecryptError:
+        raise
+    except Exception:
+        raise DecryptError("private_blob_corrupt") from None
 
 
 def encrypt_text(plain: str) -> str:

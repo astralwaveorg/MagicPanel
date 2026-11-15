@@ -1,15 +1,9 @@
-"""WebDAV 备份：把数据库快照与主密钥推到远端，并支持从远端恢复。
-
-为什么必须有：容器内的备份与数据在同一个磁盘上，NAS 一次磁盘故障
-就会把备份一起带走。远端（WebDAV）是唯一能跨故障保存副本的地方。
-
-约定与边界：
-- 只做"整库快照 + 主密钥"两件文件的复制，不做增量；
-- 远端文件名带时间戳，保留最近 N 份，超出的自动清理；
-- 口令用主密钥加密后入库，接口不会回显明文；
-- 恢复前必须校验快照可用（integrity_check），且要求显式确认。
-"""
+"""WebDAV 只上传加密完整归档；恢复永远停在独立 staging。"""
+import base64
+from contextlib import closing
+import json
 import logging
+import secrets
 import shutil
 import sqlite3
 import tempfile
@@ -27,6 +21,8 @@ logger = logging.getLogger("magicpanel.webdav")
 PREFIX = "magicpanel-"
 DB_SUFFIX = ".db"
 KEY_SUFFIX = ".key"
+ARCHIVE_SUFFIX = ".mpbackup"
+META_SUFFIX = ".meta.json"
 
 # 设置项
 SET_ENABLED = "webdav_enabled"
@@ -130,18 +126,26 @@ def upload_file(conn, local_path: Path, remote_name: str) -> str:
     return target
 
 
-def download_file(conn, remote_name: str, local_path: Path) -> None:
+def download_file(conn, remote_name: str, local_path: Path, *, max_bytes: int | None = None) -> None:
     """下载远端文件到本地路径。"""
-    if "/" in remote_name or ".." in remote_name:
+    if "/" in remote_name or "\\" in remote_name or ".." in remote_name:
         raise WebDavError("远端文件名不合法")
+    if max_bytes is None:
+        from .backup_archive import MAX_ARCHIVE_BYTES
+        max_bytes = MAX_ARCHIVE_BYTES
     source = f"{_base(conn)}/{remote_name}"
     try:
         with _client(conn) as client:
             with client.stream("GET", source) as resp:
                 if resp.status_code >= 400:
                     raise WebDavError(f"HTTP {resp.status_code}")
-                with local_path.open("wb") as handle:
+                from .backup_archive import _open_private
+                with _open_private(local_path) as handle:
+                    total = 0
                     for chunk in resp.iter_bytes():
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise WebDavError("archive_limit_exceeded")
                         handle.write(chunk)
     except httpx.HTTPError as exc:
         raise WebDavError(f"下载失败：{exc}") from exc
@@ -195,53 +199,28 @@ def list_backups(conn) -> list[dict]:
     return items
 
 
-def _snapshot_to_temp(conn) -> Path:
-    """生成数据库一致性快照（VACUUM INTO），返回临时文件路径。"""
-    tmpdir = Path(tempfile.mkdtemp(prefix="mp-webdav-"))
-    target = tmpdir / f"{PREFIX}local.db"
-    try:
-        conn.execute("VACUUM INTO ?", (str(target),))
-    except sqlite3.Error as exc:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-        raise WebDavError(f"生成数据库快照失败：{exc}") from exc
-    return target
-
-
 def run_backup(conn, operator: str = "系统", trigger: str = "auto") -> dict:
-    """执行一次完整备份：本地快照 + 主密钥 → 上传 → 清理旧副本。"""
+    """只上传认证加密归档与安全外层元数据；主密钥独立保管。"""
+    from . import backups
     if not is_configured(conn):
         raise WebDavError("尚未配置 WebDAV 地址")
-    stamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S")
-    # 同一秒内重复备份要生成不同文件名，否则后一次会覆盖前一次
-    suffix = 0
-    while any(name.startswith(f"{PREFIX}{stamp}") for name in _remote_names(conn)):
-        suffix += 1
-        stamp = f"{datetime.now(timezone.utc).astimezone().strftime('%Y%m%d-%H%M%S')}-{suffix}"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f") + "-" + secrets.token_hex(4)
     tmpdir = Path(tempfile.mkdtemp(prefix="mp-webdav-"))
     uploaded: list[str] = []
     try:
-        snapshot = tmpdir / f"{PREFIX}{stamp}{DB_SUFFIX}"
-        try:
-            conn.execute("VACUUM INTO ?", (str(snapshot),))
-        except sqlite3.Error as exc:
-            raise WebDavError(f"生成数据库快照失败：{exc}") from exc
-        # 快照必须可用才上传
-        check = sqlite3.connect(str(snapshot))
-        try:
-            if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                raise WebDavError("生成的快照自检未通过，已中止上传")
-        finally:
-            check.close()
-        upload_file(conn, snapshot, snapshot.name)
-        uploaded.append(snapshot.name)
+        tmpdir.chmod(0o700)
+        archive = tmpdir / f"{PREFIX}{stamp}{ARCHIVE_SUFFIX}"
+        report = backups.create_archive(conn, archive)
+        metadata = tmpdir / f"{PREFIX}{stamp}{META_SUFFIX}"
+        from .backup_archive import _open_private
+        with _open_private(metadata) as handle:
+            handle.write(json.dumps({"format": "mpbackup", "version": 1, "encrypted": True,
+                                      "created_at": db.now(), "size": report["size"],
+                                      "key_included": False}).encode("utf-8"))
+        for local in (archive, metadata):
+            upload_file(conn, local, local.name)
+            uploaded.append(local.name)
 
-        key_file = config.SECRET_KEY_PATH
-        if key_file.exists():
-            remote_key = f"{PREFIX}{stamp}{KEY_SUFFIX}"
-            upload_file(conn, key_file, remote_key)
-            uploaded.append(remote_key)
-
-        # 轮转：只保留最近 N 份快照（成对删除 db 与 key）
         keep = _keep_count(conn)
         removed = _prune_remote(conn, keep)
         result = {
@@ -257,7 +236,7 @@ def run_backup(conn, operator: str = "系统", trigger: str = "auto") -> dict:
             security.audit(wconn, operator, "WebDAV 备份", "backup", stamp, result)
         return result
     except Exception as exc:
-        message = str(exc)
+        message = str(exc) if isinstance(exc, WebDavError) else "backup_failed"
         with db.tx() as wconn:
             db.set_setting(wconn, SET_LAST_STATUS, "失败")
             db.set_setting(wconn, SET_LAST_ERROR, message[:500])
@@ -268,13 +247,6 @@ def run_backup(conn, operator: str = "系统", trigger: str = "auto") -> dict:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def _remote_names(conn) -> list[str]:
-    try:
-        return [item["name"] for item in list_backups(conn)]
-    except WebDavError:
-        return []
-
-
 def _keep_count(conn) -> int:
     try:
         return max(1, int(_setting(conn, SET_KEEP, "7")))
@@ -283,84 +255,136 @@ def _keep_count(conn) -> int:
 
 
 def _prune_remote(conn, keep: int) -> int:
-    """远端只保留最近 keep 份快照（db 与 key 一起删）。"""
-    items = [i for i in list_backups(conn) if i["name"].endswith(DB_SUFFIX)]
+    """仅轮转新加密归档；历史 db/key 不自动删除。"""
+    items = [i for i in list_backups(conn) if i["name"].endswith(ARCHIVE_SUFFIX)]
     removed = 0
     for item in items[keep:]:
-        stamp = item["name"][len(PREFIX):-len(DB_SUFFIX)]
+        stamp = item["name"][len(PREFIX):-len(ARCHIVE_SUFFIX)]
         try:
             delete_file(conn, item["name"])
             removed += 1
         except WebDavError:
             continue
         try:
-            delete_file(conn, f"{PREFIX}{stamp}{KEY_SUFFIX}")
+            delete_file(conn, f"{PREFIX}{stamp}{META_SUFFIX}")
         except WebDavError:
             pass
     return removed
 
 
-def restore_from_remote(conn, remote_name: str, operator: str) -> dict:
-    """从远端快照恢复数据库与主密钥。
-
-    恢复前会校验快照完整性；主密钥会一并还原（否则密文全都解不开）。
-    """
-    if not remote_name.startswith(PREFIX) or not remote_name.endswith(DB_SUFFIX):
-        raise WebDavError("只能恢复本系统的数据库快照")
+def restore_from_remote(conn, remote_name: str, operator: str, *, destination: Path | None = None,
+                        key_path: Path | None = None, legacy: bool = False) -> dict:
+    """下载到私有临时目录，仅验证并生成调用方指定的新 staging。"""
+    from . import backups
+    if destination is None or (key_path is None and not legacy):
+        raise WebDavError("backup_staging_required")
+    if (not isinstance(remote_name, str) or "/" in remote_name or "\\" in remote_name or
+            ".." in remote_name or not remote_name.startswith(PREFIX)):
+        raise WebDavError("archive_invalid")
+    if remote_name.endswith(DB_SUFFIX) and not legacy:
+        raise WebDavError("legacy_restore_required")
+    if not remote_name.endswith(DB_SUFFIX if legacy else ARCHIVE_SUFFIX):
+        raise WebDavError("archive_invalid_extension")
+    # HTTP 只会给出此固定父目录；离线调用方的其它父目录必须已存在。
+    staging_root = config.DATA_DIR / "restore-staging"
+    if Path(destination).absolute().parent == staging_root:
+        from .backup_archive import _check_parents
+        try:
+            _check_parents(staging_root)
+            staging_root.mkdir(mode=0o700, exist_ok=True)
+            staging_root.chmod(0o700)
+        except (OSError, ValueError):
+            raise WebDavError("archive_invalid_path") from None
     tmpdir = Path(tempfile.mkdtemp(prefix="mp-restore-"))
     try:
-        local_db = tmpdir / remote_name
-        download_file(conn, remote_name, local_db)
-        check = sqlite3.connect(str(local_db))
-        try:
-            if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                raise WebDavError("远端快照自检未通过，已中止恢复")
-            tables = {r[0] for r in check.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")}
-        finally:
-            check.close()
-        if "base_configs" not in tables or "users" not in tables:
-            raise WebDavError("远端文件不是 MagicPanel 的数据库快照")
-        # 主密钥：与快照同名的 .key
-        stamp = remote_name[len(PREFIX):-len(DB_SUFFIX)]
-        key_name = f"{PREFIX}{stamp}{KEY_SUFFIX}"
-        key_local = tmpdir / key_name
-        try:
-            download_file(conn, key_name, key_local)
-        except WebDavError:
-            key_local = None
-        return _restore_files(local_db, key_local, operator)
+        tmpdir.chmod(0o700)
+        local = tmpdir / remote_name
+        download_file(conn, remote_name, local)
+        local.chmod(0o600)
+        if not legacy:
+            backups.restore_archive(local, Path(destination), key_path=Path(key_path))
+            return _staged_result(Path(destination))
+        key_local = Path(key_path) if key_path is not None else tmpdir / "legacy.key"
+        if key_path is None:
+            stamp = remote_name[len(PREFIX):-len(DB_SUFFIX)]
+            key_name = f"{PREFIX}{stamp}{KEY_SUFFIX}"
+            download_file(conn, key_name, key_local, max_bytes=4096)
+            key_local.chmod(0o600)
+        return _restore_files(local, key_local, operator, destination=Path(destination), legacy=True)
+    except (ValueError, security.DecryptError) as exc:
+        raise WebDavError(str(exc)) from None
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def _restore_files(local_db: Path, key_local: Path | None, operator: str) -> dict:
-    """用快照文件覆盖当前数据库（必要时同时替换主密钥）。"""
+def _staged_result(destination: Path, *, legacy: bool = False) -> dict:
+    return {"status": "STAGED", "verification_status": "VERIFIED", "restored": False,
+            "staging_name": destination.name, "requires_maintenance_restart": True,
+            "key_restored": False, "legacy_import": legacy, "complete_archive": not legacy}
+
+
+def _restore_files(local_db: Path, key_local: Path | None, operator: str, *,
+                   destination: Path | None = None, key_path: Path | None = None,
+                   legacy: bool = False) -> dict:
+    """显式历史物理库导入：可信当前 schema → 新 staging，绝不覆盖运行库。"""
     from . import backups
+    from .backup_archive import (_open_private, _validate_database, sanitize_restored,
+                                 staging_directory)
+    if destination is None:
+        raise WebDavError("backup_staging_required")
+    if not legacy:
+        raise WebDavError("legacy_restore_required")
+    supplied_key = key_local if key_local is not None else key_path
+    if supplied_key is None:
+        raise WebDavError("key_required")
+    try:
+        master = security.read_master_material(Path(supplied_key))
+    except security.DecryptError as exc:
+        raise WebDavError(str(exc)) from None
     source = sqlite3.connect(local_db.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         source.row_factory = sqlite3.Row
+        source.execute("PRAGMA trusted_schema=OFF")
         source.execute("BEGIN")
-        with db.tx(immediate=True) as conn:
-            backups.restore_legacy_database(conn, source)
-            security.audit(conn, operator, "从 WebDAV 恢复备份", "backup", "",
-                           {"file": local_db.name})
+        with staging_directory(Path(destination)) as stage:
+            target = stage / "magicpanel.db"
+            with _open_private(target):
+                pass
+            with db.connect() as template, backups._staging_schema(template) as schema:
+                with closing(sqlite3.connect(target)) as conn:
+                    schema.backup(conn)
+            with closing(sqlite3.connect(target)) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("BEGIN IMMEDIATE")
+                # v1 合并当前迁移标记，但不导入运行库的策略或历史行。
+                with db.connect() as template:
+                    conn.executemany("INSERT INTO schema_version(key,value) VALUES(?,?)",
+                                     [tuple(row) for row in template.execute("SELECT key,value FROM schema_version")])
+                backups.restore_legacy_database(conn, source)
+                if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audit'").fetchone():
+                    allowed = {row["name"] for row in backups._columns(conn, "audit")}
+                    if {row["name"] for row in backups._columns(source, "audit")} != allowed:
+                        raise ValueError("backup_invalid")
+                    for row in backups._rows(source, "audit"):
+                        columns = ','.join(backups._quote(column) for column in row)
+                        conn.execute(f'INSERT INTO audit({columns}) VALUES({",".join("?" for _ in row)})', tuple(row.values()))
+                sanitize_restored(conn)
+                conn.commit()
+                versions = dict(conn.execute("SELECT key,value FROM schema_version"))
+            _validate_database(stage, master, versions)
+            with _open_private(stage / "secret.key") as handle:
+                handle.write(base64.urlsafe_b64encode(master))
     except (ValueError, sqlite3.Error) as exc:
         code = str(exc) if str(exc) in {
             "backup_invalid", "backup_invalid_reference", "backup_missing_variants",
-            "backup_missing_resource", "backup_schema_unregistered",
+            "backup_missing_resource", "backup_schema_unregistered", "private_blob_corrupt",
+            "archive_destination_exists", "archive_invalid_path", "archive_runtime_destination_forbidden",
         } else "backup_invalid"
         raise WebDavError(code) from None
     finally:
         source.close()
-    if key_local and key_local.exists():
-        # 换密钥后必须重启进程才能解密旧密文，这里只落盘并提示
-        shutil.copyfile(key_local, config.SECRET_KEY_PATH)
-        try:
-            config.SECRET_KEY_PATH.chmod(0o600)
-        except OSError:
-            pass
-    return {"restored": True, "key_restored": bool(key_local and key_local.exists())}
+    return _staged_result(Path(destination), legacy=True)
 
 
 def status(conn) -> dict:

@@ -426,14 +426,14 @@ def test_webdav_restore_uses_server_owned_staging_and_current_key(client, monkey
     captured = []
     def restore(conn, remote_name, actor, *, destination, key_path):
         captured.append((remote_name, actor, destination, key_path))
-        return {"state": "STAGED", "verification_status": "VERIFIED", "restored": False,
+        return {"status": "STAGED", "verification_status": "VERIFIED", "restored": False,
                 "staging_name": destination.name, "requires_maintenance_restart": True, "key_restored": False}
     monkeypatch.setattr(webdav, "restore_from_remote", restore)
     response = client.post("/api/v1/backup/webdav/restore", headers=admin, json={
         "confirm": True, "data": {"file": "fixture.mpa", "destination": "C:/client-cannot-select"}})
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
-    assert response.json()["state"] == "STAGED"
+    assert response.json()["status"] == "STAGED"
     assert response.json()["restored"] is False
     assert response.json()["requires_maintenance_restart"] is True
     assert response.json()["verification_status"] == "VERIFIED"

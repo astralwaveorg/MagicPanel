@@ -405,8 +405,10 @@ def webdav_restore(body: RestoreBody, response: Response, user=RequireCapabiliti
         raise HTTPException(400, "请设置 confirm=true 确认创建隔离恢复目录")
     name = (body.data or {}).get("file", "")
     data_root = config.DATA_DIR.resolve()
-    staging_root = (data_root / "restore-staging").resolve()
-    if not staging_root.is_relative_to(data_root):
+    staging_root = data_root / "restore-staging"
+    if (staging_root.is_symlink() or
+            (hasattr(staging_root, "is_junction") and staging_root.is_junction()) or
+            not staging_root.is_relative_to(data_root)):
         raise HTTPException(400, "隔离恢复目录不可用")
     destination = staging_root / uuid4().hex
     if destination.exists():
@@ -417,6 +419,6 @@ def webdav_restore(body: RestoreBody, response: Response, user=RequireCapabiliti
                 conn, name, user["username"], destination=destination, key_path=config.SECRET_KEY_PATH)
         except webdav.WebDavError as exc:
             raise HTTPException(400, str(exc), headers={"Cache-Control": "no-store"})
-    return {"ok": True, "state": result["state"], "verification_status": result["verification_status"],
+    return {"ok": True, "status": result["status"], "verification_status": result["verification_status"],
             "restored": False, "staging_name": destination.name,
             "requires_maintenance_restart": True, "key_restored": False}

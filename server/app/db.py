@@ -302,6 +302,9 @@ def _ensure_column(conn, table: str, column: str, ddl: str) -> bool:
 
 
 def init_db() -> None:
+    from . import security
+    from .migrations import v2_foundation
+    security.load_master_material(require_existing=False)
     with connect() as conn:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "sources", "filter_unavailable",
@@ -420,6 +423,9 @@ def init_db() -> None:
         _migrate_device_config_pull(conn)
         _migrate_source_headers(conn)
         _migrate_variants(conn)
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        v2_foundation.migrate(conn)
 
 
 def _migrate_variants(conn) -> None:
@@ -1050,8 +1056,7 @@ def tx(immediate: bool = False):
     if immediate:
         conn.isolation_level = None      # 关闭 Python 的隐式事务，改用显式 BEGIN
     try:
-        if immediate:
-            conn.execute("BEGIN IMMEDIATE")
+        conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
         yield conn
         conn.commit()
     except Exception:

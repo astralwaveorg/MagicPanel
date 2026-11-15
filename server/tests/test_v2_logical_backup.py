@@ -1,5 +1,6 @@
 """逻辑备份通过真实接口和调用事务验证恢复边界。"""
 from copy import deepcopy
+from contextlib import closing
 import hashlib
 import sqlite3
 
@@ -424,29 +425,30 @@ def legacy_database(tmp_path, *, original_schema=True, missing_markers=False):
 
 @pytest.mark.parametrize("missing_markers", [False, True])
 def test_legacy_physical_restore_preserves_default_variant_and_migration_markers(client, tmp_path, missing_markers):
-    from app import db
+    from app import config, db
     from app.services import webdav
     headers = seeded(client)
     with db.connect() as conn:
         before = ordering(conn)
         markers = [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")]
     snapshot = legacy_database(tmp_path, missing_markers=missing_markers)
-    assert webdav._restore_files(snapshot, None, "admin")["restored"] is True
-    with db.connect() as conn:
+    destination = tmp_path / "legacy-staging"
+    result = webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "admin",
+                                  destination=destination, legacy=True)
+    assert result["status"] == "STAGED" and result["restored"] is False
+    with closing(sqlite3.connect(destination / "magicpanel.db")) as conn:
+        conn.row_factory = sqlite3.Row
         assert ordering(conn) == before
         assert [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")] == markers
         variant = conn.execute("SELECT id,name,is_system FROM variants").fetchone()
         assert variant is not None and tuple(variant) == (0, "默认", 1)
-    assert client.get("/api/v1/overview").status_code == 401
-    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-pass-1"})
-    assert response.status_code == 200, response.text
-    headers = {"X-CSRF-Token": response.json()["csrf_token"]}
+    assert client.get("/api/v1/overview").status_code == 200
     assert client.post("/api/v1/groups", headers=headers, json={
         "name": "after-legacy-restore", "type": "select", "proxies": ["DIRECT"]}).status_code == 201
 
 
 def test_legacy_physical_restore_with_missing_nondefault_variant_never_clears_live_data(client, tmp_path):
-    from app import db
+    from app import config, db
     from app.services import webdav
     seeded(client)
     snapshot = legacy_database(tmp_path, original_schema=False)
@@ -457,7 +459,8 @@ def test_legacy_physical_restore_with_missing_nondefault_variant_never_clears_li
         markers = [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")]
         sessions = [tuple(row) for row in conn.execute("SELECT * FROM sessions")]
     with pytest.raises(webdav.WebDavError, match="backup_missing_variants"):
-        webdav._restore_files(snapshot, None, "admin")
+        webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "admin",
+                              destination=tmp_path / "invalid-legacy", legacy=True)
     with db.connect() as conn:
         assert ordering(conn) == before
         assert [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")] == markers
@@ -480,7 +483,7 @@ def test_legacy_snapshot_rejects_duplicate_migration_keys(client):
 
 
 def test_physical_restore_uses_snapshot_variants_and_preserves_source_bytes(client, tmp_path):
-    from app import db
+    from app import config, db
     from app.services import webdav
     headers = seeded(client)
     assert client.post("/api/v1/variants", headers=headers, json={
@@ -494,15 +497,21 @@ def test_physical_restore_uses_snapshot_variants_and_preserves_source_bytes(clie
         conn.execute("UPDATE proxy_groups SET sort=sort+500")
         conn.execute("UPDATE rules SET sort=sort+600")
         conn.execute("UPDATE variants SET name='current-only' WHERE id!=0")
-    webdav._restore_files(snapshot, None, "admin")
-    with db.connect() as conn:
+    destination = tmp_path / "physical-staging"
+    webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "admin",
+                          destination=destination, legacy=True)
+    with closing(sqlite3.connect(destination / "magicpanel.db")) as conn:
+        conn.row_factory = sqlite3.Row
         assert ordering(conn) == before
         assert {row[0] for row in conn.execute("SELECT name FROM variants")} == {"默认", "第二方案"}
     assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == source_hash
+    with db.connect() as conn:
+        assert ordering(conn) != before
+        assert {row[0] for row in conn.execute("SELECT name FROM variants")} == {"默认", "current-only"}
 
 
 def test_physical_restore_rejects_unknown_columns_even_in_empty_table(client, tmp_path):
-    from app import db
+    from app import config, db
     from app.services import webdav
     seeded(client)
     snapshot = legacy_database(tmp_path)
@@ -511,6 +520,7 @@ def test_physical_restore_rejects_unknown_columns_even_in_empty_table(client, tm
     with db.connect() as conn:
         before = ordering(conn)
     with pytest.raises(webdav.WebDavError, match="backup_invalid"):
-        webdav._restore_files(snapshot, None, "admin")
+        webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "admin",
+                              destination=tmp_path / "unknown-column", legacy=True)
     with db.connect() as conn:
         assert ordering(conn) == before
