@@ -5,8 +5,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import fetcher, refs, repo_manager, repo_sync, updater
+from ..services.access_dto import rule_provider_public, url_summary
+from ..services.capabilities import require_capability
 
 router = APIRouter(prefix="/api/v1/rule-providers", tags=["rule-providers"])
 
@@ -41,36 +43,12 @@ class BatchInterval(BaseModel):
 
 
 def _public(row) -> dict:
-    return {
-        "id": row["id"],
-        "name": row["name"],
-        "behavior": row["behavior"],
-        "format": row["format"],
-        "kind": row["kind"],
-        "url": row["url"],
-        "interval": row["interval"],
-        "client_interval": row["client_interval"],
-        "enabled": bool(row["enabled"]),
-        "use_proxy": bool(row["proxy_url_enc"] or ""),
-        "proxy_url_masked": (security.mask_url(security.decrypt_text(row["proxy_url_enc"]))
-                             if row["proxy_url_enc"] else ""),
-        "last_status": row["last_status"],
-        "last_error": row["last_error"],
-        "last_fetched_at": row["last_fetched_at"],
-        "last_attempt_at": row["last_attempt_at"],
-        # 仓库托管的来源：仓库内相对路径（kind='repo'）
-        "repo_path": row["repo_path"] if "repo_path" in row.keys() else "",
-        # 二进制格式（MRS）的条目数数不出来，留空由界面显示"—"
-        "rule_count": (None if (row["format"] or "yaml") in config.BINARY_FORMATS
-                       else row["rule_count"]),
-        "sha256": row["sha256"],
-        "has_content": bool(row["content"]),
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
+    return rule_provider_public(row)
 
 
 def _validate_body(body: RuleProviderBody) -> None:
+    if body.kind not in {"remote", "inline", "repo"}:
+        raise HTTPException(400, "来源类型仅支持 remote / inline / repo")
     if body.behavior not in BEHAVIORS:
         raise HTTPException(400, f"behavior 仅支持：{'、'.join(sorted(BEHAVIORS))}")
     if body.format not in FORMATS:
@@ -155,17 +133,18 @@ def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
                          status: str = "", referenced: str = "", user=CurrentUser):
     """规则来源分页列表。
 
-    keyword 匹配名称或 URL；kind（remote/inline）、behavior 精确匹配；
+    keyword 匹配名称或公开 URL 摘要；kind（remote/inline）、behavior 精确匹配；
     enabled 取 "0"（停用）/"1"（启用）；
     status 限定抓取结果：ok 成功 / failed 失败 / none 从未抓取。
     内联来源没有抓取这回事，不参与这个筛选。
     referenced 取 "0"（没被分流规则引用）/"1"（被引用）。
     """
     with db.connect() as conn:
+        conn.create_function("public_url", 1, url_summary, deterministic=True)
         where, args = [], []
         if keyword:
             like = f"%{keyword}%"
-            where.append("(name LIKE ? OR url LIKE ?)")
+            where.append("(name LIKE ? OR public_url(url) LIKE ?)")
             args += [like, like]
         if kind:
             where.append("kind = ?")
@@ -203,6 +182,16 @@ def list_providers(user=CurrentUser):
         return [_public_with_refs(conn, r) for r in rows]
 
 
+@router.post("/{rp_id}/reveal")
+def reveal_provider(rp_id: int, user=RequireCapabilities("reveal")):
+    with db.tx() as conn:
+        row = _get_or_404(conn, rp_id)
+        security.audit(conn, user["username"], "查看规则来源连接原文", "rule_provider", rp_id,
+                       {"fields": ["url", "proxy_url", "last_error"]})
+    return {"id": rp_id, "url": row["url"], "last_error": row["last_error"],
+            "proxy_url": security.decrypt_text(row["proxy_url_enc"]) if row["proxy_url_enc"] else ""}
+
+
 @router.get("/{rp_id}/content")
 def get_content(rp_id: int, user=CurrentUser):
     """规则内容不涉凭据，允许维护者查看最近快照原文。"""
@@ -217,7 +206,7 @@ def get_content(rp_id: int, user=CurrentUser):
 
 
 @router.post("", status_code=201)
-def create_provider(body: RuleProviderBody, user=CurrentUser):
+def create_provider(body: RuleProviderBody, user=RequireCapabilities("edit", "reveal")):
     _validate_body(body)
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM rule_providers WHERE name=?", (body.name,)):
@@ -253,9 +242,13 @@ def create_provider(body: RuleProviderBody, user=CurrentUser):
 @router.put("/{rp_id}")
 def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
                   user=CurrentUser):
-    _validate_body(body)
+    if body.model_fields_set & {"url", "proxy_url", "kind", "repo_path"}:
+        require_capability(user, "reveal")
     with db.tx() as conn:
-        _get_or_404(conn, rp_id)
+        old = _get_or_404(conn, rp_id)
+        fields = set(RuleProviderBody.model_fields) - {"proxy_url"}
+        body = body.model_copy(update={key: old[key] for key in fields - body.model_fields_set})
+        _validate_body(body)
         clash = db.one(
             conn, "SELECT id FROM rule_providers WHERE name=? AND id!=?",
             (body.name, rp_id),
@@ -461,7 +454,7 @@ def batch_delete_providers(body: BatchIds, user=CurrentUser):
 
 
 @router.post("/{rp_id}/refresh")
-def refresh_provider(rp_id: int, user=CurrentUser):
+def refresh_provider(rp_id: int, user=RequireCapabilities("probe")):
     # 仓库托管的来源不做抓取：只从仓库工作树同步这一个文件的内容
     with db.connect() as conn:
         existing = _get_or_404(conn, rp_id)
@@ -477,6 +470,6 @@ def refresh_provider(rp_id: int, user=CurrentUser):
         raise HTTPException(404, str(exc))
     except updater.InvalidOperation as exc:
         raise HTTPException(400, str(exc))
-    except fetcher.FetchError as exc:
-        raise HTTPException(502, f"抓取失败：{exc}（已保留最近一次成功快照）")
+    except fetcher.FetchError:
+        raise HTTPException(502, "抓取失败，详情需授权查看（已保留最近一次成功快照）")
     return _public(row)

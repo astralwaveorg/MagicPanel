@@ -10,6 +10,7 @@ from .. import db, security
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import repo_manager, repo_sync
 from ..services.capabilities import require_capability
+from ..services.access_dto import migration_public
 
 router = APIRouter(prefix="/api/v1/deps", tags=["deps"])
 
@@ -323,11 +324,22 @@ def deps_migrations(user=CurrentUser):
     """迁移存档与核对结果（切换规则来源到仓库托管时的留档）。"""
     with db.connect() as conn:
         rows = db.all_(conn, "SELECT * FROM repo_migrations ORDER BY id DESC LIMIT 200")
-    return {"migrations": [dict(r) for r in rows]}
+    return {"migrations": [migration_public(r) for r in rows]}
+
+
+@router.post("/migrations/{migration_id}/reveal")
+def deps_reveal_migration(migration_id: int, user=RequireCapabilities("reveal")):
+    with db.tx() as conn:
+        row = db.one(conn, "SELECT * FROM repo_migrations WHERE id=?", (migration_id,))
+        if not row:
+            raise HTTPException(404, "迁移存档不存在")
+        security.audit(conn, user["username"], "查看迁移来源连接原文", "repo_migration", migration_id,
+                       {"fields": ["origin_url"]})
+    return {"id": migration_id, "origin_url": row["origin_url"]}
 
 
 @router.post("/rollback-migration")
-def deps_rollback_migration(batch: int = Query(...), user=CurrentUser):
+def deps_rollback_migration(batch: int = Query(...), user=RequireCapabilities("edit", "reveal")):
     """一键回退某一批：还原来源的 kind / url / repo_path 等字段。"""
     with db.tx() as conn:
         rows = db.all_(conn, "SELECT * FROM repo_migrations WHERE batch=?", (batch,))

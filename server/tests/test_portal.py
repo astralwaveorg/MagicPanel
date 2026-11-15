@@ -172,7 +172,8 @@ def test_portal_provider_detail(client):
     assert demo["url"] == ""
     remote = by_name["remote-demo"]
     assert remote["origin"] == "astralwaveorg/magic-sets"
-    assert remote["url"].endswith("rule/demo.yaml")
+    assert remote["url"].startswith("https://cdn.jsdelivr.net/")
+    assert "rule/demo.yaml" not in remote["url"]
     assert remote["behavior"] == "ipcidr"
 
     # 详情按需拉，带内容预览

@@ -1184,8 +1184,11 @@ def test_manual_run_records_history_and_audit(client):
     assert runs[0]["summary"]["trigger"] == "manual"
     assert runs[0]["summary"]["actor"] == "admin"
     audit = client.get("/api/v1/audit").json()["items"]
-    assert any(a["action"] == "手动自动任务运行完成" and "manual" in a["detail"]
-               for a in audit)
+    entry = next(a for a in audit if a["action"] == "手动自动任务运行完成")
+    assert entry["has_detail"] is True
+    detail = client.post(f"/api/v1/audit/{entry['id']}/reveal", headers=h)
+    assert detail.status_code == 200 and detail.headers["cache-control"] == "no-store"
+    assert "manual" in detail.json()["detail"]
 
     # 无实际动作的定时 tick 不写运行记录
     scheduler.run_once(force=False)

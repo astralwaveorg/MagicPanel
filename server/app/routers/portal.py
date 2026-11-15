@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, field_validator
 from .. import config, db, security
 from ..deps import CurrentUser, RequireCapabilities
 from ..services.capabilities import effective_capabilities
+from ..services.access_dto import url_summary
 from ..services import releases
 
 router = APIRouter(prefix="/api/v1/portal", tags=["portal"])
@@ -197,9 +198,9 @@ def _provider_meta(r, repo_origin: str = "") -> dict:
     content = r["content"] or ""
     kind = r["kind"]
     repo_path = r["repo_path"] if "repo_path" in r.keys() else ""
-    # 「复制地址」复制的东西：远程复制上游 URL，仓库托管复制仓库内路径，内联没有地址
+    # 远程只展示地址摘要；仓库托管显示相对路径，内联没有地址。
     if kind == "remote":
-        address = r["url"]
+        address = url_summary(r["url"])
     elif kind == "repo":
         address = repo_path
     else:
@@ -210,7 +211,7 @@ def _provider_meta(r, repo_origin: str = "") -> dict:
         "format": r["format"],
         "kind": kind,
         "rule_count": r["rule_count"] or 0,
-        "url": r["url"] if kind == "remote" else "",
+        "url": url_summary(r["url"]) if kind == "remote" else "",
         "repo_path": repo_path,
         "address": address,
         "interval": r["interval"],

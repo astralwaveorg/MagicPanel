@@ -11,6 +11,7 @@ from .. import config, db, security
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import direct, releases, tester, webdav
 from ..services.capabilities import require_capability
+from ..services.access_dto import audit_public, error_summary
 from . import targets_devices
 
 router = APIRouter(prefix="/api/v1", tags=["misc"])
@@ -42,7 +43,8 @@ def overview(user=CurrentUser):
             failed = sum(1 for n in names if results.get(n, -1) < 0)
             sources.append({
                 "id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
-                "last_status": r["last_status"], "last_error": r["last_error"],
+                "last_status": r["last_status"], "last_error": error_summary(r["last_error"]),
+                "has_error": bool(r["last_error"]),
                 "last_fetched_at": r["last_fetched_at"], "node_count": r["node_count"],
                 "tested_at": r["tested_at"],
                 "filter_unavailable": bool(r["filter_unavailable"]),
@@ -50,7 +52,8 @@ def overview(user=CurrentUser):
             })
         rule_providers = [
             {"id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
-             "last_status": r["last_status"], "last_error": r["last_error"],
+             "last_status": r["last_status"], "last_error": error_summary(r["last_error"]),
+             "has_error": bool(r["last_error"]),
              "last_fetched_at": r["last_fetched_at"], "rule_count": r["rule_count"]}
             for r in db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
         ]
@@ -65,7 +68,7 @@ def overview(user=CurrentUser):
             for r in db.all_(conn, "SELECT * FROM devices ORDER BY id")
         ]
         recent_audit = [
-            db.row_to_dict(r) for r in db.all_(
+            audit_public(r) for r in db.all_(
                 conn, "SELECT * FROM audit ORDER BY id DESC LIMIT 8"
             )
         ]
@@ -151,7 +154,7 @@ def list_audit(limit: int = 100, offset: int = 0, keyword: str = "",
     where = ""
     args: list = []
     if keyword:
-        where = "WHERE action LIKE ? OR actor LIKE ? OR object_type LIKE ? OR detail LIKE ?"
+        where = "WHERE action LIKE ? OR actor LIKE ? OR object_type LIKE ? OR object_id LIKE ?"
         like = f"%{keyword}%"
         args = [like, like, like, like]
     with db.connect() as conn:
@@ -162,11 +165,22 @@ def list_audit(limit: int = 100, offset: int = 0, keyword: str = "",
             args + [limit, offset],
         )
     return {
-        "items": [db.row_to_dict(r) for r in rows],
+        "items": [audit_public(r) for r in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.post("/audit/{audit_id}/reveal")
+def reveal_audit(audit_id: int, user=RequireCapabilities("reveal")):
+    with db.tx() as conn:
+        row = db.one(conn, "SELECT * FROM audit WHERE id=?", (audit_id,))
+        if not row:
+            raise HTTPException(404, "审计记录不存在")
+        security.audit(conn, user["username"], "查看历史审计原文", "audit", audit_id,
+                       {"fields": ["detail"]})
+    return {"id": audit_id, "detail": row["detail"]}
 
 
 class AuditDeleteBody(BaseModel):
