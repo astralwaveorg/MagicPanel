@@ -207,6 +207,10 @@ def _normalize(conn, payload: dict) -> tuple[dict, bool]:
         supplied_keys = {row["key"] for row in tables["schema_version"]}
         tables["schema_version"] = [current.get(row["key"], row) for row in tables["schema_version"]]
         tables["schema_version"].extend(row for key, row in current.items() if key not in supplied_keys)
+    if legacy and 'catalog_state' not in supplied:
+        tables['catalog_state'] = [{'id': 1, 'revision': 0}]
+    if legacy and 'node_catalog' not in supplied:
+        tables['schema_version'] = [r for r in tables['schema_version'] if r['key'] != 'v2_catalog']
     return tables, legacy
 
 
@@ -246,6 +250,12 @@ def _list(row: dict, field: str) -> list:
 
 
 def _validate_references(tables: dict) -> None:
+    state = tables['catalog_state']
+    revisions = {(row['node_uid'], row['revision']) for row in tables['node_revisions']}
+    if (len(state) != 1 or state[0]['id'] != 1 or state[0]['revision'] < 0 or
+            any((row['node_uid'], row['current_revision']) not in revisions
+                for row in tables['node_catalog'])):
+        raise ValueError('backup_invalid_reference')
     variants = {row["id"] for row in tables["variants"]}
     default = [row for row in tables["variants"] if row["id"] == 0]
     if len(default) != 1 or default[0]["name"] != "默认" or default[0]["is_system"] != 1:
@@ -356,7 +366,7 @@ def validate_logical(conn, payload: dict) -> dict:
     return _report(tables, legacy)
 
 
-def restore_logical(conn, payload: dict) -> dict:
+def restore_logical(conn, payload: dict, *, _backfill_catalog: bool = True) -> dict:
     """调用方须持有写事务；校验全部通过后才清空，事务由调用方提交。"""
     _require_transaction(conn)
     tables, legacy = _validated(conn, payload)
@@ -369,6 +379,9 @@ def restore_logical(conn, payload: dict) -> dict:
         _insert(conn, tables)
         from .backup_archive import sanitize_restored
         sanitize_restored(conn)
+        if legacy and _backfill_catalog:
+            from . import node_catalog
+            node_catalog.backfill(conn)
     except Exception:
         conn.execute("ROLLBACK TO logical_restore")
         conn.execute("RELEASE logical_restore")
@@ -405,7 +418,7 @@ def restore_legacy_database(conn, source) -> dict:
                 raise ValueError("backup_invalid")
             row[column] = {"encoding": "base64", "data": base64.b64encode(value).decode("ascii")}
     payload = {"version": 1, "exported_at": db.now(), "tables": tables}
-    return restore_logical(conn, payload)
+    return restore_logical(conn, payload, _backfill_catalog=False)
 
 
 def create_archive(conn, destination: Path) -> dict:

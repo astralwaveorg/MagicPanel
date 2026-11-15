@@ -2,6 +2,7 @@
 
 BACKUP_TABLES = (
     "users", "sources", "rule_providers", "local_nodes", "variants", "private_blobs",
+    "node_catalog", "catalog_state", "node_revisions", "node_aliases", "catalog_issues",
     "targets", "snippets", "devices", "base_configs", "proxy_groups", "rules",
     "builds", "releases", "repo_migrations", "automation_runs", "settings",
     "schema_version",
@@ -9,6 +10,7 @@ BACKUP_TABLES = (
 
 # 历史导出唯一缺少的长期表。只允许 v1 使用这些安全缺省值。
 LEGACY_OPTIONAL_TABLES = frozenset({
+    "node_catalog", "catalog_state", "node_revisions", "node_aliases", "catalog_issues",
     "variants", "repo_migrations", "automation_runs", "schema_version", "private_blobs",
 })
 

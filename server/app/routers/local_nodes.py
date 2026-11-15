@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from .. import db, security
 from ..deps import CurrentUser, RequireCapabilities
-from ..services import local_nodes, node_dto
+from ..services import local_nodes, node_dto, node_catalog
 from ..services import refs
 from ..services import tester
 
@@ -123,6 +123,7 @@ def create_node(body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal'))
         )
         security.audit(conn, user["username"], "新增本地节点", "local_node",
                        cur.lastrowid, {"name": body.name, "protocol": body.protocol})
+        node_catalog.sync_local_node(conn, cur.lastrowid)
         row = _get_or_404(conn, cur.lastrowid)
     return _public(row)
 
@@ -167,6 +168,7 @@ def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edi
         )
         security.audit(conn, user["username"], "更新本地节点", "local_node", node_id,
                        {"name": body.name, "protocol": body.protocol})
+        node_catalog.sync_local_node(conn, node_id)
         row = _get_or_404(conn, node_id)
     return _public(row)
 
@@ -229,6 +231,7 @@ def set_node_enabled(node_id: int, body: EnabledBody, user=CurrentUser):
             conn, user["username"],
             "启用本地节点" if body.enabled else "停用本地节点",
             "local_node", node_id, {"name": row["name"]})
+        node_catalog.sync_local_node(conn, node_id)
         row = _get_or_404(conn, node_id)
     return _public(row)
 
@@ -253,6 +256,7 @@ def delete_node(node_id: int, force: bool = False, user=CurrentUser):
         detached, warnings = (refs.detach_local_node(conn, node_id)
                               if used_by else ([], []))
         conn.execute("DELETE FROM local_nodes WHERE id=?", (node_id,))
+        node_catalog.sync_local_node(conn, node_id)
         security.audit(conn, user["username"], "删除本地节点", "local_node", node_id,
                        {"name": row["name"], "detached_groups": detached})
     return {"ok": True, "detached_groups": detached, "warnings": warnings}

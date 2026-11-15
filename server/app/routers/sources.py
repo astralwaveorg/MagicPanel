@@ -8,8 +8,9 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser, RequireCapabilities
-from ..services import fetcher, refs, source_nodes, tester, updater
+from ..services import fetcher, refs, source_nodes, tester, updater, node_catalog
 from ..services.capabilities import require_capability
+from ..schemas.nodes import is_secret_key
 
 router = APIRouter(prefix="/api/v1/sources", tags=["sources"])
 
@@ -44,6 +45,7 @@ class SourceFileBody(BaseModel):
 
 
 class SourceBody(BaseModel):
+    trusted_upstream_id_key: str = Field(default="", max_length=64)
     # 名称会进入 provider 的订阅 URL（/res/provider/<name>），
     # 允许空格或斜杠会让 URL 失效、客户端拿不到节点。
     name: str = Field(min_length=1, max_length=64, pattern=r"^[^\s/?#%&]+$")
@@ -87,6 +89,11 @@ def _check_filter(value: str) -> None:
             re.compile(value)
         except re.error as exc:
             raise HTTPException(400, f"过滤正则无效：{exc}")
+
+
+def _check_trusted_key(value: str) -> None:
+    if value and (not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', value) or is_secret_key(value)):
+        raise HTTPException(400, '可信上游 ID 字段无效')
 
 
 def _check_mode(value: str) -> str:
@@ -157,6 +164,7 @@ def _headers_of(row) -> list[dict]:
 def _public(row, with_meta: bool = True) -> dict:
     url = security.decrypt_text(row["url_enc"])
     data = {
+        "trusted_upstream_id_key": row["trusted_upstream_id_key"],
         "id": row["id"],
         "name": row["name"],
         "url_masked": security.mask_url(url),
@@ -231,6 +239,7 @@ def _reference_reason(refs_list: list[dict]) -> str:
 
 
 def _delete_one(conn, row, operator: str, detached: list[str] | None = None) -> None:
+    node_catalog.retire_source(conn, row["id"])
     conn.execute("DELETE FROM sources WHERE id=?", (row["id"],))
     security.audit(conn, operator, "删除节点来源", "source", row["id"],
                    {"name": row["name"], "detached_groups": detached or []})
@@ -284,6 +293,7 @@ def list_sources(user=CurrentUser):
 
 @router.post("", status_code=201)
 def create_source(body: SourceBody, user=RequireCapabilities('edit', 'reveal')):
+    _check_trusted_key(body.trusted_upstream_id_key)
     if not body.url:
         raise HTTPException(400, "订阅地址不能为空")
     _check_filter(body.filter)
@@ -309,6 +319,8 @@ def create_source(body: SourceBody, user=RequireCapabilities('edit', 'reveal')):
                                for h in _check_headers(body.headers)]),
                  "remote", now, now),
             )
+            conn.execute('UPDATE sources SET trusted_upstream_id_key=? WHERE id=?',
+                         (body.trusted_upstream_id_key, cur.lastrowid))
             security.audit(conn, user["username"], "新增节点来源", "source", cur.lastrowid,
                            {"name": body.name})
             row = _get_or_404(conn, cur.lastrowid)
@@ -321,8 +333,10 @@ def create_source(body: SourceBody, user=RequireCapabilities('edit', 'reveal')):
 @router.put("/{source_id}")
 def update_source(source_id: int, body: SourceBody, force: bool = False,
                   user=CurrentUser):
-    if body.model_fields_set & {"url", "proxy_url", "headers", "ua", "allow_private"}:
+    if body.model_fields_set & {"url", "proxy_url", "headers", "ua", "allow_private", "trusted_upstream_id_key"}:
         require_capability(user, "reveal")
+    if "trusted_upstream_id_key" in body.model_fields_set:
+        require_capability(user, "edit")
     with db.tx() as conn:
         row = _get_or_404(conn, source_id)
         fields = {"enabled", "filter", "ua", "suffix", "mode", "interval", "test_interval",
@@ -386,6 +400,11 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
              int(body.filter_unavailable), proxy_enc, body.mode, headers_enc,
              db.now(), source_id),
         )
+        if 'trusted_upstream_id_key' in body.model_fields_set:
+            _check_trusted_key(body.trusted_upstream_id_key)
+            conn.execute('UPDATE sources SET trusted_upstream_id_key=? WHERE id=?',
+                         (body.trusted_upstream_id_key, source_id))
+        node_catalog.sync_source_enabled(conn, source_id)
         security.audit(conn, user["username"], "更新节点来源", "source", source_id,
                        {"name": body.name, "url_changed": bool(body.url),
                         "renamed_groups": renamed_groups})
@@ -404,6 +423,7 @@ def set_source_enabled(source_id: int, body: EnabledBody, user=CurrentUser):
         row = _get_or_404(conn, source_id)
         conn.execute("UPDATE sources SET enabled=?, updated_at=? WHERE id=?",
                      (int(body.enabled), db.now(), source_id))
+        node_catalog.sync_source_enabled(conn, source_id)
         security.audit(
             conn, user["username"],
             "启用节点来源" if body.enabled else "停用节点来源",
@@ -579,6 +599,7 @@ def import_source_file(body: SourceFileBody, user=RequireCapabilities('edit', 'r
             "test_attempt_at=NULL WHERE id=?",
             (security.encrypt_text(text), cur.lastrowid),
         )
+        node_catalog.reconcile_source(conn, cur.lastrowid, nodes)
         security.audit(conn, user["username"], "导入节点来源文件", "source",
                        cur.lastrowid, {"name": body.name, "node_count": len(nodes)})
         row = _get_or_404(conn, cur.lastrowid)
@@ -604,6 +625,7 @@ def replace_source_file(source_id: int, body: SourceFileBody, user=RequireCapabi
             (security.encrypt_text(text), len(nodes), security.sha256_text(text),
              now, json.dumps(meta, ensure_ascii=False), now, source_id),
         )
+        node_catalog.reconcile_source(conn, source_id, nodes)
         security.audit(conn, user["username"], "更新节点来源文件", "source", source_id,
                        {"name": row["name"], "node_count": len(nodes)})
         out = _get_or_404(conn, source_id)

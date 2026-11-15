@@ -13,7 +13,7 @@ import threading
 import yaml
 
 from .. import config, db, security
-from . import fetcher, source_nodes, tester
+from . import fetcher, source_nodes, tester, node_catalog
 
 
 class NotFound(Exception):
@@ -146,6 +146,7 @@ def refresh_source(source_id: int, operator: str, automatic: bool = False):
                      security.encrypt_text(text),
                      json.dumps(meta, ensure_ascii=False), now, source_id),
                 )
+                node_catalog.reconcile_source(conn, source_id, nodes)
                 security.audit(
                     conn, operator,
                     _action(automatic, "刷新节点来源", "自动抓取节点来源"),
