@@ -92,7 +92,6 @@ echo "== 重建并重启容器 =="
 PREV_IMAGE=$(ssh -o BatchMode=yes "$NAS_HOST" \
   "docker inspect --format '{{.Image}}' magicpanel 2>/dev/null || echo ''" || true)
 restore_previous() {
-  trap - ERR
   if [ -n "$PREV_IMAGE" ]; then
     echo "尝试回滚到上一镜像 $PREV_IMAGE" >&2
     ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && python3 - '$PREV_IMAGE'" <<'PY'
@@ -110,7 +109,15 @@ PY
     echo "已核对回滚镜像ID，请检查容器健康与日志" >&2
   fi
 }
-trap 'restore_previous' ERR
+finish_deploy() {
+  local status=$?
+  trap - EXIT
+  if [ "$status" -ne 0 ]; then
+    restore_previous
+  fi
+  exit "$status"
+}
+trap finish_deploy EXIT
 # 刚重启时 NAS 的外网可能还没恢复，npm/pip 拉包会失败；
 # 需要时用 DEPLOY_PROXY=http://host:port 走局域网代理。
 # 家庭网络已由路由器的 OpenClash 透明代理，通常无需设置 DEPLOY_PROXY。
@@ -135,20 +142,16 @@ echo "容器状态：$STATUS"
 if [ "$STATUS" != "healthy" ]; then
   echo "健康检查未通过，查看日志：ssh $NAS_HOST 'docker logs magicpanel --tail 50'" >&2
   # 回滚到上一个镜像，避免一次坏发布把面板长时间打挂
-  restore_previous
   exit 1
 fi
-
-trap - ERR
 
 echo "== 数据自检 =="
 # 把自检脚本拷进容器，对运行中的数据库做一致性检查：
 # 引用完整性、命名规范、冗余覆盖、结构键越权——数据层面的问题在这里挡住，
 # 不留给用户在下发配置时才发现。
 scp -q "$REPO_DIR/scripts/check_data_consistency.py" "$NAS_HOST:/tmp/check_data.py" 2>/dev/null || true
-ssh -o BatchMode=yes "$NAS_HOST" "docker cp /tmp/check_data.py magicpanel:/tmp/check_data.py && \
-  docker exec magicpanel python3 /tmp/check_data.py /app/data/magicpanel.db"
-if [ $? -ne 0 ]; then
+if ! ssh -o BatchMode=yes "$NAS_HOST" "docker cp /tmp/check_data.py magicpanel:/tmp/check_data.py && \
+  docker exec magicpanel python3 /tmp/check_data.py /app/data/magicpanel.db"; then
   echo "数据自检未通过，请按上面的提示修正数据（面板已发布，但数据需要整理）" >&2
   exit 1
 fi
@@ -165,3 +168,5 @@ for path in /api/v1/setup/status / /admin/login; do
   [ "$CODE" = "200" ] || FAIL=1
 done
 [ "$FAIL" = "0" ] && echo "发布完成：$DOMAIN" || { echo "域名验证未通过，请检查反代与证书" >&2; exit 1; }
+
+trap - EXIT

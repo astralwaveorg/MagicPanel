@@ -12,6 +12,8 @@ from contextlib import closing
 import time
 import uuid
 import tarfile
+import gzip
+import tempfile
 from scripts.ops.evidence import canonical_bytes, private_path, private_write, verify_artifact, seal_artifact, write_proof, EvidenceError
 
 _IMAGE = re.compile(r'sha256:[0-9a-f]{64}\Z')
@@ -132,7 +134,106 @@ def validate_rescue_database(database: Path, key_path: Path) -> dict:
                 'proxy_groups':conn.execute('SELECT COUNT(*) FROM proxy_groups').fetchone()[0]}
 
 
-def verify_rescue_receipts(manifest: dict, proof_dir: Path | None, *, database_result_sha256: str) -> list[str]:
+def daemon_identity(run) -> dict:
+    raw=run(['docker','info','--format','{{.ID}}'])
+    if not raw:
+        raise ValueError('DAEMON_ID_REQUIRED')
+    arch=run(['docker','info','--format','{{.Architecture}}'])
+    os_type=run(['docker','info','--format','{{.OSType}}'])
+    return {'id_sha256':hashlib.sha256(raw.encode()).hexdigest(),
+            'architecture':{'x86_64':'amd64','aarch64':'arm64'}.get(arch,arch),'os_type':os_type}
+
+
+def _binding(manifest, directory, daemon):
+    run=json.loads((private_path(Path(directory))/'run.json').read_text(encoding='utf-8'))
+    return {'manifest_sha256':hashlib.sha256(canonical_bytes(manifest)).hexdigest(),
+            'inventory_sha256':run['inventory_sha'],'daemon':daemon}
+
+
+def _seal_machine_observation(directory, purpose, observation):
+    directory=private_path(Path(directory))
+    filename={'rescue_resources':'resources-observation.json','rescue_rehearsal':'compose-observation.json'}[purpose]
+    private_write(directory/filename,canonical_bytes(observation))
+    body={'schema':2,'manifest_sha256':observation['binding']['manifest_sha256'],
+          'observation_file':filename,'evidence_hashes':{filename:_sha(directory/filename)}}
+    private_write(directory/(purpose+'.receipt.json'),canonical_bytes(seal_artifact(directory,purpose=purpose,body=body)))
+    return body
+
+
+def _machine_observation(directory, purpose, body, manifest, database_sha, root):
+    filename={'rescue_resources':'resources-observation.json','rescue_rehearsal':'compose-observation.json'}[purpose]
+    if body.get('schema')!=2 or body.get('observation_file')!=filename or set(body['evidence_hashes'])!={filename}:
+        raise ValueError('MACHINE_OBSERVATION_REQUIRED')
+    observation=json.loads((directory/filename).read_text(encoding='utf-8'))
+    if (not isinstance(observation,dict) or observation.get('schema')!=2 or
+            set(observation)!={'schema','kind','binding','expected','observed','steps'}):
+        raise ValueError('MACHINE_OBSERVATION_REQUIRED')
+    metadata=manifest['metadata'];binding=observation.get('binding',{})
+    inventory=metadata.get('target_inventory')
+    target=metadata.get('target_daemon')
+    run=json.loads((directory/'run.json').read_text(encoding='utf-8'))
+    if (set(binding)!={'manifest_sha256','inventory_sha256','daemon'} or
+            not isinstance(inventory,dict) or inventory.get('role')!='nas' or
+            inventory.get('daemon_identity')!=target or
+            not isinstance(target,dict) or set(target)!={'id_sha256','architecture','os_type'} or
+            not re.fullmatch('[a-f0-9]{64}',str(target.get('id_sha256',''))) or
+            target.get('os_type')!='linux' or target.get('architecture')!=metadata['architecture'] or
+            binding.get('manifest_sha256')!=body['manifest_sha256'] or
+            binding.get('inventory_sha256')!=hashlib.sha256(canonical_bytes(inventory)).hexdigest() or
+            binding.get('inventory_sha256')!=run['inventory_sha'] or run['target_role']!='nas'):
+        raise ValueError('MACHINE_TARGET_BINDING_REQUIRED')
+    if binding.get('daemon')!=target:
+        raise ValueError('TARGET_DAEMON_MISMATCH')
+    if root is None:
+        raise ValueError('MACHINE_SOURCE_BYTES_REQUIRED')
+    root=Path(root);assets=metadata['assets'];expected=observation.get('expected',{});actual=observation.get('observed',{})
+    old=metadata['previous_image_id'];new=metadata.get('image_id')
+    if purpose=='rescue_resources':
+        archive=root/assets['resources_archive'][0]
+        catalog=resource_archive_catalog(archive)
+        expected_fields={'old_image_id':old,'database_sha256':_sha(root/assets['database'][0]),
+                         'resources_archive_sha256':_sha(archive)}
+        if observation.get('kind')!='resource_restore' or expected!=expected_fields:
+            raise ValueError('RESOURCE_OBSERVATION_MISMATCH')
+        database=actual.get('database',{});old_code=actual.get('old_code',{})
+        if (actual.get('runtime_image_id')!=old or actual.get('config_digest')!=inspect_saved_image(root/assets['old_image'][0],old)['config_digest'] or
+                actual.get('resources')!=catalog or
+                hashlib.sha256(canonical_bytes(database)).hexdigest()!=database_sha or
+                set(old_code)!={'old_code_imported','integrity','decrypted_values','variants','local_runtime_image'} or
+                old_code.get('old_code_imported') is not True or
+                type(old_code.get('decrypted_values')) is not int or type(old_code.get('variants')) is not int or
+                old_code.get('local_runtime_image')!=old or old_code.get('integrity')!='ok' or
+                old_code.get('decrypted_values')!=database.get('decrypted_values') or
+                old_code.get('variants')!=database.get('variants')):
+            raise ValueError('RESOURCE_OBSERVATION_MISMATCH')
+        steps=[{'action':'archive_verified','expected':expected_fields['resources_archive_sha256'],'observed':expected_fields['resources_archive_sha256']},
+               {'action':'resources_restored','expected':catalog['resource_digest'],'observed':catalog['resource_digest']},
+               {'action':'database_verified','expected':database_sha,'observed':database_sha},
+               {'action':'old_code_read','expected':old,'observed':old}]
+        if observation.get('steps')!=steps:
+            raise ValueError('RESOURCE_STEPS_MISMATCH')
+    else:
+        infos=[inspect_saved_image(root/assets[role][0],image) for role,image in [('old_image',old),('new_image',new)]]
+        if (observation.get('kind')!='image_restore' or expected!={'image_sequence':[old,new,old]} or
+                actual.get('archives')!=infos or actual.get('network_mode')!='none' or actual.get('host_mounts') is not False):
+            raise ValueError('IMAGE_OBSERVATION_MISMATCH')
+        steps=observation.get('steps',[])
+        if len(steps)!=6:
+            raise ValueError('IMAGE_STEPS_MISMATCH')
+        for step,info,image in zip(steps[:2],infos,[old,new]):
+            if step!={'action':'load','archive_sha256':info['archive_sha256'],'expected_image_id':image,'observed_image_id':image}:
+                raise ValueError('IMAGE_LOAD_OBSERVATION_MISMATCH')
+        for step,image in zip(steps[2:5],[old,new,old]):
+            if (set(step)!={'action','expected_image_id','observed_image_id','running','container_id_sha256'} or
+                    step['action']!='switch' or step['expected_image_id']!=image or step['observed_image_id']!=image or
+                    step['running'] is not True or not re.fullmatch('[a-f0-9]{64}',str(step['container_id_sha256']))):
+                raise ValueError('IMAGE_RESTORE_OBSERVATION_MISMATCH')
+        if steps[5]!={'action':'cleanup','remaining_container_ids':[]}:
+            raise ValueError('IMAGE_CLEANUP_OBSERVATION_MISMATCH')
+    return observation
+
+
+def verify_rescue_receipts(manifest: dict, proof_dir: Path | None, *, database_result_sha256: str, root: Path | None=None) -> list[str]:
     """人工观察必须单独签名并附原件哈希；fixture收据不能替代整包实测。"""
     sha = hashlib.sha256(canonical_bytes(manifest)).hexdigest()
     metadata = manifest.get('metadata', {})
@@ -165,21 +266,16 @@ def verify_rescue_receipts(manifest: dict, proof_dir: Path | None, *, database_r
                        body.get('management_transport') in ('lan','serial') and
                        body.get('protected_management_vps') is True and
                        body.get('retrieved_manifest_sha256')==sha)
-            elif purpose=='rescue_resources':
-                valid=(body.get('database_result_sha256')==database_result_sha256 and
-                       body.get('old_code_image_id')==metadata.get('previous_image_id') and
-                       body.get('old_code_readable') is True and body.get('resources_restored') is True)
             else:
-                valid=(body.get('architecture')==metadata.get('architecture') and
-                       body.get('image_sequence')==[metadata.get('previous_image_id'),metadata.get('image_id'),metadata.get('previous_image_id')] and
-                       body.get('network_mode')=='none' and body.get('host_mounts') is False)
+                _machine_observation(directory,purpose,body,manifest,database_result_sha256,root)
+                valid=True
             if not valid:
                 errors.append(missing)
         except FileNotFoundError:
             errors.append(missing)
         except (OSError,ValueError,TypeError,KeyError) as exc:
             code=str(exc)
-            errors.append(code if code.startswith(('RECEIPT_','PROOF_')) else 'RECEIPT_INVALID')
+            errors.append(code if code.startswith(('RECEIPT_','PROOF_','MACHINE_','TARGET_','RESOURCE_','IMAGE_')) else 'RECEIPT_INVALID')
     return sorted(set(errors))
 
 
@@ -202,7 +298,7 @@ def restore_resource_archive(archive: Path, destination: Path) -> dict:
             if total>4*1024**3 or len(members)>100000:
                 raise ValueError('RESOURCE_ARCHIVE_TOO_LARGE')
         private_path(destination,create=True)
-        hashes={}
+        hashes={};sizes={}
         for member in members:
             target=destination/member.name
             # 根目录已受限且全表拒绝链接；嵌套.git是惰性恢复字节，不调用Git。
@@ -215,8 +311,26 @@ def restore_resource_archive(archive: Path, destination: Path) -> dict:
                     for block in iter(lambda:stream.read(1024*1024),b''):
                         out.write(block)
                 target.chmod(0o600)
-                hashes[member.name]=_sha(target)
-    return {'files':len(hashes),'bytes':total,'resource_digest':hashlib.sha256(canonical_bytes(hashes)).hexdigest()}
+                hashes[member.name]=_sha(target);sizes[member.name]=member.size
+    return {'files':len(hashes),'bytes':total,'resource_digest':hashlib.sha256(canonical_bytes(hashes)).hexdigest(),
+            'file_hashes':hashes,'file_sizes':sizes}
+
+
+def resource_archive_catalog(archive: Path) -> dict:
+    hashes={};sizes={}
+    with tarfile.open(archive,'r:*') as source:
+        for member in source:
+            if member.isfile():
+                if member.name in hashes or member.size<0 or member.size>4*1024**3:
+                    raise ValueError('RESOURCE_ARCHIVE_INVALID')
+                h=hashlib.sha256()
+                with source.extractfile(member) as stream:
+                    for block in iter(lambda:stream.read(1024*1024),b''):h.update(block)
+                hashes[member.name]=h.hexdigest();sizes[member.name]=member.size
+            elif not member.isdir():
+                raise ValueError('RESOURCE_ARCHIVE_INVALID')
+    return {'files':len(hashes),'bytes':sum(sizes.values()),'resource_digest':hashlib.sha256(canonical_bytes(hashes)).hexdigest(),
+            'file_hashes':hashes,'file_sizes':sizes}
 
 
 _REQUIRED_ASSETS=frozenset(('database','resources_archive','old_image','new_image','binaries','rules','providers',
@@ -263,29 +377,99 @@ def verify_rescue_readiness(root: Path, manifest: dict, proof_dir: Path | None, 
         database_sha=hashlib.sha256(canonical_bytes(result)).hexdigest()
     except (OSError,ValueError,KeyError,IndexError,TypeError,sqlite3.Error):
         errors.append('DATABASE_RESTORE_REQUIRED')
-    errors.extend(verify_rescue_receipts(manifest,proof_dir,database_result_sha256=database_sha))
+    errors.extend(verify_rescue_receipts(manifest,proof_dir,database_result_sha256=database_sha,root=Path(root)))
     return sorted(set(errors))
 
 
 def inspect_saved_image(archive: Path, expected: str) -> dict:
     expected=_image(expected)
     with tarfile.open(archive,'r:*') as source:
-        handle=source.extractfile('manifest.json')
-        if handle is None or source.getmember('manifest.json').size>1024*1024:
+        members=source.getmembers()
+        if len(members)>100000 or len({m.name for m in members})!=len(members):
             raise ValueError('INVALID_IMAGE_ARCHIVE')
-        manifest=json.load(handle)
-        if len(manifest)!=1:
+        by_name={m.name:m for m in members}
+        def member(name, limit=4*1024**3):
+            m=by_name.get(name)
+            if m is None or not m.isfile() or not 0<=m.size<=limit:
+                raise ValueError('IMAGE_LAYER_MEMBER_INVALID')
+            return m
+        def read_json(name,limit=16*1024*1024):
+            return json.load(source.extractfile(member(name,limit)))
+        def raw_sha(name):
+            h=hashlib.sha256()
+            with source.extractfile(member(name)) as stream:
+                for block in iter(lambda:stream.read(1024*1024),b''):h.update(block)
+            return 'sha256:'+h.hexdigest()
+        manifest=read_json('manifest.json',1024*1024)
+        if not isinstance(manifest,list) or len(manifest)!=1:
             raise ValueError('SINGLE_IMAGE_ARCHIVE_REQUIRED')
         config_name=manifest[0]['Config']
-        member=source.getmember(config_name)
-        if not member.isfile() or member.size>16*1024*1024:
-            raise ValueError('INVALID_IMAGE_ARCHIVE')
-        config_bytes=source.extractfile(member).read()
-        if 'sha256:'+hashlib.sha256(config_bytes).hexdigest()!=expected:
+        config_digest=raw_sha(config_name)
+        config=read_json(config_name)
+        diffs=config['rootfs']['diff_ids'];layers=manifest[0]['Layers']
+        if not isinstance(diffs,list) or not isinstance(layers,list) or len(diffs)!=len(layers) or len(layers)>256:
+            raise ValueError('IMAGE_LAYER_COUNT_MISMATCH')
+        observations=[]
+        for name,diff in zip(layers,diffs):
+            _image(diff)
+            m=member(name)
+            stored_sha=raw_sha(name)
+            if name.startswith('blobs/sha256/') and stored_sha!='sha256:'+name.rsplit('/',1)[1]:
+                raise ValueError('IMAGE_LAYER_STORED_DIGEST_MISMATCH')
+            with source.extractfile(m) as raw:
+                magic=raw.read(4);raw.seek(0)
+                if magic==bytes.fromhex('28b52ffd'):
+                    raise ValueError('IMAGE_LAYER_ZSTD_UNSUPPORTED')
+                decoded=gzip.GzipFile(fileobj=raw) if magic[:2]==b'\x1f\x8b' else raw
+                try:
+                    with tempfile.SpooledTemporaryFile(max_size=16*1024*1024) as layer:
+                        digest=hashlib.sha256();size=0
+                        for block in iter(lambda:decoded.read(1024*1024),b''):
+                            size+=len(block)
+                            if size>4*1024**3:raise ValueError('IMAGE_LAYER_TOO_LARGE')
+                            digest.update(block);layer.write(block)
+                        if 'sha256:'+digest.hexdigest()!=diff:
+                            raise ValueError('IMAGE_LAYER_DIFF_ID_MISMATCH')
+                        if size<1024 or size%512:
+                            raise ValueError('IMAGE_LAYER_TRUNCATED')
+                        layer.seek(-1024,2)
+                        if layer.read(1024)!=b'\0'*1024:
+                            raise ValueError('IMAGE_LAYER_TRUNCATED')
+                        layer.seek(0)
+                        with tarfile.open(fileobj=layer,mode='r:') as inner:
+                            for entry in inner:
+                                if entry.offset_data+entry.size>size:
+                                    raise ValueError('IMAGE_LAYER_TRUNCATED')
+                except (OSError,EOFError,tarfile.TarError):
+                    raise ValueError('IMAGE_LAYER_INVALID') from None
+            observations.append({'path':name,'stored_sha256':stored_sha,'stored_bytes':m.size,
+                                 'diff_id':diff,'uncompressed_bytes':size})
+        # OCI目录中的每个可达描述符也按实际字节校验，不相信blob文件名。
+        checked=set();identities={config_digest}
+        def descriptor(d):
+            digest=_image(d['digest']);name='blobs/sha256/'+digest[7:]
+            m=member(name)
+            if type(d.get('size')) is not int or m.size!=d['size'] or raw_sha(name)!=digest:
+                raise ValueError('IMAGE_LAYER_DESCRIPTOR_MISMATCH')
+            if digest in checked:return
+            checked.add(digest)
+            media=d.get('mediaType','')
+            if 'image.index' in media or 'manifest.list' in media:
+                for child in read_json(name).get('manifests',[]):descriptor(child)
+            elif 'image.manifest' in media or 'manifest.v2' in media:
+                doc=read_json(name);descriptor(doc['config'])
+                for child in doc['layers']:descriptor(child)
+                if (doc['config']['digest']==config_digest and
+                        [d['digest'] for d in doc['layers']]==[o['stored_sha256'] for o in observations]):
+                    identities.add(digest)
+                else:
+                    raise ValueError('IMAGE_LAYER_DESCRIPTOR_MAPPING_MISMATCH')
+        if 'index.json' in by_name:
+            for d in read_json('index.json').get('manifests',[]):descriptor(d)
+        if expected not in identities:
             raise ValueError('ARCHIVE_IMAGE_ID_MISMATCH')
-        config=json.loads(config_bytes)
-        return {'config_digest':expected,'architecture':config['architecture'],
-                'os':config['os'],'diff_ids':config['rootfs']['diff_ids']}
+        return {'config_digest':config_digest,'image_identity':expected,'architecture':config['architecture'],'os':config['os'],
+                'diff_ids':diffs,'layers':observations,'archive_sha256':_sha(Path(archive))}
 
 
 def old_code_readability(restored: Path, runtime_image: str, *, run=None) -> dict:
@@ -347,6 +531,8 @@ def rehearse_resources(manifest_path: Path, destination: Path, proof_dir: Path, 
     expected=_image(metadata['previous_image_id'])
     runtime=_image(metadata.get('previous_runtime_image_id',expected))
     archived=inspect_saved_image(asset('old_image'),expected)
+    daemon=daemon_identity(run)
+    run(['docker','image','load','--input',str(asset('old_image'))])
     loaded=_inspect_image(runtime,run)
     if archived['architecture']!=metadata['architecture'] or loaded['Architecture']!=archived['architecture'] or loaded['RootFS']['Layers']!=archived['diff_ids']:
         raise ValueError('LOADED_IMAGE_CONTENT_MISMATCH')
@@ -356,19 +542,18 @@ def rehearse_resources(manifest_path: Path, destination: Path, proof_dir: Path, 
     old=old_code_readability(destination,runtime,run=run)
     if old['decrypted_values']!=database['decrypted_values'] or old['variants']!=database['variants']:
         raise ValueError('OLD_CODE_DATABASE_MISMATCH')
-    observation={'database':database,'resources':resources,'old_code':old,
-                 'archive_config_digest':expected,'local_runtime_image':runtime,
-                 'same_engine_image_identity':runtime==expected}
-    directory=private_path(Path(proof_dir))
-    private_write(directory/'resources-observation.json',canonical_bytes(observation))
-    body={'manifest_sha256':hashlib.sha256(canonical_bytes(manifest)).hexdigest(),
-          'database_result_sha256':hashlib.sha256(canonical_bytes(database)).hexdigest(),
-          'old_code_image_id':expected,'local_runtime_image':runtime,
-          'old_code_readable':True,'resources_restored':True,
-          'same_engine_image_identity':runtime==expected,
-          'evidence_hashes':{'resources-observation.json':_sha(directory/'resources-observation.json')}}
-    private_write(directory/'rescue_resources.receipt.json',canonical_bytes(seal_artifact(directory,purpose='rescue_resources',body=body)))
-    return body
+    database_sha=hashlib.sha256(canonical_bytes(database)).hexdigest()
+    expected_fields={'old_image_id':expected,'database_sha256':_sha(asset('database')),
+                     'resources_archive_sha256':_sha(asset('resources_archive'))}
+    observation={'schema':2,'kind':'resource_restore','binding':_binding(manifest,proof_dir,daemon),
+                 'expected':expected_fields,
+                 'observed':{'database':database,'resources':resources,'old_code':old,
+                             'config_digest':archived['config_digest'],'runtime_image_id':runtime},
+                 'steps':[{'action':'archive_verified','expected':expected_fields['resources_archive_sha256'],'observed':expected_fields['resources_archive_sha256']},
+                          {'action':'resources_restored','expected':resources['resource_digest'],'observed':resources['resource_digest']},
+                          {'action':'database_verified','expected':database_sha,'observed':database_sha},
+                          {'action':'old_code_read','expected':expected,'observed':runtime}]}
+    return _seal_machine_observation(proof_dir,'rescue_resources',observation)
 
 
 def compose_image_override(root: Path, digest: str) -> Path:
@@ -437,44 +622,56 @@ def offline_deploy(manifest_path: Path, compose_dir: Path, *, run=_run, attempts
         raise ValueError('DEPLOY_FAILED_OLD_IMAGE_RESTORED') from None
 
 
-def rehearse_restore(root: Path, old: str, new: str, *, run=_run) -> dict:
-    """仅生成无网络/无宿主挂载的一次性Compose；镜像必须预加载并提供/bin/sh。"""
-    old, new = _image(old), _image(new)
-    if old == new:
+def rehearse_restore(root: Path, old: str, new: str, *, run=_run, archives=None) -> dict:
+    """从本包load后仅生成无网络/无宿主挂载的一次性Compose。"""
+    old,new=_image(old),_image(new)
+    if old==new:
         raise ValueError('DISTINCT_FIXTURE_IMAGES_REQUIRED')
-    engine = run(['docker', 'info', '--format', '{{.ID}}'])
-    _inspect_image(old, run)
-    _inspect_image(new, run)
-    root = private_path(Path(root), create=True)
-    sandbox = root / ('fixture-' + uuid.uuid4().hex)
-    private_path(sandbox, create=True)
-    service = {'image': old, 'network_mode': 'none', 'read_only': True,
-               'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'],
-               'user': '65534:65534', 'entrypoint': ['/bin/sh', '-c'],
-               'command': ['sleep 120'], 'restart': 'no', 'healthcheck': {'disable': True}}
-    private_write(sandbox / 'docker-compose.yml', canonical_bytes({
-        'name': 'mp-rescue-' + uuid.uuid4().hex, 'services': {'magicpanel': service}}))
-    base = ['docker', 'compose', '-f', str(sandbox / 'docker-compose.yml')]
-    seen = []
+    daemon=daemon_identity(run)
+    if not isinstance(archives,list) or len(archives)!=2:
+        raise ValueError('IMAGE_ARCHIVES_REQUIRED')
+    infos=[inspect_saved_image(Path(archive),image) for archive,image in zip(archives,[old,new])]
+    steps=[]
+    for archive,image,info in zip(archives,[old,new],infos):
+        run(['docker','image','load','--input',str(archive)])
+        loaded=_inspect_image(image,run)
+        if loaded['Architecture']!=info['architecture'] or loaded['RootFS']['Layers']!=info['diff_ids']:
+            raise ValueError('LOADED_IMAGE_CONTENT_MISMATCH')
+        steps.append({'action':'load','archive_sha256':info['archive_sha256'],
+                      'expected_image_id':image,'observed_image_id':loaded['Id']})
+    root=private_path(Path(root),create=True)
+    sandbox=private_path(root/('fixture-'+uuid.uuid4().hex),create=True)
+    service={'image':old,'network_mode':'none','read_only':True,'cap_drop':['ALL'],
+             'security_opt':['no-new-privileges:true'],'user':'65534:65534',
+             'entrypoint':['/bin/sh','-c'],'command':['sleep 120'],'restart':'no',
+             'stop_grace_period':'1s','healthcheck':{'disable':True}}
+    private_write(sandbox/'docker-compose.yml',canonical_bytes({
+        'name':'mp-rescue-'+uuid.uuid4().hex,'services':{'magicpanel':service}}))
+    base=['docker','compose','-f',str(sandbox/'docker-compose.yml')]
     try:
-        for image in (old, new, old):
-            override = compose_image_override(sandbox, image)
-            run(restore_argv(str(sandbox), str(override)))
-            container = run(base + ['ps', '-q', 'magicpanel'])
-            if not container or not re.fullmatch(r'[a-f0-9]{12,64}', container):
+        for image in (old,new,old):
+            override=compose_image_override(sandbox,image)
+            run(restore_argv(str(sandbox),str(override)))
+            container=run(base+['ps','-q','magicpanel'])
+            if not container or not re.fullmatch(r'[a-f0-9]{12,64}',container):
                 raise ValueError('FIXTURE_CONTAINER_MISSING')
-            actual = run(['docker', 'inspect', '--format', '{{.Image}}', container])
-            running = run(['docker', 'inspect', '--format', '{{.State.Running}}', container])
-            if actual != image or running != 'true':
+            actual=run(['docker','inspect','--format','{{.Image}}',container])
+            running=run(['docker','inspect','--format','{{.State.Running}}',container])
+            if actual!=image or running!='true':
                 raise ValueError('FIXTURE_IMAGE_RESTORE_FAILED')
-            seen.append(actual)
+            steps.append({'action':'switch','expected_image_id':image,'observed_image_id':actual,
+                          'running':True,'container_id_sha256':hashlib.sha256(container.encode()).hexdigest()})
     finally:
-        run(base + ['down', '--volumes', '--remove-orphans'])
-    receipt = {'schema': 1, 'kind': 'isolated_compose_restore', 'image_sequence': seen,
-               'engine_sha256': hashlib.sha256(engine.encode()).hexdigest(),
-               'network_mode': 'none', 'host_mounts': False}
-    private_write(sandbox / 'rehearsal.json', canonical_bytes(receipt))
-    return receipt
+        run(base+['down','--volumes','--remove-orphans'])
+    remaining=run(base+['ps','-aq'])
+    if remaining:
+        raise ValueError('FIXTURE_CLEANUP_FAILED')
+    steps.append({'action':'cleanup','remaining_container_ids':[]})
+    observation={'schema':2,'kind':'image_restore','daemon':daemon,
+                 'expected':{'image_sequence':[old,new,old]},
+                 'observed':{'archives':infos,'network_mode':'none','host_mounts':False},'steps':steps}
+    private_write(sandbox/'rehearsal.json',canonical_bytes(observation))
+    return observation
 
 
 def main(argv=None) -> int:
@@ -546,14 +743,11 @@ def main(argv=None) -> int:
                 if errors:
                     raise ValueError(errors[0])
                 metadata = manifest['metadata']
-                receipt = rehearse_restore(args.compose_dir, metadata['previous_image_id'], metadata['image_id'])
+                archives=[args.manifest.parent/metadata['assets'][role][0] for role in ('old_image','new_image')]
+                receipt = rehearse_restore(args.compose_dir, metadata['previous_image_id'], metadata['image_id'],archives=archives)
                 if args.proof_dir:
-                    directory=private_path(args.proof_dir)
-                    private_write(directory/'compose-observation.json',canonical_bytes(receipt))
-                    body={**receipt,'architecture':metadata['architecture'],
-                          'manifest_sha256':hashlib.sha256(canonical_bytes(manifest)).hexdigest(),
-                          'evidence_hashes':{'compose-observation.json':_sha(directory/'compose-observation.json')}}
-                    private_write(directory/'rescue_rehearsal.receipt.json',canonical_bytes(seal_artifact(directory,purpose='rescue_rehearsal',body=body)))
+                    receipt['binding']=_binding(manifest,args.proof_dir,receipt.pop('daemon'))
+                    _seal_machine_observation(args.proof_dir,'rescue_rehearsal',receipt)
                 print(json.dumps({'rehearsal_sha256': hashlib.sha256(canonical_bytes(receipt)).hexdigest()}))
                 return 0
             result = offline_deploy(args.manifest, args.compose_dir)
