@@ -18,6 +18,7 @@ import yaml
 
 from .. import config
 from ..services import base_config as base_config_service
+from ..services import config_resolution, runtime_profiles
 from ..services import local_nodes as local_node_service
 from ..services import source_nodes as source_node_service
 
@@ -359,8 +360,10 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     general_base = (snapshot.get("base") or {}).get(f"{engine}|{platform}")
     if general_base:
         docs[(engine, platform, 0)] = base_config_service.normalize(general_base)
-    layers = base_config_service.scope_layers(engine, platform, 0, docs)
-    base, _sources = base_config_service.cascade(layers)
+    profile = runtime_profiles.effective_profile(target, device)
+    resolved = config_resolution.resolve_layers(
+        engine=engine, platform=platform, docs=docs, runtime_profile=profile['id'])
+    base = resolved['effective']
     # 应用级伪键：不写入产物，只控制面板内置行为
     panel_direct = bool(base.pop(base_config_service.PANEL_DIRECT_KEY, True))
     direct_domains = base_config_service.normalize_domains(
@@ -608,27 +611,4 @@ def dedupe_rules(text: str) -> str:
 
 
 def apply_device_overlay(text: str, overlay_yaml: str) -> str:
-    """设备级个性化：在目标产物之上叠加该设备自己的扩展 YAML。
-
-    合并语义与「基础配置」的分层完全一致：字典递归、列表**追加**、标量覆盖。
-    设备层是"个性化"语义：保存的是与上层的差异，列表只记新增项，
-    因此这里用追加语义——下发结果 = 平台产物 + 这台设备新增的内容。
-
-    结构键（节点 / 策略组 / 规则等）不允许被设备覆盖：
-    列表是追加语义，写在兜底规则之后永不生效，还会让客户端加载失败。
-    """
-    overlay_yaml = (overlay_yaml or "").strip()
-    if not overlay_yaml:
-        return text
-    overlay = yaml.safe_load(overlay_yaml) or {}
-    if not isinstance(overlay, dict):
-        return text
-    for key in base_config_service.PROTECTED_KEYS:
-        if key in overlay:
-            raise ValueError(f"设备扩展不允许覆盖结构键：{key}")
-    cfg = yaml.safe_load(text) or {}
-    if not isinstance(cfg, dict):
-        return text
-    merged = base_config_service.merge_docs(
-        cfg, overlay, base_config_service.LIST_APPEND)
-    return yaml.safe_dump(merged, allow_unicode=True, sort_keys=False, width=4096)
+    return config_resolution.apply_device_overlay(text, overlay_yaml)
