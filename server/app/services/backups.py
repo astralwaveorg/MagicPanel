@@ -250,6 +250,28 @@ def _list(row: dict, field: str) -> list:
 
 
 def _validate_references(tables: dict) -> None:
+    from . import node_refs
+    try:
+        groups = tables['proxy_groups']
+        # Restore checks identity while preserving disabled/retired state.
+        catalog = [{**node,'enabled':True,'retired':False} for node in tables['node_catalog']]
+        for group in groups:
+            if group.get('members_format') == 'typed-v2':
+                names = node_refs.resolve_refs(node_refs.decoded(group.get('members_v2'),[]),
+                    variant_id=group['variant_id'],groups=groups,nodes=catalog)
+                if json.loads(group['proxies']) != names:
+                    raise ValueError('backup_invalid_reference')
+                group['proxies'] = json.dumps(names,ensure_ascii=False)
+                group['local_nodes'] = '[]'
+        for rule in tables['rules']:
+            ref = node_refs.decoded(rule.get('target_ref_v2'),None)
+            if ref is not None:
+                name = node_refs.resolve_refs([ref],variant_id=rule['variant_id'],groups=groups,nodes=catalog)[0]
+                if rule['target'] != name:
+                    raise ValueError('backup_invalid_reference')
+                rule['target'] = name
+    except (ValueError,TypeError,KeyError):
+        raise ValueError('backup_invalid_reference') from None
     state = tables['catalog_state']
     revisions = {(row['node_uid'], row['revision']) for row in tables['node_revisions']}
     if (len(state) != 1 or state[0]['id'] != 1 or state[0]['revision'] < 0 or
@@ -267,7 +289,7 @@ def _validate_references(tables: dict) -> None:
     providers = {row["name"] for row in tables["rule_providers"]}
     group_keys = {(row["variant_id"], row["name"]) for row in tables["proxy_groups"]}
     local_names = set(local_nodes.display_index(tables["local_nodes"], enabled_only=False))
-    source_names = set()
+    source_names = {node["emit_name"] for node in tables["node_catalog"] if node["origin_kind"] == "source"}
     for source in tables["sources"]:
         for node in _list(source, "nodes_meta"):
             if not isinstance(node, dict) or not isinstance(node.get("name"), str):
@@ -382,6 +404,8 @@ def restore_logical(conn, payload: dict, *, _backfill_catalog: bool = True) -> d
         if legacy and _backfill_catalog:
             from . import node_catalog
             node_catalog.backfill(conn)
+        from . import node_refs
+        node_refs.migrate_refs(conn)
     except Exception:
         conn.execute("ROLLBACK TO logical_restore")
         conn.execute("RELEASE logical_restore")

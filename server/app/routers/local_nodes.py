@@ -168,7 +168,14 @@ def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edi
         )
         security.audit(conn, user["username"], "更新本地节点", "local_node", node_id,
                        {"name": body.name, "protocol": body.protocol})
+        previous_emit = local_nodes.display_name(row['name'], row['node_type'])
         node_catalog.sync_local_node(conn, node_id)
+        from ..services.policy_mutations import refresh_node_projection
+        catalog = db.one(conn,'SELECT node_uid FROM node_catalog WHERE local_node_id=?',(node_id,))
+        try:
+            refresh_node_projection(conn, previous_emit, catalog['node_uid'])
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from None
         row = _get_or_404(conn, node_id)
     return _public(row)
 

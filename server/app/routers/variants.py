@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
+from ..services import node_refs
 
 router = APIRouter(prefix="/api/v1", tags=["variants"])
 
@@ -107,12 +108,13 @@ def _copy_variant_rows(conn, src: int, dst: int,
     offset = dst * config.VARIANT_SORT_STRIDE
     stamp = db.now()
     group_count = 0
+    id_map = {}
     for g in db.all_(conn, "SELECT * FROM proxy_groups WHERE variant_id=? "
                            "ORDER BY sort, id", (src,)):
         use_sources = json.loads(g["use_sources"] or "[]")
         if use_sources_empty:
             use_sources = []
-        conn.execute(
+        copied = conn.execute(
             "INSERT INTO proxy_groups(variant_id, name, type, sort, hidden, filter, "
             "use_sources, local_nodes, proxies, url, interval, timeout, tolerance, "
             "lazy, strategy, local_first, targets, devices, created_at, updated_at) "
@@ -123,11 +125,22 @@ def _copy_variant_rows(conn, src: int, dst: int,
              g["lazy"], g["strategy"], g["local_first"], g["targets"], g["devices"],
              stamp, stamp),
         )
+        id_map[str(g['id'])] = copied.lastrowid
+        conn.execute('UPDATE proxy_groups SET members_v2=?,members_format=? WHERE id=?',
+                     (g['members_v2'],g['members_format'],copied.lastrowid))
         group_count += 1
+    for new_id in id_map.values():
+        group = dict(conn.execute('SELECT * FROM proxy_groups WHERE id=?',(new_id,)).fetchone())
+        if group['members_format'] == 'typed-v2':
+            members = node_refs.decoded(group['members_v2'],[])
+            for ref in members:
+                if ref['kind'] == 'group':
+                    ref['ref'] = str(id_map[ref['ref']])
+            conn.execute('UPDATE proxy_groups SET members_v2=? WHERE id=?',(json.dumps(members),new_id))
     rule_count = 0
     for r in db.all_(conn, "SELECT * FROM rules WHERE variant_id=? "
                            "ORDER BY sort, id", (src,)):
-        conn.execute(
+        copied_rule = conn.execute(
             "INSERT INTO rules(variant_id, sort, type, value, target, enabled, note, "
             "no_resolve, no_track, pre_matching, targets, devices, created_at, "
             "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -135,6 +148,11 @@ def _copy_variant_rows(conn, src: int, dst: int,
              r["enabled"], r["note"], r["no_resolve"], r["no_track"],
              r["pre_matching"], r["targets"], r["devices"], stamp, stamp),
         )
+        ref = node_refs.decoded(r['target_ref_v2'],None)
+        if ref is not None:
+            if ref['kind'] == 'group':
+                ref['ref'] = str(id_map[ref['ref']])
+            node_refs.canonical_rule(conn,copied_rule.lastrowid,ref)
         rule_count += 1
     return group_count, rule_count
 

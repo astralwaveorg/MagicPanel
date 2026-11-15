@@ -86,6 +86,7 @@ def validate_policy(snapshot: dict) -> dict[int, tuple[list[str], list[str]]]:
     返回 `{方案id: (errors, warnings)}`：方案之间互不阻塞，
     一个方案的数据坏了不能连累其它方案的产物（默认方案优先保住）。
     """
+    from ..services.node_refs import resolve_snapshot
     sources = {s["name"] for s in snapshot["sources"] if s.get("enabled")}
     providers = {r["name"] for r in snapshot["rule_providers"] if r.get("enabled")}
     local_nodes = {
@@ -95,6 +96,10 @@ def validate_policy(snapshot: dict) -> dict[int, tuple[list[str], list[str]]]:
     local_display = local_node_service.display_index(local_nodes.values())
     local_display_all = local_node_service.display_index(
         local_nodes.values(), enabled_only=False)
+    for entry in snapshot.get('node_catalog',[]):
+        if entry.get('origin_kind') == 'source' and entry.get('enabled'):
+            local_display[entry['emit_name']] = entry
+            local_display_all[entry['emit_name']] = entry
     behaviors = {r["name"]: r.get("behavior", "domain")
                  for r in snapshot["rule_providers"] if r.get("enabled")}
 
@@ -105,8 +110,13 @@ def validate_policy(snapshot: dict) -> dict[int, tuple[list[str], list[str]]]:
     for variant in variants:
         vid = int(variant.get("id", 0))
         label = "" if vid == 0 else f"「方案{variant.get('name', vid)}」"
-        groups = [g for g in snapshot["groups"] if g.get("variant_id", 0) == vid]
-        rules = [r for r in snapshot["rules"] if r.get("variant_id", 0) == vid]
+        try:
+            resolved = resolve_snapshot(snapshot,variant_id=vid)
+        except ValueError as exc:
+            results[vid] = ([str(exc)],[])
+            continue
+        groups = [g for g in resolved["groups"] if g.get("variant_id", 0) == vid]
+        rules = [r for r in resolved["rules"] if r.get("variant_id", 0) == vid]
         errors: list[str] = []
         warnings: list[str] = []
         _validate_one_variant(

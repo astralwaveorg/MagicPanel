@@ -14,8 +14,11 @@ def migrate(conn) -> None:
     if 'trusted_upstream_id_key' not in {r[1] for r in conn.execute('PRAGMA table_info(sources)')}:
         conn.execute("ALTER TABLE sources ADD COLUMN trusted_upstream_id_key TEXT NOT NULL DEFAULT ''")
     catalog_schema(conn)
+    profile_schema(conn)
     from ..services import node_catalog
     node_catalog.backfill(conn)
+    from ..services import node_refs
+    node_refs.migrate_refs(conn)
     conn.execute("INSERT OR IGNORE INTO schema_version(key,value) VALUES('v2_private_blobs', '1')")
 
 
@@ -50,3 +53,17 @@ def catalog_schema(conn):
     for sql in statements:
         conn.execute(sql)
     conn.execute('INSERT OR IGNORE INTO catalog_state(id,revision) VALUES(1,0)')
+
+
+def profile_schema(conn):
+    for table, fields in (
+        ('targets', [('default_runtime_profile', "TEXT NOT NULL DEFAULT 'legacy-v1'"),
+                     ('config_revision', 'INTEGER NOT NULL DEFAULT 1')]),
+        ('devices', [('runtime_profile', 'TEXT DEFAULT NULL'),
+                     ('config_revision', 'INTEGER NOT NULL DEFAULT 1')]),
+    ):
+        existing = {row[1] for row in conn.execute('PRAGMA table_info(' + table + ')')}
+        for name, definition in fields:
+            if name not in existing:
+                conn.execute('ALTER TABLE ' + table + ' ADD COLUMN ' + name + ' ' + definition)
+    conn.execute("INSERT OR IGNORE INTO schema_version(key,value) VALUES('v2_runtime_profiles','1')")

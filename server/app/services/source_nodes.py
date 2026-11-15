@@ -283,3 +283,15 @@ def match(pattern: str, name: str) -> bool:
         return bool(re.search(pattern, name))
     except re.error:
         return True     # 正则无效时不过滤：保存来源时已经拦过一次
+
+
+def map_emit_names(nodes: list[dict], *, source_id: int, catalog: list[dict], suffix: str = '') -> list[dict]:
+    """纯映射：输出已含后缀的稳定 emit_name，不再次追加 override。"""
+    entries = [entry for entry in catalog if entry.get('source_id') == source_id and not entry.get('retired')]
+    out = []
+    for node in nodes:
+        matches = [entry for entry in entries if entry['raw_name'] == node['name']]
+        if len(matches) != 1:
+            raise ValueError('reference_ambiguous' if matches else 'catalog_material_invalid')
+        out.append({**node,'name':matches[0]['emit_name']})
+    return out

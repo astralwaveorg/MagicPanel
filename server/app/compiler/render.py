@@ -346,6 +346,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     传入设备 = 渲染这台设备自己的产物（含只属于它的策略组与规则）。
     variant 为空 = 默认方案；传入 {"id", "name"} = 渲染该方案的产物。
     """
+    from ..services.node_refs import resolve_snapshot
+    snapshot = resolve_snapshot(snapshot,variant_id=(variant or {}).get('id',0))
     engine = target["engine"]
     # ① 基础配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
     #
@@ -385,7 +387,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     variant_id = int((variant or {}).get("id", 0))
     groups, rules = _select_structure(
         snapshot, target, warnings, (device or {}).get("name"),
-        set(local_index), variant_id)
+        set(local_index) | {n['emit_name'] for n in snapshot.get('node_catalog',[]) if n.get('origin_kind') == 'source'}, variant_id)
     used_local = {
         node_id for group in groups for node_id in (group.get("local_nodes") or [])
     }
@@ -411,6 +413,22 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         else:
             used_sources.update(use)
     sources = [s for s in enabled_sources if s["name"] in used_sources]
+    selected_uids = {ref['ref'] for group in groups if group.get('members_format') == 'typed-v2'
+                     for ref in group.get('members_v2',[]) if ref.get('kind') == 'node'}
+    selected_source_nodes = [n for n in snapshot.get('node_catalog',[])
+                             if n['node_uid'] in selected_uids and n.get('origin_kind') == 'source']
+    materials = {n['node_uid']:n for n in snapshot.get('node_materials',[])}
+    fixed_nodes = []
+    for node in selected_source_nodes:
+        source = next((s for s in snapshot['sources'] if s.get('source_id') == node['source_id']),None)
+        if not source or not source.get('enabled') or node['raw_name'] in (source.get('excluded_nodes') or []):
+            raise ValueError('node_unavailable')
+        material = materials.get(node['node_uid'])
+        if not material or material['revision'] != node['revision']:
+            raise ValueError('catalog_material_invalid')
+        if any(s.get('source_id') == node['source_id'] and s.get('mode') != config.SOURCE_MODE_INLINE for s in sources):
+            raise ValueError('typed_provider_dynamic_conflict')
+        fixed_nodes.append(dict(material['proxy'],name=node['emit_name']))
     inline_sources = [s for s in sources
                       if s.get("mode") == config.SOURCE_MODE_INLINE]
     provider_sources = [s for s in sources
@@ -435,7 +453,11 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             entry = dict(node)
             # 节点名后缀：与 provider 的 additional-suffix 语义一致，
             # 不同来源的同名节点靠它区分开（客户端按名字去重）
-            entry["name"] = raw + (src.get("suffix") or "")
+            if 'source_id' in src and snapshot.get('node_catalog') is not None:
+                entry = source_node_service.map_emit_names([entry],source_id=src['source_id'],
+                    catalog=snapshot['node_catalog'],suffix=src.get('suffix') or '')[0]
+            else:
+                entry["name"] = raw + (src.get("suffix") or "")
             inline_nodes.append(entry)
             names.append(entry["name"])
         inline_names[src["name"]] = names
@@ -447,7 +469,13 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     cfg["proxies"] = [_guard_proxy(engine)]
     for node in local_enabled.values():
         cfg["proxies"].append(local_node_service.render_proxy(node, engine))
-    cfg["proxies"].extend(inline_nodes)
+    all_fixed = {}
+    for node in inline_nodes + fixed_nodes:
+        previous = all_fixed.get(node['name'])
+        if previous is not None and previous != node:
+            raise ValueError('reference_ambiguous')
+        all_fixed[node['name']] = node
+    cfg["proxies"].extend(all_fixed.values())
 
     if provider_sources:
         cfg["proxy-providers"] = {

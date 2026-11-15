@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser
-from ..services import refs
+from ..services import refs, node_refs, policy_mutations
 
 router = APIRouter(prefix="/api/v1", tags=["policy"])
 
@@ -23,6 +23,7 @@ class GroupBody(BaseModel):
     use_sources: list[str] = Field(default_factory=lambda: [config.ALL_SCOPE])
     local_nodes: list[int] = Field(default_factory=list)
     proxies: list[str] = Field(default_factory=list)
+    members_v2: list[dict] | None = None
     url: str = Field(default=config.HEALTH_CHECK_URL, max_length=256)
     interval: int = Field(default=600, ge=30, le=86400)
     timeout: int = Field(default=8000, ge=100, le=60000)
@@ -40,7 +41,8 @@ class RuleBody(BaseModel):
     variant_id: int = config.DEFAULT_VARIANT_ID
     type: str
     value: str = Field(default="", max_length=512)
-    target: str = Field(min_length=1, max_length=64)
+    target: str = Field(default="", max_length=64)
+    target_ref_v2: dict | None = None
     enabled: bool = True
     note: str = Field(default="", max_length=256)
     no_resolve: bool = False
@@ -56,6 +58,7 @@ class RuleBody(BaseModel):
 
 def _group_public(row) -> dict:
     data = db.row_to_dict(row)
+    data["members_v2"] = node_refs.decoded(data.get("members_v2"), [])
     data["hidden"] = bool(row["hidden"])
     data["lazy"] = bool(row["lazy"])
     data["use_sources"] = json.loads(row["use_sources"] or "[]")
@@ -79,6 +82,7 @@ def _has_real_source_sql() -> str:
 
 def _rule_public(row) -> dict:
     data = db.row_to_dict(row)
+    data["target_ref_v2"] = node_refs.decoded(data.get("target_ref_v2"), None)
     data["enabled"] = bool(row["enabled"])
     data["no_resolve"] = bool(row["no_resolve"])
     data["no_track"] = bool(row["no_track"]) if "no_track" in row.keys() else False
@@ -90,6 +94,8 @@ def _rule_public(row) -> dict:
 
 
 def _check_group(body: GroupBody) -> None:
+    if 'proxies' in body.model_fields_set and 'members_v2' in body.model_fields_set:
+        raise HTTPException(400, '不能同时提交 proxies 与 members_v2')
     if body.type not in config.GROUP_TYPES:
         raise HTTPException(400, f"策略组类型仅支持：{'、'.join(sorted(config.GROUP_TYPES))}")
     if body.strategy:
@@ -103,7 +109,7 @@ def _check_group(body: GroupBody) -> None:
         uses = [u for u in (body.use_sources or []) if u != config.ALL_SCOPE]
         if uses or body.filter:
             raise HTTPException(400, "relay 为链式转发，仅支持固定成员，不能用节点来源或过滤")
-        if len(body.proxies) + len(body.local_nodes) < 2:
+        if len(body.members_v2 if body.members_v2 is not None else body.proxies) + len(body.local_nodes) < 2:
             raise HTTPException(400, "relay 至少需要两个成员组成转发链")
     if body.filter:
         try:
@@ -237,6 +243,7 @@ def create_group(body: GroupBody, user=CurrentUser):
             )
             security.audit(conn, user["username"], "新增策略组", "group", cur.lastrowid,
                            {"name": body.name})
+            _canonical_group(conn, cur.lastrowid, body.members_v2)
             row = _get_group(conn, cur.lastrowid)
     except db.UniqueViolation:
         raise HTTPException(409, "同名策略组已存在")
@@ -268,7 +275,7 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         # 改名时同步改写引用（同方案内规则目标 + 其它组的成员列表），
         # 否则引用会指向不存在的组，构建全线失败且无法发布。
         if current["name"] != body.name:
-            _remap_group_refs(conn, current["name"], body.name, body.variant_id)
+            policy_mutations.rename_group(conn, gid, body.name, variant_id=body.variant_id)
         conn.execute(
             "UPDATE proxy_groups SET name=?, type=?, hidden=?, filter=?, use_sources=?, "
             "local_nodes=?, proxies=?, url=?, interval=?, timeout=?, tolerance=?, "
@@ -284,6 +291,7 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         )
         security.audit(conn, user["username"], "更新策略组", "group", gid,
                        {"name": body.name})
+        _canonical_group(conn, gid, body.members_v2)
         row = _get_group(conn, gid)
     return _group_public(row)
 
@@ -444,6 +452,11 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
             conn.execute(
                 f"UPDATE proxy_groups SET {', '.join(fields)} WHERE id=?",
                 (*args, db.now(), gid))
+            if body.proxies is not None or body.local_nodes is not None:
+                if body.proxies is None and row['members_format'] == 'typed-v2':
+                    projected = node_refs.project_group(conn,row)
+                    conn.execute('UPDATE proxy_groups SET proxies=? WHERE id=?',(projected['proxies'],gid))
+                _canonical_group(conn,gid)
             updated += 1
             if notes:
                 skipped.append({"id": gid, "name": row["name"],
@@ -592,6 +605,8 @@ def batch_update_rules(body: BatchRulePatch, user=CurrentUser):
             conn.execute(
                 f"UPDATE rules SET {', '.join(fields)} WHERE id=?",
                 (*args, db.now(), rid))
+            if body.target is not None:
+                _canonical_rule(conn,rid)
             updated += 1
             if notes:
                 skipped.append({"id": rid, "name": f"{row['type']},{row['value'][:24]}",
@@ -677,29 +692,6 @@ def _check_rule(body: RuleBody) -> None:
                      "（官方只允许连接建立前就能判断的类型）")
 
 
-def _remap_group_refs(conn, old_name: str, new_name: str,
-                      variant_id: int = config.DEFAULT_VARIANT_ID) -> int:
-    """策略组改名后，同步更新同方案内规则目标与其它组的成员列表。"""
-    changed = 0
-    for row in db.all_(conn, "SELECT id, target FROM rules WHERE target=? "
-                             "AND variant_id=?", (old_name, variant_id)):
-        conn.execute("UPDATE rules SET target=? WHERE id=?", (new_name, row["id"]))
-        changed += 1
-    for row in db.all_(conn, "SELECT id, proxies FROM proxy_groups "
-                             "WHERE variant_id=? AND proxies IS NOT NULL", (variant_id,)):
-        try:
-            members = json.loads(row["proxies"] or "[]")
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(members, list) or old_name not in members:
-            continue
-        members = [new_name if m == old_name else m for m in members]
-        conn.execute("UPDATE proxy_groups SET proxies=? WHERE id=?",
-                     (json.dumps(members, ensure_ascii=False), row["id"]))
-        changed += 1
-    return changed
-
-
 def _check_device_names(conn, names: list[str]) -> None:
     """写时校验"适用设备"必须真实存在。
 
@@ -719,8 +711,7 @@ def _check_target_names(conn, names: list[str]) -> None:
 
     这一项必须硬校验：平台名写错时，策略组与规则会被**所有产物静默剔除**，
     界面与构建日志都看不出任何异常。
-    策略组之间的相互引用不在这里校验——建组顺序本来就是任意的，
-    引用写错由构建期给出明确报错（"引用了不存在的策略组"）。
+    组成员另由 canonical refs 入口校验，引用对象必须先创建。
     """
     for name in names or []:
         if name == config.ALL_SCOPE:
@@ -874,6 +865,15 @@ def list_rules(variant: int = config.DEFAULT_VARIANT_ID, user=CurrentUser):
 
 @router.post("/rules", status_code=201)
 def create_rule(body: RuleBody, user=CurrentUser):
+    if body.target_ref_v2 is not None:
+        if 'target' in body.model_fields_set:
+            raise HTTPException(400, '不能同时提交 target 与 target_ref_v2')
+        with db.connect() as conn:
+            groups,nodes = node_refs.context(conn)
+            try:
+                body.target = node_refs.resolve_refs([body.target_ref_v2], variant_id=body.variant_id, groups=groups, nodes=nodes)[0]
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
     _check_rule(body)
     try:
         with db.tx() as conn:
@@ -897,6 +897,7 @@ def create_rule(body: RuleBody, user=CurrentUser):
             )
             security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
                            {"rule": f"{body.type},{body.value},{body.target}"})
+            _canonical_rule(conn, cur.lastrowid, body.target_ref_v2)
             row = _get_rule(conn, cur.lastrowid)
     except db.UniqueViolation:
         raise HTTPException(409, "同名规则已存在")
@@ -906,6 +907,15 @@ def create_rule(body: RuleBody, user=CurrentUser):
 
 @router.put("/rules/{rid}")
 def update_rule(rid: int, body: RuleBody, user=CurrentUser):
+    if body.target_ref_v2 is not None:
+        if 'target' in body.model_fields_set:
+            raise HTTPException(400, '不能同时提交 target 与 target_ref_v2')
+        with db.connect() as conn:
+            groups,nodes = node_refs.context(conn)
+            try:
+                body.target = node_refs.resolve_refs([body.target_ref_v2], variant_id=body.variant_id, groups=groups, nodes=nodes)[0]
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
     _check_rule(body)
     with db.tx() as conn:
         current = _get_rule(conn, rid)
@@ -927,6 +937,7 @@ def update_rule(rid: int, body: RuleBody, user=CurrentUser):
         )
         security.audit(conn, user["username"], "更新分流规则", "rule", rid,
                        {"rule": f"{body.type},{body.value},{body.target}"})
+        _canonical_rule(conn, rid, body.target_ref_v2)
         row = _get_rule(conn, rid)
     return _rule_public(row)
 
@@ -957,3 +968,17 @@ def reorder_rules(ids: list[int], user=CurrentUser):
             raise HTTPException(400, "排序未生效")
         security.audit(conn, user["username"], "调整分流规则顺序", "rule", "")
     return {"ok": True}
+
+
+def _canonical_group(conn, gid, members=None):
+    try:
+        return node_refs.canonical_group(conn,gid,members)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from None
+
+
+def _canonical_rule(conn, rid, ref=None):
+    try:
+        return node_refs.canonical_rule(conn,rid,ref)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from None

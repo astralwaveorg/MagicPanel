@@ -100,6 +100,23 @@ def main() -> int:
     # ---- 2. 策略组与规则（按分流方案逐套校验引用）----
     groups = rows("SELECT id, variant_id, name, proxies, use_sources, targets, "
                   "devices, local_nodes FROM proxy_groups ORDER BY sort, id")
+    from app.services import node_refs
+    typed_groups = [dict(r) for r in rows('SELECT * FROM proxy_groups')]
+    catalog_nodes = [dict(r) for r in rows('SELECT * FROM node_catalog')]
+    for group in typed_groups:
+        if group.get('members_format') == 'typed-v2':
+            try:
+                node_refs.resolve_refs(node_refs.decoded(group['members_v2'],[]),
+                    variant_id=group['variant_id'],groups=typed_groups,nodes=catalog_nodes)
+            except ValueError as exc:
+                problems.append(f"策略组 #{group['id']} 引用无效：{exc}")
+    for rule in rows('SELECT * FROM rules'):
+        ref = node_refs.decoded(rule['target_ref_v2'],None)
+        if ref is not None:
+            try:
+                node_refs.resolve_refs([ref],variant_id=rule['variant_id'],groups=typed_groups,nodes=catalog_nodes)
+            except ValueError as exc:
+                problems.append(f"规则 #{rule['id']} 引用无效：{exc}")
     variants = {int(r["id"]): r["name"] for r in rows("SELECT id, name FROM variants")}
     # 同名组允许存在于不同方案：引用判定一律 (variant_id, name) 内解析
     group_names_by_variant: dict[int, set[str]] = {}

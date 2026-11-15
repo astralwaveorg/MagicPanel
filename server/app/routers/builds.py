@@ -13,7 +13,7 @@ from .. import config, db, security
 from ..compiler import render, validate
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
-from ..services import releases
+from ..services import releases, node_catalog
 from ..services import source_nodes as source_node_service
 from ..services import tester
 
@@ -24,7 +24,7 @@ def collect_snapshot(conn) -> dict:
     sources = []
     for r in db.all_(conn, "SELECT * FROM sources ORDER BY id"):
         mode = r["mode"] if "mode" in r.keys() else config.SOURCE_MODE_PROVIDER
-        item = {"name": r["name"], "enabled": bool(r["enabled"]),
+        item = {"source_id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
                 "filter": r["filter"], "ua": r["ua"],
                 "suffix": (r["suffix"] if "suffix" in r.keys() else ""),
                 "interval": r["interval"],
@@ -61,7 +61,9 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT * FROM local_nodes ORDER BY sort, id")
     ]
     groups = [
-        {"variant_id": int(r["variant_id"] or 0) if "variant_id" in r.keys() else 0,
+        {"id":r["id"], "members_format":r["members_format"],
+         "members_v2":json.loads(r["members_v2"]),
+         "variant_id": int(r["variant_id"] or 0) if "variant_id" in r.keys() else 0,
          "name": r["name"], "type": r["type"], "hidden": bool(r["hidden"]),
          "filter": r["filter"], "use_sources": json.loads(r["use_sources"] or "[]"),
          "local_nodes": json.loads(r["local_nodes"] or "[]"),
@@ -75,7 +77,8 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT * FROM proxy_groups ORDER BY sort, id")
     ]
     rules = [
-        {"variant_id": int(r["variant_id"] or 0) if "variant_id" in r.keys() else 0,
+        {"id":r["id"], "target_ref_v2":json.loads(r["target_ref_v2"]),
+         "variant_id": int(r["variant_id"] or 0) if "variant_id" in r.keys() else 0,
          "type": r["type"], "value": r["value"], "target": r["target"],
          "enabled": bool(r["enabled"]), "no_resolve": bool(r["no_resolve"]),
          "no_track": bool(r["no_track"]) if "no_track" in r.keys() else False,
@@ -84,6 +87,15 @@ def collect_snapshot(conn) -> dict:
          "devices": json.loads(r["devices"] or "[]") if "devices" in r.keys() else []}
         for r in db.all_(conn, "SELECT * FROM rules ORDER BY sort, id")
     ]
+    catalog = node_catalog.list_active_nodes(conn)
+    selected_uids = {ref['ref'] for group in groups if group['members_format'] == 'typed-v2'
+                     for ref in group['members_v2'] if ref.get('kind') == 'node'}
+    node_materials = []
+    for entry in catalog:
+        if entry['origin_kind'] == 'source' and entry['node_uid'] in selected_uids:
+            proxy = node_catalog.load_probe_material(conn,entry['node_uid'],entry['revision'])
+            proxy['name'] = entry['emit_name']
+            node_materials.append({'node_uid':entry['node_uid'],'revision':entry['revision'],'proxy':proxy})
     targets = [
         {"id": int(r["id"]), "name": r["name"], "engine": r["engine"],
          "platform": r["platform"], "extra_yaml": r["extra_yaml"]}
@@ -126,6 +138,7 @@ def collect_snapshot(conn) -> dict:
         for r in db.all_(conn, "SELECT * FROM variants ORDER BY sort, id")
     ] or [{"id": 0, "name": "默认", "note": "", "enabled": True, "is_system": True}]
     return {
+        "node_catalog": catalog, "node_materials":node_materials,
         "sources": sources, "rule_providers": rule_providers,
         "local_nodes": local_nodes, "groups": groups, "rules": rules,
         "targets": targets, "snippets": snippets, "base": base_docs,

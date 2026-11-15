@@ -113,16 +113,16 @@ def make_policy(client, csrf):
     assert r.json()["url_masked"] == "https://airport.example.com/…(17 字符)"
 
     r = client.post("/api/v1/groups", headers=h, json={
-        "name": "节点选择", "type": "select",
-        "proxies": ["地区自动", "DIRECT"], "use_sources": ["测试机场"],
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/api/v1/groups", headers=h, json={
         "name": "地区自动", "type": "url-test",
         "use_sources": ["测试机场"], "hidden": True,
     })
     assert r.status_code == 201, r.text
 
+    r = client.post("/api/v1/groups", headers=h, json={
+        "name": "节点选择", "type": "select",
+        "proxies": ["地区自动", "DIRECT"], "use_sources": ["测试机场"],
+    })
+    assert r.status_code == 201, r.text
     r = client.post("/api/v1/rules", headers=h, json={
         "type": "DOMAIN-SUFFIX", "value": "example.com", "target": "节点选择",
     })
@@ -298,8 +298,14 @@ def test_build_validation_blocks_bad_policy(client):
     assert build["verify_status"] == "failed"
     assert build["status"] == "BUILT"
     errors = build["results"]["stash-ios"]["errors"]
-    assert any("兜底" in e for e in errors)
-    assert any("为空" in e for e in errors)
+    assert errors and all(e == '构建校验未通过' for e in errors)
+    from app import db
+    from app.compiler import validate
+    from app.routers.builds import collect_snapshot
+    with db.connect() as conn:
+        internal_errors = validate.validate_policy(collect_snapshot(conn))[0][0]
+    assert any('兜底' in e for e in internal_errors)
+    assert any('为空' in e for e in internal_errors)
     # 失败构建不能发布
     r = client.post(f"/api/v1/builds/{build['id']}/publish-to-test", headers=h,
                     json={"reason": "试试"})
@@ -312,14 +318,25 @@ def test_group_cycle_detected(client):
     h = auth_headers(csrf)
     client.post("/api/v1/targets", headers=h, json={
         "name": "stash-ios", "engine": "stash", "platform": "ios"})
-    client.post("/api/v1/groups", headers=h, json={
-        "name": "A", "type": "select", "proxies": ["B"]})
+    a = client.post("/api/v1/groups", headers=h, json={
+        "name": "A", "type": "select", "proxies": ["DIRECT"]}).json()
     client.post("/api/v1/groups", headers=h, json={
         "name": "B", "type": "select", "proxies": ["A"]})
+    rejected = client.put(f"/api/v1/groups/{a['id']}",headers=h,json={
+        "name":"A","proxies":["B"]})
+    assert rejected.status_code == 400
+    assert 'reference_cycle' in rejected.text
     client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "A"})
+    from app import db
+    from app.compiler import validate
+    from app.routers.builds import collect_snapshot
+    with db.tx() as conn:
+        conn.execute("UPDATE proxy_groups SET members_format='legacy',members_v2='[]',proxies=? WHERE id=?",
+                     (json.dumps(['B']),a['id']))
+        errors = validate.validate_policy(collect_snapshot(conn))[0][0]
+    assert any('reference_cycle' in e for e in errors)
     build = client.post("/api/v1/builds", headers=h, json={}).json()
     assert build["verify_status"] == "failed"
-    assert any("循环" in e for e in build["results"]["stash-ios"]["errors"])
 
 
 def test_toggle_enabled_endpoints(client):
@@ -1229,7 +1246,12 @@ def test_local_node_crud_render_and_group_reference(client):
         "name": "手动节点", "type": "select", "proxies": ["DIRECT"],
         "local_nodes": [node["id"]],
     }).json()
-    assert group["local_nodes"] == [node["id"]]
+    assert group['members_format'] == 'typed-v2'
+    assert group['members_v2'][1]['kind'] == 'node'
+    from app import db
+    with db.connect() as conn:
+        uid = conn.execute('SELECT node_uid FROM node_catalog WHERE local_node_id=?',(node['id'],)).fetchone()[0]
+    assert group['members_v2'][1]['ref'] == uid
     client.post("/api/v1/targets", headers=h, json={
         "name": "stash-ios", "engine": "stash", "platform": "ios"})
     client.post("/api/v1/rules", headers=h, json={
@@ -1265,10 +1287,12 @@ def test_local_node_crud_render_and_group_reference(client):
         "params": node["params"], "extra_yaml": node["extra_yaml"],
     }).json()
     node.update(client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h).json())
-    client.put(f"/api/v1/groups/{group['id']}", headers=h,
-               json={**group, "local_nodes": [node["id"]]})
+    legacy_body = {k:v for k,v in group.items() if k not in {'members_v2','members_format'}}
+    legacy_body.update(proxies=['DIRECT'],local_nodes=[node['id']])
+    rebound = client.put(f"/api/v1/groups/{group['id']}", headers=h,json=legacy_body)
+    assert rebound.status_code == 200,rebound.text
 
-    # 停用后不再写入产物，但组里仍有 DIRECT，构建仍可通过
+    # typed 引用停用节点必须阻止构建，不能静默丢弃。
     disabled = client.put(f"/api/v1/local-nodes/{node['id']}", headers=h, json={
         "name": node["name"], "protocol": node["protocol"],
         "server": node["server"], "port": node["port"],
@@ -1277,13 +1301,14 @@ def test_local_node_crud_render_and_group_reference(client):
     })
     assert disabled.status_code == 200, disabled.text
     build2 = client.post("/api/v1/builds", headers=h, json={}).json()
-    assert build2["verify_status"] == "success", build2
-    art2 = client.get(
-        f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
-    assert "HK-01 (本地)" not in art2
+    assert build2['verify_status'] == 'failed',build2
+    from app.compiler import validate
+    from app.routers.builds import collect_snapshot
+    with db.connect() as conn:
+        assert 'node_disabled' in validate.validate_policy(collect_snapshot(conn))[0][0]
 
     # 解除引用后可删除
-    body = {**group, "local_nodes": []}
+    body = {**legacy_body, "local_nodes": []}
     assert client.put(f"/api/v1/groups/{group['id']}", headers=h,
                       json=body).status_code == 200
     assert client.delete(f"/api/v1/local-nodes/{node['id']}",
@@ -1883,7 +1908,12 @@ def test_rule_pointing_to_absent_group_is_dropped(client):
     assert "DOMAIN-SUFFIX,x.com,仅A" not in b["rules"]
     # 构建结果里应有剔除说明
     results = build["results"]
-    assert any("仅A" in w for w in results["stash-b"]["warnings"])
+    assert results['stash-b']['warnings']
+    assert all(w == '构建存在警告' for w in results['stash-b']['warnings'])
+    from app import db
+    with db.connect() as conn:
+        internal = json.loads(conn.execute('SELECT results FROM builds WHERE id=?',(build['id'],)).fetchone()[0])
+    assert any('仅A' in w for w in internal['stash-b']['warnings'])
 
 
 def test_final_rule_group_is_always_kept(client):
@@ -1925,7 +1955,12 @@ def test_platform_trims_process_rules(client):
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"])
     assert "PROCESS-NAME,qbittorrent,节点选择" in mac["rules"]
     assert "PROCESS-NAME,qbittorrent,节点选择" not in ios["rules"]
-    assert any("剔除" in w for w in build["results"]["stash-ios"]["warnings"])
+    assert build['results']['stash-ios']['warnings']
+    assert all(w == '构建存在警告' for w in build['results']['stash-ios']['warnings'])
+    from app import db
+    with db.connect() as conn:
+        internal = json.loads(conn.execute('SELECT results FROM builds WHERE id=?',(build['id'],)).fetchone()[0])
+    assert any('剔除' in w for w in internal['stash-ios']['warnings'])
 
 
 def test_device_level_override_only_affects_that_device(client):
