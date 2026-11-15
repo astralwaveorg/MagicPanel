@@ -336,7 +336,7 @@ def restore_from_remote(conn, remote_name: str, operator: str) -> dict:
 
 def _restore_files(local_db: Path, key_local: Path | None, operator: str) -> dict:
     """用快照文件覆盖当前数据库（必要时同时替换主密钥）。"""
-    from ..routers.misc import RESTORE_TABLES
+    from .backup_tables import RESTORE_TABLES
     source = sqlite3.connect(str(local_db))
     try:
         source.row_factory = sqlite3.Row

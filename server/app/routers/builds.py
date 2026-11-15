@@ -322,7 +322,7 @@ def create_build(operator: str, note: str = "",
             verification = "未通过"
         else:
             path = artifact_path(build_id, artifact_name)
-            path.write_text(text, encoding="utf-8")
+            path.write_bytes(text.encode("utf-8"))
             try:
                 path.chmod(0o600)   # 产物含明文节点凭据
             except OSError:

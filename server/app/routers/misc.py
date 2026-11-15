@@ -235,24 +235,6 @@ def put_settings(body: SettingsBody, user=CurrentUser):
     return {"ok": True}
 
 
-# 备份表清单。顺序即"依赖正序"：父表在前，恢复时先插父表再插子表；
-# 清空时按倒序删除，否则会触发外键约束失败（devices → targets、
-# releases → builds 都有外键）。
-BACKUP_TABLES = [
-    "users", "sources", "rule_providers", "local_nodes", "proxy_groups", "rules",
-    "targets", "snippets", "devices", "builds", "releases", "settings",
-    "base_configs",
-]
-# 恢复范围比导出多一张表：sessions。
-# users 被删除时 sessions.user_id 是 ON DELETE CASCADE，会话会一起消失，
-# 恢复完把管理员踢下线；把会话一起还原才不会。
-RESTORE_TABLES = BACKUP_TABLES + ["sessions"]
-# 恢复时允许写入的列白名单：只接受表结构里真实存在的列，
-# 避免备份文件里的任意列名拼进 SQL。
-def _table_columns(conn, table: str) -> list[str]:
-    return [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
-
-
 @router.get("/core/status")
 def core_status(user=CurrentUser):
     return tester.core_status()
@@ -381,54 +363,3 @@ def webdav_restore(body: RestoreBody, user=CurrentUser):
         except webdav.WebDavError as exc:
             raise HTTPException(400, str(exc))
     return {"ok": True, **result}
-
-
-@router.get("/backup/export")
-def backup_export(user=CurrentUser):
-    """导出全部策略与运行数据。
-
-    文件包含加密后的订阅地址与设备令牌摘要；与 data/secret.key
-    分开保管，泄露等同于泄露全部凭据的密文与主密钥保管边界。
-    """
-    with db.connect() as conn:
-        tables = {
-            t: [db.row_to_dict(r) for r in db.all_(conn, f"SELECT * FROM {t}")]
-            for t in BACKUP_TABLES
-        }
-        security.audit(conn, user["username"], "导出备份", "backup", "")
-    return {"version": 1, "exported_at": db.now(), "tables": tables}
-
-
-@router.post("/backup/restore")
-def backup_restore(body: RestoreBody, user=CurrentUser):
-    if not body.confirm:
-        raise HTTPException(400, "恢复会覆盖当前全部数据，请设置 confirm=true 确认")
-    tables = (body.data or {}).get("tables")
-    if not isinstance(tables, dict):
-        raise HTTPException(400, "备份文件格式不正确")
-    unknown = set(tables) - set(BACKUP_TABLES)
-    if unknown:
-        raise HTTPException(400, f"备份包含未知数据表：{'、'.join(sorted(unknown))}")
-    with db.tx() as conn:
-        # 先按依赖倒序清空（子表先删），再按依赖正序插入（父表先插）
-        for table in reversed(RESTORE_TABLES):
-            conn.execute(f"DELETE FROM {table}")
-        for table in RESTORE_TABLES:
-            rows = tables.get(table)
-            if not rows:
-                continue
-            allowed = _table_columns(conn, table)
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                columns = [c for c in row.keys() if c in allowed]
-                if not columns:
-                    continue
-                marks = ",".join("?" for _ in columns)
-                values = [row[c] for c in columns]
-                conn.execute(
-                    f"INSERT INTO {table}({','.join(columns)}) VALUES({marks})",
-                    tuple(values),
-                )
-        security.audit(conn, user["username"], "恢复备份", "backup", "")
-    return {"ok": True}
