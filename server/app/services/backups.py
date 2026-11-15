@@ -179,9 +179,12 @@ def _normalize(conn, payload: dict) -> tuple[dict, bool]:
             raise ValueError("backup_missing_variants")
         tables["variants"] = [{"id": 0, "name": "默认", "is_system": 1,
                                 "created_at": moment, "updated_at": moment}]
-    if legacy and "schema_version" not in supplied:
-        # 当前结构已迁移；不能因旧格式缺 marker 而在下次启动重放迁移。
-        tables["schema_version"] = _rows(conn, "schema_version")
+    if legacy:
+        # staging 使用当前已迁移结构，旧 marker 不能让下次启动重放迁移。
+        current = {row["key"]: row for row in _rows(conn, "schema_version")}
+        supplied_keys = {row["key"] for row in tables["schema_version"]}
+        tables["schema_version"] = [current.get(row["key"], row) for row in tables["schema_version"]]
+        tables["schema_version"].extend(row for key, row in current.items() if key not in supplied_keys)
     return tables, legacy
 
 
@@ -348,3 +351,28 @@ def restore_logical(conn, payload: dict) -> dict:
         raise
     conn.execute("RELEASE logical_restore")
     return _report(tables, legacy)
+
+
+def restore_legacy_database(conn, source) -> dict:
+    """历史物理库只读转 v1 输入，复用 staging 校验与事务替换。"""
+    _require_transaction(conn)
+    _require_transaction(source)
+    if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise ValueError("backup_invalid")
+    actual = {row[0] for row in source.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+    known = (set(backup_tables.BACKUP_TABLES) | set(backup_tables.PRESERVED_TABLES) |
+             set(backup_tables.RESET_TABLES))
+    if actual - known:
+        raise ValueError("backup_schema_unregistered")
+    for table in set(backup_tables.BACKUP_TABLES) & actual:
+        columns = _columns(conn, table)
+        allowed = {row["name"] for row in columns}
+        required = {row["name"] for row in columns if row["pk"] or (
+            row["notnull"] and row["dflt_value"] is None)}
+        present = {row["name"] for row in _columns(source, table)}
+        if present - allowed or required - present:
+            raise ValueError("backup_invalid")
+    tables = {table: _rows(source, table) for table in backup_tables.BACKUP_TABLES if table in actual}
+    payload = {"version": 1, "exported_at": db.now(), "tables": tables}
+    return restore_logical(conn, payload)

@@ -392,3 +392,125 @@ def test_export_refuses_build_file_that_changed_since_build(client):
         conn.execute("BEGIN")
         with pytest.raises(ValueError, match="backup_missing_resource"):
             backups.export_logical(conn)
+
+
+def legacy_database(tmp_path, *, original_schema=True, missing_markers=False):
+    from app import db
+    snapshot = tmp_path / "legacy-physical.db"
+    with db.connect() as source, sqlite3.connect(snapshot) as target:
+        source.backup(target)
+    with sqlite3.connect(snapshot) as conn:
+        if original_schema:
+            conn.row_factory = sqlite3.Row
+            sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='proxy_groups'").fetchone()[0]
+            sql = sql.replace("proxy_groups", "legacy_groups", 1)
+            sql = sql.replace("variant_id INTEGER NOT NULL DEFAULT 0,", "")
+            sql = sql.replace("UNIQUE(variant_id, name)", "UNIQUE(name)")
+            conn.execute(sql)
+            columns = ",".join(row["name"] for row in conn.execute("PRAGMA table_info(proxy_groups)")
+                               if row["name"] != "variant_id")
+            conn.execute(f"INSERT INTO legacy_groups({columns}) SELECT {columns} FROM proxy_groups")
+            conn.execute("DROP TABLE proxy_groups")
+            conn.execute("ALTER TABLE legacy_groups RENAME TO proxy_groups")
+            conn.execute("ALTER TABLE rules DROP COLUMN variant_id")
+        conn.execute("DROP TABLE variants")
+        if missing_markers:
+            conn.execute("DROP TABLE schema_version")
+        else:
+            conn.execute("DELETE FROM schema_version WHERE key='variants_v1'")
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    return snapshot
+
+
+@pytest.mark.parametrize("missing_markers", [False, True])
+def test_legacy_physical_restore_preserves_default_variant_and_migration_markers(client, tmp_path, missing_markers):
+    from app import db
+    from app.services import webdav
+    headers = seeded(client)
+    with db.connect() as conn:
+        before = ordering(conn)
+        markers = [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")]
+    snapshot = legacy_database(tmp_path, missing_markers=missing_markers)
+    assert webdav._restore_files(snapshot, None, "admin")["restored"] is True
+    with db.connect() as conn:
+        assert ordering(conn) == before
+        assert [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")] == markers
+        variant = conn.execute("SELECT id,name,is_system FROM variants").fetchone()
+        assert variant is not None and tuple(variant) == (0, "默认", 1)
+    assert client.get("/api/v1/overview").status_code == 401
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-pass-1"})
+    assert response.status_code == 200, response.text
+    headers = {"X-CSRF-Token": response.json()["csrf_token"]}
+    assert client.post("/api/v1/groups", headers=headers, json={
+        "name": "after-legacy-restore", "type": "select", "proxies": ["DIRECT"]}).status_code == 201
+
+
+def test_legacy_physical_restore_with_missing_nondefault_variant_never_clears_live_data(client, tmp_path):
+    from app import db
+    from app.services import webdav
+    seeded(client)
+    snapshot = legacy_database(tmp_path, original_schema=False)
+    with sqlite3.connect(snapshot) as conn:
+        conn.execute("UPDATE proxy_groups SET variant_id=42")
+    with db.connect() as conn:
+        before = ordering(conn)
+        markers = [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")]
+        sessions = [tuple(row) for row in conn.execute("SELECT * FROM sessions")]
+    with pytest.raises(webdav.WebDavError, match="backup_missing_variants"):
+        webdav._restore_files(snapshot, None, "admin")
+    with db.connect() as conn:
+        assert ordering(conn) == before
+        assert [tuple(row) for row in conn.execute("SELECT * FROM schema_version ORDER BY key")] == markers
+        assert [tuple(row) for row in conn.execute("SELECT * FROM sessions")] == sessions
+
+
+def test_legacy_snapshot_rejects_duplicate_migration_keys(client):
+    from app import db
+    from app.services import backups
+    seeded(client)
+    with db.connect() as conn:
+        payload = export(conn)
+    payload["version"] = 1
+    payload["tables"]["schema_version"].append(deepcopy(payload["tables"]["schema_version"][0]))
+    with db.tx(immediate=True) as conn:
+        before = ordering(conn)
+        with pytest.raises(ValueError, match="backup_invalid"):
+            backups.restore_logical(conn, payload)
+        assert ordering(conn) == before
+
+
+def test_physical_restore_uses_snapshot_variants_and_preserves_source_bytes(client, tmp_path):
+    from app import db
+    from app.services import webdav
+    headers = seeded(client)
+    assert client.post("/api/v1/variants", headers=headers, json={
+        "name": "第二方案", "copy_from": 0}).status_code == 201
+    snapshot = tmp_path / "current-physical.db"
+    with db.connect() as source, sqlite3.connect(snapshot) as target:
+        before = ordering(source)
+        source.backup(target)
+    source_hash = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+    with db.tx(immediate=True) as conn:
+        conn.execute("UPDATE proxy_groups SET sort=sort+500")
+        conn.execute("UPDATE rules SET sort=sort+600")
+        conn.execute("UPDATE variants SET name='current-only' WHERE id!=0")
+    webdav._restore_files(snapshot, None, "admin")
+    with db.connect() as conn:
+        assert ordering(conn) == before
+        assert {row[0] for row in conn.execute("SELECT name FROM variants")} == {"默认", "第二方案"}
+    assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == source_hash
+
+
+def test_physical_restore_rejects_unknown_columns_even_in_empty_table(client, tmp_path):
+    from app import db
+    from app.services import webdav
+    seeded(client)
+    snapshot = legacy_database(tmp_path)
+    with sqlite3.connect(snapshot) as conn:
+        conn.execute("ALTER TABLE sources ADD COLUMN unknown_secret TEXT")
+    with db.connect() as conn:
+        before = ordering(conn)
+    with pytest.raises(webdav.WebDavError, match="backup_invalid"):
+        webdav._restore_files(snapshot, None, "admin")
+    with db.connect() as conn:
+        assert ordering(conn) == before

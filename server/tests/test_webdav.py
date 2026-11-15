@@ -80,6 +80,11 @@ def test_webdav_restore_replaces_data(client):
         r = client.post("/api/v1/backup/webdav/restore", headers=h,
                         json={"confirm": True, "data": {"file": db_file}})
         assert r.status_code == 200, r.text
+        assert client.get("/api/v1/sources", headers=h).status_code == 401
+        r = client.post("/api/v1/auth/login", json={
+            "username": "admin", "password": "admin-pass-1"})
+        assert r.status_code == 200, r.text
+        h = auth_headers(r.json()["csrf_token"])
         resp = client.get("/api/v1/sources", headers=h)
         assert resp.status_code == 200, resp.text
         names = [s["name"] for s in resp.json()]

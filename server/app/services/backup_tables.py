@@ -13,10 +13,7 @@ LEGACY_OPTIONAL_TABLES = frozenset({
 })
 
 PRESERVED_TABLES = ("audit",)
-SESSION_TABLES = ("sessions",)
-RESET_TABLES = SESSION_TABLES + ("rename_applies",)
-# 旧 WebDAV 恢复暂沿用原有会话语义，由完整归档任务统一替换。
-RESTORE_TABLES = BACKUP_TABLES + SESSION_TABLES
+RESET_TABLES = ("sessions", "rename_applies")
 
 
 def registered_tables(conn) -> tuple[str, ...]:

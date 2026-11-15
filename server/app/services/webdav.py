@@ -336,35 +336,21 @@ def restore_from_remote(conn, remote_name: str, operator: str) -> dict:
 
 def _restore_files(local_db: Path, key_local: Path | None, operator: str) -> dict:
     """用快照文件覆盖当前数据库（必要时同时替换主密钥）。"""
-    from .backup_tables import RESTORE_TABLES
-    source = sqlite3.connect(str(local_db))
+    from . import backups
+    source = sqlite3.connect(local_db.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         source.row_factory = sqlite3.Row
-        rows = {}
-        for table in RESTORE_TABLES:
-            try:
-                rows[table] = [dict(r) for r in source.execute(
-                    f"SELECT * FROM {table}").fetchall()]
-            except sqlite3.Error:
-                rows[table] = []
-        with db.tx() as conn:
-            for table in reversed(RESTORE_TABLES):
-                conn.execute(f"DELETE FROM {table}")
-            for table in RESTORE_TABLES:
-                for row in rows.get(table) or []:
-                    if not isinstance(row, dict) or not row:
-                        continue
-                    allowed = [r["name"] for r in conn.execute(
-                        f"PRAGMA table_info({table})")]
-                    columns = [c for c in row.keys() if c in allowed]
-                    if not columns:
-                        continue
-                    marks = ",".join("?" for _ in columns)
-                    conn.execute(
-                        f"INSERT INTO {table}({','.join(columns)}) VALUES({marks})",
-                        tuple(row[c] for c in columns))
+        source.execute("BEGIN")
+        with db.tx(immediate=True) as conn:
+            backups.restore_legacy_database(conn, source)
             security.audit(conn, operator, "从 WebDAV 恢复备份", "backup", "",
                            {"file": local_db.name})
+    except (ValueError, sqlite3.Error) as exc:
+        code = str(exc) if str(exc) in {
+            "backup_invalid", "backup_invalid_reference", "backup_missing_variants",
+            "backup_missing_resource", "backup_schema_unregistered",
+        } else "backup_invalid"
+        raise WebDavError(code) from None
     finally:
         source.close()
     if key_local and key_local.exists():
