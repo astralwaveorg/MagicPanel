@@ -2,11 +2,13 @@
 import copy
 import json
 import hashlib
+import io
 import os
 from pathlib import Path
 import shutil
 import sys
 import subprocess
+import tarfile
 
 import pytest
 
@@ -482,3 +484,175 @@ def test_isolated_shell_failure_after_uci_commit_restores_own_schedule(isolated_
     assert config.read_bytes() == before_config
     assert cron.read_bytes() == before_cron
     assert not (etc / "network-commands.log").exists()
+
+
+def _collector_tar(*, uci, cron, route6, listeners):
+    """与固定shell的tar、UCI -X、ip -j、netstat -ln输出格式一致。"""
+    def archive(files):
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w") as tar:
+            for name, body in files.items():
+                content = body.encode("utf-8") if isinstance(body, str) else body
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                tar.addfile(member, io.BytesIO(content))
+        return stream.getvalue()
+
+    config = "".join(f"{key}={value}\n" for key, value in uci.items())
+    observed = {
+        "uci.txt": config, "openclash.txt": config, "pending.txt": "",
+        "network.txt": "fixture-network", "dhcp.txt": "fixture-dnsmasq",
+        "firewall_config.txt": "fixture-firewall", "crontab.txt": cron,
+        "board.json": '{"fixture":true}', "agh.txt": "fixture-agh",
+        "nft.json": '{"nftables":[{"table":{"family":"inet","name":"fw4"}}]}',
+        "routes4.json": '[{"dst":"default","gateway":"192.0.2.1","dev":"eth0"}]',
+        "routes6.json": json.dumps(route6), "rules4.json": "[]", "rules6.json": "[]",
+        "forwarding.txt": "net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n",
+        "listeners.txt": listeners, "connections.txt": "tcp 6 123 ESTABLISHED src=192.0.2.2 dst=192.0.2.3\n",
+        "processes.txt": "42 root mihomo\n", "core.txt": "42 10000\n",
+    }
+    files = {"observed/" + name: value for name, value in observed.items()}
+    files["files/openclash.tar"] = archive({
+        "etc/openclash/config/example.yaml": "proxies: []\n",
+        "etc/openclash/proxy_provider/example.yaml": "proxies: []\n",
+        "etc/openclash/Country.mmdb": "fixture-geo",
+    })
+    files["files/config.tar"] = archive({"etc/config/openclash": config})
+    return archive(files)
+
+
+@pytest.fixture
+def collector_runner():
+    from scripts.ops.safe_preparation import LocalRouterRunner
+
+    class CollectorRunner(LocalRouterRunner):
+        # 只替换设备传输，capture/bind/stage/freeze/restore/apply均用真实实现。
+        def __init__(self):
+            self.plan, self.before, self.staged = None, None, []
+            self.uci = {"openclash.config": "openclash", "openclash.config.auto_update": "'1'",
+                        "openclash.config.enable": "'1'", "openclash.cfg0abc": "config_subscribe",
+                        "openclash.cfg0abc.auto_update": "'1'"}
+            self.cron = "0 4 * * * /usr/share/openclash/openclash.sh 'Example-默认'\n"
+            self.route6 = [{"dst": "default", "gateway": "fe80::1", "dev": "eth0",
+                            "protocol": "ra", "metric": 512, "expires": 1799}]
+            self.listeners = [
+                "tcp        0      0 0.0.0.0:53              0.0.0.0:*               LISTEN",
+                "tcp        0      0 127.0.0.1:5353          0.0.0.0:*               LISTEN",
+                "udp        0      0 127.0.0.1:7874          0.0.0.0:*",
+                "tcp6       0      0 :::53                   :::*                    LISTEN",
+                "tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN",
+            ]
+            self.mutations, self.files = [], {}
+            self.clock = 0
+            self.countdown, self.listener_noise = False, False
+            self.drift_after_freeze = None
+            self.saved = None
+
+        def _call(self, action, *args, body=None):
+            if action == "capture":
+                route6 = copy.deepcopy(self.route6)
+                listeners = list(self.listeners)
+                if self.countdown:
+                    route6[0]["expires"] -= self.clock
+                if self.listener_noise:
+                    listeners.append(f"tcp 0 0 127.0.0.1:{9000 + self.clock} 0.0.0.0:* LISTEN")
+                    listeners = [line.replace(" 0      0 ", f" {self.clock}      7 ") for line in listeners]
+                    if self.clock % 2:
+                        listeners.reverse()
+                self.clock += 1
+                return _collector_tar(uci=self.uci, cron=self.cron, route6=route6,
+                                      listeners="\n".join(listeners) + "\n")
+            self.mutations.append(action)
+            if action == "stage":
+                self.files[args[1]] = body
+            elif action == "freeze":
+                self.saved = (dict(self.uci), self.cron)
+                for change in self.plan["schedule"]["uci"]:
+                    self.uci[change["key"]] = "'0'"
+                self.cron = self.plan["schedule"]["crontab_after"]
+                if self.drift_after_freeze:
+                    self.drift_after_freeze(self)
+            elif action == "restore" and self.saved:
+                self.uci, self.cron = self.saved
+            elif action == "unstage":
+                self.files.pop(args[1], None)
+            else:
+                raise AssertionError(f"unexpected_fixed_action:{action}")
+            return b""
+
+    return CollectorRunner()
+
+
+def test_collector_quoted_uci_flows_through_bind_and_apply(collector_runner, tmp_path):
+    from scripts.ops.safe_preparation import prepare_safe_plan, apply_safe_preparation
+
+    runner = collector_runner
+    before = runner.capture()
+    assert before["uci"]["openclash.config.auto_update"] == "'1'"
+    plan = prepare_safe_plan(before, rescue_files=[{"name": "rescue.sh", "content": "exit 0\n"}])
+    runner.bind_plan(plan)
+    result = apply_safe_preparation(plan, runner=runner, proof_dir=init_proofs(tmp_path))
+    assert result["state"] == "verified"
+    assert result["blockers"] == []
+    assert runner.uci["openclash.config.auto_update"] == "'0'"
+    assert runner.mutations == ["stage", "freeze"]
+
+
+@pytest.mark.parametrize("noise", ["countdown", "listener_noise"])
+def test_collector_volatile_state_does_not_break_plan_bind_or_apply(collector_runner, tmp_path, noise):
+    from scripts.ops.safe_preparation import prepare_safe_plan, apply_safe_preparation
+
+    runner = collector_runner
+    setattr(runner, noise, True)
+    plan = prepare_safe_plan(runner.capture(), rescue_files=[])
+    assert prepare_safe_plan(runner.capture(), rescue_files=[])["plan_sha"] == plan["plan_sha"]
+    runner.bind_plan(plan)
+    result = apply_safe_preparation(plan, runner=runner, proof_dir=init_proofs(tmp_path))
+    assert result["state"] == "verified"
+    assert runner.mutations == ["freeze"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("gateway", "fe80::2"), ("dev", "eth1"), ("dst", "2001:db8::/32"),
+    ("protocol", "static"), ("metric", 1024), ("pref", "high"), ("table", 100),
+])
+def test_collector_real_route_change_still_blocks_bind(collector_runner, field, value):
+    from scripts.ops.safe_preparation import prepare_safe_plan, SafePreparationError
+
+    runner = collector_runner
+    plan = prepare_safe_plan(runner.capture(), rescue_files=[])
+    runner.route6[0][field] = value
+    with pytest.raises(SafePreparationError, match="BASELINE_CHANGED"):
+        runner.bind_plan(plan)
+    assert runner.mutations == []
+
+
+@pytest.mark.parametrize("port", [53, 5353, 7874])
+@pytest.mark.parametrize("change", ["remove", "bind", "add"])
+def test_collector_real_dns_listener_change_still_blocks_bind(collector_runner, port, change):
+    from scripts.ops.safe_preparation import prepare_safe_plan, SafePreparationError
+
+    runner = collector_runner
+    plan = prepare_safe_plan(runner.capture(), rescue_files=[])
+    index = next(i for i, line in enumerate(runner.listeners) if f":{port} " in line)
+    if change == "remove":
+        runner.listeners.pop(index)
+    elif change == "bind":
+        runner.listeners[index] = runner.listeners[index].replace("0.0.0.0:" + str(port), "192.0.2.1:" + str(port)).replace(
+            "127.0.0.1:" + str(port), "192.0.2.1:" + str(port))
+    else:
+        runner.listeners.append(f"udp6 0 0 [2001:db8::1]:{port} :::*")
+    with pytest.raises(SafePreparationError, match="BASELINE_CHANGED"):
+        runner.bind_plan(plan)
+    assert runner.mutations == []
+
+
+def test_collector_post_freeze_unowned_uci_change_is_not_normalized_away(collector_runner, tmp_path):
+    from scripts.ops.safe_preparation import prepare_safe_plan, apply_safe_preparation
+
+    runner = collector_runner
+    runner.drift_after_freeze = lambda owner: owner.uci.update({"openclash.config.enable": "'0'"})
+    plan = prepare_safe_plan(runner.capture(), rescue_files=[])
+    result = apply_safe_preparation(plan, runner=runner, proof_dir=init_proofs(tmp_path))
+    assert result["state"] != "verified"
+    assert "SAFE_INVARIANT_CHANGED" in result["blockers"]

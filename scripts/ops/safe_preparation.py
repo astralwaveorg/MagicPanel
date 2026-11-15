@@ -180,10 +180,12 @@ def validate_safe_diff(before: dict, after: dict) -> list[str]:
             continue
         if key == "uci":
             expected = dict(before[key])
-            for name in _schedule_keys(expected):
-                if _unquote(expected[name]) == "1":
-                    expected[name] = "0"
-            if after[key] != before[key] and after[key] != expected:
+            actual = dict(after[key])
+            for name in _schedule_keys(before[key]):
+                expected[name] = "0" if _unquote(expected[name]) == "1" else _unquote(expected[name])
+                if name in actual:
+                    actual[name] = _unquote(actual[name])
+            if after[key] != before[key] and actual != expected:
                 errors.append("SAFE_INVARIANT_CHANGED")
         elif key == "crontab":
             try:
@@ -350,6 +352,31 @@ def _without_counters(value):
     return value
 
 
+def _route_semantics(value):
+    if isinstance(value, dict):
+        return {key: _route_semantics(item) for key, item in value.items() if key != "expires"}
+    if isinstance(value, list):
+        return [_route_semantics(item) for item in value]
+    return value
+
+
+def _dns_listeners(text):
+    identities = set()
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields or fields[0] not in ("tcp", "tcp6", "udp", "udp6"):
+            continue
+        if len(fields) < 5:
+            raise SafePreparationError("INCOMPLETE_LISTENER_CAPTURE")
+        address, separator, port = fields[3].rpartition(":")
+        if not separator or port not in ("53", "5353", "7874"):
+            continue
+        if fields[0].startswith("tcp") and fields[-1] != "LISTEN":
+            continue
+        identities.add((fields[0], address.strip("[]"), int(port)))
+    return sorted(identities)
+
+
 class LocalRouterRunner:
     """只在inventory绑定的本机OpenWrt执行固定脚本；无远程传输入口。"""
     def __init__(self, inventory: dict):
@@ -412,13 +439,14 @@ class LocalRouterRunner:
                 for line in text("connections.txt").splitlines())
             snapshot = {
                 "role": "router", "adapter": "openclash_v1", "phase": "PRE_NETWORK",
-                "dns_sha": digest([text("dhcp.txt"), text("agh.txt"), text("listeners.txt")]),
+                "dns_sha": digest([text("dhcp.txt"), text("agh.txt"), _dns_listeners(text("listeners.txt"))]),
                 "wan_lan_sha": digest(text("network.txt")),
                 "udp_v6_cn_sha": digest([nft, text("rules4.json"), text("rules6.json")]),
                 "core_pid": [item[0] for item in core], "core_started_at": [item[1] for item in core],
                 "subscription_sha": digest(configs), "geo_sha": digest(geo),
                 "firewall_sha": digest([nft, text("firewall_config.txt")]),
-                "routes_sha": digest([json.loads(text("routes4.json")), json.loads(text("routes6.json"))]),
+                "routes_sha": digest([_route_semantics(json.loads(text("routes4.json"))),
+                                      _route_semantics(json.loads(text("routes6.json")))]),
                 "forwarding_sha": digest(text("forwarding.txt")),
                 "connections_sha": digest(connections), "uci_pending": text("pending.txt").splitlines(),
                 "updaters_running": bool(re.search(
@@ -429,6 +457,7 @@ class LocalRouterRunner:
                     "crontab": text("crontab.txt") or "empty-crontab",
                     "subscription_raw": configs, "subscription_cache": configs, "geo_versions": geo,
                     "firewall": nft, "routes": text("routes4.json"), "runtime": core,
+                    "listeners": text("listeners.txt"),
                     "archive_b64": base64.b64encode(archive).decode("ascii"),
                     "openclash_config_sha": hashlib.sha256(observed["openclash.txt"]).hexdigest()},
             }
