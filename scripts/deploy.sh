@@ -11,7 +11,21 @@ NAS_HOST="${NAS_HOST:-archon@10.0.1.2}"
 NAS_DIR="${NAS_DIR:-/opt/magicpanel}"
 DOMAIN="${DOMAIN:-https://magichub.top:8443}"
 SKIP_TESTS=0
-[ "${1:-}" = "--fast" ] && SKIP_TESTS=1
+OFFLINE=0
+IMAGE_MANIFEST=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --fast) SKIP_TESTS=1; shift ;;
+    --offline) OFFLINE=1; shift ;;
+    --image-manifest) IMAGE_MANIFEST="${2:?image manifest required}"; shift 2 ;;
+    *) echo "unknown argument" >&2; exit 42 ;;
+  esac
+done
+if [ "$OFFLINE" = "1" ]; then
+  [ -n "$IMAGE_MANIFEST" ] || { echo "image manifest required" >&2; exit 42; }
+  exec python3 -m scripts.ops.rescue deploy --manifest "$IMAGE_MANIFEST" --compose-dir "$REPO_DIR"
+fi
+[ -z "$IMAGE_MANIFEST" ] || { echo "--image-manifest requires --offline" >&2; exit 42; }
 
 DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
 if [ "$DIRTY" != "0" ]; then
@@ -77,6 +91,26 @@ echo "== 重建并重启容器 =="
 # 记录当前镜像，失败时回滚到它
 PREV_IMAGE=$(ssh -o BatchMode=yes "$NAS_HOST" \
   "docker inspect --format '{{.Image}}' magicpanel 2>/dev/null || echo ''" || true)
+restore_previous() {
+  trap - ERR
+  if [ -n "$PREV_IMAGE" ]; then
+    echo "尝试回滚到上一镜像 $PREV_IMAGE" >&2
+    ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && python3 - '$PREV_IMAGE'" <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+from scripts.ops.rescue import compose_image_override, restore_argv
+old = sys.argv[1]
+override = compose_image_override(Path('/tmp/magicpanel-rescue'), old)
+subprocess.run(restore_argv(str(Path.cwd()), str(override)), check=True)
+actual = subprocess.check_output(['docker', 'inspect', '--format', '{{.Image}}', 'magicpanel'], text=True).strip()
+if actual != old:
+    raise SystemExit('RESTORED_IMAGE_MISMATCH')
+PY
+    echo "已核对回滚镜像ID，请检查容器健康与日志" >&2
+  fi
+}
+trap 'restore_previous' ERR
 # 刚重启时 NAS 的外网可能还没恢复，npm/pip 拉包会失败；
 # 需要时用 DEPLOY_PROXY=http://host:port 走局域网代理。
 # 家庭网络已由路由器的 OpenClash 透明代理，通常无需设置 DEPLOY_PROXY。
@@ -101,15 +135,11 @@ echo "容器状态：$STATUS"
 if [ "$STATUS" != "healthy" ]; then
   echo "健康检查未通过，查看日志：ssh $NAS_HOST 'docker logs magicpanel --tail 50'" >&2
   # 回滚到上一个镜像，避免一次坏发布把面板长时间打挂
-  if [ -n "$PREV_IMAGE" ]; then
-    echo "尝试回滚到上一镜像 $PREV_IMAGE" >&2
-    ssh -o BatchMode=yes "$NAS_HOST" \
-      "cd '$NAS_DIR' && docker compose down && \
-       IMAGE_TAG=\"$PREV_IMAGE\" docker compose up -d" || true
-    echo "已尝试回滚，请检查 docker ps 与日志" >&2
-  fi
+  restore_previous
   exit 1
 fi
+
+trap - ERR
 
 echo "== 数据自检 =="
 # 把自检脚本拷进容器，对运行中的数据库做一致性检查：

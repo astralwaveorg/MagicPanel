@@ -158,6 +158,20 @@ def verified_proofs(directory: Path, *, operation_id: str, plan_sha: str, predec
                 raise EvidenceError("INVALID_PROOF_EVIDENCE")
             if hashlib.sha256(_read_private(Path(directory) / filename)).hexdigest() != expected:
                 raise EvidenceError("PROOF_EVIDENCE_CHANGED")
+        if claims.get("rescue_verified") is True:
+            required={"accepted-rescue-manifest.json","rescue-binding.json","rescue_path.receipt.json",
+                      "rescue_resources.receipt.json","rescue_rehearsal.receipt.json"}
+            if not required <= hashes.keys():
+                raise EvidenceError("RESCUE_EVIDENCE_REQUIRED")
+            try:
+                from scripts.ops.rescue import verify_rescue_readiness
+                binding=json.loads(_read_private(Path(directory)/"rescue-binding.json"))
+                manifest=json.loads(_read_private(Path(directory)/"accepted-rescue-manifest.json"))
+                root=private_path(Path(binding["root"]))
+                if verify_rescue_readiness(root,manifest,Path(directory),architecture=binding["architecture"]):
+                    raise EvidenceError("RESCUE_EVIDENCE_INVALID")
+            except (OSError,ValueError,TypeError,KeyError):
+                raise EvidenceError("RESCUE_EVIDENCE_INVALID") from None
         for key, value in claims.items():
             if key in proofs and proofs[key] != value:
                 raise EvidenceError("CONFLICTING_PROOFS")

@@ -2,6 +2,7 @@
 # 数据持久化在 ./data（数据库、密钥、构建产物、测速核心），请纳入备份。
 services:
   magicpanel:
+    image: "${MAGICPANEL_IMAGE:-magicpanel:local}"
     build:
       context: .
       # 构建期代理：NAS 刚重启时外网可能未就绪，npm/pip 拉包需要走代理。
