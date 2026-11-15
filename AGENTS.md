@@ -1,6 +1,6 @@
 # AGENTS.md
 
-改动这份代码前，先读这三份文档：
+改动前，先按任务阅读对应文档：
 
 | 要做的事 | 看哪份 |
 | --- | --- |
@@ -9,10 +9,41 @@
 | 回答"这个页面怎么用" | [使用文档](docs/使用文档.md) |
 | 改规则集、决定直连还是代理、走哪个策略组 | [规则集与分流设计](docs/reference/规则集与分流设计.md) |
 | 查内网地址、代理端口、哪台机器在跑什么 | [环境与地址速查](docs/reference/环境与地址.md) |
+| 改分流方案、跨方案引用、方案产物与门户选择 | [多套分流方案设计](docs/reference/方案设计-多套分流方案.md) |
 
 **第一次接手本项目**（新 Agent、换机器、隔了很久再来）：先读
 [Agent 交接提示词](docs/reference/Agent-交接提示词.md)，里面写清了架构、硬性约束、
 改配置的方式和发布流程，再动手。
+
+**维护说明（2026-11-15）**：代码行为以仓库实现为准；线上策略与部署状态以实际查询为准。
+本文中的构建号、条数与 `sort` 清单是注明日期的记录，不能直接当作当前线上状态，
+更不能据此覆盖用户后来在面板里做的调整。
+
+**V2 实施入口**：[总体设计与审查稿](docs/superpowers/specs/2026-11-15-MagicPanel-V2-总体设计与审查稿.md)
+及其配套规范记录了全面迭代。用户已于2026-11-15授权方案定案后完整实施、提交、部署和测试；现状约束在对应迁移生效前继续有效，不能把未来能力当成已经部署。
+
+**Google 地区优先级（用户于 2026-11-15 最后澄清）**：家宽/住宅、机房、机场所有来源，
+访问 Google/Gemini/Gmail/YouTube 及关联业务时，严格按 **美国 → 新加坡 → 日本** 回退。
+只要还有合格可用的美国候选就用美国；同档内再按业务可用性、IP 质量与稳定性排序，
+不能因新加坡/日本更快就越级。仅当前主备失败、未测/未知或预算跳过，不等于整档失败。
+Google 专项规则优先于 AI/影音等主题集合，Gemini 归 Google 路径，不新增 Gemini 前台组。
+三档均不可用时普通 Google 策略明确失败，不加入 DIRECT；核心整体故障则按用户批准的 BASIC_WAN 恢复原生WAN（含海外尝试）并告警。
+“仅美国、美国耗尽即拒绝”和“非美禁止 Google 专项探测”的先前解释撤回；
+共同依据见 [Google 选路策略](docs/reference/Google选路策略.md)。策略实现与生产生效分别记录，不将文档定案当作部署完成。
+
+**后续执行入口**：[Agent总执行方案](docs/superpowers/plans/2026-11-15-MagicPanel-V2-00-Agent总执行方案.md)及01–04子计划。最新数字/默认值只认[自动恢复与检测策略](docs/reference/自动恢复与检测策略.md)，网络/DNS/WG/SQM只认[家庭网络运行契约](docs/reference/家庭网络运行契约.md)。
+
+**用户最新运行边界**：杭州电信家宽（下行1000M，上行常见60–80M/峰值100M），外出中国移动；家庭R6S统一透明，NAS/Mac mini/AppleTV不装第二套日常代理；外出Android/MacBook/iOS Stash，WG只回家内网。最终采用auto_stable_v1自动恢复，不能以周间人工处理交付。主用终端分别验能力，不把iOS官方能力推断给Android。
+
+**客户端确认**：统一使用Stash；Android商店包`ws.stash.app`、用户截图版本1.1.10（2026-11-04），Windows即使早期版本也保留兼容目标。商店信息不代替实际设备installed version与cron/API/强制叶/鉴权读回能力回执。
+
+**路由器准备与切换**：用户明确允许先写手册/备份、交付不执行的救援脚本、冻结独立自动更新等安全准备；当前不动WAN/LAN/PPPoE/实际DNS转发，不重启OpenClash、不拉订阅。候选接管/双栈/DNS配置另存，不提前写进会被后台加载的live层。成套网络切换与订阅更新仍在代码/隔离/恢复门禁通过后最后执行；不得通过NAS早发feed间接绕过。已授权范围不用反复请求同一许可。
+
+**路由器包管理禁令**：不得运行`apk upgrade`（含指定包）或用批量重装/升级循环替代；用户明确要求规避该风险。新增依赖先模拟并核对实际变更，基础包/内核升级不属于本次代理优化。`server-ops`已同步该限制。
+
+2026-11-15准备期已完成备份、惰性救援脚本与7项更新调度冻结；核心PID/运行配置和网络/DNS摘要未变。细节与恢复命令只维护在本机私密`docs/network/2026-11-15-路由器手动恢复与分阶段优化手册.md`，这不是最终网络迁移完成。
+
+**稳定性优先**：[稳定性与覆盖验收](docs/superpowers/specs/2026-11-15-MagicPanel-V2-稳定性与覆盖验收补充.md)。先拦坏规则/陈旧自动发布/缺核心证据/最终业务误分流，生产达标以真实回执为准。
 
 ## 0. 开工前：先让代码与环境对齐
 
@@ -21,12 +52,18 @@
 两边不一致时以仓库为准，先把差异查清楚再动手，不要直接在 NAS 上改代码。
 
 ```bash
-git pull --ff-only            # 拉最新；有未提交改动会失败，先提交或 stash
+git status --short            # 先检查已有改动，避免覆盖或混入本次任务
+git branch --show-current     # 确认当前分支
+git pull --ff-only            # 工作区适合更新时再拉取；失败先查原因
 git log --oneline -5          # 确认自己在哪个提交上
-git status --short            # 应为空——脏工作区 deploy.sh 照样发布，容易带出半成品
 ```
 
-核对线上跑的是哪一版：
+`git pull` 不保证拒绝所有脏工作区；不要自动提交、stash 或丢弃用户已有改动。
+`deploy.sh` 也只提示脏工作区，仍会发布当前工作区内容，部署前必须检查完整 diff。
+开发仓库可以在 Windows、Mac 或其他工作机上，以当前工作区为准，不限定 Mac mini；
+NAS 上的部署目录不能当作开发仓库。
+
+涉及代码部署或线上排障时，核对线上跑的是哪一版：
 
 ```bash
 ssh archon@10.0.1.2 'docker inspect magicpanel \
@@ -34,40 +71,51 @@ ssh archon@10.0.1.2 'docker inspect magicpanel \
 ssh archon@10.0.1.2 'docker images --format "{{.ID}} {{.CreatedSince}}" | grep magicpanel'
 ```
 
-镜像构建时间应与你最近一次 `deploy.sh` 对得上；对不上说明线上不是你以为的那版代码。
+结合镜像 ID、构建时间、启动时间与最近一次 `deploy.sh` 记录核对；时间只能辅助判断，
+不能单独证明线上对应哪个 Git 提交。
 
-**一次改动必须走完的链路**（缺一步就不算完成）：
+**代码或策略改动必须走完对应的生效链路**：
 
 ```text
-git pull → 改代码/策略 → 本地自检 → deploy.sh → 构建发布 → 客户端拉取 → 核对
+代码：对齐仓库 → 改代码 → 本地自检 → deploy.sh → 核对页面 / 接口
+产物逻辑：上述代码部署完成 → 创建构建 → 发布测试 → 验证 → 发布生产 → 客户端拉取核对
+策略数据：查询并导出改前快照 → 改数据 → 自检并导出改后快照 → 构建发布 → 客户端拉取核对
 ```
 
-**注意区分两类改动**，它们的生效方式完全不同：
+**先区分改动类型**，按实际影响验证与发布：
 
 | 类型 | 内容 | 生效条件 |
 | --- | --- | --- |
 | **代码** | `server/`、`src/`、`scripts/` | `deploy.sh` 重建容器后立即生效 |
-| **策略数据** | 规则、策略组、规则来源（存在 NAS 的 `data/magicpanel.db`） | 必须再走一次「创建构建 → 发布测试 → 发布生产」，否则设备拿到的还是旧产物 |
+| **产物逻辑** | 渲染器、源码基线默认值等 | 部署代码后还要手动创建构建并发布，见约束 40 |
+| **策略数据** | 方案、规则、策略组、来源、引擎默认配置 / 引擎平台配置等（NAS 的 `data/magicpanel.db`） | 「创建构建 → 发布测试 → 发布生产 → 客户端拉取核对」；仅改数据无需重建容器 |
+| **设备独立配置** | 基础配置的设备层 | 分发时实时叠加，客户端下次拉取生效，无需重新构建发布 |
+| **纯文档** | `AGENTS.md`、`docs/` 等，未改变代码与运行配置 | 核对实现、链接、示例与 diff，运行凭据扫描；无需重建容器或刷新客户端 |
 
 策略数据**不在 git 里**，靠 `policy/snapshots/*.json` 存档，见下节。
 
 ## 策略快照（让不在 git 里的策略可复现）
 
-规则顺序、策略组这些内容只存在数据库里，git 看不见。改动前后各导一份：
+方案、规则顺序、策略组这些内容只存在数据库里，git 看不见。改动前后各导一份，
+用 `-before` / `-after` 等后缀区分，避免同一天覆盖备份。以下 Bash 命令在能访问数据库的 NAS 工作目录执行：
 
 ```bash
 # 导出（无凭据，可入库）
 python scripts/export_policy.py --db /opt/magicpanel/data/magicpanel.db \
-  --out policy/snapshots/$(date +%F).json
+  --out policy/snapshots/$(date +%F)-before.json
 
 # 复现（先 dry-run 看 digest 与条数，再正式导入；会自动备份数据库）
 python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
-  --in policy/snapshots/2026-11-10.json --dry-run
+  --in policy/snapshots/2026-11-15-before.json --dry-run
 ```
 
-快照只含 `rules` / `proxy_groups` / `rule_providers` 三张表，且 `rule_providers`
+当前导出格式为 **schema 2**，含 `variants` / `rules` / `proxy_groups` / `rule_providers`
+四张表；`rule_providers`
 走**列白名单**，**不含** `content`（MRS 二进制缓存）与 `proxy_url_enc`（加密订阅地址）；
 `sources` / `local_nodes` / `devices`（含令牌与节点凭据）整体不导出。
+导入会替换快照中非空的策略表，**不是按方案增量合并**；旧 schema 1 快照缺少
+`variants`，不能用来完整恢复多方案状态。正式导入前核对方案、引用对象与目标数据库，
+导入后重新构建发布。导出的快照要带回开发仓库保存，不能只留在 NAS 部署副本。
 
 ## 硬性约束
 
@@ -83,17 +131,19 @@ python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
 10. **命名只有三个层级名**：引擎默认配置 / 引擎平台配置 / 设备独立配置，代码、注释、界面、文档保持一致；页面叫「基础配置」，引擎平台自己的片段叫「平台扩展」。
 11. **地区线路的自动测速一律 `url-test`，跨地区只留一个「⚡️ 自动测速」组。** 日常组按实测延迟自动选（`interval` 600、`tolerance` 100）。跨地区择优用 url-test（成员 = 各地区自动组 + 本地机房节点），不另建 `fallback` 兜底组：fallback 只保证连得上、不保证快，限速节点会被一直用下去。同一地区不要建「稳定 / 优选」两套组。注意 url-test 组是**隐藏**的（前台不显示），规则不能直接指向它，要用可见 select 包住（见约束 14）。
 
+    本条600秒及下表自建来源优先是旧产物基线。V2由`auto_stable_v1`显式检测预算/当前路径恢复取代隐含递归测速；AI按实测业务可用性、信誉、稳定性排序，来源身份不永久加分。新方案通过对应门禁后按新合同迁移，不提前修改旧生产或把native fallback当完整业务恢复。
+
     **2026-11-10 起有四个例外，都是有明确业务理由的 `fallback`，不要改回 url-test：**
 
     | 组 | 类型与顺序 | 为什么必须是 fallback |
     | --- | --- | --- |
     | `🏢 自建优先` | fallback：日本机房01→02 → 美国01→02 → 香港01→02 → `⚡️ 自动测速` | 自建机房节点质量高于机场，需要**按序优先**；url-test 会随延迟抖动在日/美/港之间乱跳，长连接与会话粘性变差。注意 `local_first=1`，否则渲染时 `⚡️ 自动测速` 会排到自建节点前面，fallback 永远选不到自建 |
-    | `🔍 谷歌服务` | fallback：美国机房 → 美国自动 → 日本机房 → 日本自动 | **Google 全家（含 Gemini / YouTube）必须美国出口**，美国全挂才退日本；url-test 会选到香港/新加坡，Gemini 直接不可用 |
+    | `🔍 谷歌服务` | 严格地区档位：美国 → 新加坡 → 日本，各档内再择优 | 包括 Gemini / Gmail / YouTube 及关联依赖；全部适用美国候选失败才进新加坡，新加坡全失败才进日本。不可因延迟或来源类型越级；未知/未测不算整档失败 |
     | `🧠 人工智能` | fallback：美国机房 → 美国自动 → 日本机房 → 日本自动 → 新加坡自动 | AI 对 IP 质量与地区敏感，部分服务不支持香港，**明确排除香港**；顺序固定 美→日→新 |
     | `🎞️ 国际影音` | fallback：新加坡自动 → 日本自动 → 香港自动 | 流媒体解锁按地区，逐级降级而不是按延迟择优 |
 
     规则顺序同样有要求：**Google 三件套（`search`/`youtube`/`google`）必须排在 AI 规则之前**，否则 `gemini.google.com` 会先命中 `category-ai-chat-!cn` 落到 `🧠` 组（虽然也是美国，但语义不对且改 AI 组会连带影响 Google）。
-12. **兜底规则是 `MATCH → 默认代理`，不是直连。** 面板采用"先分流、未列出的全部走代理"：漏配一条规则只会让线路不最优，不会让服务打不开。改兜底方向前先想清楚影响面。
+12. **正常代理模式兜底为`MATCH → 默认代理`。** 这降低未收录海外域名误直连的风险，不能据此断言任何漏规则都只影响速度；国内服务仍须通过独立DNS、明确直连及末端国内IP规则验证，地区锁服务还要验证对应出口。核心整体故障的BASIC_WAN是用户批准的独立救援状态，不修改普通MATCH政策。
 13. **地区维度只保留两类组**：各地区单独命名的组 + 机房组（🇺🇸 美国机房 / 🇯🇵 日本机房）。机房组只放本地机房节点，供"重点标注"用；不要按"散节点"另开同地区组。每个地区是**两层**：内层 `XX自动`（隐藏 `url-test`，自动测速）+ 外层 `XX`（可见 `select`，规则只指向它）。命名规范：内层带"自动"后缀且有空格（`🇭🇰 香港自动`），外层无空格（`🇭🇰香港`）。
 14. **规则目标必须是前台可见的策略组。** 客户端前台只显示可见组，指向隐藏组等于"分流了但用户选不了节点"。做法是可见 `select` 包住隐藏 `url-test`：规则指向可见组，可见组成员是隐藏自动组 + 地区正则过滤出的节点。产物里不允许出现任何指向 `hidden: true` 组的规则。
 15. **引擎平台配置里的 `_direct_domains` 会置顶成直连规则**，排在所有用户规则之前。域名一旦进了这份列表，用户集合里针对它（或它的子域）的条目就是死规则——用户规则改不动它。要让某个子域走别的线路，得先把主域名从 `_direct_domains` 里摘掉，再确认 `self-hosted` 之类的集合能兜住其余子域。
@@ -156,27 +206,29 @@ python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
 24. **规则与规则集改动后要按官方文档复核一遍。** 白名单以官方文档为准，不靠记忆：Stash <https://stash.wiki/rules/rule-types>、<https://stash.wiki/rules/rule-set>；Mihomo <https://wiki.metacubex.one/config/rules/>、<https://wiki.metacubex.one/config/rule-providers/>。要核对的项、已发现过的问题（`ipcidr` 行为漏加 `no-resolve`，现存的 `private-ip` / `telegram-ip` 都已带上；`cn-ip` 按约束 23 的例外不带）以及 Stash 独有能力（`no-track` / `pre-matching`）都写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「规则与规则集的规范核对」。**规则来源内部的一致性（内容有没有悬空引用、有没有规则引用它）暂时不查**——面板侧的校验向阳后面自己优化，验收时不必报告这两类问题。Stash 独有的 `no-track` / `pre-matching` **只写进 Stash 产物**（Mihomo 的规则参数只有 `no-resolve` 与 `src`；实测 Mihomo 遇到未知参数会忽略、不会加载失败，但产物里不写更清楚）；`pre-matching` 还要求目标是 `REJECT` 字面量、用策略组会直接加载失败，且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效，版本太旧的客户端可能加载失败。兜底规则（MATCH）不能加 `no-track`，否则客户端不记录任何连接。同一个规则集可以在互斥的引擎平台各挂一条（广告过滤就是这么分轨的：Stash iOS/tvOS/macOS 用 `REJECT` 字面量，其余平台用「🛑 广告过滤」策略组），「规则重复」判定只看适用范围有无交集。
 25. **服务分流要按「这个服务到底要什么」分派，不要一律丢进默认代理。** 三类需求对应三种落法：**地区锁服务**（Pixiv / DMM / Hulu / BBC，换 IP 就打不开）→ 指向对应地区组；**账号风控服务**（Discord / Slack / Amazon / 币圈，对出口 IP 的信誉与地区一致性有校验）→ 指向固定出口的 `select` 组（🛒 跨境电商 / 🪙 加密货币，本地节点排最前），别交给 `url-test` 自动切 IP；**上游大集合吃掉了本该更细路由的域名**（`media` 里的 BBC、`disney` 里的 Hulu）→ 拆出服务专属集合并排在宽泛合集之前。判断"这个集合值不值得加"必须与面板全部现有集合求交，看净增量与路由错位，算增量的三个坑（公共后缀回溯、behavior 不能嗅探、mrs 要换 yaml 等价物）写在 [规则集与分流设计](docs/reference/规则集与分流设计.md) 的「服务细分：按用途与地区分派」。
 26. **社交类分流按用途分两组：💬 即时通讯 与 👥 海外社交。** 前者是点对点聊天、群聊、通话、消息推送（Telegram / WhatsApp / Signal / Discord / LINE / Viber / KakaoTalk / Messenger / Snapchat / Element / Session / Threema / SimpleX / Wire / Zalo / Slack），后者是动态、发帖、图文流、关注、社区（Twitter / Instagram / Facebook / Reddit / Threads / Bluesky / Tumblr / Pinterest / LinkedIn / TruthSocial / VK / OK / Quora / Lemmy / Nextdoor / GETTR / Minds / MeWe / Gab / Mastodon）。**两个块在第 7 块内各自连续，通讯块必须排在社交块前面**——两块都含 LINE / Messenger / Discord 的域名，具体服务集合要排在宽泛的 `social-extra` / `social` 前面，否则走错组。geosite 的 `category-social-media-!cn`（`social`）已覆盖 Twitter / Facebook / Instagram / Threads / Tumblr / LinkedIn / TruthSocial / VK / Bluesky / Mastodon 的全部条目，**不要再为它们建单服务集合**（同约束 22 的重复清单）；只有净增量不为零的才建来源。小众服务（Threema / Session / SimpleX / Wire / Viber / Quora / Lemmy / Nextdoor / OK / GETTR / Minds / MeWe / Gab）走自维护层 `magic-chat` 与 `magic-social`，域名逐个核实过。
-27. **策略组的顺序是向阳精心配置过的基线，不得变更。** 下面这 32 个策略组的先后顺序（含 `sort` 值）是基线，括号内是 `sort`：
+27. **策略组的顺序是向阳精心配置过的基线，不得擅自变更。** 多方案下逐方案核对，改其他方案不得影响默认方案。以下是仓库已存档的 **2026-11-12、构建 233** 默认方案基线（33 组，来自 `policy/snapshots/2026-11-12.json`），括号内是 `sort`：
 
     ```
-    🚀 默认代理(0) → 🛑 广告过滤(1) → 🔍 谷歌服务(2) → 🧠 人工智能(3) → 💻 开发工具(4)
-    → 🎮 海外游戏(5) → 🎞️ 国际影音(6) → 🎵 TikTok(7) → 💬 即时通讯(8) → 👥 海外社交(9)
-    → 🍎 苹果服务(10) → Ⓜ️ 微软服务(11) → 🛒 跨境电商(12) → 🪙 加密货币(13) → ⚡️ 自动测速(14)
-    → 🇯🇵日本(15) → 🇺🇸美国(16) → 🇹🇼台湾(17) → 🇰🇷韩国(18) → 🇸🇬 新加坡(19) → 🇭🇰香港(20)
-    → 🌍欧洲(21) → 🇯🇵 日本机房(22) → 🇺🇸 美国机房(23) → 🇯🇵 日本自动(24) → 🇺🇸 美国自动(25)
-    → 🇹🇼 台湾自动(26) → 🇰🇷 韩国自动(27) → 🇭🇰 香港自动(28) → 🌍 欧洲自动(29)
-    → 🇸🇬 新加坡自动(30) → 🏠 路由回家(31)
+    🚀 默认代理(0) → 🏢 自建优先(1) → 🔍 谷歌服务(3) → 🧠 人工智能(4) → 💻 开发工具(5)
+    → 🎮 海外游戏(6) → 🎞️ 国际影音(7) → 🎵 TikTok(8) → 💬 即时通讯(9) → 👥 海外社交(10)
+    → 🍎 苹果服务(11) → Ⓜ️ 微软服务(12) → 🛒 跨境电商(13) → 🪙 加密货币(14) → ⚡️ 自动测速(15)
+    → 🇯🇵日本(16) → 🇺🇸美国(17) → 🇹🇼台湾(18) → 🇰🇷韩国(19) → 🇸🇬 新加坡(20) → 🇭🇰香港(21)
+    → 🌍欧洲(22) → 🇯🇵 日本机房(23) → 🇺🇸 美国机房(24) → 🇯🇵 日本自动(25) → 🇺🇸 美国自动(26)
+    → 🇹🇼 台湾自动(27) → 🇰🇷 韩国自动(28) → 🇭🇰 香港自动(29) → 🌍 欧洲自动(30)
+    → 🇸🇬 新加坡自动(31) → 🏠 路由回家(32) → 🇺🇸 美国NTT落地(33)
     ```
 
-    > 基线于 2026-10-26 核对：线上 32 个组，顺序与本段逐项一致。`🇸🇬 新加坡`（外层可见组，`sort=19`）
-    > 与内层隐藏组 `🇸🇬 新加坡自动`（`sort=30`）成对。
-    > 上一版写的 `🇸🇬 新加坡(15)` 与线上不符，已按线上实际顺序改正。
-    > 曾短暂存在的 `🏠 私有网络` 组已删除——私有地址必然直连，单独一个组没有意义，
-    > `private` / `private-ip` 两条规则直接指向 `DIRECT`。
+    > 这是历史存档，不代表实时线上状态；旧版 2026-10-26 的 32 组清单已过时，不能照着恢复。
+    > `sort=2` 的空缺合法，排序值要求唯一、不要求连续，不要为填空缺重编号。
+    > `🇸🇬 新加坡` 与 `🇸🇬 新加坡自动` 仍是外层可见 / 内层隐藏的一对。
+    > 曾短暂存在的 `🏠 私有网络` 组已删除；`private` / `private-ip` 直接指向 `DIRECT`。
 
-    **任何重构（菜单重排、页面合并、构建流程改动、数据层切换）都不得改动这个先后顺序**，包括不得重排 `sort` 值。新建组只能追加到指定位置；删除组时其余组的相对顺序不变。改动前先拉线上当前顺序核对，改动后逐项比对确认一致。**要改顺序必须向阳明确要求。**
+    **任何重构（菜单重排、页面合并、构建流程改动、数据层切换）都不得改动用户现有的先后顺序**，包括不得擅自重排 `sort` 值。新建组只能放到指定位置；删除组时其余组的相对顺序不变。改动前先拉线上各方案当前顺序作为本次基线，改动后逐项比对确认一致。**要改顺序必须向阳明确要求。**
 
 28. **各列表的 `sort` 值必须全局唯一，否则拖拽排序会静默失效。** `sort` 是全局排序键，同值的两组相对顺序退回由 `id` 决定，界面上拖了没反应。`reorder_subset`（`server/app/db.py`）现在会在重排前检测重复并整表按当前顺序重编号消歧，相对顺序不变；子集重排按"连续块"语义放回原位置区间，区间内其余行整体顺延。**因此重排后要重新核对上条的基线**——`sort` 数值可能被消歧改掉（相对顺序不变）。消歧只在存在重复时触发，正常路径不动任何数值。
+
+    组与规则的排序请求只能包含同一 `variant_id`，混入其他方案的 ID 会被拒绝；
+    新方案使用独立的排序段，见约束 42。不要把方案内排序请求拼成整表重排。
 
 29. **后台页面结构已重排（2026-10-25）。** 侧边栏 12 项，顺序是：系统状态 → 策略组 → **分流策略** → 节点来源 → 规则来源 → **基础配置** → 设备管理 → **拓展模块** → **构建发布** → **自主维护** → 审计日志 → 系统设置。分流规则紧跟策略组——规则的目标就是策略组，改规则时来回切这两页最频繁。
 
@@ -190,6 +242,7 @@ python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
 31. **DNS 段固化在「引擎默认配置」（源码基线 `server/app/services/base_config.py`），其他层一律不得写 `dns:` 键。** 2026-10-27 定稿方案（旧方案"默认境外 DoH 走代理"把所有未命中策略域名的解析绑在代理可用性上，代理一抖国内网站成片打不开，已废弃）：默认 `nameserver` 为国内 DoH 裸 IP 直连双运营商并发（`120.53.53.53` 腾讯 doh.pub + `223.5.5.5` 阿里）；海外敏感域（Fake-IP 排除清单里的海外域：微软全家 + `lens.l.google.com`）与直连的海外集合（`rule-set:mirror-accelerate` / `pt` / `trackers`）在 `nameserver-policy` 指到境外 DoH（`1.1.1.1` / `8.8.8.8`，经代理出口）。核心依据：Fake-IP 下走代理的连接由节点远程解析，本地答案无关紧要；本地答案只对「Fake-IP 排除清单的海外域」与「DIRECT 连接」有意义。alidns（223.5.5.5）对海外域有污染，但本设计下默认解析器的海外答案永远不会被使用，放它只为运营商冗余。**国内域名不需要任何显式 `nameserver-policy`**——默认就是国内 DoH，显式写反而退化成单服务器。
 
     - **维护位置与禁改范围**：DNS 段（nameserver / nameserver-policy / proxy-server-nameserver / follow-rule / respect-rules / ipv6 等）只改源码基线；**引擎平台配置、平台扩展（targets.extra_yaml）、设备独立配置、拓展模块都不许写 `dns:` 键**——平台扩展与设备层是追加合并，写了就会悄悄盖过基线（2026-10-27 就从平台扩展和 4 个设备层里清掉过残留的 `vpn.jiek.top` 策略）。家用 Fake-IP 清单仍在平台层用 `_fake_ip_filter` 伪键维护（伪键不是 dns 键）。
+    - **保存时校验差异，不能拒绝继承值（2026-11-13 修复）**：`PUT /api/v1/base-config` 与 `POST /api/v1/base-config/apply` 提交的是编辑后的完整生效值，可能含上层继承的 `dns`。先以 `allow_dns=True` 校验生效值，再相对 `_baseline()` 计算 `overlay`，最后按当前层校验 `overlay` 的 `allow_dns`；平台 / 设备层新增或改写 DNS 仍返回 400。不能直接对完整生效值用 `allow_dns=False`，否则连修改 `ipv6` 也保存不了。解析、差异计算与校验的 `ValueError` 都要转为 HTTP 400。回归见 `server/tests/test_builtin_config.py`。
     - **两个清单必须同步**：源码 `_OVERSEAS_SENSITIVE` 与平台层 `_fake_ip_filter` 里的海外域一一对应——一边加域另一边也要加，否则要么答案不干净、要么白走代理。
     - **三个集合不可删**：`mirror-accelerate` / `pt` / `trackers` 被 DNS 策略的 `rule-set:` 键引用，删除或改名会让策略悬空；要动先改源码 `_OVERSEAS_DIRECT_SETS`。
     - **不配 `fallback` / `fallback-filter`**（配了默认启用 geoip CN 过滤，多一个 geo 依赖且没有污染值要筛）；**不配 `default-nameserver`**（所有服务器都是裸 IP，它永远不会被查询）；**不配 `direct-nameserver`**。
@@ -209,8 +262,10 @@ python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
     - **基础配置分层（2026-10-28 固化，构建 180）**：共有键（ipv6 / profile / sniffer 端口 / mihomo global-client-fingerprint / `_direct_domains` / `_fake_ip_filter`）全部上收引擎默认配置（源码基线 `base_config.py`），8 个引擎平台层全部清空（仅 Mihomo-Android 保留 `find-process-mode: off`），设备层只剩 MTProto / hosts / tun 个性化；**API 已在平台/设备层拒绝 `dns:` 键**（仅引擎默认层可写，`validate_doc(allow_dns)`），Fake-IP 清单用 `_fake_ip_filter` 伪键、设备层追加。`cascade` 同时修复了顶层级列表键在设备层被静默替换的 bug（现按文档语义追加）。
     - **LVSP 的 tun 段放在设备层（2026-10-28，构建 181）**：Mihomo-macOS 目标的平台扩展**故意为空**——tun/dns-hijack/Tailscale 路由排除是 Lvsp-MacBook-Mihomo 一台设备的个性化，已下沉到该设备的「设备独立配置」。不要「整理」回平台扩展；若将来出现第二台 LVSP mihomo-macOS 设备，再按先个性后共性的原则提升。
     - **引擎基线官方对齐（2026-10-28，构建 182，官方示例已刷新进 official-example/）**：`sniffing` 是 mihomo 官方废弃键（「若 sniffer.sniff 配置则此项无效」），只存在于 Stash 基线，不要加回 mihomo；mihomo 基线带官方示例同款 `geox-url` jsdelivr 镜像（geo-auto-update 国内直连 GitHub 会失败）；mihomo 的 `fake-ip-filter` 是 blacklist 模式，**不支持 GEOSITE 语法**（wiki：GEOSITE/RuleSet 仅 fake-ip-filter-mode: rule 可用），所以 mihomo 清单没有 `geosite:private` 而 Stash 有——两边清单不要强行统一。
-    - **OpenClash-Mihomo 目标（mihomo/linux，构建 183）**：面向 OpenWrt OpenClash 的 Mihomo 内核，按 Aethersailor/Custom_OpenClash_Rules wiki 的「最小配置」原则设计——产物只提供节点/策略组/规则，入站端口、运行模式（TUN/TPROXY）、DNS、嗅探、external-controller 全部由 OpenClash LuCI 覆写，**平台扩展保持为空，不要往里写 tun 或端口**；平台层只有路由器必需的三键：`allow-lan: true`、`bind-address: "*"`、`find-process-mode: off`（mihomo 官方建议路由器关进程匹配）。该目标暂无设备，属于预留。
-**改 AGENTS.md 这类文档必须改在 mini 仓库再部署——直接改 NAS 侧文件会被 deploy 的 rsync --delete 覆盖掉（2026-10-28 踩过）。**
+    - **OpenClash-Mihomo 目标（mihomo/linux，2026-11-13 构建 243 适配记录）**：面向 OpenWrt OpenClash 的 Mihomo 内核，入站端口、运行模式（TUN/TPROXY）、DNS、嗅探、external-controller 由 OpenClash LuCI 覆写，**平台扩展保持为空，不要往里写 tun 或端口**；平台层差异为 `allow-lan: true`、`bind-address: "*"`、`find-process-mode: off`、`ipv6: false`，最后一项与路由器 `ipv6_enable=0` 对齐。构建 243 已有设备 `Astral-PassWall-Mihomo` 使用「自建美日」方案，路由器订阅登记为 `MagicPanel-自建美日`；不再是无设备的预留目标。内核实际加载配置还要看 LuCI 覆写结果，不能仅凭面板产物判断 DNS、端口和运行模式。
+
+    **文档也必须改在开发工作区**；NAS 部署副本的手工改动会被下次 `rsync --delete` 覆盖。
+    纯文档更新的验证范围见「改完要做的事」。
 
 34. **QUIC 分轨：直连放行，代理链路强制回退 TCP（2026-10-31 修订 10-28 决策）。** 10-28 的实测结论仍然成立：Fake-IP 修复后 UDP/QUIC 直连链路畅通，语音/游戏/P2P 必须放行 UDP，所以**不做全局禁 QUIC**。但「任何应用都不出现访问异常」的目标下，QUIC 经 VPN 隧道（尤其手机蜂窝网络）的转发质量无法逐设备保证，而官方 FAQ（stash.wiki/faq/effective-stash）明确建议对走代理的流量禁 QUIC。定稿方案是一条逻辑规则：`AND,((NETWORK,udp),(DST-PORT,443)),REJECT`，排在尾部直连块（`private-ip`）之后、`MATCH` 之前——**只拦“本来就要走代理”的 QUIC**，国内直连流量早在 `cn`/`cn-ip` 命中 DIRECT，QUIC 完全不受影响；未命中任何规则的 QUIC 被拒后应用自动回退 TCP/2，兼容性优先于 HTTP/3 首包收益。两引擎语法一致（Stash 与 Mihomo 都支持 AND 逻辑规则），一行配置全覆盖，不需要逐 App 覆写。带 `no-track`（Stash 侧）避免 REJECT 刷屏连接列表；**不要加 `pre-matching`**（旧版本客户端可能加载失败，约束 24）。若未来要把某类代理流量恢复 QUIC，改这条规则而不是加客户端覆写。
 
@@ -233,65 +288,90 @@ python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
 
 40. **只改渲染器代码要手动构建一次才会进产物（2026-11-04 记录）。** 自动构建的指纹是「策略快照」的哈希（`builds.current_policy` → `collect_snapshot` 的 JSON），覆盖策略与**基础配置三层的内容**，但**不覆盖渲染器代码**。所以只改 `compiler/render.py` 或 `services/base_config.py` 里的默认取值、而策略本身没动时，定时构建会判定「策略未变化，跳过」，新的渲染逻辑不会进产物，设备继续用旧配置。改完渲染器要手动「创建构建 → 发布至测试 → 发布至生产」一次。基础配置层的内容改动会被指纹覆盖，会自动重建，不需要手动干预。
 
-41. **门户「看配置源码」是预览，不是拉取（2026-11-10）。** 设备卡片标题可点，弹层里用 YAML 语法高亮展示该设备的配置源码。走的是**同一个 feed 地址加 `?preview=1`**（`/feed/{token}/config.yaml?preview=1`），内容与客户端下发的完全一致，但三件事必须不同：**不记拉取**（人在看不是客户端在更新，污染了 `last_config_at` / `pull_count` 会让「配置时效」失真——见规则 38 的同类教训）、**不加 `#SUBSCRIBED`**（那是给客户端的更新提示行，不是配置内容）、**`Content-Disposition` 用 `inline`**（`attachment` 会让「新标签打开原文」变成下载而不是显示）。预览响应还带 `Cache-Control: no-store` 且不做 304 协商——缓存的 ETag 会让第二次预览拿到 304 空响应。
+41. **门户「看配置源码」是预览，不是拉取（2026-11-10）。** 设备卡片标题可点，弹层里用 YAML 语法高亮展示该设备的配置源码。走的是**同一个 feed 地址加 `?preview=1`**（`/feed/{token}/config.yaml?preview=1`），内容与客户端下发的完全一致，但三件事必须不同：**不记拉取**（人在看不是客户端在更新，污染了 `last_config_at` / `pull_count` 会让「配置时效」失真——见约束 36）、**不加 `#SUBSCRIBED`**（那是给客户端的更新提示行，不是配置内容）、**`Content-Disposition` 用 `inline`**（`attachment` 会让「新标签打开原文」变成下载而不是显示）。预览响应还带 `Cache-Control: no-store` 且不做 304 协商——缓存的 ETag 会让第二次预览拿到 304 空响应。
 
     高亮用 `src/yamlHighlight.js`（自研、零依赖）而**不是** CodeMirror：门户是公开页，CodeMirror 是编辑器（`components/CodeEditor.vue` 自己也写明「只读文件不渲染本组件」）；产物动辄四千多行，自研逐行词法扫描 7ms 出结果。**YAML 的纯量按空格分词是错的**——`name: 🇭🇰 香港 06 [Home]` 是一个字符串不是四个 token，所以只有单个词才按类型（布尔/数字/URL/IP）着色，带空格的整段当字符串，否则会把节点名里的 `06` 染成数字，看着像端口号。产物里的键名、URL、节点名都是用户可写内容，**上 `v-html` 前必须转义**。
 
+42. **多套分流方案（variants）：每个方案是一套完整、独立的策略组 + 分流规则副本（2026-11-13 定稿）。** 设计与实现细节见 [方案设计](docs/reference/方案设计-多套分流方案.md)。要点：
+
+    - **数据模型**：`variants` 表（`默认` 方案 id=0，`is_system` 保护，禁删禁改名禁停用）；`proxy_groups` / `rules` 挂 `variant_id`，组名约束为 `UNIQUE(variant_id, name)`——不同方案允许同名组，同一方案内唯一。新方案使用 `config.VARIANT_SORT_STRIDE=10000` 的排序偏移，组 / 规则排序请求不得跨方案，改动后仍须核对默认方案的顺序与 sort（约束 27/28）。
+    - **引用全部方案内解析**：规则目标、组成员引用、改名重映射、删除解绑、`validate_policy`（逐方案返回 `{方案id: (errors, warnings)}`，方案之间互不阻塞）都只看同一 `variant_id` 的行。**`refs.detach_group` 必须传 `variant_id`**——2026-11-13 线上事故：删「自建美日」的港台组时把默认方案里指向同名组的 8 条规则一并删了（有回归测试 `test_deleting_group_in_one_variant_keeps_other_variants_rules`）。
+    - **构建矩阵**：`create_build` 对每个启用方案 × 每个引擎平台渲染一份产物，并为有专属策略的设备生成设备产物——默认方案沿用 `{target}.yaml` / `{device}.yaml` 命名，方案 V 是 `{target}@V.yaml` / `{device}@V.yaml`。产物文件名冲突在构建期报错。`results` 键为不带 `.yaml` 的产物名，非默认方案的 value 带 `"variant": V`（方案名）。
+    - **来源/集合按引用过滤**：渲染时展开各组的 `use`（含 `["*"]`）取并集，顶层 `proxies` 只展开被引用的 inline 来源，`proxy-providers` 只写被引用的 provider 来源；`rule-providers` 只写「本方案规则引用 ∪ DNS `rule-set:` 引用」的集合。默认方案所有组 `use=["*"]` → 行为不变；「自建美日」无来源引用 → 产物无机场节点、无 providers 段。「只分发可用节点」等既有开关不受影响。
+    - **分发**：`GET /feed/{token}/config.yaml?variant=<方案名>` 取方案产物（设备专属优先，缺省回退目标产物）；不带参数 = 默认方案 = 历史路径，老订阅零影响。`?preview=1` 与 `?variant=` 可组合。
+    - **守卫**：删除/改名被当前生产**或测试**产物引用的方案 → 409 `variant_in_use`（复用约束 35 语义）；停用只是不进新构建，已有产物照常下发。
+    - **默认方案展示在前**：方案管理里系统方案的上移 / 下移按钮禁用（`src/components/VariantBar.vue`）；调整其他方案时同样不能把默认方案挤到后面。此顺序属于 `variants.sort`，与各方案内部的组 / 规则 `sort` 分开维护。
+    - **「自建美日」方案（2026-11-13 精简终态，构建 240）**：方案数据共 **6 组 / 114 规则**；一般设备产物只有 **5 组（3 可见 + 2 隐藏）**：`🚀 默认代理`（select，成员按 `🇯🇵日本` → `🇺🇸美国`）、`🇯🇵日本`、`🇺🇸美国`，以及两个隐藏 url-test `🇯🇵 日本自动` / `🇺🇸 美国自动`。`🏠 路由回家` 仅在 LVSP 设备范围内保留。节点池只含日美自建节点（日本机房、AWS日本机房、美国机房、美国NTT 01–10），不含机场来源与香港节点；不要恢复精简前的 23 组或重新加回各服务组。
+    - **精简方案的分流目标**：AI / 谷歌 / 开发 / 即时通讯 / 海外社交 / 微软 / 跨境电商 / 加密货币 → `🇺🇸美国`；TikTok / 影音 / 游戏等 → `🇯🇵日本`；`apple` → `DIRECT`，国内直连规则保留；DNS 出口、云服务商、代理兜底集合与 MATCH 保留原有目标。这里是独立方案的既定设计，不要套用默认方案的服务组结构，也不要连带改默认方案。精编脚本 `scripts/configure_selfbuilt_variant.py` 可重复执行，运行前仍须导出快照并检查现状。
+    - **门户操作全部跟随方案**：设备卡片的复制 / **下载** / 导入 / 二维码 / 预览联动；下载文件名为 `设备名.yaml` 或 `设备名@方案名.yaml`。预览沿用服务端返回的**相对路径**并追加方案参数（已有 `?preview=1` 时用 `&variant=`），不要改成公网绝对地址，否则内网访问会遇到跨源问题。预览纪律见约束 41。
+
+43. **「指到家里」的域名必须用 system DNS 解析（2026-11-13 定案，构建 239）。** `magichub.top` / `homehub.stream` 的服务器就在家里：路由器分流 DNS 给 **NAS 内网地址**（10.0.1.2），公网 DoH 给**家宽公网 IP**。代理接管 DNS 后用国内 DoH 解析出公网 IP，局域网设备访问自己的公网 IP 会被 **NAT 回环**挡住——线上实证「homehub 相关域名内网打不开、关代理立刻恢复」。修复：这两个域在引擎默认配置 `nameserver-policy` 固化为 `system`（内网直达 NAS，外网正常回家），伪键 `_system_dns_domains` 供界面追加（渲染时与基线合并）。判断标准：系统 DNS 与公网 DoH 答案不一致且系统侧是内网地址 → 该域必须进清单。与 `_direct_domains` / `_fake_ip_filter` 是三件套，加域要三处一起改。
+
+44. **约束 23 的 cn-ip 例外有构建期校验**（2026-11-13 起）：`RULE-SET,cn-ip` 带 `no-resolve` 直接构建失败（validate.py 强制）。2026-11-13 实证违反过：cn-ip 被 no-resolve 后未收录国内域名全部落进 `MATCH → 🚀 默认代理`，大量大陆服务异常。修复这类报错时改规则，不要绕过校验。
+
 ## 改完要做的事
 
-按顺序走，前一步不过不要往下走：
+先按开头的改动类型表确定范围。**纯文档更新**核对实现、日期、链接、命令示例，
+运行 `git diff --check` 与凭据扫描即可；涉及文档站生成逻辑时再验证文档站构建。
+代码与策略按以下顺序走，前一步不过不要往下走。
+
+以下是 **Bash** 示例，从仓库根目录执行：
 
 ```bash
 # 1) 本地自检
-cd server && ../.venv/bin/python -m pytest tests -q     # 后端测试
-cd .. && npm run build                                  # 前端构建（产物进 server/app/static）
+(cd server && ../.venv/bin/python -m pytest tests -q)   # 后端测试，结束后仍在仓库根目录
+npm run build                                           # 前端构建（产物进 server/app/static）
 .venv/bin/python scripts/check_secrets.py               # 凭据扫描（有人把令牌贴进代码会在这里被拦）
+git diff --check
 
 # 2) 发布到 NAS：同步代码 → 重建容器 → 健康检查 → 数据自检 → 域名验证
 bash scripts/deploy.sh                                  # 全量（含后端测试）
 bash scripts/deploy.sh --fast                           # 只改前端时跳过测试
 # NAS 走路由器 OpenClash 透明代理，构建拉包无需额外代理；
 # 仅在异常时用 DEPLOY_PROXY=<可用的内网代理> 显式指定。
-
-# 3) 策略类改动：构建 → 发布测试 → 发布生产（渲染器改动也必须走这一步，见约束 40）
-docker exec magicpanel python -c "
-from app.routers import builds
-from app.services import releases
-from app import db
-bid, v = builds.create_build('agent', note='说明这次改了什么')
-print('build=', bid, v)
-with db.connect() as conn:
-    b = dict(conn.execute('select * from builds where id=?', (bid,)).fetchone()); releases.publish_to_testing(conn, b, 'agent', '验证')
-with db.connect() as conn:
-    b = dict(conn.execute('select * from builds where id=?', (bid,)).fetchone()); releases.publish_to_production(conn, b, 'agent', '上线')
-"
-
-# 4) 客户端拉取：路由器 OpenClash 每日 04:00 自动更新，需要立刻生效时手动触发
-ssh root@10.0.1.1 'U=$(uci -q get openclash.@config_subscribe[0].address); \
-  curl -sk --max-time 60 "$U" -o /etc/openclash/config/magic.yaml; \
-  /etc/init.d/openclash restart'
 ```
+
+Windows PowerShell 的虚拟环境路径为 `.venv\Scripts\python.exe`；后端测试先
+`Push-Location server`，用 `..\.venv\Scripts\python.exe -m pytest tests -q`，
+结束后 `Pop-Location`。从根目录用 `.\.venv\Scripts\python.exe scripts/check_secrets.py`
+扫描凭据；虚拟环境尚未创建时，纯文档检查可直接用可用的 `python`。
+`deploy.sh` 依赖 Bash、rsync、SSH 及脚本指定的 `.venv/bin/python`，
+不能只换成 PowerShell 命令直接运行；先核对执行环境与依赖。
+
+**3）影响产物的改动：创建构建 → 发布测试 → 验证 → 发布生产。**
+优先走已有 API（带登录会话与 CSRF，具体请求见[配置文档](docs/配置文档.md#改完怎么发布)）：
+
+- `POST /api/v1/builds` 创建构建，检查所有方案与目标的 `results`。
+- `POST /api/v1/builds/{id}/publish-to-test` 发布测试，实际验证受影响的设备与方案。
+- `POST /api/v1/builds/{id}/publish-to-prod` 发布生产，再核对生产产物。
+
+渲染器改动也必须执行这一步（约束 40）。直接调用内部发布服务时，状态切换必须放在
+`db.tx(immediate=True)` 中串行执行，避免并发产生同一环境的多条生效记录。
+
+**4）客户端拉取并核对。** 路由器在 OpenClash 的订阅管理里找到对应的
+`MagicPanel-自建美日` 记录，核对设备与方案后触发更新，更新时间以当前设置为准。
+不要假设 `@config_subscribe[0]` 就是目标订阅，也不要把下载内容直接覆盖进猜测的配置路径。
 
 **部署后必须自己验一遍**，不要只看脚本输出：
 
 ```bash
-ssh archon@10.0.1.2 'docker inspect magicpanel --format "{{.State.Health.Status}}" && \
-  docker exec magicpanel curl -s -o /dev/null -w "%{http_code}\n" -m 10 \
-  https://www.gstatic.com/generate_204'          # 期望 healthy + 204
+ssh archon@10.0.1.2 'docker inspect magicpanel --format "{{.State.Health.Status}}"'
 ```
 
-策略类改动还要在路由器上确认规则真的进了产物：
+再使用已配置并审定的非 Google 健康端点核对通用网络，避免把基础连通等同 Google 能力。
+Google 专项按已授权的美国、新加坡、日本候选分别检查，保留视角和业务范围。
 
-```bash
-ssh root@10.0.1.1 'grep -n "RULE-SET,steam-cn" /etc/openclash/magic.yaml'   # 换成你改的那条
-```
+策略类改动还要在路由器上确认**实际加载的配置路径**，检查修改的规则与最终出口；
+面板产物、订阅下载文件与 OpenClash 覆写后的运行配置可能不同，不能混为一份。
 
 配置类改动要**重新构建发布**才生效（只有设备独立配置例外，分发时实时叠加）。
 部署脚本里的「数据自检」会拦下引用不存在的平台/组/节点——它不过就说明数据层有问题，按提示修完再发布。
 
 ## 客户端侧核对
 
-本机 Mac mini 上的 Stash 4.4.0 装了命令行 `stash`，能直接问**正在运行的核心**，比在产物 YAML 里推演可靠：
+若在已安装并运行 Stash CLI 的 Mac 上核对，可直接查询**正在运行的核心**。
+以下为历史 Stash 4.4.0 环境的命令示例；Windows 工作区不能假定本机有 Stash，
+Mac mini 也已不再承担全屋代理，先确认要检查的是哪台客户端与哪个方案：
 
 ```sh
 stash status                              # 版本 / 模式 / 端口 / 吞吐
@@ -313,17 +393,3 @@ python3 scripts/docs_lookup.py read <官方页面 URL>
 ```
 
 流程与要求见 [官方文档查阅流程](docs/reference/Official-Docs-Workflow.md)。
-
-42. **多套分流方案（variants）：每个方案是一套完整、独立的策略组 + 分流规则副本（2026-11-13 定稿）。** 设计与实现细节见 [方案设计](docs/reference/方案设计-多套分流方案.md)。要点：
-
-    - **数据模型**：`variants` 表（`默认` 方案 id=0，`is_system` 保护，禁删禁改名禁停用）；`proxy_groups` / `rules` 挂 `variant_id`，`UNIQUE(variant_id, name)`——不同方案允许同名组，同一方案内唯一。`sort` 按方案分段（方案 N 占 `[N*10000, (N+1)*10000)`），拖拽排序永不跨方案，默认方案的 sort 值不动（约束 27/28 自动满足）。
-    - **引用全部方案内解析**：规则目标、组成员引用、改名重映射、删除解绑、`validate_policy`（逐方案返回 `{方案id: (errors, warnings)}`，方案之间互不阻塞）都只看同一 `variant_id` 的行。**`refs.detach_group` 必须传 `variant_id`**——2026-11-13 线上事故：删「自建美日」的港台组时把默认方案里指向同名组的 8 条规则一并删了（有回归测试 `test_deleting_group_in_one_variant_keeps_other_variants_rules`）。
-    - **构建矩阵**：`create_build` 对每个启用方案 × 每个引擎平台渲染一份产物——默认方案沿用 `{target}.yaml` / `{device}.yaml` 命名，方案 V 是 `{target}@V.yaml` / `{device}@V.yaml`。产物文件名冲突在构建期报错。`results` 键 = 产物名，value 带 `"variant": V`。
-    - **来源/集合按引用过滤**：渲染时展开各组的 `use`（含 `["*"]`）取并集，顶层 `proxies` 只展开被引用的 inline 来源，`proxy-providers` 只写被引用的 provider 来源；`rule-providers` 只写「本方案规则引用 ∪ DNS `rule-set:` 引用」的集合。默认方案所有组 `use=["*"]` → 行为不变；「自建美日」无来源引用 → 产物无机场节点、无 providers 段。「只分发可用节点」等既有开关不受影响。
-    - **分发**：`GET /feed/{token}/config.yaml?variant=<方案名>` 取方案产物（设备专属优先，缺省回退目标产物）；不带参数 = 默认方案 = 历史路径，老订阅零影响。`?preview=1` 与 `?variant=` 可组合。
-    - **守卫**：删除/改名被当前生产**或测试**产物引用的方案 → 409 `variant_in_use`（复用约束 35 语义）；停用只是不进新构建，已有产物照常下发。
-    - **「自建美日」方案**：23 组 / 114 规则，节点池只含日美自建节点（含 AWS日本机房——它此前未进任何组，是历史遗漏）；精编脚本 `scripts/configure_selfbuilt_variant.py` 可重复执行。门户设备卡片有方案选择芯片，复制/导入/二维码/预览全部联动。
-
-43. **「指到家里」的域名必须用 system DNS 解析（2026-11-13 定案，构建 239）。** `magichub.top` / `homehub.stream` 的服务器就在家里：路由器分流 DNS 给 **NAS 内网地址**（10.0.1.2），公网 DoH 给**家宽公网 IP**。代理接管 DNS 后用国内 DoH 解析出公网 IP，局域网设备访问自己的公网 IP 会被 **NAT 回环**挡住——线上实证「homehub 相关域名内网打不开、关代理立刻恢复」。修复：这两个域在引擎默认配置 `nameserver-policy` 固化为 `system`（内网直达 NAS，外网正常回家），伪键 `_system_dns_domains` 供界面追加（渲染时与基线合并）。判断标准：系统 DNS 与公网 DoH 答案不一致且系统侧是内网地址 → 该域必须进清单。与 `_direct_domains` / `_fake_ip_filter` 是三件套，加域要三处一起改。
-
-44. **约束 23 的 cn-ip 例外有构建期校验**（2026-11-13 起）：`RULE-SET,cn-ip` 带 `no-resolve` 直接构建失败（validate.py 强制）。2026-11-13 实证违反过：cn-ip 被 no-resolve 后未收录国内域名全部落进 `MATCH → 🚀 默认代理`，大量大陆服务异常。修复这类报错时改规则，不要绕过校验。
