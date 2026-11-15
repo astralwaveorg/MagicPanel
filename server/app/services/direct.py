@@ -10,13 +10,15 @@
      WebDAV、门户），环境里的代理变量对它们无效；
   2. Mihomo 核心子进程显式剥离代理变量（``direct_env``），不让"核心恰好
      不读环境变量"这种隐含前提承担直连责任；
-  3. 应用层管不到透明代理／TUN：那种情况下只能靠 NAS 侧的路由规则绕开，
-     所以这里提供一个直连自检，把出口地址与结论暴露出来。
+  3. 应用层管不到透明代理／TUN；出口观测只提供线索，是否旁路必须用独立路径证据验证。
 """
 from __future__ import annotations
 
 import os
+import math
 import time
+from datetime import datetime, timezone
+from ipaddress import ip_address
 from typing import Any
 
 import httpx
@@ -91,36 +93,46 @@ def egress(refresh: bool = False) -> dict:
     data = _fetch_egress()
     _cache["at"] = now
     _cache["data"] = data
+    _cache["checked_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return data
 
 
-def check(refresh: bool = False) -> dict:
-    """直连自检：出口地址 + 代理环境变量 + 结论。"""
-    proxies = env_proxies()
-    eg = egress(refresh)
-    notes: list[str] = []
-    state = "unknown"
-    code = (eg.get("country_code") or "").upper()
+def last_observation() -> dict:
+    """只读安全摘要；出口归属地不能证明透明代理旁路。"""
+    raw = _cache.get("data")
+    eg = {}
+    if isinstance(raw, dict):
+        try:
+            eg["ip"] = str(ip_address(raw.get("ip", "")))
+        except ValueError:
+            pass
+        for field in ("country", "country_code", "org"):
+            value = raw.get(field)
+            if isinstance(value, str) and value:
+                eg[field] = value[:160]
+    freshness = "unknown"
     if eg.get("ip"):
-        where = eg.get("country") or code or "未知地区"
-        if code and code != "CN":
-            state = "risk"
-            notes.append(
-                f"面板直连出口 {eg['ip']}（{where}）不在中国大陆："
-                "如果 NAS 后续启用了透明代理／TUN，测速会被代理接管，此项需要复核")
-        else:
-            state = "ok"
-            notes.append(f"面板直连出口 {eg['ip']}（{where}）：测速走本机直连，未经过代理")
-    else:
-        notes.append("出口检测失败（网络不通或查询接口不可用），无法判断是否被代理接管")
+        at = _cache.get("at")
+        if isinstance(at, (float, int)) and not isinstance(at, bool) and math.isfinite(at):
+            age = time.monotonic() - at
+            if age >= 0:
+                freshness = "fresh" if age < CACHE_TTL else "stale"
+    proxies = sorted(env_proxies())
+    notes = ["出口地址只是最近观测，不能证明 NAS 已绕过路由器透明代理。"]
     if proxies:
-        keys = "、".join(sorted(proxies))
-        notes.append(
-            f"检测到系统代理环境变量（{keys}）：面板自身的请求与核心子进程都不使用它们")
+        notes.append("检测到代理环境变量（" + "、".join(proxies) + "）；应用请求忽略这些变量。")
     return {
-        "state": state,
+        "state": "unknown",
+        "source_kind": "egress_reported",
+        "freshness": freshness,
         "notes": notes,
         "egress": eg,
         "env_proxies": proxies,
-        "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "checked_at": _cache.get("checked_at", "") if eg.get("ip") else "",
     }
+
+
+def check(refresh: bool = False) -> dict:
+    """兼容显式内部诊断；HTTP GET 只能调用 last_observation。"""
+    egress(refresh)
+    return last_observation()

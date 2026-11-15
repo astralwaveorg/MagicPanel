@@ -34,16 +34,17 @@ def test_check_reports_state(monkeypatch):
         "ip": "1.2.3.4", "country": "中国", "country_code": "CN", "org": "ISP",
     })
     result = direct.check(refresh=True)
-    assert result["state"] == "ok"
+    assert result["state"] == "unknown"
     assert result["egress"]["ip"] == "1.2.3.4"
     assert result["notes"]
 
-    # 出口不在境内 → 提示可能被透明代理接管
+    # 国家是出口观测，不作为透明代理是否旁路的证明。
     monkeypatch.setattr(direct, "_fetch_egress", lambda: {
         "ip": "5.6.7.8", "country": "美国", "country_code": "US", "org": "x",
     })
     result = direct.check(refresh=True)
-    assert result["state"] == "risk"
+    assert result["state"] == "unknown"
+    assert result["egress"]["country_code"] == "US"
 
     # 检测不到出口 → unknown，而不是假装正常
     monkeypatch.setattr(direct, "_fetch_egress", lambda: {})

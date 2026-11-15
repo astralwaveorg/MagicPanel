@@ -69,19 +69,21 @@
       </div>
 
       <div class="mp-card stat-tile">
-        <div class="stat-label">连接状态</div>
+        <div class="stat-label">出口观测</div>
         <div class="stat-direct">
           <StatusDot :kind="directKind" :text="directTitle" />
-          <el-button size="small" :loading="directLoading" @click="loadDirect(true)">
-            重新检测
+          <el-button size="small" :loading="directLoading" @click="loadDirect">
+            刷新记录
           </el-button>
         </div>
         <div v-if="direct.egress?.ip" class="stat-sub">
           出口 <span class="mono">{{ direct.egress.ip }}</span><br />
           {{ direct.egress.country || direct.egress.country_code || '未知地区' }}
-          · 检测于 {{ direct.checked_at }}
+          · 观测于 {{ direct.checked_at ? fmtTime(direct.checked_at) : '时间未确认' }}
         </div>
-        <div v-else class="stat-sub">正在检测出口…</div>
+        <div v-else class="stat-sub">暂无出口观测，未发起主动检测。</div>
+        <div class="stat-sub">出口归属地不能证明测速已绕过透明代理。</div>
+        <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击刷新重试。</div>
       </div>
     </div>
 
@@ -176,27 +178,22 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../api'
+import { createScopedRequest } from '../v2/useScopedRequest'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 
-const data = ref({})
-const error = ref('')
-const direct = ref({})
-const directLoading = ref(false)
-
-// 连接状态：服务端自检自己的出口链路（抓取/测速走的就是这条链路）
-const DIRECT_TITLES = {
-  ok: '直连',
-  risk: '疑似代理',
-  unknown: '无法确认',
-}
-const directKind = computed(() => (direct.value.state === 'ok' ? 'ok' : 'warn'))
-const directTitle = computed(() => DIRECT_TITLES[direct.value.state] || DIRECT_TITLES.unknown)
+const overviewRequest = createScopedRequest((scope, signal) => api('/api/v1/overview', { signal }))
+const directRequest = createScopedRequest((scope, signal) => api('/api/v1/direct-check', { signal }))
+const data = computed(() => overviewRequest.state.data || {})
+const error = computed(() => overviewRequest.state.error?.message || '')
+const direct = computed(() => directRequest.state.data || {})
+const directLoading = computed(() => directRequest.state.loading)
+const directKind = 'warn'
+const directTitle = computed(() => direct.value.freshness === 'stale' ? '观测已过期' : '路径未验证')
 
 const testedSources = computed(() =>
   (data.value.sources || []).filter((s) => s.tested_at))
@@ -261,29 +258,16 @@ function availColor(percent) {
   return AVAIL_COLORS[step]
 }
 
-async function loadDirect(refresh = false) {
-  directLoading.value = true
-  try {
-    direct.value = await api(`/api/v1/direct-check${refresh ? '?refresh=1' : ''}`)
-  } catch (e) {
-    direct.value = { state: 'unknown', notes: [`检测失败：${e.message}`] }
-  } finally {
-    directLoading.value = false
-  }
+function loadDirect() {
+  return directRequest.load('nas:last-observation')
 }
 
 async function load() {
-  error.value = ''
-  try {
-    data.value = await api('/api/v1/overview')
-  } catch (e) {
-    error.value = e.message
-    ElMessage.error(e.message)
-  }
-  loadDirect()
+  await Promise.all([overviewRequest.load('overview'), loadDirect()])
 }
 
 onMounted(load)
+onUnmounted(() => { overviewRequest.cancel(); directRequest.cancel() })
 </script>
 
 <style scoped>

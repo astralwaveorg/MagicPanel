@@ -134,10 +134,10 @@ def _health_snapshot(conn) -> dict:
 def direct_check(refresh: bool = False, user=CurrentUser):
     """读取最近出口信息；GET 不触发网络检测。"""
     if refresh:
-        raise HTTPException(405, "请使用 POST 执行出口检测")
-    return {"state": "unknown", "notes": ["主动检测请执行出口检测动作"],
-            "egress": dict(direct._cache.get("data") or {}),
-            "env_proxies": sorted(direct.env_proxies())}
+        raise HTTPException(409, {"code": "action_required",
+            "message": "主动检测须先预演检测任务并确认预算",
+            "action": "probe_task_preview", "request_id": uuid4().hex})
+    return direct.last_observation()
 
 
 @router.get("/audit")

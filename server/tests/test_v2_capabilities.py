@@ -327,7 +327,9 @@ def test_get_direct_diagnostics_never_starts_probe(client, monkeypatch):
     response = client.get("/api/v1/direct-check", headers=viewer)
     assert response.status_code == 200
     assert response.json()["state"] == "unknown"
-    assert client.get("/api/v1/direct-check?refresh=true", headers=admin).status_code == 405
+    refresh = client.get("/api/v1/direct-check?refresh=true", headers=admin)
+    assert refresh.status_code == 409
+    assert refresh.json()["detail"]["code"] == "action_required"
     assert client.post("/api/v1/direct-check", headers=admin).status_code == 405
     assert calls == []
 

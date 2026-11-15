@@ -10,8 +10,8 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path, { method = 'GET', body, headers = {} } = {}) {
-  const opts = { method, headers: { ...headers }, credentials: 'same-origin' }
+export async function api(path, { method = 'GET', body, headers = {}, signal } = {}) {
+  const opts = { method, headers: { ...headers }, credentials: 'same-origin', signal }
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(body)
@@ -20,6 +20,7 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
     opts.headers['X-CSRF-Token'] = store.csrf
   }
   const resp = await fetch(path, opts)
+  if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   if (resp.status === 401 && !path.startsWith('/api/v1/auth') && !path.startsWith('/api/v1/setup')) {
     store.user = null
     store.csrf = ''
@@ -27,6 +28,7 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
     throw new ApiError(401, '未登录或会话已过期')
   }
   const text = await resp.text()
+  if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   let data = null
   try { data = text ? JSON.parse(text) : null } catch { data = { detail: text || '响应格式错误' } }
   if (!resp.ok) {
