@@ -409,6 +409,30 @@ def _unpack(plaintext: Path, destination: Path, master: bytes) -> dict:
         raise ValueError("archive_invalid") from None
 
 
+def _validate_ciphertext(value, codec: str, fernet: Fernet) -> None:
+    if value is None or value == "":
+        return
+    if not isinstance(value, str):
+        raise ValueError("backup_invalid")
+    if codec == "payload":
+        if not value.startswith(security.PAYLOAD_PREFIX):
+            return
+        value = value[len(security.PAYLOAD_PREFIX):]
+    elif codec != "fernet":
+        raise ValueError("backup_invalid")
+    fernet.decrypt(value.encode("ascii"))
+
+
+def _validate_encrypted_material(conn, fernet: Fernet) -> None:
+    for (table, column), codec in backup_tables.ENCRYPTED_COLUMNS.items():
+        for row in conn.execute(f'SELECT "{column}" FROM "{table}"'):
+            _validate_ciphertext(row[0], codec, fernet)
+    for row in conn.execute("SELECT key,value FROM settings"):
+        codec = backup_tables.ENCRYPTED_SETTINGS.get(row[0])
+        if codec is not None:
+            _validate_ciphertext(row[1], codec, fernet)
+
+
 def _validate_database(destination: Path, master: bytes, versions: dict) -> None:
     from . import backups, resource_store
     path = destination / "magicpanel.db"
@@ -426,15 +450,7 @@ def _validate_database(destination: Path, master: bytes, versions: dict) -> None
         payload = backups.export_logical(conn)
         backups.validate_logical(conn, payload)
         fernet = Fernet(base64.urlsafe_b64encode(master))
-        for table in backup_tables.BACKUP_TABLES:
-            for row in backups._rows(conn, table):
-                for column, value in row.items():
-                    if isinstance(value, str) and value:
-                        if column.endswith("_enc"):
-                            token = value[len(security.PAYLOAD_PREFIX):] if value.startswith(security.PAYLOAD_PREFIX) else value
-                            fernet.decrypt(token.encode("ascii"))
-                        elif value.startswith(security.PAYLOAD_PREFIX):
-                            fernet.decrypt(value[len(security.PAYLOAD_PREFIX):].encode("ascii"))
+        _validate_encrypted_material(conn, fernet)
         for row in conn.execute("SELECT * FROM private_blobs"):
             if (row["key_version"] != 1 or row["kind"] not in resource_store.KINDS or
                     row["size"] > resource_store.MAX_PRIVATE_BYTES or not isinstance(row["ciphertext"], bytes) or

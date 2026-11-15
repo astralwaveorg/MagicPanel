@@ -18,6 +18,25 @@ RESET_TABLES = ("sessions", "rename_applies")
 # 只为真实 SQLite BLOB 列注册 codec；普通 JSON 对象不作隐式 bytes。
 BLOB_COLUMNS = frozenset({("private_blobs", "ciphertext")})
 
+# 按持久化契约识别密文；payload 仅在该已知字段内兼容历史明文。
+ENCRYPTED_COLUMNS = {
+    ("sources", "url_enc"): "fernet",
+    ("sources", "proxy_url_enc"): "fernet",
+    ("sources", "snapshot_enc"): "fernet",
+    ("sources", "headers_enc"): "fernet",
+    ("rule_providers", "proxy_url_enc"): "fernet",
+    ("local_nodes", "params_enc"): "fernet",
+    ("local_nodes", "extra_yaml_enc"): "fernet",
+    ("snippets", "proxy_url_enc"): "fernet",
+    ("devices", "token_enc"): "fernet",
+    ("builds", "snapshot"): "payload",
+}
+ENCRYPTED_SETTINGS = {
+    "deps_private_key_enc": "fernet",
+    "deps_token_enc": "fernet",
+    "webdav_password_enc": "payload",
+}
+
 
 def registered_tables(conn) -> tuple[str, ...]:
     actual = {row[0] for row in conn.execute(

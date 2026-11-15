@@ -326,3 +326,156 @@ def test_authenticated_archive_rejects_unmanaged_files(client, tmp_path, name):
     with pytest.raises(ValueError, match="archive_invalid_manifest"):
         backups.restore_archive(malicious, tmp_path / "unmanaged-staging", key_path=config.SECRET_KEY_PATH)
     assert not (tmp_path / "unmanaged-staging").exists()
+
+
+def test_review_legacy_wrong_key_rejects_raw_encrypted_setting(client, tmp_path):
+    from contextlib import closing
+    from cryptography.fernet import Fernet
+    from app import config, db
+    from app.services import webdav
+    foreign = Fernet(Fernet.generate_key())
+    with db.tx() as conn:
+        db.set_setting(conn, "deps_token_enc", foreign.encrypt(b"fixture-repo-token").decode())
+    snapshot = tmp_path / "foreign-key-legacy.db"
+    with db.connect() as conn, closing(sqlite3.connect(snapshot)) as target:
+        conn.backup(target)
+    with pytest.raises(webdav.WebDavError, match="^backup_invalid$"):
+        webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "fixture",
+                             destination=tmp_path / "wrong-key-stage", legacy=True)
+    assert not (tmp_path / "wrong-key-stage").exists()
+
+
+def test_review_archive_rejects_corrupt_raw_encrypted_setting(client, tmp_path):
+    from app import db
+    from app.services import backups
+    with db.tx() as conn:
+        db.set_setting(conn, "deps_private_key_enc", "corrupt-fixture-token")
+    with db.connect() as conn:
+        with pytest.raises(ValueError, match="^backup_invalid$"):
+            backups.create_archive(conn, tmp_path / "corrupt-setting.mpbackup")
+    assert not (tmp_path / "corrupt-setting.mpbackup").exists()
+
+
+def test_review_archive_accepts_plain_note_with_ciphertext_prefix(client, tmp_path):
+    from contextlib import closing
+    from app import config, db
+    from app.services import backups, webdav
+    headers = admin(client)
+    response = client.post("/api/v1/rules", headers=headers, json={
+        "type": "MATCH", "target": "DIRECT", "note": "enc:v1: this is plain fixture text"})
+    assert response.status_code == 201, response.text
+    with db.connect() as conn:
+        result = backups.create_archive(conn, tmp_path / "note.mpbackup")
+    assert result["encrypted"] is True
+    result = backups.restore_archive(tmp_path / "note.mpbackup", tmp_path / "note-restored",
+                                     key_path=config.SECRET_KEY_PATH)
+    assert result["status"] == "VERIFIED"
+    snapshot = tmp_path / "note-legacy.db"
+    with db.connect() as conn, closing(sqlite3.connect(snapshot)) as target:
+        conn.backup(target)
+    result = webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "fixture",
+                                  destination=tmp_path / "note-legacy-stage", legacy=True)
+    assert result["status"] == "STAGED"
+    for name in ("note-restored", "note-legacy-stage"):
+        with closing(sqlite3.connect(tmp_path / name / "magicpanel.db")) as conn:
+            assert conn.execute("SELECT note FROM rules").fetchone()[0] == "enc:v1: this is plain fixture text"
+
+
+@pytest.mark.parametrize("flow", ["archive", "legacy"])
+@pytest.mark.parametrize("setting", ["deps_token_enc", "deps_private_key_enc"])
+@pytest.mark.parametrize("material", ["current", "wrong", "corrupt", "prefixed"])
+def test_registered_raw_settings_validate_exact_fernet_codec(client, tmp_path, flow, setting, material):
+    from contextlib import closing
+    from cryptography.fernet import Fernet
+    from app import config, db, security
+    from app.services import backups, webdav
+    current_key = config.SECRET_KEY_PATH.read_bytes()
+    valid = security.encrypt_text("fixture-private-material")
+    value = {"current": valid,
+             "wrong": Fernet(Fernet.generate_key()).encrypt(b"fixture-private-material").decode(),
+             "corrupt": "corrupt-fixture-token", "prefixed": security.PAYLOAD_PREFIX + valid}[material]
+    with db.tx() as conn:
+        db.set_setting(conn, setting, value)
+    destination = tmp_path / "checked-stage"
+    if flow == "archive":
+        def run():
+            with db.connect() as conn:
+                return backups.create_archive(conn, tmp_path / "checked.mpbackup")
+        error = ValueError
+    else:
+        snapshot = tmp_path / "checked-legacy.db"
+        with db.connect() as conn, closing(sqlite3.connect(snapshot)) as target:
+            conn.backup(target)
+        def run():
+            return webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "fixture",
+                                         destination=destination, legacy=True)
+        error = webdav.WebDavError
+    if material == "current":
+        result = run()
+        assert result["encrypted"] is True if flow == "archive" else result["status"] == "STAGED"
+        if flow == "legacy":
+            with closing(sqlite3.connect(destination / "magicpanel.db")) as restored:
+                token = restored.execute("SELECT value FROM settings WHERE key=?", (setting,)).fetchone()[0]
+            assert Fernet((destination / "secret.key").read_bytes()).decrypt(token.encode()) == b"fixture-private-material"
+    else:
+        with pytest.raises(error, match="^backup_invalid$"):
+            run()
+        assert not destination.exists() and not (tmp_path / "checked.mpbackup").exists()
+    assert config.SECRET_KEY_PATH.read_bytes() == current_key
+    with db.connect() as conn:
+        assert db.get_setting(conn, setting) == value
+
+
+@pytest.mark.parametrize("flow", ["archive", "legacy"])
+@pytest.mark.parametrize("material", ["encrypted", "legacy_plain", "corrupt"])
+def test_registered_payload_setting_preserves_legacy_plaintext_only(client, tmp_path, flow, material):
+    from contextlib import closing
+    from app import config, db, security
+    from app.services import backups, webdav
+    value = {"encrypted": security.encrypt_payload("fixture-dav-password"),
+             "legacy_plain": "fixture-old-dav-password", "corrupt": "enc:v1:corrupt-fixture-token"}[material]
+    with db.tx() as conn:
+        db.set_setting(conn, "webdav_password_enc", value)
+        db.set_setting(conn, "ordinary_fixture_note", "enc:v1:plain setting annotation")
+    if flow == "archive":
+        def run():
+            with db.connect() as conn:
+                return backups.create_archive(conn, tmp_path / "payload.mpbackup")
+        error = ValueError
+    else:
+        snapshot = tmp_path / "payload-legacy.db"
+        with db.connect() as conn, closing(sqlite3.connect(snapshot)) as target:
+            conn.backup(target)
+        def run():
+            return webdav._restore_files(snapshot, config.SECRET_KEY_PATH, "fixture",
+                                         destination=tmp_path / "payload-stage", legacy=True)
+        error = webdav.WebDavError
+    if material == "corrupt":
+        with pytest.raises(error, match="^backup_invalid$"):
+            run()
+    else:
+        result = run()
+        assert result["encrypted"] is True if flow == "archive" else result["status"] == "STAGED"
+
+
+def test_legacy_validation_uses_explicit_key_without_live_fernet_cache(client, tmp_path):
+    from contextlib import closing
+    from cryptography.fernet import Fernet
+    from app import config, db, security
+    from app.services import webdav
+    current_key = config.SECRET_KEY_PATH.read_bytes()
+    live_token = security.encrypt_text("prime-live-cache")
+    supplied_key = tmp_path / "explicit-fixture.key"
+    supplied_key.write_bytes(Fernet.generate_key())
+    token = Fernet(supplied_key.read_bytes()).encrypt(b"fixture-repo-token").decode()
+    with db.tx() as conn:
+        db.set_setting(conn, "deps_token_enc", token)
+    snapshot = tmp_path / "explicit-key-legacy.db"
+    with db.connect() as conn, closing(sqlite3.connect(snapshot)) as target:
+        conn.backup(target)
+    result = webdav._restore_files(snapshot, supplied_key, "fixture",
+                                  destination=tmp_path / "explicit-key-stage", legacy=True)
+    assert result["status"] == "STAGED"
+    assert config.SECRET_KEY_PATH.read_bytes() == current_key
+    assert security.decrypt_text(live_token) == "prime-live-cache"
+    assert Fernet(current_key).decrypt(security.encrypt_text("still-live").encode()) == b"still-live"
