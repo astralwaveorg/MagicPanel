@@ -116,9 +116,14 @@ def build_public(row, with_results: bool = False) -> dict:
         "status_updated_at": row["status_updated_at"] or "",
     }
     if with_results:
-        data["results"] = json.loads(row["results"] or "{}")
-        data["snapshot"] = json.loads(
-            security.decrypt_payload(row["snapshot"] or "{}") or "{}")
+        results = json.loads(row["results"] or "{}")
+        data["results"] = {}
+        for name, item in results.items():
+            safe = {key: item[key] for key in ('ok', 'engine', 'platform', 'device', 'target', 'variant', 'size', 'verification', 'core_checked') if key in item}
+            # 核心/渲染器诊断可能带回配置正文，普通读取只返回数量。
+            safe['errors'] = ['构建校验未通过'] * len(item.get('errors', []))
+            safe['warnings'] = ['构建存在警告'] * len(item.get('warnings', []))
+            data['results'][name] = safe
     return data
 
 

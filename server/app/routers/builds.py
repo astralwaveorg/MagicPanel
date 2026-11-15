@@ -3,7 +3,6 @@
 构建把当前策略固化为不可变快照并逐目标渲染；发布按状态机切换
 版本状态（已构建 / 测试中 / 生产中 / 已下线），失败或空结果不会覆盖现网。
 """
-import difflib
 import json
 import shutil
 
@@ -392,8 +391,9 @@ def get_build(bid: int, user=CurrentUser):
 
 @router.post("/builds/{bid}/reveal")
 def reveal_build(bid: int, user=RequireCapabilities("reveal")):
-    with db.connect() as conn:
+    with db.tx() as conn:
         row = _get_build(conn, bid)
+        security.audit(conn, user['username'], '查看构建快照', 'build', bid, {'fields': ['snapshot']})
     return {"id": bid, "snapshot": json.loads(security.decrypt_payload(row["snapshot"] or "{}") or "{}")}
 
 
@@ -438,8 +438,9 @@ def delete_build(bid: int, user=CurrentUser):
 @router.get("/builds/{bid}/artifact/{target_name}")
 def get_artifact(bid: int, target_name: str, user=RequireCapabilities('reveal')):
     """产物仅对维护者开放；本地单节点的凭据会直接出现在产物中。"""
-    with db.connect() as conn:
+    with db.tx() as conn:
         _get_build(conn, bid)
+        security.audit(conn, user['username'], '查看构建产物', 'build', bid, {'fields': ['artifact']})
     path = artifact_file(bid, target_name)
     if not path.exists():
         raise HTTPException(404, "该目标没有构建产物")
@@ -447,7 +448,7 @@ def get_artifact(bid: int, target_name: str, user=RequireCapabilities('reveal'))
 
 
 @router.get("/builds/{bid}/diff/{other_id}")
-def diff_builds(bid: int, other_id: int, user=RequireCapabilities('reveal')):
+def diff_builds(bid: int, other_id: int, user=CurrentUser):
     with db.connect() as conn:
         _get_build(conn, bid)
         _get_build(conn, other_id)
@@ -461,10 +462,7 @@ def diff_builds(bid: int, other_id: int, user=RequireCapabilities('reveal')):
         b = build_dir_b / f"{name}.yaml"
         old = a.read_text(encoding="utf-8").splitlines() if a.exists() else []
         new = b.read_text(encoding="utf-8").splitlines() if b.exists() else []
-        diffs[name] = "\n".join(difflib.unified_diff(
-            old, new, fromfile=f"构建 #{other_id}", tofile=f"构建 #{bid}",
-            lineterm="",
-        ))
+        diffs[name] = {"changed": old != new, "before_lines": len(old), "after_lines": len(new)}
     return {"targets": diffs}
 
 

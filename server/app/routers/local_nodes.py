@@ -6,12 +6,11 @@ from pydantic import BaseModel, Field
 
 from .. import db, security
 from ..deps import CurrentUser, RequireCapabilities
-from ..services import local_nodes
+from ..services import local_nodes, node_dto
 from ..services import refs
 from ..services import tester
 
 router = APIRouter(prefix="/api/v1/local-nodes", tags=["local-nodes"])
-
 
 class LocalNodeBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
@@ -22,6 +21,10 @@ class LocalNodeBody(BaseModel):
     params: dict = Field(default_factory=dict)
     extra_yaml: str = Field(default="", max_length=20_000)
     enabled: bool = True
+    public_params: dict = Field(default_factory=dict)
+    secret_set: dict = Field(default_factory=dict)
+    secret_clear: list[str] = Field(default_factory=list)
+    clear_extra_yaml: bool = False
 
 
 def _decrypt(value: str) -> str:
@@ -29,32 +32,17 @@ def _decrypt(value: str) -> str:
 
 
 def _public(row) -> dict:
-    return {
-        "id": row["id"],
-        "name": row["name"],
-        "node_type": row["node_type"] or "",
-        "display_name": local_nodes.display_name(
-            row["name"], row["node_type"] or ""),
-        "protocol": row["protocol"],
-        "server": row["server"],
-        "port": row["port"],
-        "enabled": bool(row["enabled"]),
-        "sort": row["sort"],
-        "test_status": row["test_status"] or "",
-        "test_delay": row["test_delay"] or 0,
-        "tested_at": row["tested_at"] or "",
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
+    return node_dto.node_summary(row)
 
 
 @router.post("/{node_id}/reveal")
 def reveal_node(node_id: int, user=RequireCapabilities("reveal")):
-    with db.connect() as conn:
+    with db.tx() as conn:
         row = _get_or_404(conn, node_id)
+        security.audit(conn, user['username'], '查看节点凭据', 'local_node', node_id,
+                       {'fields': ['params', 'extra_yaml']})
     return {"id": node_id, "protocol": row["protocol"], "server": row["server"],
-            "port": row["port"], "params": json.loads(_decrypt(row["params_enc"]) or "{}"),
-            "extra_yaml": _decrypt(row["extra_yaml_enc"])}
+            "port": row["port"], **node_dto.reveal_configuration(row)}
 
 
 def _get_or_404(conn, node_id: int):
@@ -77,7 +65,7 @@ def _prepare(body: LocalNodeBody) -> tuple[dict, str]:
         params = local_nodes.normalize_params(body.protocol, body.params)
         local_nodes.parse_extra(body.extra_yaml)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, "节点配置无效，请检查字段及必填凭据")
     return params, body.extra_yaml
 
 
@@ -103,6 +91,15 @@ def list_nodes(user=CurrentUser):
 
 @router.post("", status_code=201)
 def create_node(body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal')):
+    try:
+        patch = {k: getattr(body, k) for k in node_dto.PATCH_FIELDS if k in body.model_fields_set}
+        node_dto.validate_patch(body.protocol, patch)
+        current = node_dto.configuration(body.protocol, body.params, body.extra_yaml)
+        merged = node_dto.merge_configuration(current, patch)
+        body.params = {**merged['public_params'], **merged['secrets']}
+        body.extra_yaml = merged.get('extra_yaml', '')
+    except ValueError:
+        raise HTTPException(400, '节点配置无效，请检查字段及必填凭据')
     params, extra_yaml = _prepare(body)
     marked = local_nodes.display_name(body.name.strip(), body.node_type)
     with db.tx() as conn:
@@ -131,10 +128,24 @@ def create_node(body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal'))
 
 @router.put("/{node_id}")
 def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal')):
-    params, extra_yaml = _prepare(body)
     marked = local_nodes.display_name(body.name.strip(), body.node_type)
     with db.tx() as conn:
         row = _get_or_404(conn, node_id)
+        try:
+            old = node_dto.reveal_configuration(row)
+            current = node_dto.configuration(row['protocol'], old['params'], old['extra_yaml']) if row['protocol'] == body.protocol else node_dto.configuration(body.protocol, {})
+            patch = {k: getattr(body, k) for k in node_dto.PATCH_FIELDS if k in body.model_fields_set and (k != 'extra_yaml' or body.extra_yaml)}
+            if body.params:
+                public, secrets = node_dto.split_parameters(body.protocol, body.params)
+                patch['public_params'] = {**public, **patch.get('public_params', {})}
+                patch['secret_set'] = {**secrets, **patch.get('secret_set', {})}
+            node_dto.validate_patch(body.protocol, patch)
+            merged = node_dto.merge_configuration(current, patch)
+            body.params = {**merged['public_params'], **merged['secrets']}
+            body.extra_yaml = merged.get('extra_yaml', '')
+            params, extra_yaml = _prepare(body)
+        except ValueError:
+            raise HTTPException(400, '节点配置无效，请检查字段及必填凭据')
         clash = db.one(
             conn, "SELECT id FROM local_nodes WHERE name=? AND id!=?",
             (body.name.strip(), node_id),
@@ -183,9 +194,10 @@ def test_node(node_id: int, user=RequireCapabilities('probe')):
         proxy = local_nodes.render_proxy(node, "mihomo")
         result = tester.test_proxy(proxy)
     except tester.TestError as exc:
-        raise HTTPException(400, str(exc))
+        message = "Mihomo 核心不可用，请在运行设置中安装" if str(exc).startswith("Mihomo 核心不可用") else "测速失败，请检查节点配置"
+        raise HTTPException(400, message)
     except Exception as exc:
-        raise HTTPException(400, f"测速失败：{exc}")
+        raise HTTPException(400, "测速失败，请检查节点配置")
     now = db.now()
     with db.tx() as conn:
         conn.execute(

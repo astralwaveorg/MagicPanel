@@ -161,6 +161,8 @@ def test_migration_adds_type_and_cleans_legacy_prefix(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     _prepare_old_db(data_dir / "magicpanel.db")
+    from cryptography.fernet import Fernet
+    (data_dir / "secret.key").write_bytes(Fernet.generate_key())
 
     os.environ["MAGICPANEL_DATA_DIR"] = str(data_dir)
     os.environ["MAGICPANEL_SCHEDULER"] = "0"

@@ -10,7 +10,7 @@ def _make_node(client, h, name="HK-01", protocol="ss"):
     return client.post("/api/v1/local-nodes", headers=h, json={
         "name": name, "node_type": "本地", "protocol": protocol,
         "server": "hk.example.com", "port": 8388,
-        "params": {"cipher": "aes-256-gcm", "password": "secret", "udp": True},
+        "params": {"password": "secret", "udp": True, **({"cipher": "aes-256-gcm"} if protocol == "ss" else {})},
     }).json()
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import HTTPException as StarletteHTTPException, RequestValidationError
 
 from . import config, db
 from .routers import (auth, automation, backups, base_config, builds, deps, feed,
@@ -138,6 +138,23 @@ def create_app() -> FastAPI:
             resp.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000")
         return resp
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        messages = {
+            'missing': '必填字段缺失', 'string_type': '字段必须为文本',
+            'dict_type': '字段必须为对象', 'list_type': '字段必须为列表',
+            'int_type': '字段必须为整数', 'int_parsing': '字段必须为整数',
+            'bool_type': '字段必须为布尔值', 'bool_parsing': '字段必须为布尔值',
+            'greater_than_equal': '数值低于允许下限', 'less_than_equal': '数值超过允许上限',
+            'string_too_long': '文本超过长度限制', 'string_too_short': '文本未达到最小长度',
+            'extra_forbidden': '不支持的字段', 'json_invalid': 'JSON 格式无效',
+        }
+        detail = [{'loc': list(error.get('loc', [])),
+                   'type': error.get('type', 'value_error'),
+                   'msg': messages.get(error.get('type'), '字段值无效')}
+                  for error in exc.errors()]
+        return JSONResponse({'detail': detail}, status_code=422)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):

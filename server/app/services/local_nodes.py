@@ -283,7 +283,13 @@ def normalize_params(protocol: str, params: dict) -> dict:
     spec = PROTOCOLS.get(protocol)
     if not spec:
         raise ValueError(f"不支持的协议：{protocol}")
-    normalized = {}
+    if protocol == 'custom':
+        normalized = deepcopy(params)
+    else:
+        unknown = set(params) - {field['key'] for field in spec['fields']}
+        if unknown:
+            raise ValueError('未知协议参数字段')
+        normalized = {}
     for field in spec["fields"]:
         key = field["key"]
         if key not in params:
@@ -325,7 +331,7 @@ def parse_extra(extra_yaml: str) -> dict:
     try:
         data = yaml.safe_load(extra_yaml)
     except yaml.YAMLError as exc:
-        raise ValueError(f"高级 YAML 解析失败：{exc}")
+        raise ValueError("高级 YAML 解析失败")
     if data is None:
         return {}
     if not isinstance(data, dict):
