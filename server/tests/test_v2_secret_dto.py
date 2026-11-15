@@ -51,11 +51,18 @@ def test_schema_nested_and_custom(client):
 
 
 def test_build_public_never_returns_snapshot(client):
+    import json
     from app.services.releases import build_public
     from app import db, security
     row = dict(id=1, created_at=db.now(), created_by='admin', status='BUILT', verify_status='success', policy_sha='hash', note='', published_at='', published_by='', publish_reason='', status_updated_at='', results='{}', snapshot=security.encrypt_payload('{"password":"example-test-password"}'))
+    row['results'] = json.dumps({
+        'safe': {'ok': True, 'sha256': 'ab' * 32},
+        'malformed': {'ok': False, 'sha256': 'example-test-password'},
+    })
     result = build_public(row, with_results=True)
     assert 'snapshot' not in result
+    assert result['results']['safe']['sha256'] == 'ab' * 32
+    assert result['results']['malformed']['sha256'] == ''
     assert_no_secrets(result)
 
 def test_patch_rejects_conflicts_and_unknown(client):

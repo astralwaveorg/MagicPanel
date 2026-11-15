@@ -18,6 +18,7 @@
 配合 builds 表上的两条部分唯一索引，保证生产/测试环境全局至多一条生效版本。
 """
 import json
+import re
 from enum import Enum
 
 from .. import config, db, security
@@ -120,6 +121,8 @@ def build_public(row, with_results: bool = False) -> dict:
         data["results"] = {}
         for name, item in results.items():
             safe = {key: item[key] for key in ('ok', 'engine', 'platform', 'device', 'target', 'variant', 'size', 'verification', 'core_checked') if key in item}
+            digest = item.get('sha256')
+            safe['sha256'] = digest if isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{64}', digest) else ''
             # 核心/渲染器诊断可能带回配置正文，普通读取只返回数量。
             safe['errors'] = ['构建校验未通过'] * len(item.get('errors', []))
             safe['warnings'] = ['构建存在警告'] * len(item.get('warnings', []))
