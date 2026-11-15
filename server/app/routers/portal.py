@@ -10,6 +10,7 @@ import math
 import secrets
 import re
 import time
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
@@ -165,21 +166,36 @@ class ProviderDetailBody(BaseModel):
 
 
 def _provider_origin(url: str) -> str:
-    """从上游地址取仓库标识（owner/repo），用来按来源分组。
-
-    覆盖三种写法：jsDelivr 的 /gh/owner/repo、网页版 github.com/owner/repo、
-    以及 SSH 的 git@github.com:owner/repo.git。
-    """
-    text = url or ""
-    m = re.search(r"/gh/([^/]+)/([^/@?#]+)", text)
-    if not m:
-        m = re.search(r"github\.com[/:]([^/]+)/([^/@?#]+)", text)
-    if not m:
+    """只从可信主机的仓库路径取公开标识，忽略凭据与查询片段。"""
+    text = (url or "").strip()
+    scp_prefix = "git@github.com:"
+    if text.lower().startswith(scp_prefix):
+        text = "ssh://git@github.com/" + text[len(scp_prefix):]
+    try:
+        parsed = urlsplit(text)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
         return ""
-    repo = m.group(2)
+    parts = parsed.path.split("/")
+    if not parts or parts[0] != "":
+        return ""
+    if host == "cdn.jsdelivr.net" and parsed.scheme in {"http", "https"}:
+        if len(parts) < 4 or parts[1] != "gh":
+            return ""
+        owner, repo = parts[2], parts[3].split("@", 1)[0]
+    elif (host in {"github.com", "www.github.com"} and parsed.scheme in {"http", "https", "ssh", "git"}
+          or host == "raw.githubusercontent.com" and parsed.scheme in {"http", "https"}):
+        if len(parts) < 3:
+            return ""
+        owner, repo = parts[1], parts[2]
+    else:
+        return ""
     if repo.endswith(".git"):
         repo = repo[:-len(".git")]
-    return f"{m.group(1)}/{repo}"
+    if (not re.fullmatch(r"[A-Za-z0-9-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo)
+            or repo in {".", ".."}):
+        return ""
+    return f"{owner}/{repo}"
 
 
 def _provider_desc(content: str, fmt: str) -> str:
@@ -201,10 +217,13 @@ def _provider_meta(r, repo_origin: str = "") -> dict:
     # 远程只展示地址摘要；仓库托管显示相对路径，内联没有地址。
     if kind == "remote":
         address = url_summary(r["url"])
+        origin = _provider_origin(r["url"])
     elif kind == "repo":
         address = repo_path
+        origin = repo_origin
     else:
         address = ""
+        origin = ""
     return {
         "name": r["name"],
         "behavior": r["behavior"],
@@ -221,7 +240,7 @@ def _provider_meta(r, repo_origin: str = "") -> dict:
         "size": len(content),
         "sha256": (r["sha256"] or "")[:12],
         # 仓库托管的来源没有上游 URL，来源归属取自后台配置的依赖仓库地址
-        "origin": _provider_origin(r["url"]) or (repo_origin if kind == "repo" else ""),
+        "origin": origin,
         "desc": _provider_desc(content, r["format"]),
     }
 

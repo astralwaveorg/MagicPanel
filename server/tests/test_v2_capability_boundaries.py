@@ -258,3 +258,58 @@ def test_rule_refresh_error_does_not_bypass_safe_error_projection(client, monkey
     assert "保留" in response.text
     revealed = client.post(f"/api/v1/rule-providers/{provider['id']}/reveal", headers=admin)
     assert revealed.status_code == 200 and "fixture-rule-token" in revealed.json()["last_error"]
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/portal/data", "/api/v1/portal/provider-detail"])
+@pytest.mark.parametrize("url,marker", [
+    ("https://rules.example.com/list?token=https://github.com/fixture-portal-query-token/rules", "fixture-portal-query-token"),
+    ("https://rules.example.com/github.com/fixture-portal-path-token/rules", "fixture-portal-path-token"),
+    ("https://github.com:fixture-portal-userinfo-token@rules.example.com/rules", "fixture-portal-userinfo-token"),
+    ("https://cdn.jsdelivr.net/npm/pkg/gh/fixture-portal-trusted-path-token/rules", "fixture-portal-trusted-path-token"),
+    ("https://rules.example.com/list#https://cdn.jsdelivr.net/gh/fixture-portal-fragment-token/rules", "fixture-portal-fragment-token"),
+])
+def test_portal_origin_never_extracts_embedded_repository_urls(client, endpoint, url, marker):
+    admin = _admin(client)
+    created = client.post("/api/v1/rule-providers", headers=admin, json={
+        "name": "fixture-origin", "url": url})
+    assert created.status_code == 201, created.text
+    assert marker not in created.text
+    assert client.post("/api/v1/portal/my-pin", headers=admin, json={"pin": "7291"}).status_code == 201
+    response = client.post(endpoint, json={"pin": "7291", "name": "fixture-origin"})
+    assert response.status_code == 200, response.text
+    assert marker not in response.text
+    row = response.json()["rule_providers"][0] if endpoint.endswith("data") else response.json()
+    assert row["origin"] == ""
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://github.com/astralwaveorg/magic-sets", "astralwaveorg/magic-sets"),
+    ("https://github.com/astralwaveorg/magic-sets.git/tree/main/rule", "astralwaveorg/magic-sets"),
+    ("https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.yaml", "MetaCubeX/meta-rules-dat"),
+    ("https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Apple/Apple.yaml", "blackmatrix7/ios_rule_script"),
+    ("git@github.com:astralwaveorg/magic-sets.git", "astralwaveorg/magic-sets"),
+    ("ssh://git@github.com/astralwaveorg/magic-sets.git", "astralwaveorg/magic-sets"),
+    ("https://fixture-user:fixture-pass@github.com/astralwaveorg/magic-sets?token=https://github.com/fixture-ignored/rules#ignored", "astralwaveorg/magic-sets"),
+    ("https://github.com.evil.example/github.com/fixture-not-a-repository/rules", ""),
+])
+def test_provider_origin_uses_actual_host_and_repository_path(client, url, expected):
+    from app.routers.portal import _provider_origin
+    assert _provider_origin(url) == expected
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/portal/data", "/api/v1/portal/provider-detail"])
+def test_repo_portal_origin_uses_configured_repository_not_stale_url(client, endpoint):
+    from app import db
+    admin = _admin(client)
+    created = client.post("/api/v1/rule-providers", headers=admin, json={
+        "name": "fixture-repo", "kind": "repo", "repo_path": "rule/demo.yaml",
+        "url": "https://github.com/fixture-stale-url-token/rules"})
+    assert created.status_code == 201, created.text
+    with db.tx() as conn:
+        db.set_setting(conn, "deps_url", "git@github.com:astralwaveorg/magic-sets.git")
+    assert client.post("/api/v1/portal/my-pin", headers=admin, json={"pin": "7291"}).status_code == 201
+    response = client.post(endpoint, json={"pin": "7291", "name": "fixture-repo"})
+    assert response.status_code == 200
+    assert "fixture-stale-url-token" not in response.text
+    row = response.json()["rule_providers"][0] if endpoint.endswith("data") else response.json()
+    assert row["origin"] == "astralwaveorg/magic-sets"
