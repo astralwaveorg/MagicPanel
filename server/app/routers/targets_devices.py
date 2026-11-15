@@ -11,9 +11,10 @@ import json
 import yaml
 
 from .. import db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
 from ..services import refs
+from ..services.capabilities import require_capability
 
 router = APIRouter(prefix="/api/v1", tags=["targets-devices"])
 
@@ -58,7 +59,8 @@ def _check_target(body: TargetBody) -> None:
 
 
 def _target_public(row) -> dict:
-    return db.row_to_dict(row)
+    return {key: row[key] for key in (
+        "id", "name", "engine", "platform", "description", "update_interval", "sort", "created_at", "updated_at")}
 
 
 def _device_public(row, base_url: str = "") -> dict:
@@ -239,6 +241,8 @@ def _check_engine_platform_unique(conn, engine: str, platform: str,
 
 @router.post("/targets", status_code=201)
 def create_target(body: TargetBody, user=CurrentUser):
+    if body.extra_yaml:
+        require_capability(user, "reveal")
     _check_target(body)
     try:
         with db.tx() as conn:
@@ -279,9 +283,14 @@ def reorder_targets(ids: list[int], user=CurrentUser):
 
 @router.put("/targets/{tid}")
 def update_target(tid: int, body: TargetBody, user=CurrentUser):
-    _check_target(body)
     with db.tx() as conn:
-        _get_target(conn, tid)
+        old = _get_target(conn, tid)
+        if ("extra_yaml" in body.model_fields_set or body.engine != old["engine"]
+                or body.platform != old["platform"]):
+            require_capability(user, "reveal")
+        if "extra_yaml" not in body.model_fields_set:
+            body = body.model_copy(update={"extra_yaml": old["extra_yaml"]})
+        _check_target(body)
         clash = db.one(
             conn, "SELECT id FROM targets WHERE name=? AND id!=?", (body.name, tid)
         )
@@ -307,6 +316,13 @@ def update_target(tid: int, body: TargetBody, user=CurrentUser):
                        {"name": body.name, "remapped_refs": remapped})
         row = _get_target(conn, tid)
     return _target_public(row)
+
+
+@router.post("/targets/{tid}/reveal")
+def reveal_target(tid: int, user=RequireCapabilities("reveal")):
+    with db.connect() as conn:
+        row = _get_target(conn, tid)
+    return {**_target_public(row), "extra_yaml": row["extra_yaml"]}
 
 
 @router.delete("/targets/{tid}")
@@ -393,7 +409,7 @@ def list_devices(user=CurrentUser):
 
 
 @router.post("/devices", status_code=201)
-def create_device(body: DeviceBody, request: Request, user=CurrentUser):
+def create_device(body: DeviceBody, request: Request, user=RequireCapabilities("edit", "reveal")):
     if body.env not in ENVS:
         raise HTTPException(400, "订阅环境仅支持 production / testing")
     if body.platform not in PLATFORMS:
@@ -559,7 +575,7 @@ def batch_delete_devices(body: BatchDeviceIds, user=CurrentUser):
 
 
 @router.post("/devices/{did}/rotate-token")
-def rotate_token(did: int, request: Request, user=CurrentUser):
+def rotate_token(did: int, request: Request, user=RequireCapabilities("edit", "reveal")):
     """轮换令牌：旧令牌立即失效，新令牌仅本次返回。"""
     token = security.new_device_token()
     with db.tx() as conn:
@@ -576,7 +592,7 @@ def rotate_token(did: int, request: Request, user=CurrentUser):
 
 
 @router.post("/devices/{did}/reveal")
-def reveal_device(did: int, request: Request, user=CurrentUser):
+def reveal_device(did: int, request: Request, user=RequireCapabilities("reveal")):
     """重新展示设备订阅地址。地址即凭据，拿到即可拉取完整配置。"""
     with db.connect() as conn:
         row = _get_device(conn, did)

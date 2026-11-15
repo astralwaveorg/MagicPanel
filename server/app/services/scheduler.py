@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from .. import config, db, security
 from ..routers import builds
 from . import releases, repo_sync, retention, tester, updater
+from .capabilities import require_capability
 
 logger = logging.getLogger("magicpanel.scheduler")
 AUTO_OPERATOR = "系统"
@@ -302,7 +303,18 @@ def _unchecked_core_targets(results: dict) -> list[str]:
     ]
 
 
-def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
+def _require_manual_actor(conn, actor_user_id: int | None, *, publish_env: str | None = None) -> None:
+    if actor_user_id is None:
+        return
+    row = db.one(conn, "SELECT id, role FROM users WHERE id=?", (actor_user_id,))
+    actor = dict(row) if row else {}
+    require_capability(actor, "probe")
+    if publish_env is not None:
+        require_capability(actor, "publish_test" if publish_env == "testing" else "publish_prod")
+
+
+def _run_auto_build(summary: dict, now: datetime, force: bool = False,
+                    *, actor_user_id: int | None = None) -> None:
     """自动构建与发布：读策略（只读）→ 构建（自管事务）→ 发布（短事务）。
 
     构建过程可能跑几十秒的 mihomo -t，绝不能占着写锁，
@@ -311,6 +323,11 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
     with db.connect() as conn:
         if not _enabled(conn, "auto_build_enabled", "1"):
             return
+        publish = _enabled(conn, "auto_publish_enabled", "1")
+        env = _setting(conn, "auto_publish_env", "production")
+        if env not in ("production", "testing"):
+            env = "production"
+        _require_manual_actor(conn, actor_user_id, publish_env=env if publish else None)
         try:
             interval_hours = max(1, int(_setting(conn, "auto_build_interval_hours", "1")))
         except ValueError:
@@ -327,10 +344,6 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
             # 没有引擎平台时不推进检查时间，添加后可尽快自动构建
             summary["build_error"] = "尚未配置任何引擎平台"
             return
-        publish = _enabled(conn, "auto_publish_enabled", "1")
-        env = _setting(conn, "auto_publish_env", "production")
-        if env not in ("production", "testing"):
-            env = "production"
         # 判定基准是"该环境当前生效的构建"，不是"最近一次成功构建"——
         # 否则构建成功但没发布出去时，后续每轮都会因"策略未变化"被跳过，
         # 新产物永远上线不了。
@@ -395,6 +408,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False) -> None:
         return
     try:
         with db.tx(immediate=True) as conn:
+            _require_manual_actor(conn, actor_user_id, publish_env=env)
             build = builds._get_build(conn, build_id)
             releases.publish_build(
                 conn, build, AUTO_OPERATOR, "自动构建发布", releases.Env(env),
@@ -484,7 +498,7 @@ def _record_run(summary: dict, trigger: str, actor: str) -> None:
 
 
 def run_once(force: bool = False, trigger: str = "scheduled",
-             actor: str = AUTO_OPERATOR) -> dict:
+             actor: str = AUTO_OPERATOR, *, actor_user_id: int | None = None) -> dict:
     """执行一轮检查；force=True 时忽略到期时间（用于“立即手动发布”）。"""
     if not _lock.acquire(blocking=False):
         return {"skipped": "上一轮任务仍在运行"}
@@ -514,6 +528,10 @@ def run_once(force: bool = False, trigger: str = "scheduled",
     }
     try:
         with db.connect() as conn:
+            publish_env = None
+            if _enabled(conn, "auto_build_enabled", "1") and _enabled(conn, "auto_publish_enabled", "1"):
+                publish_env = _setting(conn, "auto_publish_env", "production")
+            _require_manual_actor(conn, actor_user_id, publish_env=publish_env)
             master = _setting(conn, "scheduler_enabled", "1") == "1"
             fetch_sources = _enabled(conn, "auto_fetch_sources", "1")
             fetch_rules = _enabled(conn, "auto_fetch_rules", "1")
@@ -532,7 +550,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             _run_deps_sync(summary, now, force=force)
             if test_sources:
                 _run_source_test(summary, now, force=force)
-            _run_auto_build(summary, now, force=force)
+            _run_auto_build(summary, now, force=force, actor_user_id=actor_user_id)
             _run_retention(summary)
         summary["finished_at"] = db.now()
         _state["last_tick_at"] = summary["finished_at"]
@@ -558,9 +576,9 @@ def run_once(force: bool = False, trigger: str = "scheduled",
 
 
 def run_once_safe(force: bool = False, trigger: str = "scheduled",
-                  actor: str = AUTO_OPERATOR) -> dict | None:
+                  actor: str = AUTO_OPERATOR, *, actor_user_id: int | None = None) -> dict | None:
     try:
-        return run_once(force=force, trigger=trigger, actor=actor)
+        return run_once(force=force, trigger=trigger, actor=actor, actor_user_id=actor_user_id)
     except Exception:
         return None
 

@@ -101,6 +101,7 @@ def test_updating_type_changes_artifact_name(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     node = _make_node(client, h, name="SG-01", node_type="本地").json()
+    node.update(client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h).json())
     client.post("/api/v1/targets", headers=h, json={
         "name": "stash-ios", "engine": "stash", "platform": "ios"})
     client.post("/api/v1/groups", headers=h, json={

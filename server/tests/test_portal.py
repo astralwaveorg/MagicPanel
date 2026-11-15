@@ -62,7 +62,7 @@ def test_portal_pin_bound_to_user(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     client.post("/api/v1/users", headers=h, json={
-        "username": "second", "password": "second-pass-1", "display_name": "二号"})
+        "username": "second", "password": "second-pass-1", "display_name": "二号", "role": "admin"})
     client.post("/api/v1/portal/my-pin", headers=h, json={"pin": "1111"})
 
     r = client.post("/api/v1/auth/login",

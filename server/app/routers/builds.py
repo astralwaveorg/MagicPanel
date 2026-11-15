@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..compiler import render, validate
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
 from ..services import releases
 from ..services import source_nodes as source_node_service
@@ -154,7 +154,9 @@ def artifact_file(build_id: int, target_name: str):
 
 
 def _build_public(row, with_results: bool = False) -> dict:
-    return releases.build_public(row, with_results=with_results)
+    data = releases.build_public(row, with_results=with_results)
+    data.pop("snapshot", None)
+    return data
 
 
 def _get_build(conn, bid: int):
@@ -388,6 +390,13 @@ def get_build(bid: int, user=CurrentUser):
     return _build_public(row, with_results=True)
 
 
+@router.post("/builds/{bid}/reveal")
+def reveal_build(bid: int, user=RequireCapabilities("reveal")):
+    with db.connect() as conn:
+        row = _get_build(conn, bid)
+    return {"id": bid, "snapshot": json.loads(security.decrypt_payload(row["snapshot"] or "{}") or "{}")}
+
+
 @router.post("/builds/batch/delete")
 def batch_delete_builds(body: BatchIds, user=CurrentUser):
     """批量删除构建：非「已构建」状态的构建保留并返回原因。
@@ -427,7 +436,7 @@ def delete_build(bid: int, user=CurrentUser):
 
 
 @router.get("/builds/{bid}/artifact/{target_name}")
-def get_artifact(bid: int, target_name: str, user=CurrentUser):
+def get_artifact(bid: int, target_name: str, user=RequireCapabilities('reveal')):
     """产物仅对维护者开放；本地单节点的凭据会直接出现在产物中。"""
     with db.connect() as conn:
         _get_build(conn, bid)
@@ -438,7 +447,7 @@ def get_artifact(bid: int, target_name: str, user=CurrentUser):
 
 
 @router.get("/builds/{bid}/diff/{other_id}")
-def diff_builds(bid: int, other_id: int, user=CurrentUser):
+def diff_builds(bid: int, other_id: int, user=RequireCapabilities('reveal')):
     with db.connect() as conn:
         _get_build(conn, bid)
         _get_build(conn, other_id)
@@ -492,19 +501,19 @@ def _publish(action: str, bid: int, reason: str, operator: str) -> dict:
 
 
 @router.post("/builds/{bid}/publish-to-test")
-def publish_to_test(bid: int, body: PublishBody, user=CurrentUser):
+def publish_to_test(bid: int, body: PublishBody, user=RequireCapabilities('publish_test')):
     """发布至测试环境：已构建 / 已下线 → 测试中。"""
     return _publish("test", bid, body.reason, user["username"])
 
 
 @router.post("/builds/{bid}/publish-to-prod")
-def publish_to_prod(bid: int, body: PublishBody, user=CurrentUser):
+def publish_to_prod(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
     """发布至生产环境：测试中 / 已下线 → 生产中。"""
     return _publish("prod", bid, body.reason, user["username"])
 
 
 @router.post("/builds/{bid}/publish-both")
-def publish_both(bid: int, body: PublishBody, user=CurrentUser):
+def publish_both(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
     """一键发布：已构建 / 已下线 → 测试中 + 生产中，一步到位。
 
     两步同处一个事务，状态原子切换；发布历史只记最终那一条。
@@ -513,13 +522,13 @@ def publish_both(bid: int, body: PublishBody, user=CurrentUser):
 
 
 @router.post("/builds/{bid}/rollback-to-prod")
-def rollback_to_prod(bid: int, body: PublishBody, user=CurrentUser):
+def rollback_to_prod(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
     """回滚生产版本：把已下线的历史构建重新设为生产版本。"""
     return _publish("rollback", bid, body.reason, user["username"])
 
 
 @router.post("/builds/{bid}/offline")
-def offline_build(bid: int, body: PublishBody, user=CurrentUser):
+def offline_build(bid: int, body: PublishBody, user=RequireCapabilities('publish_test')):
     """手动下线：测试中 → 已下线（测试环境空置）。"""
     return _publish("offline", bid, body.reason, user["username"])
 

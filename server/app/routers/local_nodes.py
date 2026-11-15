@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import local_nodes
 from ..services import refs
 from ..services import tester
@@ -38,8 +38,6 @@ def _public(row) -> dict:
         "protocol": row["protocol"],
         "server": row["server"],
         "port": row["port"],
-        "params": json.loads(_decrypt(row["params_enc"]) or "{}"),
-        "extra_yaml": _decrypt(row["extra_yaml_enc"]),
         "enabled": bool(row["enabled"]),
         "sort": row["sort"],
         "test_status": row["test_status"] or "",
@@ -48,6 +46,15 @@ def _public(row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+@router.post("/{node_id}/reveal")
+def reveal_node(node_id: int, user=RequireCapabilities("reveal")):
+    with db.connect() as conn:
+        row = _get_or_404(conn, node_id)
+    return {"id": node_id, "protocol": row["protocol"], "server": row["server"],
+            "port": row["port"], "params": json.loads(_decrypt(row["params_enc"]) or "{}"),
+            "extra_yaml": _decrypt(row["extra_yaml_enc"])}
 
 
 def _get_or_404(conn, node_id: int):
@@ -95,7 +102,7 @@ def list_nodes(user=CurrentUser):
 
 
 @router.post("", status_code=201)
-def create_node(body: LocalNodeBody, user=CurrentUser):
+def create_node(body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal')):
     params, extra_yaml = _prepare(body)
     marked = local_nodes.display_name(body.name.strip(), body.node_type)
     with db.tx() as conn:
@@ -123,7 +130,7 @@ def create_node(body: LocalNodeBody, user=CurrentUser):
 
 
 @router.put("/{node_id}")
-def update_node(node_id: int, body: LocalNodeBody, user=CurrentUser):
+def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal')):
     params, extra_yaml = _prepare(body)
     marked = local_nodes.display_name(body.name.strip(), body.node_type)
     with db.tx() as conn:
@@ -153,7 +160,7 @@ def update_node(node_id: int, body: LocalNodeBody, user=CurrentUser):
 
 
 @router.post("/{node_id}/test")
-def test_node(node_id: int, user=CurrentUser):
+def test_node(node_id: int, user=RequireCapabilities('probe')):
     """测速：经该节点请求 generate_204，记录最近一次结果。
 
     与订阅来源的测速同机制（Mihomo 核心 + delay 接口），

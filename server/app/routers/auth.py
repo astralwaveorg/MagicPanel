@@ -1,12 +1,14 @@
 """认证与维护者账号。多维护者共享同一份数据，账号仅用于访问控制。"""
 import time
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import config, db, security
-from ..deps import SESSION_COOKIE, CurrentUser, create_session, destroy_session
+from ..deps import SESSION_COOKIE, CurrentUser, RequireCapabilities, create_session, destroy_session
+from ..services.capabilities import effective_capabilities, require_capability
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 
@@ -75,6 +77,11 @@ class UserBody(BaseModel):
     username: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     password: str = Field(min_length=8, max_length=128)
     display_name: str = Field(default="", max_length=64)
+    role: Literal["admin", "operator", "viewer"] = "operator"
+
+
+class RoleBody(BaseModel):
+    role: Literal["admin", "operator", "viewer"]
 
 
 class PasswordBody(BaseModel):
@@ -173,6 +180,7 @@ def me(user=CurrentUser):
         "username": user["username"],
         "display_name": user["display_name"],
         "role": user["role"],
+        "capabilities": sorted(effective_capabilities(user)),
         "csrf_token": user["csrf_token"],
         "has_portal_pin": bool(user.get("portal_pin_hash")),
         "has_avatar": bool(user.get("avatar_mime")),
@@ -180,7 +188,7 @@ def me(user=CurrentUser):
 
 
 @router.get("/users")
-def list_users(user=CurrentUser):
+def list_users(user=RequireCapabilities("manage_users")):
     with db.connect() as conn:
         rows = db.all_(
             conn,
@@ -197,7 +205,7 @@ def list_users(user=CurrentUser):
 
 
 @router.post("/users", status_code=201)
-def create_user(body: UserBody, user=CurrentUser):
+def create_user(body: UserBody, user=RequireCapabilities("manage_users")):
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM users WHERE username=?", (body.username,)):
             raise HTTPException(409, "用户名已存在")
@@ -205,7 +213,7 @@ def create_user(body: UserBody, user=CurrentUser):
         cur = conn.execute(
             "INSERT INTO users(username, password_hash, salt, display_name, role, created_at) "
             "VALUES(?,?,?,?,?,?)",
-            (body.username, digest, salt, body.display_name, "admin", db.now()),
+            (body.username, digest, salt, body.display_name, body.role, db.now()),
         )
         security.audit(conn, user["username"], "新增维护者", "user", cur.lastrowid,
                        {"username": body.username})
@@ -219,20 +227,51 @@ def create_user(body: UserBody, user=CurrentUser):
 
 
 @router.delete("/users/{user_id}")
-def delete_user(user_id: int, user=CurrentUser):
+def delete_user(user_id: int, user=RequireCapabilities("manage_users")):
     if user_id == user["id"]:
         raise HTTPException(400, "不能删除当前登录的账号")
-    with db.tx() as conn:
-        row = db.one(conn, "SELECT username FROM users WHERE id=?", (user_id,))
+    with db.tx(immediate=True) as conn:
+        _require_current_manager(conn, user)
+        row = db.one(conn, "SELECT username, role FROM users WHERE id=?", (user_id,))
         if not row:
             raise HTTPException(404, "账号不存在")
-        if db.one(conn, "SELECT COUNT(*) AS c FROM users")["c"] <= 1:
-            raise HTTPException(400, "至少需要保留一个维护者账号")
+        _preserve_admin(conn, row)
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
         security.audit(conn, user["username"], "删除维护者", "user", user_id,
                        {"username": row["username"]})
     return {"ok": True}
+
+
+def _require_current_manager(conn, user):
+    row = db.one(conn, "SELECT role FROM users WHERE id=?", (user["id"],))
+    require_capability(dict(row) if row else {}, "manage_users")
+
+
+def _preserve_admin(conn, row):
+    if row["role"] == "admin" and db.one(
+        conn, "SELECT COUNT(*) AS c FROM users WHERE role='admin'")["c"] <= 1:
+        raise HTTPException(400, "至少需要保留一个管理员账号")
+
+
+@router.patch("/users/{user_id}/role")
+def change_role(user_id: int, body: RoleBody, user=RequireCapabilities("manage_users")):
+    with db.tx(immediate=True) as conn:
+        _require_current_manager(conn, user)
+        row = db.one(conn, "SELECT id, username, role FROM users WHERE id=?", (user_id,))
+        if not row:
+            raise HTTPException(404, "账号不存在")
+        if row["role"] != body.role:
+            if body.role != "admin":
+                _preserve_admin(conn, row)
+            clear_pin = ("reveal" in effective_capabilities(dict(row)) and
+                         "reveal" not in effective_capabilities({"role": body.role}))
+            conn.execute("UPDATE users SET role=?, portal_pin_hash=CASE WHEN ? THEN '' "
+                         "ELSE portal_pin_hash END WHERE id=?", (body.role, clear_pin, user_id))
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            security.audit(conn, user["username"], "变更账号角色", "user", user_id,
+                           {"previous_role": row["role"], "role": body.role})
+    return {"id": user_id, "role": body.role}
 
 
 @router.post("/auth/password")

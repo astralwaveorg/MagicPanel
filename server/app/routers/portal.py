@@ -10,11 +10,12 @@ import secrets
 import re
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
 from .. import config, db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
+from ..services.capabilities import effective_capabilities
 from ..services import releases
 
 router = APIRouter(prefix="/api/v1/portal", tags=["portal"])
@@ -130,10 +131,11 @@ class StrictPinBody(BaseModel):
 
 
 def _session_user(conn, request: Request):
-    """已登录的维护者免 PIN：尝试按会话识别，失败返回 None。"""
+    """只有具有 reveal 能力的会话可以免 PIN。"""
     from ..deps import SESSION_COOKIE, _load_session
     token = request.cookies.get(SESSION_COOKIE, "")
-    return _load_session(conn, token) if token else None
+    row = _load_session(conn, token) if token else None
+    return row if row and "reveal" in effective_capabilities(dict(row)) else None
 
 
 def _check_pin(conn, request: Request, pin: str) -> None:
@@ -142,7 +144,7 @@ def _check_pin(conn, request: Request, pin: str) -> None:
     if locked_until > time.time():
         raise HTTPException(429, "尝试次数过多，请 10 分钟后再试")
     hashes = [r["portal_pin_hash"] for r in db.all_(
-        conn, "SELECT portal_pin_hash FROM users WHERE portal_pin_hash != ''")]
+        conn, "SELECT portal_pin_hash FROM users WHERE role='admin' AND portal_pin_hash != ''")]
     if not hashes:
         raise HTTPException(404, "门户页未启用，请先在管理后台设置 PIN")
     if not pin or not any(_pin_matches(pin, h) for h in hashes):
@@ -225,12 +227,12 @@ def portal_status():
     """门户是否可用：任一维护者设置了 PIN 即视为开启。"""
     with db.connect() as conn:
         enabled = bool(db.one(
-            conn, "SELECT 1 FROM users WHERE portal_pin_hash != '' LIMIT 1"))
+            conn, "SELECT 1 FROM users WHERE role='admin' AND portal_pin_hash != '' LIMIT 1"))
     return {"enabled": enabled}
 
 
 @router.post("/my-pin", status_code=201)
-def set_my_pin(body: StrictPinBody, user=CurrentUser):
+def set_my_pin(body: StrictPinBody, user=RequireCapabilities('edit', 'reveal')):
     """设置当前账号的门户 PIN；其他维护者的 PIN 不受影响。"""
     with db.tx() as conn:
         conn.execute("UPDATE users SET portal_pin_hash=? WHERE id=?",
@@ -241,7 +243,7 @@ def set_my_pin(body: StrictPinBody, user=CurrentUser):
 
 
 @router.delete("/my-pin")
-def clear_my_pin(user=CurrentUser):
+def clear_my_pin(user=RequireCapabilities('edit', 'reveal')):
     """撤销当前账号的门户 PIN；全部撤销后门户页即关闭。"""
     with db.tx() as conn:
         conn.execute("UPDATE users SET portal_pin_hash='' WHERE id=?", (user["id"],))
@@ -283,11 +285,12 @@ def _available_variants(ok_artifacts: set[str], variants: list[dict],
 
 
 @router.post("/data")
-def portal_data(body: PinBody, request: Request):
+def portal_data(body: PinBody, request: Request, response: Response):
     """门户数据：设备订阅链接、客户端资源、导入指引与个人规则。
 
     已登录的维护者免 PIN；未登录访客按 PIN 校验。
     """
+    response.headers["Cache-Control"] = "no-store"
     with db.connect() as conn:
         user = _session_user(conn, request)
         if not user:
@@ -373,12 +376,13 @@ def portal_data(body: PinBody, request: Request):
 
 
 @router.post("/provider-detail")
-def portal_provider_detail(body: ProviderDetailBody, request: Request):
+def portal_provider_detail(body: ProviderDetailBody, request: Request, response: Response):
     """单个规则来源的详情与内容预览。
 
     原始内容不进门户首屏数据，这里按需取：文本格式给前若干行，
     二进制格式（MRS）没有可读内容，只给大小与指纹。
     """
+    response.headers["Cache-Control"] = "no-store"
     with db.connect() as conn:
         user = _session_user(conn, request)
         if not user:

@@ -181,7 +181,7 @@ def test_setup_login_logout(client):
 def test_multi_maintainer(client):
     csrf = setup_admin(client)
     r = client.post("/api/v1/users", headers=auth_headers(csrf), json={
-        "username": "second", "password": "second-pass-1", "display_name": "二号",
+        "username": "second", "password": "second-pass-1", "display_name": "二号", "role": "admin",
     })
     assert r.status_code == 201, r.text
     # 第二个维护者可见同一份数据（不隔离）
@@ -989,12 +989,12 @@ def test_automation_settings_and_run_endpoint(client, monkeypatch):
     called = []
     monkeypatch.setattr(
         scheduler, "run_once_safe",
-        lambda force=False, trigger="scheduled", actor="": called.append(
-            (force, trigger, actor)),
+        lambda force=False, trigger="scheduled", actor="", actor_user_id=None: called.append(
+            (force, trigger, actor, actor_user_id)),
     )
     r = client.post("/api/v1/automation/run", headers=h)
     assert r.status_code == 200 and r.json()["accepted"] is True
-    assert called == [(True, "manual", "admin")]
+    assert called == [(True, "manual", "admin", 1)]
 
 
 def test_target_reorder(client):
@@ -1212,6 +1212,8 @@ def test_local_node_crud_render_and_group_reference(client):
     # 节点类型默认「本地」，产物里的标识是「名称 (类型)」
     assert node["node_type"] == "本地"
     assert node["display_name"] == "HK-01 (本地)"
+    assert "params" not in node and "extra_yaml" not in node
+    node.update(client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h).json())
 
     custom = client.post("/api/v1/local-nodes", headers=h, json={
         "name": "Custom-01", "protocol": "custom", "server": "custom.example.com",
@@ -1259,6 +1261,7 @@ def test_local_node_crud_render_and_group_reference(client):
         "server": node["server"], "port": node["port"],
         "params": node["params"], "extra_yaml": node["extra_yaml"],
     }).json()
+    node.update(client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h).json())
     client.put(f"/api/v1/groups/{group['id']}", headers=h,
                json={**group, "local_nodes": [node["id"]]})
 
@@ -1469,8 +1472,11 @@ def test_build_snapshot_is_encrypted(client):
         row = db.one(conn, "SELECT snapshot FROM builds WHERE id=?", (build["id"],))
     assert row["snapshot"].startswith("enc:v1:")
     detail = client.get(f"/api/v1/builds/{build['id']}", headers=h).json()
-    assert detail["snapshot"]["groups"]
-    assert "base" in detail["snapshot"]
+    assert "snapshot" not in detail
+    revealed = client.post(f"/api/v1/builds/{build['id']}/reveal", headers=h)
+    assert revealed.headers["cache-control"] == "no-store"
+    assert revealed.json()["snapshot"]["groups"]
+    assert "base" in revealed.json()["snapshot"]
 
 
 def test_provider_etag_follows_test_results(client):

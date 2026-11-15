@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from .. import db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import backups
 
 router = APIRouter(prefix="/api/v1/backup", tags=["backups"])
@@ -31,7 +31,7 @@ def _audit(actor: str, action: str, detail="") -> None:
 
 
 @router.get("/export")
-def backup_export(response: Response, user=CurrentUser):
+def backup_export(response: Response, user=RequireCapabilities('backup')):
     """JSON 含私密密文，密钥另存；files 仅为清单，不携带文件。"""
     response.headers["Cache-Control"] = "no-store"
     _audit(user["username"], "开始导出备份")
@@ -46,7 +46,7 @@ def backup_export(response: Response, user=CurrentUser):
 
 
 @router.post("/restore")
-def backup_restore(body: RestoreBody, response: Response, user=CurrentUser):
+def backup_restore(body: RestoreBody, response: Response, user=RequireCapabilities('restore')):
     response.headers["Cache-Control"] = "no-store"
     if not body.dry_run and not body.confirm:
         raise HTTPException(400, "恢复会覆盖当前全部数据，请设置 confirm=true 确认")

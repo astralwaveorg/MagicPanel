@@ -6,10 +6,11 @@ feed 接口使用独立的高熵 URL 令牌，不经过此依赖。
 """
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security.utils import get_authorization_scheme_param
 
 from . import config, db, security
+from .services.capabilities import require_capability
 
 SESSION_COOKIE = "mp_session"
 
@@ -54,7 +55,7 @@ def _load_session(conn, token: str):
     return row
 
 
-def require_user(request: Request) -> dict:
+def _authenticated_user(request: Request) -> dict:
     cookie_token = request.cookies.get(SESSION_COOKIE, "")
     auth = request.headers.get("Authorization", "")
     scheme, param = get_authorization_scheme_param(auth)
@@ -82,6 +83,38 @@ def require_user(request: Request) -> dict:
             "avatar_mime": row["avatar_mime"],
             "token": token,
         }
+
+
+def require_user(request: Request, user=Depends(_authenticated_user)) -> dict:
+    # 本人账户自服务只要求有效身份；领域写操作默认 edit。
+    self_service = request.url.path in {
+        "/api/v1/auth/logout", "/api/v1/auth/password", "/api/v1/auth/avatar"}
+    action = "view" if self_service or request.method in ("GET", "HEAD", "OPTIONS") else "edit"
+    require_capability(user, action)
+    return user
+
+
+def RequireCapabilities(*actions: str):
+    """按动作授权；原文读取统一禁止缓存并只审计路由模板。"""
+    def dependency(request: Request, response: Response, user=Depends(_authenticated_user)):
+        require_capability(user, "view")
+        for action in actions:
+            require_capability(user, action)
+        if "reveal" in actions:
+            response.headers["Cache-Control"] = "no-store"
+            with db.tx() as conn:
+                route = request.scope.get("route")
+                references = {}
+                for key, value in request.path_params.items():
+                    text = str(value)
+                    if key in {"node_id", "source_id", "bid", "tid", "did", "sid", "user_id"} and text.isdecimal():
+                        references[key] = int(text)
+                    elif key == "node_uid" and text.isascii() and len(text) <= 80 and text.replace("-", "").replace("_", "").isalnum():
+                        references[key] = text
+                security.audit(conn, user["username"], "访问私密内容", "api",
+                               getattr(route, "path", ""), {"references": references})
+        return user
+    return Depends(dependency)
 
 
 CurrentUser = Depends(require_user)

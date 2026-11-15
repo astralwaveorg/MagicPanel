@@ -17,10 +17,11 @@ from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..compiler import render
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..routers import builds
 from ..services import base_config as base_config_service
 from ..services import releases
+from ..services.capabilities import require_capability
 
 ENGINE_LABELS = config.ENGINE_LABELS
 PLATFORM_LABELS = config.PLATFORM_LABELS
@@ -234,7 +235,7 @@ def _baseline(engine: str, plat: str, dev_id: int, layers) -> dict:
 
 @router.get("")
 def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 0,
-                    user=CurrentUser):
+                    user=RequireCapabilities('reveal')):
     """返回该作用域的完整信息：继承值、本层差异、生效值、每个键的来源。"""
     engine = _engine(engine)
     with db.connect() as conn:
@@ -266,7 +267,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
 
 @router.put("")
 def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str = "",
-                    device_id: int = 0, user=CurrentUser):
+                    device_id: int = 0, user=RequireCapabilities('edit', 'reveal')):
     """保存本层覆盖：提交的是"本层编辑后的生效值"，服务端自动与上层求差异。"""
     engine = _engine(engine)
     with db.tx() as conn:
@@ -323,7 +324,7 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
 
 @router.post("/reset")
 def reset_base_config(engine: str = "stash", platform: str = "", device_id: int = 0,
-                      user=CurrentUser):
+                      user=RequireCapabilities('edit', 'reveal')):
     """恢复默认：清空本层覆盖，回到继承上层（引擎默认配置 → 引擎平台配置）。"""
     engine = _engine(engine)
     with db.tx() as conn:
@@ -400,7 +401,7 @@ def _pick_target(conn, engine: str, platform: str) -> dict:
 
 
 @router.post("/preview")
-def preview(body: PreviewBody, user=CurrentUser):
+def preview(body: PreviewBody, user=RequireCapabilities('reveal')):
     engine = _engine(body.engine)
     warnings: list[str] = []
     with db.connect() as conn:
@@ -429,7 +430,8 @@ def preview(body: PreviewBody, user=CurrentUser):
 
 
 @router.post("/apply")
-def apply(body: ApplyBody, user=CurrentUser):
+def apply(body: ApplyBody, user=RequireCapabilities('edit', 'reveal')):
+    require_capability(user, "publish_test" if body.env == "testing" else "publish_prod")
     engine = _engine(body.engine)
     if body.env not in ("production", "testing"):
         raise HTTPException(400, "发布环境仅支持 production / testing")

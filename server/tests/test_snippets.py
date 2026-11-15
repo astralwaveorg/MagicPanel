@@ -54,6 +54,10 @@ def test_snippet_remote_source(client, monkeypatch):
     """远程拓展模块：来源类型、内联/远程互斥、抓取失败保留旧内容。"""
     csrf = setup_admin(client)
     h = auth_headers(csrf)
+    from app.services import fetcher
+    def fail_fetch(*args, **kwargs):
+        raise fetcher.FetchError("fixture upstream unavailable")
+    monkeypatch.setattr(fetcher, "fetch", fail_fetch)
 
     # 远程来源必须填 URL；内联来源不需要
     r = client.post("/api/v1/snippets", headers=h, json={
@@ -103,7 +107,10 @@ def test_snippet_remote_source(client, monkeypatch):
     r = client.post(f"/api/v1/snippets/{sid}/refresh", headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["last_status"] == "ok"
-    assert "log-level: debug" in r.json()["content"]
+    assert "content" not in r.json()
+    revealed = client.post(f"/api/v1/snippets/{sid}/reveal", headers=h)
+    assert revealed.headers["cache-control"] == "no-store"
+    assert "log-level: debug" in revealed.json()["content"]
 
     make_policy(client, csrf)
     # 内联片段与远程片段写同一个键，后合并的覆盖前面的；删掉内联的再验证产物

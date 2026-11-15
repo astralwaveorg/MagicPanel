@@ -7,8 +7,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import fetcher, refs, source_nodes, tester, updater
+from ..services.capabilities import require_capability
 
 router = APIRouter(prefix="/api/v1/sources", tags=["sources"])
 
@@ -282,7 +283,7 @@ def list_sources(user=CurrentUser):
 
 
 @router.post("", status_code=201)
-def create_source(body: SourceBody, user=CurrentUser):
+def create_source(body: SourceBody, user=RequireCapabilities('edit', 'reveal')):
     if not body.url:
         raise HTTPException(400, "订阅地址不能为空")
     _check_filter(body.filter)
@@ -320,10 +321,15 @@ def create_source(body: SourceBody, user=CurrentUser):
 @router.put("/{source_id}")
 def update_source(source_id: int, body: SourceBody, force: bool = False,
                   user=CurrentUser):
-    _check_filter(body.filter)
-    _check_mode(body.mode)
+    if body.model_fields_set & {"url", "proxy_url", "headers", "ua", "allow_private"}:
+        require_capability(user, "reveal")
     with db.tx() as conn:
         row = _get_or_404(conn, source_id)
+        fields = {"enabled", "filter", "ua", "suffix", "mode", "interval", "test_interval",
+                  "client_interval", "auto_fetch", "auto_test", "allow_private", "filter_unavailable"}
+        body = body.model_copy(update={key: row[key] for key in fields - body.model_fields_set})
+        _check_filter(body.filter)
+        _check_mode(body.mode)
         clash = db.one(
             conn, "SELECT id FROM sources WHERE name=? AND id!=?", (body.name, source_id)
         )
@@ -513,7 +519,7 @@ def batch_delete_sources(body: BatchIds, user=CurrentUser):
 
 
 @router.post("/{source_id}/reveal")
-def reveal_source(source_id: int, user=CurrentUser):
+def reveal_source(source_id: int, user=RequireCapabilities('reveal')):
     """解密并返回订阅地址原文，用于复制；操作记入审计。"""
     with db.tx() as conn:
         row = _get_or_404(conn, source_id)
@@ -538,7 +544,7 @@ def _file_nodes(content_b64: str) -> tuple[bytes, list[dict]]:
 
 
 @router.post("/import-file", status_code=201)
-def import_source_file(body: SourceFileBody, user=CurrentUser):
+def import_source_file(body: SourceFileBody, user=RequireCapabilities('edit', 'reveal')):
     """从上传的订阅文件建立节点来源。
 
     文件来源没有在线地址：内容解析后存成快照（source_kind=file），
@@ -580,7 +586,7 @@ def import_source_file(body: SourceFileBody, user=CurrentUser):
 
 
 @router.put("/{source_id}/file")
-def replace_source_file(source_id: int, body: SourceFileBody, user=CurrentUser):
+def replace_source_file(source_id: int, body: SourceFileBody, user=RequireCapabilities('edit', 'reveal')):
     """替换文件来源的内容（重新上传订阅文件）。"""
     _raw, nodes = _file_nodes(body.content_b64)
     text = source_nodes.dump(nodes)
@@ -605,7 +611,7 @@ def replace_source_file(source_id: int, body: SourceFileBody, user=CurrentUser):
 
 
 @router.post("/{source_id}/refresh")
-def refresh_source(source_id: int, user=CurrentUser):
+def refresh_source(source_id: int, user=RequireCapabilities('probe')):
     try:
         row = updater.refresh_source(source_id, user["username"])
     except updater.NotFound as exc:
@@ -616,7 +622,7 @@ def refresh_source(source_id: int, user=CurrentUser):
 
 
 @router.post("/{source_id}/test")
-def test_source(source_id: int, user=CurrentUser):
+def test_source(source_id: int, user=RequireCapabilities('probe')):
     """用本地 Mihomo 核心逐个测试节点连通性；结果供过滤与展示。
 
     结果只反映从本服务器所在网络出发的连通性，不代表客户端侧一定可用。

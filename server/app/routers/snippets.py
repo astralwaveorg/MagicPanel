@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 import yaml
 
 from .. import db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
 from ..services import fetcher, updater
+from ..services.capabilities import require_capability
 
 PROTECTED_KEYS = base_config_service.PROTECTED_KEYS
 
@@ -74,6 +75,8 @@ def _public(row) -> dict:
     data = db.row_to_dict(row)
     data["enabled"] = bool(data.get("enabled"))
     enc = data.pop("proxy_url_enc", "") or ""
+    data.pop("content", None)
+    data["url"] = security.mask_url(data.get("url") or "")
     data["use_proxy"] = bool(enc)
     data["proxy_url_masked"] = (
         security.mask_url(security.decrypt_text(enc)) if enc else ""
@@ -86,6 +89,14 @@ def _get(conn, sid: int):
     if not row:
         raise HTTPException(404, "拓展模块不存在")
     return row
+
+
+@router.post("/{sid}/reveal")
+def reveal_snippet(sid: int, user=RequireCapabilities("reveal")):
+    with db.connect() as conn:
+        row = _get(conn, sid)
+    return {"id": sid, "content": row["content"], "url": row["url"],
+            "proxy_url": security.decrypt_text(row["proxy_url_enc"]) if row["proxy_url_enc"] else ""}
 
 
 @router.get("/page")
@@ -110,7 +121,7 @@ def list_snippets(user=CurrentUser):
 
 
 @router.post("", status_code=201)
-def create_snippet(body: SnippetBody, user=CurrentUser):
+def create_snippet(body: SnippetBody, user=RequireCapabilities('edit', 'reveal')):
     _check(body)
     with db.tx() as conn:
         if db.one(conn, "SELECT id FROM snippets WHERE name=?", (body.name,)):
@@ -135,9 +146,13 @@ def create_snippet(body: SnippetBody, user=CurrentUser):
 
 @router.put("/{sid}")
 def update_snippet(sid: int, body: SnippetBody, user=CurrentUser):
-    _check(body)
+    if body.model_fields_set & {"content", "url", "proxy_url", "source", "format", "engine"}:
+        require_capability(user, "reveal")
     with db.tx() as conn:
         old = _get(conn, sid)
+        fields = set(SnippetBody.model_fields) - {"proxy_url"}
+        body = body.model_copy(update={key: old[key] for key in fields - body.model_fields_set})
+        _check(body)
         clash = db.one(
             conn, "SELECT id FROM snippets WHERE name=? AND id!=?", (body.name, sid)
         )
@@ -164,7 +179,7 @@ def update_snippet(sid: int, body: SnippetBody, user=CurrentUser):
 
 
 @router.post("/{sid}/refresh")
-def refresh_snippet(sid: int, user=CurrentUser):
+def refresh_snippet(sid: int, user=RequireCapabilities('probe')):
     """立刻抓取远程拓展模块；失败保留上一次可用内容。"""
     try:
         row = updater.refresh_snippet(sid, user["username"])

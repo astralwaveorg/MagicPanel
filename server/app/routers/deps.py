@@ -7,8 +7,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .. import db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import repo_manager, repo_sync
+from ..services.capabilities import require_capability
 
 router = APIRouter(prefix="/api/v1/deps", tags=["deps"])
 
@@ -63,17 +64,29 @@ class RevertBody(BaseModel):
 @router.get("/status")
 def deps_status(user=CurrentUser):
     with db.connect() as conn:
-        return repo_manager.status(conn)
+        result = repo_manager.status(conn)
+    result["url"] = security.mask_url(result.get("url") or "")
+    return result
 
 
 @router.get("/settings")
 def deps_get_settings(user=CurrentUser):
+    with db.connect() as conn:
+        result = repo_manager.get_settings(conn)
+    result["url"] = security.mask_url(result.get("url") or "")
+    return result
+
+
+@router.post("/settings/reveal")
+def deps_reveal_settings(user=RequireCapabilities("reveal")):
     with db.connect() as conn:
         return repo_manager.get_settings(conn)
 
 
 @router.put("/settings")
 def deps_put_settings(body: SettingsBody, user=CurrentUser):
+    if body.model_fields_set & {"url", "branch", "auth", "private_key", "token", "clear_private_key", "clear_token"}:
+        require_capability(user, "reveal")
     with db.tx() as conn:
         values: dict = {}
         if body.enabled is not None:
@@ -109,7 +122,9 @@ def deps_put_settings(body: SettingsBody, user=CurrentUser):
         repo_manager.save_settings(conn, values)
         security.audit(conn, user["username"], "更新自主维护设置", "deps", "",
                        {"keys": sorted(values.keys())})
-        return repo_manager.get_settings(conn)
+        result = repo_manager.get_settings(conn)
+        result["url"] = security.mask_url(result.get("url") or "")
+        return result
 
 
 @router.post("/clone")
@@ -126,7 +141,7 @@ def deps_clone(user=CurrentUser):
 
 
 @router.post("/generate-key")
-def deps_generate_key(user=CurrentUser):
+def deps_generate_key(user=RequireCapabilities('edit', 'reveal')):
     """生成 SSH 密钥对：只回显公钥，私钥加密落库。"""
     try:
         private, public = repo_manager.generate_keypair()
@@ -152,7 +167,7 @@ def deps_files(user=CurrentUser):
 
 
 @router.get("/file")
-def deps_get_file(path: str = Query(...), user=CurrentUser):
+def deps_get_file(path: str = Query(...), user=RequireCapabilities('reveal')):
     with db.connect() as conn:
         try:
             return repo_manager.read_file(conn, path)
@@ -180,7 +195,7 @@ def _validate_text_file(path: str, content: str) -> None:
 
 
 @router.put("/file")
-def deps_put_file(body: FileBody, user=CurrentUser):
+def deps_put_file(body: FileBody, user=RequireCapabilities('edit', 'reveal')):
     _validate_text_file(body.path, body.content)
     with db.connect() as conn:
         try:
@@ -191,7 +206,7 @@ def deps_put_file(body: FileBody, user=CurrentUser):
 
 
 @router.post("/file")
-def deps_post_file(body: FileBody, user=CurrentUser):
+def deps_post_file(body: FileBody, user=RequireCapabilities('edit', 'reveal')):
     _validate_text_file(body.path, body.content)
     with db.connect() as conn:
         try:
@@ -249,7 +264,7 @@ def deps_sync(user=CurrentUser):
 
 
 @router.get("/conflicts")
-def deps_conflicts(user=CurrentUser):
+def deps_conflicts(user=RequireCapabilities('reveal')):
     with db.connect() as conn:
         try:
             files = repo_manager.conflicted_files(conn)
@@ -262,7 +277,7 @@ def deps_conflicts(user=CurrentUser):
 
 
 @router.post("/conflicts/resolve")
-def deps_resolve(body: ResolveBody, user=CurrentUser):
+def deps_resolve(body: ResolveBody, user=RequireCapabilities('edit', 'reveal')):
     with db.tx() as conn:
         try:
             repo_manager.conflict_stage(conn, body.path, body.content, body.resolution)
@@ -283,7 +298,7 @@ def deps_history(limit: int = 30, user=CurrentUser):
 
 
 @router.get("/diff")
-def deps_diff(commit: str = Query(...), user=CurrentUser):
+def deps_diff(commit: str = Query(...), user=RequireCapabilities('reveal')):
     with db.connect() as conn:
         try:
             return repo_manager.show_commit(conn, commit)

@@ -1,13 +1,16 @@
 """概览、审计、设置、核心与备份。"""
 import json
 import re
+from urllib.parse import urlsplit
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from .. import config, db, security
-from ..deps import CurrentUser
+from ..deps import CurrentUser, RequireCapabilities
 from ..services import direct, releases, tester, webdav
+from ..services.capabilities import require_capability
 from . import targets_devices
 
 router = APIRouter(prefix="/api/v1", tags=["misc"])
@@ -126,8 +129,12 @@ def _health_snapshot(conn) -> dict:
 
 @router.get("/direct-check")
 def direct_check(refresh: bool = False, user=CurrentUser):
-    """测速链路直连自检：出口地址、代理环境变量与结论。"""
-    return direct.check(refresh=refresh)
+    """读取最近出口信息；GET 不触发网络检测。"""
+    if refresh:
+        raise HTTPException(405, "请使用 POST 执行出口检测")
+    return {"state": "unknown", "notes": ["主动检测请执行出口检测动作"],
+            "egress": dict(direct._cache.get("data") or {}),
+            "env_proxies": sorted(direct.env_proxies())}
 
 
 @router.get("/audit")
@@ -192,7 +199,20 @@ def delete_audit(body: AuditDeleteBody, user=CurrentUser):
 def get_settings(user=CurrentUser):
     with db.connect() as conn:
         rows = db.all_(conn, "SELECT key, value FROM settings")
-    return {r["key"]: r["value"] for r in rows}
+    result = {r["key"]: r["value"] for r in rows
+              if r["key"] in EDITABLE_SETTINGS - {"core_proxy"}}
+    base = result.get("base_url", "")
+    parsed = urlsplit(base)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        result["base_url"] = security.mask_url(base)
+    return result
+
+
+@router.post("/settings/reveal")
+def reveal_settings(user=RequireCapabilities("reveal")):
+    with db.connect() as conn:
+        rows = db.all_(conn, "SELECT key, value FROM settings")
+    return {r["key"]: r["value"] for r in rows if r["key"] in EDITABLE_SETTINGS}
 
 
 class SettingsBody(BaseModel):
@@ -201,6 +221,8 @@ class SettingsBody(BaseModel):
 
 @router.put("/settings")
 def put_settings(body: SettingsBody, user=CurrentUser):
+    if body.values.keys() & {"core_proxy", "base_url"}:
+        require_capability(user, "reveal")
     for key in body.values:
         if key not in EDITABLE_SETTINGS:
             raise HTTPException(400, f"不支持的设置项：{key}")
@@ -214,6 +236,9 @@ def put_settings(body: SettingsBody, user=CurrentUser):
             raise HTTPException(400, "对外基础地址含有不允许的字符")
         if "'" in base_url or "\\" in base_url or '"' in base_url:
             raise HTTPException(400, "对外基础地址含有不允许的字符")
+        parsed = urlsplit(base_url)
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise HTTPException(400, "对外基础地址不能包含凭据、查询参数或片段")
     for key, value in body.values.items():
         if key in BOOL_SETTINGS and value not in ("0", "1"):
             raise HTTPException(400, f"{key} 只能是 0 或 1")
@@ -226,7 +251,14 @@ def put_settings(body: SettingsBody, user=CurrentUser):
                 raise HTTPException(400, "自动构建间隔需在 1–168 小时之间")
         if key == "auto_publish_env" and value not in ("production", "testing"):
             raise HTTPException(400, "自动构建发布环境仅支持 production / testing")
-    with db.tx() as conn:
+    with db.tx(immediate=True) as conn:
+        if body.values.keys() & {"scheduler_enabled", "auto_build_enabled", "auto_publish_enabled", "auto_publish_env"}:
+            effective = {key: body.values.get(key, db.get_setting(conn, key, default)) for key, default in (
+                ("auto_build_enabled", "1"), ("auto_publish_enabled", "1"),
+                ("auto_publish_env", "production"))}
+            if (effective["auto_build_enabled"] == "1" and effective["auto_publish_enabled"] == "1"
+                    and effective["auto_publish_env"] == "production"):
+                require_capability(user, "publish_prod")
         for key, value in body.values.items():
             db.set_setting(conn, key, value.strip())
         security.audit(conn, user["username"], "更新设置", "settings", "",
@@ -241,7 +273,7 @@ def core_status(user=CurrentUser):
 
 
 @router.post("/core/install")
-def core_install(user=CurrentUser):
+def core_install(user=RequireCapabilities('edit', 'reveal')):
     """下载固定版本的 Mihomo 核心到 data/bin，用于节点连通性测试。"""
     with db.connect() as conn:
         proxy = db.get_setting(conn, "core_proxy", "")
@@ -256,7 +288,7 @@ def core_install(user=CurrentUser):
 
 
 @router.post("/core/upload")
-async def core_upload(request: Request, user=CurrentUser):
+async def core_upload(request: Request, user=RequireCapabilities('edit', 'reveal')):
     """本地上传安装 / 更新核心（.gz / .zip / 裸二进制，原始字节直传）。
 
     适用于服务端无法直连 GitHub 的环境：在本机下载与服务端平台一致的
@@ -286,6 +318,18 @@ class WebDavSettingsBody(BaseModel):
 def webdav_status(user=CurrentUser):
     """WebDAV 备份配置与状态（不回显口令）。"""
     with db.connect() as conn:
+        return _webdav_public(conn)
+
+
+def _webdav_public(conn):
+    result = webdav.status(conn)
+    result["url"] = security.mask_url(result.get("url") or "")
+    return result
+
+
+@router.post("/backup/webdav/reveal")
+def reveal_webdav_settings(user=RequireCapabilities("reveal")):
+    with db.connect() as conn:
         return webdav.status(conn)
 
 
@@ -293,6 +337,8 @@ def webdav_status(user=CurrentUser):
 def webdav_save(body: WebDavSettingsBody, user=CurrentUser):
     """保存 WebDAV 配置。口令加密存储；password 为空表示不修改，null 表示清除。"""
     values = dict(body.values or {})
+    if values.keys() & {"url", "username", "password", "directory"}:
+        require_capability(user, "reveal")
     if "interval_hours" in values:
         try:
             hours = int(values["interval_hours"])
@@ -314,13 +360,13 @@ def webdav_save(body: WebDavSettingsBody, user=CurrentUser):
     with db.tx() as conn:
         webdav.save_settings(conn, values)
         security.audit(conn, user["username"], "更新 WebDAV 备份配置", "backup", "",
-                       {k: ("***" if k == "password" else v) for k, v in values.items()})
+                       {"fields": sorted(values)})
     with db.connect() as conn:
-        return webdav.status(conn)
+        return _webdav_public(conn)
 
 
 @router.post("/backup/webdav/test")
-def webdav_test(user=CurrentUser):
+def webdav_test(user=RequireCapabilities('backup')):
     """测试 WebDAV 连接与鉴权。"""
     with db.connect() as conn:
         try:
@@ -331,7 +377,7 @@ def webdav_test(user=CurrentUser):
 
 
 @router.post("/backup/webdav/upload")
-def webdav_upload(user=CurrentUser):
+def webdav_upload(user=RequireCapabilities('backup')):
     """立即执行一次 WebDAV 备份。"""
     with db.connect() as conn:
         try:
@@ -342,7 +388,7 @@ def webdav_upload(user=CurrentUser):
 
 
 @router.get("/backup/webdav/files")
-def webdav_files(user=CurrentUser):
+def webdav_files(user=RequireCapabilities('backup')):
     """列出远端备份。"""
     with db.connect() as conn:
         try:
@@ -352,14 +398,25 @@ def webdav_files(user=CurrentUser):
 
 
 @router.post("/backup/webdav/restore")
-def webdav_restore(body: RestoreBody, user=CurrentUser):
-    """从远端快照恢复（会覆盖当前数据，必须显式确认）。"""
+def webdav_restore(body: RestoreBody, response: Response, user=RequireCapabilities('restore')):
+    """从远端归档创建隔离恢复目录，运行库切换由维护流程执行。"""
+    response.headers["Cache-Control"] = "no-store"
     if not body.confirm:
-        raise HTTPException(400, "恢复会覆盖当前全部数据，请设置 confirm=true 确认")
+        raise HTTPException(400, "请设置 confirm=true 确认创建隔离恢复目录")
     name = (body.data or {}).get("file", "")
+    data_root = config.DATA_DIR.resolve()
+    staging_root = (data_root / "restore-staging").resolve()
+    if not staging_root.is_relative_to(data_root):
+        raise HTTPException(400, "隔离恢复目录不可用")
+    destination = staging_root / uuid4().hex
+    if destination.exists():
+        raise HTTPException(409, "隔离恢复目录已存在，请重试")
     with db.connect() as conn:
         try:
-            result = webdav.restore_from_remote(conn, name, user["username"])
+            result = webdav.restore_from_remote(
+                conn, name, user["username"], destination=destination, key_path=config.SECRET_KEY_PATH)
         except webdav.WebDavError as exc:
-            raise HTTPException(400, str(exc))
-    return {"ok": True, **result}
+            raise HTTPException(400, str(exc), headers={"Cache-Control": "no-store"})
+    return {"ok": True, "state": result["state"], "verification_status": result["verification_status"],
+            "restored": False, "staging_name": destination.name,
+            "requires_maintenance_restart": True, "key_restored": False}
