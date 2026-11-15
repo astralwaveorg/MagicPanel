@@ -128,3 +128,57 @@ def test_recursive_material_rejected_without_value_in_error():
     value["example-sensitive"] = value
     with pytest.raises(ValueError, match="^catalog_material_invalid$"):
         canonical_material(value)
+
+@pytest.mark.parametrize("server", ["xn--a.example", "XN--A.example", "xn--0.example", "xn--abc-.example"])
+def test_invalid_ace_server_rejected_with_safe_error(server):
+    from app.services.node_identity import canonical_material, fingerprints
+    value = dict(proxy(), server=server)
+    for operation in (lambda: canonical_material(value),
+                      lambda: fingerprints(value, source_id=None, key=KEY)):
+        with pytest.raises(ValueError, match="^catalog_material_invalid$") as error:
+            operation()
+        assert error.value.__cause__ is None
+
+
+@pytest.mark.parametrize("server", [
+    "example。com。", "example．com．", "example｡com｡", "EXAMPLE。COM。",
+])
+def test_unicode_domain_separators_are_canonical(server):
+    from app.services.node_identity import fingerprints
+    assert fingerprints(dict(proxy(), server=server), source_id=None, key=KEY) == fingerprints(
+        dict(proxy(), server="example.com."), source_id=None, key=KEY)
+
+
+@pytest.mark.parametrize("server", [
+    "[example.com]", "example..com", "-example.com", "example-.com",
+    "example.com:443", "fe80::1%eth0", "example.com..",
+])
+def test_review_invalid_server_forms_remain_rejected(server):
+    from app.services.node_identity import canonical_material
+    with pytest.raises(ValueError, match="^catalog_material_invalid$"):
+        canonical_material(dict(proxy(), server=server))
+
+
+@pytest.mark.parametrize("server,expected", [
+    ("XN--FSQU00A.XN--0ZWM56D.", "xn--fsqu00a.xn--0zwm56d"),
+    ("例子。测试。", "xn--fsqu00a.xn--0zwm56d"),
+    ("192.0.2.1", "192.0.2.1"),
+])
+def test_valid_ace_unicode_and_ipv4_stay_canonical(server, expected):
+    from app.services.node_identity import fingerprints
+    assert fingerprints(dict(proxy(), server=server), source_id=4, key=KEY) == fingerprints(
+        dict(proxy(), server=expected), source_id=4, key=KEY)
+
+@pytest.mark.parametrize("header", ["Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"])
+def test_header_credential_rotation_preserves_identity_but_host_does_not(header):
+    from app.services.node_identity import fingerprints
+    value = dict(proxy(), **{"ws-opts": {"headers": {header: "example-token-a", "Host": "first.example"}}})
+    before = fingerprints(value, source_id=4, key=KEY)
+    rotated = copy.deepcopy(value)
+    rotated["ws-opts"]["headers"][header] = "example-token-b"
+    after = fingerprints(rotated, source_id=4, key=KEY)
+    assert before["identity_hmac"] == after["identity_hmac"]
+    assert before["material_hmac"] != after["material_hmac"]
+    changed_host = copy.deepcopy(value)
+    changed_host["ws-opts"]["headers"]["Host"] = "second.example"
+    assert before["identity_hmac"] != fingerprints(changed_host, source_id=4, key=KEY)["identity_hmac"]

@@ -35,10 +35,13 @@ def _server(value):
         return str(ipaddress.ip_address(host))
     except ValueError:
         pass
-    host = host.removesuffix('.').encode('idna').decode('ascii').lower()
+    host = host.encode('idna').decode('ascii').lower().removesuffix('.')
     if (len(host) > 253 or not host or
             any(not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
                 for label in host.split('.'))):
+        raise ValueError
+    # ASCII ACE 标签编码时会被直接放行，解码往返才能验证其 IDNA 语义。
+    if host.encode('ascii').decode('idna').encode('idna').decode('ascii') != host:
         raise ValueError
     return host
 
