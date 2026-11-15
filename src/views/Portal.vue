@@ -14,19 +14,20 @@
             class="pt-pin"
             type="password"
             inputmode="numeric"
-            pattern="\d{4}"
+            pattern="(?:\d{4}|\d{6})"
             maxlength="6"
             autocomplete="off"
             placeholder="····"
+            aria-label="门户 PIN"
             :disabled="locked"
             @input="onPinInput"
           >
-          <button type="submit" class="pt-pin-submit" :disabled="locked || pin.length < 4">
-            进入
+          <button type="submit" class="pt-pin-submit" :disabled="initializing || locked || gate.state.loading || !validPortalPin(pin)">
+            {{ gate.state.loading ? '验证中…' : '进入' }}
           </button>
         </form>
-        <p v-if="gateError" class="pt-gate-error">{{ gateError }}</p>
-        <p v-if="locked" class="pt-gate-error">已锁定，{{ lockRemain }} 秒后重试</p>
+        <p v-if="gateError" class="pt-gate-error" role="alert">{{ gateError }}</p>
+        <p v-if="locked" class="pt-gate-error" role="status">已锁定，{{ lockRemain }} 秒后重试</p>
         <button class="pt-gate-login" @click="goLogin">维护者登录</button>
       </div>
     </div>
@@ -101,8 +102,8 @@
                   <div class="pt-card-head">
                     <button
                       class="pt-card-name pt-card-name-btn"
-                      :disabled="!d.subscription_url"
-                      :title="d.subscription_url ? '查看配置源码' : '暂无可预览的订阅地址'"
+                      :disabled="!previewUrlFor(d)"
+                      :title="previewUrlFor(d) ? '查看配置源码' : '暂无可预览的订阅地址'"
                       @click="openPreview(d)"
                     >{{ cardTitle(d) }}</button>
                     <span class="pt-tag" :data-env="d.env">
@@ -130,7 +131,7 @@
                     >{{ v === '' ? '默认' : v }}</button>
                   </div>
                   <div
-                    v-if="d.subscription_url"
+                    v-if="urlFor(d)"
                     class="pt-card-url"
                     :title="urlFor(d) + '（点击复制）'"
                     @click="copy(urlFor(d), 'url-' + d.name)"
@@ -138,24 +139,24 @@
                   <div class="pt-card-actions">
                     <button
                       class="pt-btn primary"
-                      :disabled="!d.subscription_url"
+                      :disabled="!urlFor(d)"
                       @click="copy(urlFor(d), 'dev-' + d.name)"
                     >{{ copied === 'dev-' + d.name ? '已复制' : '复制地址' }}</button>
                     <a
-                      v-if="d.subscription_url"
+                      v-if="urlFor(d)"
                       class="pt-btn"
                       :href="urlFor(d)"
                       :download="downloadName(d)"
                       title="把当前方案的配置文件下载到本地"
                     >下载</a>
                     <a
-                      v-if="d.subscription_url"
+                      v-if="urlFor(d)"
                       class="pt-btn"
                       :href="installUrl(d)"
                     >一键导入</a>
                     <button
                       class="pt-btn"
-                      :disabled="!d.subscription_url"
+                      :disabled="!urlFor(d)"
                       @click="showQr(d)"
                     >二维码</button>
                   </div>
@@ -382,11 +383,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { api } from '../api'
 import { highlightYaml, lineGutter } from '../yamlHighlight'
+import { createPortalGate, portalDeviceResource, validPortalPin } from '../v2/portalGate'
 
 const GATE_TITLE = 'MagicPanel - 订阅配置服务中心'
 const CONTENT_TITLE = '订阅中心 · MagicPanel'
@@ -395,9 +397,11 @@ const router = useRouter()
 const PIN_KEY = 'mp-portal-pin'
 
 const pin = ref('')
-const data = ref(null)
+const gate = createPortalGate(sendPin)
+const data = computed(() => gate.state.data)
 const isMaintainer = ref(false)
-const gateError = ref('')
+const initializing = ref(true)
+const gateError = computed(() => gate.state.error?.message || '')
 const shaking = ref(false)
 const locked = ref(false)
 const lockRemain = ref(0)
@@ -422,6 +426,10 @@ const previewLines = ref(0)
 const previewSize = ref('')
 const previewRawUrl = ref('')
 let lockTimer = null
+let disposed = false
+let previewSequence = 0, previewController
+let qrSequence = 0, providerSequence = 0
+let authorizedPin = ''
 
 const CATEGORY_LABELS = {
   script: '脚本', rewrite: '复写', panel: '面板', dns: 'DNS', general: '通用',
@@ -616,21 +624,24 @@ function timeText(v) {
 
 // 原始内容不进首屏数据，点预览时再按需拉
 async function openProvider(p) {
+  const id = ++providerSequence
   providerDetail.value = { name: p.name, desc: p.desc, preview: '加载中…' }
   try {
     const resp = await fetch('/api/v1/portal/provider-detail', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: p.name, pin: pin.value }),
+      credentials: 'same-origin', cache: 'no-store',
+      body: JSON.stringify({ name: p.name, pin: authorizedPin }),
     })
     if (!resp.ok) throw new Error('拉取失败')
-    providerDetail.value = await resp.json()
+    const detail = await resp.json()
+    if (id === providerSequence) providerDetail.value = detail
   } catch {
-    providerDetail.value = { name: p.name, desc: p.desc, preview: '拉取失败，请刷新页面重试' }
+    if (id === providerSequence) providerDetail.value = { name: p.name, desc: p.desc, preview: '拉取失败，请刷新页面重试' }
   }
 }
 
-function closeProvider() { providerDetail.value = null }
+function closeProvider() { ++providerSequence; providerDetail.value = null }
 
 const snippetGroups = computed(() => {
   const groups = {}
@@ -713,15 +724,16 @@ const variantNotes = computed(() =>
   Object.fromEntries((data.value?.variants || []).map((v) => [v.name, v.note])))
 
 function deviceVariants(d) {
-  // 后端已按当前生效构建算好该设备真正能下载到的方案，默认方案排第一
-  return d.variants || []
+  return (d.variants || []).filter(name => typeof name === 'string')
 }
 
 function pickOf(d) {
-  return variantPick[d.name] ?? ''
+  const allowed = deviceVariants(d)
+  return allowed.includes(variantPick[d.name]) ? variantPick[d.name] : allowed[0]
 }
 
 function setPick(d, name) {
+  if (!deviceVariants(d).includes(name)) return
   variantPick[d.name] = name
 }
 
@@ -736,39 +748,34 @@ function variantTitle(name) {
   return variantNotes.value[name] || name
 }
 
-// 设备的订阅地址：选了自定义方案就带 ?variant=<方案名>
+const deviceResources = computed(() => new Map((data.value?.devices || []).map(d => [
+  d.name, portalDeviceResource(d, pickOf(d), data.value?.variants || []),
+])))
+
 function urlFor(d) {
-  if (!d.subscription_url) return ''
-  const pick = pickOf(d)
-  if (isDefaultPick(pick)) return d.subscription_url
-  return `${d.subscription_url}?variant=${encodeURIComponent(pick)}`
+  return deviceResources.value.get(d.name)?.url || ''
 }
 
 // 「下载」保存到本地的文件名：设备名[@方案].yaml
 function downloadName(d) {
-  const pick = pickOf(d)
-  const suffix = isDefaultPick(pick) ? '' : `@${pick}`
-  return `${d.name}${suffix}.yaml`
+  return deviceResources.value.get(d.name)?.downloadName || ''
 }
 
-// 预览地址是相对路径且已带 ?preview=1，追加方案参数用 &
 function previewUrlFor(d) {
-  if (!d.preview_url) return ''
-  const pick = pickOf(d)
-  if (!pick) return d.preview_url
-  return `${d.preview_url}&variant=${encodeURIComponent(pick)}`
+  return deviceResources.value.get(d.name)?.previewUrl || ''
 }
 
 // Stash 与 Mihomo/Clash 均支持 install-config URL Scheme 一键导入
 function installUrl(d) {
-  const scheme = d.engine === 'stash' ? 'stash' : 'clash'
-  return `${scheme}://install-config?url=${encodeURIComponent(urlFor(d))}`
+  return deviceResources.value.get(d.name)?.installUrl || ''
 }
 
 async function showQr(d) {
+  const id = ++qrSequence
+  const url = urlFor(d)
+  if (!url) return
   qrDevice.value = (d.display_name || d.name)
     + (pickOf(d) ? `（${pickOf(d)}）` : '')
-  const url = urlFor(d)
   qrText.value = url
   if (qrCache.has(url)) {
     qrUrl.value = qrCache.get(url)
@@ -776,15 +783,17 @@ async function showQr(d) {
   }
   try {
     const qr = await QRCode.toDataURL(url, { width: 440, margin: 1 })
+    if (id !== qrSequence) return
     qrCache.set(url, qr)
     qrUrl.value = qr
   } catch {
+    if (id !== qrSequence) return
     qrDevice.value = '二维码生成失败'
     qrText.value = ''
   }
 }
 
-function closeQr() { qrUrl.value = ''; qrText.value = ''; qrDevice.value = '' }
+function closeQr() { ++qrSequence; qrUrl.value = ''; qrText.value = ''; qrDevice.value = '' }
 
 // 点设备标题看配置源码。
 // 走 ?preview=1 的同一个 feed 地址：内容与客户端下发的完全一致，
@@ -792,6 +801,9 @@ function closeQr() { qrUrl.value = ''; qrText.value = ''; qrDevice.value = '' }
 async function openPreview(d) {
   const url = previewUrlFor(d)
   if (!url) return
+  const id = ++previewSequence
+  previewController?.abort()
+  previewController = new AbortController()
   previewDevice.value = d
   previewText.value = ''
   previewHtml.value = ''
@@ -802,9 +814,10 @@ async function openPreview(d) {
   previewState.value = 'loading'
   previewRawUrl.value = url
   try {
-    const resp = await fetch(url, { credentials: 'same-origin' })
+    const resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: previewController.signal })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const text = await resp.text()
+    if (id !== previewSequence) return
     previewText.value = text
     const lines = text.split('\n')
     previewLines.value = lines.length
@@ -813,6 +826,7 @@ async function openPreview(d) {
     previewHtml.value = highlightYaml(text)
     previewState.value = 'ready'
   } catch (e) {
+    if (id !== previewSequence || e.name === 'AbortError') return
     // 预览走相对路径，正常情况下不会跨源；TypeError 基本只有网断/
     // 服务不可达两种可能，给一句能自查的提示，比光秃秃的 Failed to fetch 有用。
     const msg = String(e && e.message ? e.message : e)
@@ -824,71 +838,89 @@ async function openPreview(d) {
 }
 
 function closePreview() {
+  ++previewSequence
+  previewController?.abort()
   previewDevice.value = null
   previewState.value = ''
+  previewText.value = ''; previewHtml.value = ''; previewGutter.value = ''; previewRawUrl.value = ''
 }
 
 function startLockCountdown(seconds) {
+  const until = Date.now() + seconds * 1000
   locked.value = true
   lockRemain.value = seconds
   clearInterval(lockTimer)
   lockTimer = setInterval(() => {
-    lockRemain.value -= 1
+    lockRemain.value = Math.max(0, Math.ceil((until - Date.now()) / 1000))
     if (lockRemain.value <= 0) { locked.value = false; clearInterval(lockTimer) }
   }, 1000)
 }
 
-async function fetchData() {
-  gateError.value = ''
+// 门户401停在门禁，不能经过管理API的自动登录跳转。
+async function sendPin(submittedPin) {
+  let resp
   try {
-    const resp = await fetch('/api/v1/portal/data', {
-      method: 'POST',
+    resp = await fetch('/api/v1/portal/data', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: pin.value }),
+      body: JSON.stringify({ pin: submittedPin }),
     })
-    // 未登录且未提供 PIN：停留在门禁页，不提示错误
-    if (resp.status === 401) {
-      pin.value = ''
-      return
+  } catch { throw new Error('网络异常，请稍后重试') }
+  const body = await resp.json().catch(() => ({}))
+  if (resp.ok) return body
+  let message = typeof body.detail === 'string' ? body.detail : body.detail?.message
+  if (resp.status === 404) message = 'Magic Panel 首页未启用，请联系维护者在后台设置 PIN'
+  const error = new Error(message || (resp.status === 429 ? '暂时限流，请稍后重试' : '加载失败，请重试'))
+  error.status = resp.status
+  if (resp.status === 429) {
+    const header = resp.headers.get('Retry-After')?.trim()
+    const seconds = /^\d+$/.test(header || '') ? Number(header)
+      : header ? Math.ceil((Date.parse(header) - Date.now()) / 1000) : NaN
+    if (Number.isFinite(seconds) && seconds > 0) error.retryAfter = seconds
+  }
+  throw error
+}
+
+async function fetchData(submittedPin, canSkipPin = false) {
+  try {
+    const result = await gate.submit(submittedPin, { canSkipPin })
+    if (!result) return
+    authorizedPin = submittedPin
+    if (submittedPin) {
+      try { sessionStorage.setItem(PIN_KEY, submittedPin) } catch { /* 存储不可用仍可查看 */ }
     }
-    if (resp.status === 404) {
-      gateError.value = 'Magic Panel 首页未启用，请联系维护者在后台设置 PIN'
-      return
-    }
-    if (resp.status === 429) {
-      startLockCountdown(600)
-      return
-    }
-    const body = await resp.json().catch(() => ({}))
-    if (!resp.ok) {
-      gateError.value = body.detail === 'PIN 不正确' ? 'PIN 不正确' : (body.detail || '加载失败')
-      shaking.value = true
-      setTimeout(() => { shaking.value = false }, 500)
-      pin.value = ''
-      return
-    }
-    if (pin.value) sessionStorage.setItem(PIN_KEY, pin.value)
-    data.value = body
     document.title = CONTENT_TITLE
-  } catch {
-    gateError.value = '网络异常，请稍后重试'
+  } catch (error) {
+    if (gate.state.error !== error) return
+    if (error.retryAfter) startLockCountdown(error.retryAfter)
+    if (submittedPin) {
+      try { sessionStorage.removeItem(PIN_KEY) } catch { /* 存储不可用 */ }
+    }
+    shaking.value = true
+    setTimeout(() => { if (!disposed) shaking.value = false }, 500)
   }
 }
 
 function submitPin() {
-  if (pin.value.length >= 4) fetchData()
+  if (!initializing.value && !locked.value && !gate.state.loading && validPortalPin(pin.value)) {
+    return fetchData(pin.value)
+  }
 }
 
 function onPinInput() {
   pin.value = pin.value.replace(/\D/g, '').slice(0, 6)
-  // 4 位是当前规范；历史 6 位 PIN 仍然允许输入（散列照旧校验）
-  if (pin.value.length === 4 || pin.value.length === 6) fetchData()
 }
 
 function exitPortal() {
-  sessionStorage.removeItem(PIN_KEY)
-  data.value = null
+  try { sessionStorage.removeItem(PIN_KEY) } catch { /* 存储不可用 */ }
+  gate.reset()
+  authorizedPin = ''
   pin.value = ''
+  closeQr(); closeProvider(); closePreview()
+  qrCache.clear()
+  Object.keys(variantPick).forEach(key => delete variantPick[key])
+  clearInterval(lockTimer)
+  locked.value = false
   document.title = GATE_TITLE
   nextTick(() => pinInput.value?.focus())
 }
@@ -897,22 +929,34 @@ function goLogin() { router.push('/admin/login') }
 function goAdmin() { router.push('/admin') }
 
 onMounted(async () => {
-  // 已登录的维护者免 PIN 直接进入
   try {
-    await api('/api/v1/auth/me')
-    isMaintainer.value = true
+    const me = await api('/api/v1/auth/me')
+    if (disposed) return
+    isMaintainer.value = Array.isArray(me.capabilities) && me.capabilities.includes('reveal')
   } catch { /* 未登录 */ }
+  if (disposed) return
   if (isMaintainer.value) {
-    await fetchData()
+    await fetchData('', true)
   } else {
-    const saved = sessionStorage.getItem(PIN_KEY)
-    if (saved && /^\d{4}$/.test(saved)) {
+    let saved
+    try { saved = sessionStorage.getItem(PIN_KEY) } catch { /* 存储不可用 */ }
+    if (validPortalPin(saved) && !pin.value) {
       pin.value = saved
-      await fetchData()
-      if (!data.value) pin.value = ''
+      await fetchData(saved)
     }
   }
+  if (disposed) return
+  initializing.value = false
   if (!data.value) nextTick(() => pinInput.value?.focus())
+})
+
+onUnmounted(() => {
+  disposed = true
+  gate.reset()
+  clearInterval(lockTimer)
+  closeQr(); closeProvider(); closePreview()
+  authorizedPin = ''
+  qrCache.clear()
 })
 </script>
 
@@ -1561,7 +1605,7 @@ onMounted(async () => {
 .pt-modal-card img { width: 220px; height: 220px; border-radius: 10px; background: #fff; }
 .pt-modal-card .pt-btn { margin-top: 6px; }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .pt-hero h1.pt-hero-title { font-size: 15px; letter-spacing: 1px; }
   .pt-hero-top { gap: 8px; }
   .pt-hero-sub { font-size: 12px; }
@@ -1576,8 +1620,6 @@ onMounted(async () => {
   .pt-main { padding: 0 14px 44px; }
   .pt-hero-inner { padding: 0 14px; }
 }
-</style>
-
 /* PIN 输入：form 布局，按钮跟输入框并排 */
 .pt-pin-form {
   display: flex;
@@ -1598,3 +1640,4 @@ onMounted(async () => {
   cursor: pointer;
 }
 .pt-pin-submit:disabled { opacity: .5; cursor: not-allowed; }
+</style>

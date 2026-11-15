@@ -92,6 +92,23 @@ def test_portal_pin_bound_to_user(client):
     assert client.post("/api/v1/portal/data", json={"pin": "1111"}).status_code == 200
 
 
+def test_portal_lock_retry_after_tracks_remaining_seconds(client, monkeypatch):
+    from app.routers import portal
+
+    setup_admin(client)
+    _anonymous(client)
+    now = [1000.0]
+    monkeypatch.setattr(portal.time, "time", lambda: now[0])
+    portal._attempts["testclient"] = [5, 1003.2]
+    first = client.post("/api/v1/portal/data", json={"pin": "1234"})
+    assert first.status_code == 429
+    assert first.headers.get("Retry-After") == "4"
+    now[0] = 1002.3
+    second = client.post("/api/v1/portal/data", json={"pin": "1234"})
+    assert second.status_code == 429
+    assert second.headers.get("Retry-After") == "1"
+
+
 def test_portal_data_content(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)

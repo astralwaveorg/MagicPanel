@@ -6,6 +6,7 @@ PIN 统一为 4 位数字，只保存散列；验证有简单的失败锁定（�
 import hashlib
 import hmac
 import json
+import math
 import secrets
 import re
 import time
@@ -141,8 +142,10 @@ def _session_user(conn, request: Request):
 def _check_pin(conn, request: Request, pin: str) -> None:
     ip = _client_ip(request)
     fails, locked_until = _attempts.get(ip, [0, 0])
-    if locked_until > time.time():
-        raise HTTPException(429, "尝试次数过多，请 10 分钟后再试")
+    now = time.time()
+    if locked_until > now:
+        raise HTTPException(429, "尝试次数过多，请稍后再试",
+                            headers={"Retry-After": str(math.ceil(locked_until - now))})
     hashes = [r["portal_pin_hash"] for r in db.all_(
         conn, "SELECT portal_pin_hash FROM users WHERE role='admin' AND portal_pin_hash != ''")]
     if not hashes:

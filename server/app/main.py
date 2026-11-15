@@ -143,7 +143,7 @@ def create_app() -> FastAPI:
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         # 结构化错误体（如"仍被引用"的引用明细）原样透出，前端据此弹二次确认
         detail = exc.detail if isinstance(exc.detail, (str, dict, list)) else "请求失败"
-        return JSONResponse({"detail": detail}, status_code=exc.status_code)
+        return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=exc.headers)
 
     static = config.STATIC_DIR
     index = static / "index.html"
