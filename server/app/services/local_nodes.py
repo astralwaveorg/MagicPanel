@@ -299,6 +299,8 @@ def normalize_params(protocol: str, params: dict) -> dict:
                 raise ValueError(f"{field['label']}不能为空")
             continue
         value = params[key]
+        if isinstance(value, (dict, list)):
+            raise ValueError("协议参数类型无效")
         if field["type"] == "switch":
             normalized[key] = bool(value)
         elif field["type"] == "bandwidth":

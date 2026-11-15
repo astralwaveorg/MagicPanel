@@ -150,3 +150,81 @@ def test_validation_error_nested_body_does_not_echo_input(client):
     for error in response.json()['detail']:
         assert set(error) == {'loc', 'type', 'msg'}
         assert error['msg']
+
+import pytest
+
+@pytest.mark.parametrize('entry', ['params', 'secret_set', 'public_params'])
+@pytest.mark.parametrize('value', [{'password': 'example-test-password'}, ['example-test-password']])
+def test_nested_public_field_rejected_across_entrypoints(client, entry, value):
+    from app import db
+    h = admin(client)
+    node = make_local(client, h)
+    base = {'name': 'nested-new', 'protocol': 'trojan', 'server': 'node.example.com', 'port': 443,
+            'params': {'password': 'safe-test-material'}, entry: {'sni': value}}
+    if entry == 'params':
+        base[entry]['password'] = 'safe-test-material'
+    response = client.post('/api/v1/local-nodes', headers=h, json=base)
+    assert response.status_code == 400
+    assert_no_secrets(response.json())
+    base['name'] = node['name']
+    response = client.put(f"/api/v1/local-nodes/{node['id']}", headers=h, json=base)
+    assert response.status_code == 400
+    assert_no_secrets(response.json())
+    reveal = client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h)
+    assert reveal.json()['protocol'] == 'ss'
+    assert reveal.json()['params']['password'] == 'example-test-password'
+    with db.tx() as conn:
+        conn.execute("UPDATE users SET role='operator' WHERE username='admin'")
+    response = client.get('/api/v1/local-nodes', headers=h)
+    assert response.status_code == 200
+    assert_no_secrets(response.json())
+    assert len(response.json()) == 1
+
+
+@pytest.mark.parametrize('method', ['post', 'put'])
+def test_unknown_top_level_fields_rejected(client, method):
+    h = admin(client)
+    node = make_local(client, h)
+    body = {'name': 'unknown-new', 'protocol': 'ss', 'server': 'node.example.com', 'port': 443,
+            'params': {'password': 'safe-test-material'}, 'secret_claer': ['example-test-password']}
+    path = '/api/v1/local-nodes' + (f"/{node['id']}" if method == 'put' else '')
+    response = getattr(client, method)(path, headers=h, json=body)
+    assert response.status_code == 400
+    assert_no_secrets(response.json())
+
+@pytest.mark.parametrize('entry', ['params', 'secret_set', 'public_params'])
+def test_same_protocol_update_keeps_safe_scalar_after_rejected_nested_patch(client, entry):
+    from app import db
+    h = admin(client)
+    body = {'name': 'scalar-safe', 'protocol': 'trojan', 'server': 'node.example.com', 'port': 443,
+            'params': {'password': 'example-test-password', 'sni': 'tls.example.com'}}
+    created = client.post('/api/v1/local-nodes', headers=h, json=body)
+    assert created.status_code == 201
+    assert_no_secrets(created.json())
+    node = created.json()
+    body.pop('params')
+    body[entry] = {'sni': {'password': 'example-test-password'}}
+    response = client.put(f"/api/v1/local-nodes/{node['id']}", headers=h, json=body)
+    assert response.status_code == 400
+    assert_no_secrets(response.json())
+    revealed = client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h)
+    assert revealed.status_code == 200
+    assert revealed.json()['params']['sni'] == 'tls.example.com'
+    assert revealed.json()['params']['password'] == 'example-test-password'
+    with db.tx() as conn:
+        conn.execute("UPDATE users SET role='operator' WHERE username='admin'")
+    rows = client.get('/api/v1/local-nodes', headers=h)
+    assert rows.status_code == 200
+    assert_no_secrets(rows.json())
+    assert rows.json()[0]['public_params']['sni'] == 'tls.example.com'
+
+@pytest.mark.parametrize('key', ['Authorization', 'Proxy-Authorization', 'COOKIE', 'Set_Cookie'])
+def test_auth_header_keys_share_single_secret_schema(client, key):
+    from app.schemas.nodes import is_secret_key, contains_secret, split_parameters
+    assert is_secret_key(key)
+    assert contains_secret({'headers': {key: 'example-test-password'}})
+    public, secrets = split_parameters('custom', {'headers': {key: 'example-test-password', 'Host': 'node.example.com', 'User-Agent': 'fixture'}})
+    assert public == {}
+    assert secrets['headers'][key] == 'example-test-password'
+    assert not is_secret_key('Host')
+    assert not is_secret_key('User-Agent')

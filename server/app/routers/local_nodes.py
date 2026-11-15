@@ -2,7 +2,7 @@
 import json
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from .. import db, security
 from ..deps import CurrentUser, RequireCapabilities
@@ -13,6 +13,7 @@ from ..services import tester
 router = APIRouter(prefix="/api/v1/local-nodes", tags=["local-nodes"])
 
 class LocalNodeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=64)
     node_type: str = Field(default=local_nodes.DEFAULT_NODE_TYPE, max_length=16)
     protocol: str = Field(min_length=1, max_length=32)

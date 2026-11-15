@@ -154,7 +154,8 @@ def create_app() -> FastAPI:
                    'type': error.get('type', 'value_error'),
                    'msg': messages.get(error.get('type'), '字段值无效')}
                   for error in exc.errors()]
-        return JSONResponse({'detail': detail}, status_code=422)
+        node_unknown = request.url.path.startswith('/api/v1/local-nodes') and any(error.get('type') == 'extra_forbidden' for error in exc.errors())
+        return JSONResponse({'detail': detail}, status_code=400 if node_unknown else 422)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):

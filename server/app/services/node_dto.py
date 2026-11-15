@@ -3,7 +3,7 @@ from copy import deepcopy
 import json
 
 from .. import security
-from ..schemas.nodes import split_parameters, parameter_fields
+from ..schemas.nodes import split_parameters, parameter_fields, public_parameter_fields
 
 PATCH_FIELDS = {'public_params', 'secret_set', 'secret_clear', 'extra_yaml', 'clear_extra_yaml'}
 
@@ -69,5 +69,5 @@ def validate_patch(protocol: str, patch: dict) -> None:
     public, secret = split_parameters(protocol, patch.get('public_params', {}))
     if secret:
         raise ValueError('秘密参数必须使用 secret_set')
-    if split_parameters(protocol, patch.get('secret_set', {}))[0]:
+    if public_parameter_fields(protocol) & (set(patch.get('secret_set', {})) | set(patch.get('secret_clear', []))):
         raise ValueError('公开参数必须使用 public_params')
