@@ -24,9 +24,10 @@ DoH 与 18443 入口降级为可选，不再是 Router Final 必备。单一公�
 作唯一前提；须杭州电信/中国移动分别实测。两 A 记录可休眠，但不得进入当前
 候选配置。详见家庭网络运行契约 §4.0。
 
-**2026-11-16 Router 安全准备**：R6S 基线备份在路由器 `/root/mp-final-prep/20261116T151500/`，
-候选构建 #261 已放在 `/etc/openclash/candidates/mp261/` 并通过当前核心 `-t`；
-live 仍是旧 selfbuilt 配置，禁止无窗口切换。WireGuard peer 清单已持久修正。
+**2026-11-16 Router 当前态**：R6S 基线备份在路由器 `/root/mp-final-prep/20261116T151500/`；
+live 已切 `MagicPanel-默认.yaml`，OpenClash 进程使用官方 Mihomo `v1.19.34`，
+Smart 已关闭，宽泛 CN-IP 提前旁路已关闭，IPv6 LAN→WAN 已阻断，
+`find-process-mode=strict`。当前 NAS 生产构建 #262。WireGuard peer 清单已持久修正。
 HK/KR DNS 入口与生产化外部 guard 仍阻塞 Router DNS/Gateway Final；不要用公共 DoH 或
 旧 watchdog 冒充已验收。详情见 2026-11-16 运行手册 2C。
 

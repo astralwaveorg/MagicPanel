@@ -44,53 +44,6 @@
 6. WireGuard、SQM、AdGuard Home、OpenClash 最终切换仍属 Router Final。本轮不重启 OpenClash、不刷新订阅、不改 WAN/LAN/PPPoE/DNS 转发。
 7. 住宅 IP 当前不存在，探测授权为零。未来添加住宅资源时必须单独登记用途、硬配额和预算，不能默认进入通配检测。
 
-## 2D. 2026-11-16 DNS 方案修订
-
-用户已创建 `dns-hk.magichub.top` / `dns-kr.magichub.top` A 记录，但这两项不再作为 Router Final 必备。修订原因：自有 VPS 会把续费、单机、单域封锁和单地域故障引入家庭 DNS 关键路径；公共多源 DoH/DoT 是更合理的默认方向，但必须多运营方并用并分别实测，不能单一公共服务商。
-
-当前结论：
-
-- HK/KR 18443 部署暂停；两 A 记录可休眠，不进入 R6S 候选配置。
-- Router Final 不再因 HK/KR DNS 未部署而阻塞。
-- 仍要求 DNS 不依赖 Mihomo 业务核心；海外解析源使用多公共端点健康检查与降级。
-- 旧契约 §4 如与本节冲突，以 §4.0 修订为准。
-
-## 2C. 2026-11-16 路由器安全准备与构建 261 回执
-
-- R6S 基线备份：`/root/mp-final-prep/20261116T151500/router-baseline.tar.gz`，26.4 MiB，SHA256 `c1d467b7438cd551fc787b7bee0c624911066261b31860f1f67855abe065668e`。
-- 已持久修正 WireGuard peer 清单为 `client_phone client_macbook`；运行中两个 peer 均存在。这是配置一致性修复，不改默认路由。
-- 已发现并修正默认组只改 `proxies` 投影的问题；现在通过 `node_refs.canonical_group()` 固化 `members_v2` 类型化引用。构建 #260 是错误中间态，已被 #261 替换。
-- 生产构建 #261：production release revision `4`。
-- 语义校验通过：
-  - Google/AI：美国 NTT 自动 -> 美国机房 -> 美国自动 -> 新加坡自动 -> 日本机房 -> 日本自动 -> 空组保护；
-  - TikTok：日本自动 -> 新加坡自动 -> 美国 NTT 自动 -> 区域/默认代理；
-  - 开发/社交：美国 NTT 落地优先，再机房/区域/默认；
-  - 日本组不含美国 NTT 落地。
-- Mihomo 已移除废弃的 `global-client-fingerprint`；节点级 `client-fingerprint` 保留。生产镜像 `sha256:8269d734974d6fabb7af60df29e2cc75ad8037cda54a3ba79d92ba41f8125c78`。
-- R6S 候选包：`/etc/openclash/candidates/mp261/OpenClash-Mihomo.yaml`，SHA256 `845a3d1d7f98ca62308fef24b04426a02a126bdc4b81250bf0b4b419332bca6c`，110 个规则缓存已随包，当前核心 `-t` 通过。
-- 当前 OpenClash live 仍是旧 `MagicPanel-自建美日.yaml`，未切换；符合冻结要求。
-- 策略快照：`2026-11-16-post-typed-groups.json`，digest `efcd038e013db7b8`。
-- HK/KR DNS：`dns-hk.magichub.top` / `dns-kr.magichub.top` 仍无 A 记录；18443 未部署。因此仍阻塞 Router DNS Final，不能用公共 DoH 冒充可信控制面。
-- 生产化 gateway/dns guard 未安装；仓库脚本当前仅限离线 namespace，不能直接上生产。外部守护生产 inventory 封包仍待完成。
-
-## 2B. 2026-11-16 方案收敛与构建 259 回执
-
-- 变更前策略快照：`2026-11-16-pre-unified-variant.json`，digest `2d5e8a6c1605278a`
-- 变更后策略快照：`2026-11-16-post-unified-variant.json`，digest `8c0d908e882f0afe`
-- 生产镜像：`sha256:edcd4100daf247b9d641c685bbbc85dfbdf5224fa0346e914d7b571a30d45aee`
-- 新生产构建：#259；生产 release revision `2`，testing revision `1`
-- `自建美日` 已停用；新构建 18 个产物，没有 `@自建美日` artifact
-- 默认组修正：
-  - Google/AI：US(NTT/机房/自动) -> SG -> JP；
-  - TikTok：JP -> SG -> US NTT -> 区域/默认；
-  - 开发/社交：NTT/机房优先，再默认代理；
-  - 日本组移除美国 NTT 干扰成员；
-  - 普通代理继续保留机场与自建容量。
-- 数据自检通过。
-- 旧订阅验证：无参数与 `?variant=自建美日` 均返回 200；正文 SHA 前 12 位同为
-  `5267fdc9e1e3`；旧链接响应头 `X-MagicPanel-Variant-Fallback: default`。
-- 第一次收敛尝试在嵌套写锁处回滚；脚本已拆分策略事务和构建/发布事务后重跑成功。
-
 ## 2A. 2026-11-16 NAS 部署回执
 
 - 部署前生产镜像：`sha256:1a02658dbea6a3944b2295df3592158f5f184b20c04703f19cb072a3f7c5646c`
@@ -211,3 +164,98 @@ python -X utf8 scripts/freeze_feed_contract.py arm --root <private-dir> --expect
 - 真实主用设备恢复能力验证，而不是仅 NAS shadow 结果。
 - R6S 最终切换后 48 小时观察通过，期间国内服务、Google 档位、GitHub/TikTok/流媒体和国内冷启动均有证据。
 - 已知限制、预算、规则过期、探测覆盖、未验证设备在 UI 和交付报告中可见。
+
+## 2B. 2026-11-16 方案收敛与构建 259 回执
+
+- 变更前策略快照：`2026-11-16-pre-unified-variant.json`，digest `2d5e8a6c1605278a`
+- 变更后策略快照：`2026-11-16-post-unified-variant.json`，digest `8c0d908e882f0afe`
+- 生产镜像：`sha256:edcd4100daf247b9d641c685bbbc85dfbdf5224fa0346e914d7b571a30d45aee`
+- 新生产构建：#259；生产 release revision `2`，testing revision `1`
+- `自建美日` 已停用；新构建 18 个产物，没有 `@自建美日` artifact
+- 默认组修正：
+  - Google/AI：US(NTT/机房/自动) -> SG -> JP；
+  - TikTok：JP -> SG -> US NTT -> 区域/默认；
+  - 开发/社交：NTT/机房优先，再默认代理；
+  - 日本组移除美国 NTT 干扰成员；
+  - 普通代理继续保留机场与自建容量。
+- 数据自检通过。
+- 旧订阅验证：无参数与 `?variant=自建美日` 均返回 200；正文 SHA 前 12 位同为
+  `5267fdc9e1e3`；旧链接响应头 `X-MagicPanel-Variant-Fallback: default`。
+- 第一次收敛尝试在嵌套写锁处回滚；脚本已拆分策略事务和构建/发布事务后重跑成功。
+
+## 2C. 2026-11-16 路由器安全准备与构建 261 回执
+
+- R6S 基线备份：`/root/mp-final-prep/20261116T151500/router-baseline.tar.gz`，26.4 MiB，SHA256 `c1d467b7438cd551fc787b7bee0c624911066261b31860f1f67855abe065668e`。
+- 已持久修正 WireGuard peer 清单为 `client_phone client_macbook`；运行中两个 peer 均存在。这是配置一致性修复，不改默认路由。
+- 已发现并修正默认组只改 `proxies` 投影的问题；现在通过 `node_refs.canonical_group()` 固化 `members_v2` 类型化引用。构建 #260 是错误中间态，已被 #261 替换。
+- 生产构建 #261：production release revision `4`。
+- 语义校验通过：
+  - Google/AI：美国 NTT 自动 -> 美国机房 -> 美国自动 -> 新加坡自动 -> 日本机房 -> 日本自动 -> 空组保护；
+  - TikTok：日本自动 -> 新加坡自动 -> 美国 NTT 自动 -> 区域/默认代理；
+  - 开发/社交：美国 NTT 落地优先，再机房/区域/默认；
+  - 日本组不含美国 NTT 落地。
+- Mihomo 已移除废弃的 `global-client-fingerprint`；节点级 `client-fingerprint` 保留。生产镜像 `sha256:8269d734974d6fabb7af60df29e2cc75ad8037cda54a3ba79d92ba41f8125c78`。
+- R6S 候选包：`/etc/openclash/candidates/mp261/OpenClash-Mihomo.yaml`，SHA256 `845a3d1d7f98ca62308fef24b04426a02a126bdc4b81250bf0b4b419332bca6c`，110 个规则缓存已随包，当前核心 `-t` 通过。
+- 当前 OpenClash live 仍是旧 `MagicPanel-自建美日.yaml`，未切换；符合冻结要求。
+- 策略快照：`2026-11-16-post-typed-groups.json`，digest `efcd038e013db7b8`。
+- HK/KR DNS：`dns-hk.magichub.top` / `dns-kr.magichub.top` 仍无 A 记录；18443 未部署。因此仍阻塞 Router DNS Final，不能用公共 DoH 冒充可信控制面。
+- 生产化 gateway/dns guard 未安装；仓库脚本当前仅限离线 namespace，不能直接上生产。外部守护生产 inventory 封包仍待完成。
+
+## 2D. 2026-11-16 DNS 方案修订
+
+用户已创建 `dns-hk.magichub.top` / `dns-kr.magichub.top` A 记录，但这两项不再作为 Router Final 必备。修订原因：自有 VPS 会把续费、单机、单域封锁和单地域故障引入家庭 DNS 关键路径；公共多源 DoH/DoT 是更合理的默认方向，但必须多运营方并用并分别实测，不能单一公共服务商。
+
+当前结论：
+
+- HK/KR 18443 部署暂停；两 A 记录可休眠，不进入 R6S 候选配置。
+- Router Final 不再因 HK/KR DNS 未部署而阻塞。
+- 仍要求 DNS 不依赖 Mihomo 业务核心；海外解析源使用多公共端点健康检查与降级。
+- 旧契约 §4 如与本节冲突，以 §4.0 修订为准。
+
+## 2E. 2026-11-16 路由器配置修复与构建 262 切换回执
+
+用户已在 OpenClash 切换 `MagicPanel-默认.yaml` 后，做了只读体检并完成以下受控修复：
+
+1. **Smart 内核关闭**
+   - 旧 Smart 内核 `alpha-smart-gc4df732` 已备份；
+   - 安装官方稳定 Mihomo `v1.19.34 linux-arm64`；
+   - release digest `sha256:daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f`；
+   - `smart_enable=0`、`core_type=Meta`；
+   - 当前进程稳定运行 `Mihomo Meta v1.19.34`。
+
+2. **关闭宽泛 CN-IP 提前旁路**
+   - `china_ip_route=0`；
+   - nft 不再把大段中国大陆 IP 提前 return；
+   - 由 #262 规则集中 `cn` / `cn-ip` / 明确直连规则处理；
+   - 百度、京东、淘宝、B站、Google 204、YouTube 204、GitHub 复测通过。
+
+3. **修复规则缓存陈旧**
+   - 旧路由器缓存曾含 Mihomo 不接受的 `PROCESS-NAME,qbittorrent*`；
+   - MagicPanel feed 内容本身已是正确 `PROCESS-NAME,qbittorrent`；
+   - 已刷新 `magic-process` provider，路由器缓存不再有非法通配。
+
+4. **修正 `find-process-mode`**
+   - MagicPanel 引擎默认是 `strict`，但 Mihomo/Linux 平台层覆盖为 `off`；
+   - 已改为 `strict`，策略快照已导出；
+   - 生产构建 #262 已发布。
+
+5. **阻断 IPv6 泄漏**
+   - 旧状态：LAN RA 开启、LAN→WAN IPv6 可直连，会绕过当前 IPv4-only Mihomo；
+   - 已关闭 LAN RA/DHCPv6；
+   - 新增防火墙规则 `Block-IPv6-LAN-WAN`，IPv6 全协议 DROP；
+   - IPv6 出站测试失败符合预期，IPv4 业务正常。
+
+6. **当前生产/路由状态**
+   - NAS production build #262，verify success；
+   - production revision 5，testing revision 4；
+   - R6S live 配置：`/etc/openclash/config/MagicPanel-默认.yaml`；
+   - 路由器 source SHA256：`579fe26e63aa373131e18f0a43c18c9472278312544d30ec9c68f4d06f00fbc3`；
+   - 运行态由 OpenClash 合成，所以哈希不同属预期；
+   - 进程 PID 19919，`Mihomo Meta v1.19.34`；
+   - 当前策略快照 digest：`0458d5979f04eb00`。
+
+7. **仍保留为分阶段项**
+   - UDP 代理仍关闭，避免一次开启 IPv6/UDP/TPROXY 引入不可控风险；
+   - IPv6 仍阻断，待 UDP/IPv6 分阶段验收后再开；
+   - external gateway/dns guard 尚未生产化；
+   - NAS 上 BT 直连超时/拒绝是日志噪音，属于 P2P peers 正常不可达，不代表家庭业务故障。
