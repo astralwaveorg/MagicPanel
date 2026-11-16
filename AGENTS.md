@@ -24,6 +24,13 @@ DoH 与 18443 入口降级为可选，不再是 Router Final 必备。单一公�
 作唯一前提；须杭州电信/中国移动分别实测。两 A 记录可休眠，但不得进入当前
 候选配置。详见家庭网络运行契约 §4.0。
 
+**2026-11-16 Router 核心锁定与密钥轮换**：稳定 Mihomo `v1.19.34` 已由
+`restore-stable-core.sh` 每分钟校验；若被 Smart/alpha 覆盖会自动恢复并重启。
+面板 controller secret 和代理 auth password 已轮换，新值只保存在 R6S
+`/root/mp-final-prep/20261116T151500/` 私密文件中，不写入仓库/日志/回复。
+Mihomo WARNING 若来自 NAS BT peer 连接拒绝/超时，属于 P2P 正常失败，
+不代表 Google/AI/国内业务故障。
+
 **2026-11-16 Router 当前态**：R6S 基线备份在路由器 `/root/mp-final-prep/20261116T151500/`；
 live 已切 `MagicPanel-默认.yaml`，OpenClash 进程使用官方 Mihomo `v1.19.34`，
 Smart 已关闭，宽泛 CN-IP 提前旁路已关闭，IPv6 LAN→WAN 已阻断，

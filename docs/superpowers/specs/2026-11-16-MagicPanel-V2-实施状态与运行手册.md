@@ -259,3 +259,19 @@ python -X utf8 scripts/freeze_feed_contract.py arm --root <private-dir> --expect
    - IPv6 仍阻断，待 UDP/IPv6 分阶段验收后再开；
    - external gateway/dns guard 尚未生产化；
    - NAS 上 BT 直连超时/拒绝是日志噪音，属于 P2P peers 正常不可达，不代表家庭业务故障。
+
+## 2F. 2026-11-16 核心锁定、密钥轮换与 WARNING 结论
+
+用户手动把 OpenClash 核心切回 Smart alpha 以消除首页更新提示；这会使关键路由回到未验收内核。已恢复官方稳定 Mihomo `v1.19.34`，并增加每分钟核心锁定守护：
+
+- R6S 私密守护：`/root/mp-final-prep/20261116T151500/restore-stable-core.sh`；
+- 稳定核心备份：`/root/mp-final-prep/20261116T151500/mihomo-stable`；
+- 期望 SHA256：`022da41e03ce70641a2f50c485b4f69ade8f1c7aeeece2cf1ec45c614a029441`；
+- 若核心被覆盖，自动恢复并重启 OpenClash；
+- crontab 标记：`magicpanel-core-lock`。
+
+同时，截图中的 dashboard URL 包含 controller secret，已轮换 controller secret 和 proxy auth password；新值只保存在 R6S 私密文件，不进入仓库、日志或回复。旧 dashboard 链接不再可用，应从 LuCI/OpenClash 页面重新打开面板。
+
+Mihomo 日志中的大量 WARNING 形如 `dial DIRECT (match RuleSet/cn-ip) 10.0.1.2 -> 中国IP:高端口`，来源是 NAS 上的 qBittorrent/Transmission/aria2 等 P2P peer 连接失败；端口特征包括 51413、16881、6881 和大量临时高位端口。这些是 P2P peer 正常不可达/拒绝/超时，不表示 Google、AI、GitHub、国内站点或透明代理主链路故障。当前无 level error/fatal。
+
+不建议为了让日志好看而降级为 error；否则会掩盖真实探测/连接问题。如短期不需要 BT，可暂停对应容器/服务；如继续使用 BT，保留 WARNING 即可。
