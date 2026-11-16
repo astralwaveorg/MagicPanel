@@ -154,6 +154,17 @@ def test_variant_build_and_feed(client):
     # 预览与方案参数可组合
     r = client.get(f"/feed/{token}/config.yaml?variant=精简&preview=1")
     assert r.status_code == 200 and "example.com" not in r.text
+    # 停用方案进入兼容窗：门户不再展示，旧链接回退默认正文而非 404。
+    assert client.put(f"/api/v1/variants/{v['id']}", headers=h,
+                      json={"enabled": False}).status_code == 200
+    _publish(client, h, _build(client, h)["id"])
+    legacy = client.get(f"/feed/{token}/config.yaml?variant=精简")
+    assert legacy.status_code == 200
+    assert legacy.headers["X-MagicPanel-Variant-Fallback"] == "default"
+    assert "example.com" in legacy.text
+    portal = client.post("/api/v1/portal/data", json={"pin": ""}).json()
+    assert [item["name"] for item in portal["variants"]] == ["默认"]
+
     # 未知方案 404
     assert client.get(f"/feed/{token}/config.yaml?variant=不存在").status_code == 404
 

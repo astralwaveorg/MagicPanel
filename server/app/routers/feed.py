@@ -118,19 +118,25 @@ def device_config(token: str, request: Request, preview: bool = False,
         # 没有就用该引擎平台的共享产物。方案产物同理：先找设备专属的，
         # 没有再找引擎平台的共享方案产物。
         artifact = device["name"]
+        variant_fallback = False
         if variant:
-            row = db.one(conn, "SELECT name FROM variants WHERE name=?", (variant,))
+            row = db.one(conn, "SELECT name,enabled FROM variants WHERE name=?", (variant,))
             if not row:
                 return Response(f"variant not found: {variant}", status_code=404)
             artifact += f"@{row['name']}"
         path = artifact_file(build["id"], artifact)
         if not path.exists() and variant:
             path = artifact_file(build["id"], f"{target['name']}@{row['name']}")
+        # 停用方案是兼容窗：旧链接继续可拉，但正文回退到当前 canonical 默认方案。
+        # 不能让下一次重建后旧订阅 404，也不能继续给用户展示第二个方案入口。
+        if (not path.exists() and variant and not row["enabled"]):
+            path = artifact_file(build["id"], device["name"])
+            variant_fallback = True
         if not path.exists():
-            if not variant:
+            if not variant or variant_fallback:
                 path = artifact_file(build["id"], target["name"])
             if not path.exists():
-                if variant:
+                if variant and not variant_fallback:
                     return Response(
                         f"当前版本没有方案“{variant}”的产物，请先在后台构建发布",
                         status_code=404)
@@ -174,6 +180,7 @@ def device_config(token: str, request: Request, preview: bool = False,
         extra = {
             "profile-update-interval": interval,
             "X-MagicPanel-Config-Source": "live-envelope" if overlay else "frozen-build",
+            **({"X-MagicPanel-Variant-Fallback": "default"} if variant_fallback else {}),
             "Content-Disposition":
                 f"attachment; filename=\"{ascii_name}.yaml\"; "
                 f"filename*=UTF-8''{quoted_name}.yaml",
