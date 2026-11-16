@@ -301,6 +301,12 @@ def _ensure_column(conn, table: str, column: str, ddl: str) -> bool:
     return False
 
 
+def migrate_probe_delivery_v2(conn) -> None:
+    """幂等注册探测、路由计划与资源发布契约。"""
+    from .migrations import v2_probe_delivery
+    v2_probe_delivery.migrate(conn)
+
+
 def init_db() -> None:
     from . import security
     from .migrations import v2_foundation
@@ -426,6 +432,7 @@ def init_db() -> None:
         conn.commit()
         conn.execute("BEGIN IMMEDIATE")
         v2_foundation.migrate(conn)
+        migrate_probe_delivery_v2(conn)
 
 
 def _migrate_variants(conn) -> None:
