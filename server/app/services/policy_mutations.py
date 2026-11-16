@@ -1,18 +1,23 @@
-"""引用关系维护：删除前查引用、删除时自动解绑。
+"""引用关系维护与节点改名预演；所有服务沿用调用方事务。
 
 节点来源按**名称**被策略组引用（`proxy_groups.use_sources`），
 节点以 UID、组以同方案 ID 引用；旧名称和本地 ID 仅由兼容入口适配。
 删除对象时如果还有策略组在用，默认拦住并把引用明细报给前端；
 用户二次确认后，由这里自动把引用摘掉再删。
 """
+import hashlib
+import hmac
+import base64
 import json
 import re
+import secrets
+import uuid
+from datetime import datetime, timedelta, timezone
 import urllib.parse
 
-from .. import db
+from .. import db, security
 from . import node_refs
 from .local_nodes import display_name
-
 
 def _groups(conn, variant_id: int | None = None) -> list:
     """策略组列表；variant_id 为 None 时跨全部方案（来源/节点删除用）。"""
@@ -23,7 +28,6 @@ def _groups(conn, variant_id: int | None = None) -> list:
         conn, "SELECT * FROM proxy_groups WHERE variant_id=? ORDER BY name",
         (variant_id,))
 
-
 def source_refs(conn, name: str) -> list[dict]:
     """引用该节点来源的策略组。"""
     refs = []
@@ -31,7 +35,6 @@ def source_refs(conn, name: str) -> list[dict]:
         if name in json.loads(g["use_sources"] or "[]"):
             refs.append({"id": g["id"], "name": g["name"], "type": g["type"]})
     return refs
-
 
 def local_node_refs(conn, node_id: int) -> list[dict]:
     node = db.one(conn, "SELECT * FROM local_nodes WHERE id=?", (node_id,))
@@ -47,7 +50,6 @@ def local_node_refs(conn, node_id: int) -> list[dict]:
             out.append({'id':g['id'],'name':g['name'],'type':g['type'],'variant_id':g['variant_id']})
     return out
 
-
 def _warnings(group: dict, use_sources: list[str],
               local_nodes: list[int],
               proxies: list[str] | None = None) -> list[str]:
@@ -62,7 +64,6 @@ def _warnings(group: dict, use_sources: list[str],
         out.append(f"relay 策略组“{group['name']}”将只剩 {len(proxies) + local_count} 个成员，"
                    "relay 至少需要两个可用成员")
     return out
-
 
 def detach_source(conn, name: str) -> tuple[list[str], list[str]]:
     """把节点来源从引用它的策略组里摘掉。
@@ -84,7 +85,6 @@ def detach_source(conn, name: str) -> tuple[list[str], list[str]]:
         warnings.extend(_warnings(g, rest,
                                   json.loads(g["local_nodes"] or "[]")))
     return changed, warnings
-
 
 def detach_node(conn, node_uid: str) -> dict:
     catalog = db.one(conn, "SELECT * FROM node_catalog WHERE node_uid=?", (node_uid,))
@@ -115,14 +115,12 @@ def detach_node(conn, node_uid: str) -> dict:
                                    json.loads(current['local_nodes'] or '[]')))
     return {'detached_groups':changed,'warnings':warnings}
 
-
 def detach_local_node(conn, node_id: int) -> tuple[list[str], list[str]]:
     catalog = db.one(conn, "SELECT node_uid FROM node_catalog WHERE local_node_id=?", (node_id,))
     if catalog:
         result = detach_node(conn,catalog['node_uid'])
         return result['detached_groups'], result['warnings']
     return [], []
-
 
 def rule_provider_refs(conn, name: str) -> list[dict]:
     """引用该规则来源的分流规则（含已停用规则）。"""
@@ -138,7 +136,6 @@ def rule_provider_refs(conn, name: str) -> list[dict]:
         for r in rows
     ]
 
-
 def detach_rule_provider(conn, name: str) -> list[dict]:
     """删除引用该规则来源的分流规则。
 
@@ -149,7 +146,6 @@ def detach_rule_provider(conn, name: str) -> list[dict]:
     for r in rows:
         conn.execute("DELETE FROM rules WHERE id=?", (r["id"],))
     return rows
-
 
 # ---- 策略组 ----
 
@@ -165,7 +161,6 @@ def group_members(conn, name: str, variant_id: int | None = None) -> list[dict]:
                         "group_type": g["type"]})
     return out
 
-
 def rules_targeting(conn, name: str, variant_id: int | None = None) -> list[dict]:
     result = []
     for row in db.all_(conn,'SELECT * FROM rules ORDER BY sort,id'):
@@ -177,7 +172,6 @@ def rules_targeting(conn, name: str, variant_id: int | None = None) -> list[dict
         if matches:
             result.append({'id':row['id'],'enabled':bool(row['enabled']),'type':row['type'],'value':row['value']})
     return result
-
 
 def detach_group(conn, name: str, variant_id: int | None = None
                  ) -> tuple[list[str], list[dict], list[str]]:
@@ -211,7 +205,6 @@ def detach_group(conn, name: str, variant_id: int | None = None
         conn.execute("DELETE FROM rules WHERE id=?", (r["id"],))
     return changed, removed, warnings
 
-
 # ---- 引擎平台 ----
 
 def target_devices(conn, target_id: int) -> list[dict]:
@@ -222,7 +215,6 @@ def target_devices(conn, target_id: int) -> list[dict]:
     )
     return [{"id": r["id"], "name": r["name"], "type": "设备",
              "platform": r["platform"]} for r in rows]
-
 
 def rename_source(conn, old: str, new: str) -> list[str]:
     """来源改名：把策略组里的引用一起改成新名字。"""
@@ -239,7 +231,6 @@ def rename_source(conn, old: str, new: str) -> list[str]:
         changed.append(g["name"])
     return changed
 
-
 def rename_rule_provider(conn, old: str, new: str) -> list[dict]:
     """规则来源改名：把引用它的 RULE-SET 规则一起改成新名字。"""
     rows = rule_provider_refs(conn, old)
@@ -248,14 +239,12 @@ def rename_rule_provider(conn, old: str, new: str) -> list[dict]:
                      (new, db.now(), r["id"]))
     return rows
 
-
 # ---- 当前生产产物的引用 ----
 
 def _live_build_id(conn) -> int | None:
     """当前生效的生产构建 id（产物不可变，发布只移动指针）。"""
     row = db.one(conn, "SELECT id FROM builds WHERE status='PRODUCTION' LIMIT 1")
     return int(row["id"]) if row else None
-
 
 def release_resource_refs(conn, kind: str, name: str) -> list[dict]:
     """当前生产产物里是否还引用着某个下发资源。
@@ -285,7 +274,6 @@ def release_resource_refs(conn, kind: str, name: str) -> list[dict]:
                 break
     return out
 
-
 def rename_group(conn, group_id: int, new_name: str, *, variant_id: int) -> dict:
     group = db.one(conn, 'SELECT * FROM proxy_groups WHERE id=?', (group_id,))
     if not group or group['variant_id'] != variant_id:
@@ -300,7 +288,6 @@ def rename_group(conn, group_id: int, new_name: str, *, variant_id: int) -> dict
         if ref == {'kind':'group','ref':str(group_id)} or (ref is None and rule['target'] == old):
             conn.execute('UPDATE rules SET target=? WHERE id=?',(new_name,rule['id']))
     return dict(db.one(conn,'SELECT * FROM proxy_groups WHERE id=?',(group_id,)))
-
 
 def refresh_node_projection(conn, old_name: str, node_uid: str) -> None:
     node = db.one(conn,'SELECT * FROM node_catalog WHERE node_uid=?',(node_uid,))
@@ -331,3 +318,166 @@ def refresh_node_projection(conn, old_name: str, node_uid: str) -> None:
             if old_name in names:
                 conn.execute('UPDATE proxy_groups SET proxies=? WHERE id=?',
                     (json.dumps([node['emit_name'] if n == old_name else n for n in names],ensure_ascii=False),group['id']))
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+def _catalog_revision(conn) -> int:
+    return int(db.one(conn, 'SELECT revision FROM catalog_state WHERE id=1')['revision'])
+
+def _catalog_row(conn, node_uid: str):
+    return db.one(conn, 'SELECT * FROM node_catalog WHERE node_uid=? AND retired=0', (node_uid,))
+
+def _encoded_rename_preview(body: dict, signature: str) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps(body, ensure_ascii=False, sort_keys=True,
+                                                 separators=(',', ':')).encode()).decode().rstrip('=')
+    return payload + '.' + signature
+
+def _decode_rename_preview(preview_id: str) -> tuple[dict, str]:
+    try:
+        payload, signature = preview_id.rsplit('.', 1)
+        raw = base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4))
+        body = json.loads(raw)
+        if not isinstance(body, dict) or body.get('purpose') != 'node-rename' or body.get('version') != 1:
+            raise ValueError
+        expected = hmac.new(security.derive_subkey(security.load_master_material(),
+                                                   purpose='rename-preview'),
+                            raw, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError
+        return body, signature
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+        raise ValueError('preview_invalid') from None
+
+def _rename_state(conn, node_uid: str, new_name: str) -> tuple[dict, list[str], list[dict], list[str]]:
+    from .. import config
+    row = _catalog_row(conn, node_uid)
+    if row is None:
+        raise ValueError('node_missing')
+    # Node emit names are globally unique across variants; group uniqueness is checked globally too.
+    conflicts = []
+    if new_name in config.BUILTIN_TARGETS or new_name == config.GUARD_PROXY:
+        conflicts.append('builtin')
+    if db.one(conn, 'SELECT 1 FROM proxy_groups WHERE name=?', (new_name,)):
+        conflicts.append('group')
+    if db.one(conn, 'SELECT 1 FROM node_catalog WHERE emit_name=? AND node_uid!=? AND retired=0',
+              (new_name, node_uid)):
+        conflicts.append('node')
+    references, warnings = [], []
+    for group_raw in _groups(conn):
+        group = dict(group_raw)
+        typed = node_refs.decoded(group['members_v2'], []) if group['members_format'] == 'typed-v2' else []
+        used = {'kind':'node','ref':node_uid} in typed
+        legacy_used = (group['members_format'] != 'typed-v2' and
+                       new_name != row['emit_name'] and
+                       row['emit_name'] in node_refs.decoded(group['proxies'], []))
+        if not used and not legacy_used:
+            continue
+        references.append({'kind':'group','ref':str(group['id']),'name':group['name'],
+                           'variant_id':group['variant_id']})
+        if group.get('filter'):
+            try:
+                old_match = re.search(group['filter'], row['emit_name']) is not None
+                new_match = re.search(group['filter'], new_name) is not None
+            except re.error:
+                old_match = new_match = False
+            if old_match != new_match:
+                warnings.append(f"filter changes membership in {group['name']}")
+    return row, conflicts, references, warnings
+
+def preview_rename(conn, *, node_uids: list[str], names: dict[str, str],
+                   expected_catalog_revision: int, actor_id: int) -> dict:
+    """只读改名预演；状态由无状态签名预演票承载，不写 DB。"""
+    if (type(expected_catalog_revision) is not int or expected_catalog_revision < 0 or
+            type(node_uids) is not list or type(names) is not dict or actor_id < 1):
+        raise ValueError('preview_invalid')
+    current = _catalog_revision(conn)
+    if expected_catalog_revision != current:
+        raise ValueError('stale_revision')
+    changes, conflicts, references = [], [], []
+    for node_uid in node_uids:
+        if type(node_uid) is not str or len(node_uid) != 32 or not node_uid.isalnum():
+            raise ValueError('preview_invalid')
+        if node_uid in {item['node_uid'] for item in changes}:
+            raise ValueError('preview_invalid')
+        name = names.get(node_uid)
+        if type(name) is not str or not name.strip() or len(name.strip()) > 64:
+            raise ValueError('preview_invalid')
+        row, item_conflicts, item_references, warnings = _rename_state(conn, node_uid, name.strip())
+        changes.append({'node_uid': node_uid, 'from': row['emit_name'], 'to': name.strip(),
+                        'warnings': warnings})
+        references.extend(item_references)
+        if item_conflicts:
+            conflicts.append({'node_uid': node_uid, 'codes': item_conflicts})
+    issued = _utcnow()
+    expires = issued + timedelta(minutes=30)
+    body = {'purpose': 'node-rename', 'version': 1, 'actor_id': actor_id,
+            'catalog_revision': current, 'changes': changes,
+            'issued_at': issued.isoformat(timespec='seconds'),
+            'expires_at': expires.isoformat(timespec='seconds'),
+            'nonce': secrets.token_bytes(16).hex()}
+    raw = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
+    signature = hmac.new(security.derive_subkey(security.load_master_material(),
+                                                purpose='rename-preview'),
+                         raw, hashlib.sha256).hexdigest()
+    return {
+        'preview_id': _encoded_rename_preview(body, signature),
+        'catalog_revision': current, 'changes': changes,
+        'conflicts': conflicts,
+        'references': sorted(references, key=lambda item: (item['kind'], item['ref'])),
+        'expires_at': body['expires_at'],
+    }
+
+def apply_rename(conn, *, preview_id: str, expected_catalog_revision: int, actor_id: int) -> dict:
+    if type(preview_id) is not str or type(expected_catalog_revision) is not int or actor_id < 1:
+        raise ValueError('preview_invalid')
+    if db.one(conn, 'SELECT 1 FROM rename_applies WHERE preview_digest=?', (preview_id,)):
+        raise ValueError('preview_consumed')
+    body, signature = _decode_rename_preview(preview_id)
+    if body['actor_id'] != actor_id:
+        raise ValueError('preview_actor_mismatch')
+    if body['catalog_revision'] != expected_catalog_revision:
+        raise ValueError('stale_revision')
+    if _utcnow().isoformat(timespec='seconds') > body['expires_at']:
+        raise ValueError('preview_expired')
+    current = _catalog_revision(conn)
+    if body['catalog_revision'] != current:
+        raise ValueError('stale_revision')
+    changes, references, warnings = [], [], []
+    for change in body['changes']:
+        row, item_conflicts, item_references, item_warnings = _rename_state(
+            conn, change['node_uid'], change['to'])
+        if row['emit_name'] != change['from']:
+            raise ValueError('stale_revision')
+        if item_conflicts:
+            raise ValueError('reference_ambiguous')
+        changes.append(change)
+        references.extend(item_references)
+        warnings.extend(item_warnings)
+    for change in changes:
+        row = _catalog_row(conn, change['node_uid'])
+        conn.execute('UPDATE node_catalog SET display_name=?,emit_name=?,last_seen=? WHERE node_uid=?',
+                     (change['to'], change['to'], db.now(), change['node_uid']))
+        for name_kind in ('display', 'emit'):
+            conn.execute('INSERT OR IGNORE INTO node_aliases(node_uid,name_kind,name,revision) '
+                         'VALUES(?,?,?,?)', (change['node_uid'], name_kind, change['to'],
+                                             row['current_revision']))
+        for group in _groups(conn):
+            members = node_refs.decoded(group['members_v2'], [])
+            referenced = (group['members_format'] == 'typed-v2' and
+                          {'kind':'node','ref':change['node_uid']} in members)
+            if not referenced and group['members_format'] != 'typed-v2':
+                referenced = change['from'] in node_refs.decoded(group['proxies'], [])
+            if not referenced:
+                continue
+            names = node_refs.decoded(group['proxies'], [])
+            conn.execute('UPDATE proxy_groups SET proxies=?,updated_at=? WHERE id=?',
+                         (json.dumps([change['to'] if name == change['from'] else name
+                                      for name in names], ensure_ascii=False),
+                          db.now(), group['id']))
+    conn.execute('UPDATE catalog_state SET revision=revision+1 WHERE id=1')
+    conn.execute('INSERT INTO rename_applies(preview_digest,actor_user_id,applied_catalog_revision,applied_at) '
+                 'VALUES(?,?,?,?)', (preview_id, actor_id, current + 1, db.now()))
+    return {'ok': True, 'catalog_revision': current + 1, 'changes': changes,
+            'references': sorted(references, key=lambda item: (item['kind'], item['ref'])),
+            'warnings': warnings, 'preview_digest': security.sha256_text(preview_id)}

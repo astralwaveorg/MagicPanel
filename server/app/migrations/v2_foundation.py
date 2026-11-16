@@ -45,6 +45,9 @@ def catalog_schema(conn):
             node_uid TEXT NOT NULL REFERENCES node_catalog(node_uid), name_kind TEXT NOT NULL,
             name TEXT NOT NULL, revision INTEGER NOT NULL,
             UNIQUE(node_uid,name_kind,name,revision))""",
+        """CREATE TABLE IF NOT EXISTS rename_applies (
+            preview_digest TEXT PRIMARY KEY, actor_user_id INTEGER NOT NULL REFERENCES users(id),
+            applied_catalog_revision INTEGER NOT NULL, applied_at TEXT NOT NULL)""",
         """CREATE TABLE IF NOT EXISTS catalog_issues (
             id INTEGER PRIMARY KEY, code TEXT NOT NULL, origin TEXT NOT NULL,
             candidate_uids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
