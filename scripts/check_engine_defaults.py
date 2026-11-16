@@ -52,8 +52,6 @@ EXTRA_ALLOWED = {
         "keep-alive-interval": "Mihomo 文档未在示例里展开，但内核支持",
         "tcp-concurrent": "Mihomo 文档未在示例里展开，但内核支持",
         "unified-delay": "Mihomo 文档未在示例里展开，但内核支持",
-        "global-client-fingerprint":
-            "mihomo 官方支持（docs/config.yaml global-client-fingerprint），示例文件版本未含",
         "sniffer": "mihomo 核心能力（docs/config.yaml 有 sniffer 段），示例文件版本未含",
     },
 }

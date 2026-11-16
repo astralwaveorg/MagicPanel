@@ -9,6 +9,13 @@ def _yaml(doc):
     return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
 
 
+def test_mihomo_does_not_emit_removed_global_fingerprint(client):
+    from app.services import base_config
+    doc = base_config.default_doc("mihomo")
+    assert "global-client-fingerprint" not in doc
+    assert "client-fingerprint" not in doc
+
+
 def test_builtin_default_is_editable_and_resettable(client):
     csrf = setup_admin(client)
     hdr = auth_headers(csrf)

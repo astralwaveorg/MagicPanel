@@ -291,12 +291,12 @@ STASH_OFFICIAL = {
 }
 
 # Mihomo：DNS 由内核接管，需要显式 enable；端口与 profile 由内核读取
-# （profile 已上收到 _COMMON_DEFAULTS）。mihomo 特有：客户端 TLS 指纹、
-# sniffer 的 TLS 端口与跳过域名清单（Mijia Cloud 是 mihomo 嗅探的已知误匹配）。
+# （profile 已上收到 _COMMON_DEFAULTS）。当前 Mihomo 已移除 global-client-fingerprint；
+# VLESS/Reality 等协议继续使用节点级 client-fingerprint。sniffer 的 TLS 端口与
+# 跳过域名清单是 Mihomo 特有配置（Mijia Cloud 是已知误匹配）。
 MIHOMO_OFFICIAL = {
     **_COMMON_DEFAULTS,
     "mixed-port": 7890,
-    "global-client-fingerprint": "chrome",
     # Geo 数据下载走官方示例同款 jsdelivr 镜像：客户端 geo-auto-update
     # 若用默认 GitHub 直连地址，国内环境经常超时失败，geo 文件停留在旧版
     "geox-url": {
