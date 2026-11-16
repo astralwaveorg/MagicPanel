@@ -15,6 +15,11 @@
 [Agent 交接提示词](docs/reference/Agent-交接提示词.md)，里面写清了架构、硬性约束、
 改配置的方式和发布流程，再动手。
 
+**2026-11-17 全视图逐页巡检**：前端 16 个视图（含 Login/Setup/Portal）全部纳入
+挂载冒烟测试（`src/v2/allViews.spec.js`，用生产数据形状做夹具）；修复 10 处
+`rows.value = resp.items` 无 undefined 兜底的整页崩溃隐患（`?? []`）。新增页面
+时必须跑该冒烟，防止「引用未定义变量→整页空白」一类事故复发。
+
 **2026-11-17 magic-sets 审计与节点规范化、网络体检**：magic-sets 已按产物顺序
 做「首个命中」仿真瘦身（23 条死条目删除、zoom.us 归位、补 Element/Matrix/IP 查询站，
 script/ 与 rewrite/ 目录已删——Stash 专属片段零引用）。构建与 provider feed 分发端
