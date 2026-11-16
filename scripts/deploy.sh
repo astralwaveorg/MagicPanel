@@ -95,12 +95,17 @@ restore_previous() {
   if [ -n "$PREV_IMAGE" ]; then
     echo "尝试回滚到上一镜像 $PREV_IMAGE" >&2
     ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && python3 - '$PREV_IMAGE'" <<'PY'
+import os
 import subprocess
 import sys
 from pathlib import Path
 from scripts.ops.rescue import compose_image_override, restore_argv
 old = sys.argv[1]
-override = compose_image_override(Path('/tmp/magicpanel-rescue'), old)
+# private_path 拒绝任何含符号链接的路径，而 macOS 的 /tmp 是指向 /private/tmp 的符号链接，
+# 直接写死 /tmp 会让回滚在 Mac 上直接抛 PRIVATE_PATH_SYMLINK，镜像停在坏版本。
+# 先解析成真实路径，两种系统都能落地。
+rescue_root = Path(os.path.realpath('/tmp')) / 'magicpanel-rescue'
+override = compose_image_override(rescue_root, old)
 subprocess.run(restore_argv(str(Path.cwd()), str(override)), check=True)
 actual = subprocess.check_output(['docker', 'inspect', '--format', '{{.Image}}', 'magicpanel'], text=True).strip()
 if actual != old:
