@@ -9,6 +9,11 @@ class RuleContentError(ValueError):
     pass
 
 
+# MetaCubeX 的 .mrs 是 zstd 压缩的二进制规则集，文件头是 zstd 帧 magic，
+# 不是 "MRS" 文本头。按文本头判断会把所有 mrs 规则集判成非法。
+MRS_MAGIC = bytes.fromhex('28b52ffd')
+
+
 def _sha(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
@@ -27,7 +32,7 @@ def validate_rule_content(body: bytes, *, fmt: str, behavior: str,
     if fmt == 'mrs':
         if behavior not in ('domain', 'ipcidr'):
             raise RuleContentError('mrs_behavior_invalid')
-        if not body.startswith(b'MRS'):
+        if not body.startswith(MRS_MAGIC):
             raise RuleContentError('mrs_magic_invalid')
         count = 0
         semantic = {'format': fmt, 'behavior': behavior, 'magic': body[:4].hex()}

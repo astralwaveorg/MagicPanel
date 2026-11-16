@@ -1176,11 +1176,13 @@ def test_auto_test_switch_skips_scheduled_test(client, monkeypatch):
     assert summary["tests_run"] == 0
     assert called == []
 
+    # 来源自身允许自动测速后，定时任务要真的测：
+    # 节点测速走本地 Mihomo 核心，不受受管探测运行时（staged）影响
     with db.tx() as conn:
         conn.execute("UPDATE sources SET auto_test=1 WHERE id=?", (source["id"],))
     summary = scheduler.run_once(force=True)
-    assert summary["tests_run"] == 0
-    assert called == []
+    assert summary["tests_run"] == 1
+    assert called == [source["id"]]
 
 
 
@@ -1908,10 +1910,10 @@ def test_rule_pointing_to_absent_group_is_dropped(client):
     b = yaml.safe_load(client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-b").json()["content"])
     assert "DOMAIN-SUFFIX,x.com,仅A" not in b["rules"]
-    # 构建结果里应有剔除说明
+    # 构建结果里应有剔除说明（管理端可见原文，不做脱敏）
     results = build["results"]
     assert results['stash-b']['warnings']
-    assert all(w == '构建存在警告' for w in results['stash-b']['warnings'])
+    assert any('仅A' in w for w in results['stash-b']['warnings'])
     from app import db
     with db.connect() as conn:
         internal = json.loads(conn.execute('SELECT results FROM builds WHERE id=?',(build['id'],)).fetchone()[0])
@@ -1958,7 +1960,7 @@ def test_platform_trims_process_rules(client):
     assert "PROCESS-NAME,qbittorrent,节点选择" in mac["rules"]
     assert "PROCESS-NAME,qbittorrent,节点选择" not in ios["rules"]
     assert build['results']['stash-ios']['warnings']
-    assert all(w == '构建存在警告' for w in build['results']['stash-ios']['warnings'])
+    assert any('剔除' in w for w in build['results']['stash-ios']['warnings'])
     from app import db
     with db.connect() as conn:
         internal = json.loads(conn.execute('SELECT results FROM builds WHERE id=?',(build['id'],)).fetchone()[0])

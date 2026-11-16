@@ -13,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -29,9 +30,16 @@ MIHOMO_FALLBACK_VERSION = "v1.19.32"
 RELEASE_BASE = "https://github.com/MetaCubeX/mihomo/releases/download"
 RELEASE_LATEST = "https://github.com/MetaCubeX/mihomo/releases/latest"
 DELAY_URL = config.HEALTH_CHECK_URL
-# 测速超时：订阅来源与本地节点共用同一口径。
-# 2 秒：能连上的节点通常在 1 秒内完成往返；再久只是让失败节点干等。
-DELAY_TIMEOUT_MS = 2000
+# 测速超时按协议分档，不是一刀切：
+# 实测可用节点的延迟常在 1~3 秒，统一 2 秒会把慢握手的协议一律判成失败；
+# QUIC 类（hysteria/hysteria2/tuic）握手更慢，还要给端口跳跃留重连余量。
+DELAY_TIMEOUT_MS = 5000
+QUIC_DELAY_TIMEOUT_MS = 8000
+QUIC_PROTOCOLS = frozenset({'hysteria', 'hysteria2', 'tuic'})
+# 失败重试：端口跳跃型节点每次连的随机端口都可能不通，重试一次能明显提高成功率
+DELAY_RETRY = 1
+# 核心读不懂的节点最多剔除几轮（每轮剔掉读不懂的那一个，或那一类协议）
+SKIP_ROUNDS = 8
 CONCURRENCY = 16
 STARTUP_TIMEOUT = 8.0
 UPLOAD_MAX_BYTES = 100 * 1024 * 1024
@@ -320,6 +328,51 @@ def test_nodes(snapshot_yaml: str) -> dict:
     if not isinstance(proxies, list) or not proxies:
         raise TestError("快照中没有节点，请先抓取来源")
 
+    pending = list(proxies)
+    results: dict[str, int] = {}
+    skipped: dict[str, str] = {}
+    # 核心读不懂的节点会让整个核心起不来（实测 juicity、naive 直接 Parse error，
+    # 字段不全的节点也一样），一个坏节点就能拖垮整个来源的测速。
+    # 逐轮把读不懂的节点剔除掉，剩下的照常测。
+    for _ in range(SKIP_ROUNDS):
+        if not pending:
+            break
+        outcome = _measure(pending)
+        results.update(outcome["results"])
+        if outcome["drop_index"] is None and not outcome["drop_types"]:
+            pending = []
+            break
+        if outcome["drop_index"] is not None and 0 <= outcome["drop_index"] < len(pending):
+            bad = pending.pop(outcome["drop_index"])
+            name = str(bad.get("name")) if isinstance(bad, dict) else ""
+            skipped[name] = outcome["reason"] or "核心无法加载该节点配置"
+            continue
+        drop = outcome["drop_types"]
+        keep = []
+        for proxy in pending:
+            ptype = str(proxy.get("type") or "") if isinstance(proxy, dict) else ""
+            if ptype in drop:
+                name = str(proxy.get("name")) if isinstance(proxy, dict) else ""
+                skipped[name] = outcome["reason"] or f"核心不支持该协议（{ptype}）"
+            else:
+                keep.append(proxy)
+        if len(keep) == len(pending):
+            pending = []
+            break
+        pending = keep
+
+    ok = sum(1 for d in results.values() if d >= 0)
+    return {
+        "total": len(results) + len(skipped),
+        "ok": ok,
+        "failed": len(results) - ok,
+        "results": results,
+        "skipped": skipped,
+    }
+
+
+def _measure(proxies: list) -> dict:
+    """起一次核心测一批节点；读不懂的节点由调用方剔除后重试。"""
     controller_port = _free_port()
     mixed_port = _free_port()
     workdir = Path(tempfile.mkdtemp(prefix="mihomo-test-", dir=config.DATA_DIR))
@@ -336,8 +389,12 @@ def test_nodes(snapshot_yaml: str) -> dict:
     )
     proc = subprocess.Popen(
         [str(core_path()), "-d", str(workdir), "-f", str(workdir / "config.yaml")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=direct_env(),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=direct_env(),
+        text=True, errors="replace",
     )
+    log_lines: list[str] = []
+    drain = threading.Thread(target=_drain_log, args=(proc, log_lines), daemon=True)
+    drain.start()
     base = f"http://127.0.0.1:{controller_port}"
     try:
         controller = httpx.Client(trust_env=False, timeout=DELAY_TIMEOUT_MS / 1000 + 3)
@@ -349,6 +406,11 @@ def test_nodes(snapshot_yaml: str) -> dict:
             except httpx.HTTPError:
                 if proc.poll() is not None:
                     controller.close()
+                    drain.join(timeout=2)
+                    drop_index, drop_types, reason = _start_failure(log_lines)
+                    if drop_index is not None or drop_types:
+                        return {"results": {}, "drop_index": drop_index,
+                                "drop_types": drop_types, "reason": reason}
                     raise TestError("核心启动失败，请确认节点协议与核心版本兼容")
                 if time.monotonic() > deadline:
                     controller.close()
@@ -357,6 +419,9 @@ def test_nodes(snapshot_yaml: str) -> dict:
 
         names = [str(p.get("name")) for p in proxies
                  if isinstance(p, dict) and p.get("name")]
+        # 协议类型决定超时档位：QUIC 类握手慢，给更宽的预算
+        node_types = {str(p.get("name")): str(p.get("type") or "")
+                      for p in proxies if isinstance(p, dict) and p.get("name")}
 
         # 等核心把节点真正注册进 /proxies 再开始测。
         # RESTful API 开始监听 ≠ 节点已加载完成：抢跑时 /proxies/<name>
@@ -377,20 +442,29 @@ def test_nodes(snapshot_yaml: str) -> dict:
 
         def probe(name: str):
             quoted = urllib.parse.quote(name, safe="")
-            for attempt in (0, 1):
+            # QUIC 类协议握手慢，超时给得更宽；其余按基础档
+            timeout = (QUIC_DELAY_TIMEOUT_MS
+                       if node_types.get(name) in QUIC_PROTOCOLS
+                       else DELAY_TIMEOUT_MS)
+            for attempt in range(DELAY_RETRY + 1):
                 try:
                     resp = controller.get(
                         f"{base}/proxies/{quoted}/delay",
-                        params={"timeout": DELAY_TIMEOUT_MS, "url": DELAY_URL},
+                        params={"timeout": timeout, "url": DELAY_URL},
                     )
                     if resp.status_code == 200:
                         return name, int(resp.json().get("delay", 0))
-                    if resp.status_code != 404 or attempt:
-                        break
+                    # 404：节点还没进列表；其它错误：超时或握手失败
+                    if resp.status_code == 404:
+                        time.sleep(0.3)
+                    else:
+                        # 端口跳跃每次连的端口都可能不通，换一次机会重连
+                        time.sleep(0.5)
                 except (httpx.HTTPError, ValueError):
-                    pass
-                # 404：节点还没进列表，稍等一下再试一次
-                time.sleep(0.3)
+                    time.sleep(0.5)
+                if attempt < DELAY_RETRY:
+                    continue
+                break
             return name, -1
 
         results: dict[str, int] = {}
@@ -407,14 +481,34 @@ def test_nodes(snapshot_yaml: str) -> dict:
         except subprocess.TimeoutExpired:
             proc.kill()
         shutil.rmtree(workdir, ignore_errors=True)
+    return {"results": results, "drop_index": None, "drop_types": set(), "reason": ""}
 
-    ok = sum(1 for d in results.values() if d >= 0)
-    return {
-        "total": len(results),
-        "ok": ok,
-        "failed": len(results) - ok,
-        "results": results,
-    }
+
+def _drain_log(proc, sink: list) -> None:
+    """持续读核心输出：管道写满会把核心卡住。"""
+    stream = getattr(proc, "stdout", None)
+    if stream is None:
+        return
+    try:
+        for line in stream:
+            sink.append(line)
+    except (ValueError, OSError):
+        pass
+
+
+def _start_failure(log_lines: list) -> tuple:
+    """从核心启动日志里找出「读不懂的节点」位置或协议类型。"""
+    text = "".join(log_lines)
+    reason = ""
+    match = re.search(r'Parse config error: (.*)', text)
+    if match:
+        reason = match.group(1).strip()[:160]
+    index = None
+    pos = re.search(r'proxy (\d+):', text)
+    if pos:
+        index = int(pos.group(1))
+    types = set(re.findall(r'unsupport(?:ed)? proxy type:\s*(\S+)', text))
+    return index, types, reason
 
 
 def test_proxy(proxy: dict) -> dict:

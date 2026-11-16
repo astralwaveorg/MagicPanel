@@ -1,14 +1,12 @@
 """本地单节点：手动填写服务器与协议参数，直接写入产物顶层 proxies。"""
 import json
-from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ConfigDict
 
 from .. import db, security
 from ..deps import CurrentUser, RequireCapabilities
-from ..services import local_nodes, node_dto, node_catalog, probe_store
+from ..services import local_nodes, node_dto, node_catalog
 from ..services import refs
 from ..services import tester
 
@@ -184,21 +182,51 @@ def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edi
 
 @router.post("/{node_id}/test")
 def test_node(node_id: int, user=RequireCapabilities('probe')):
-    """创建受管单节点探测任务；不再同步启动核心。"""
-    with db.tx(immediate=True) as conn:
+    """测速：经该节点请求 generate_204，记录最近一次结果。
+
+    与订阅来源的测速同机制（Mihomo 核心 + delay 接口），
+    衡量的是从本服务器出发的连通性与延迟。
+    """
+    with db.connect() as conn:
         row = _get_or_404(conn, node_id)
-        catalog = db.one(conn, 'SELECT node_uid,current_revision FROM node_catalog '
-                               'WHERE local_node_id=? AND retired=0', (node_id,))
-        if not catalog:
-            raise HTTPException(400, '节点目录不存在')
-        now = datetime.now(timezone.utc)
-        job = probe_store.enqueue(conn, trigger='manual-node', observer_id='nas',
-            nodes=[(catalog['node_uid'], catalog['current_revision'])], services=('basic',),
-            schedule_key=None, now=now, deadline=now + timedelta(hours=1))
-        security.audit(conn, user['username'], '创建节点探测任务', 'local_node',
-                       node_id, {'job_id': job['id']})
-    return JSONResponse({'job_id': job['id'], 'state': job['state'],
-                              'poll': f"/api/v1/probe-jobs/{job['id']}"}, status_code=202)
+    node = {
+        # 这里给原始名称：render_proxy 自己会拼上「(类型)」
+        "name": row["name"],
+        "node_type": row["node_type"] or "",
+        "protocol": row["protocol"],
+        "server": row["server"],
+        "port": row["port"],
+        "params": json.loads(_decrypt(row["params_enc"]) or "{}"),
+        "extra_yaml": _decrypt(row["extra_yaml_enc"]),
+    }
+    try:
+        # 测速用 Mihomo 方言渲染（与批量测速的节点集合一致）
+        proxy = local_nodes.render_proxy(node, "mihomo")
+        result = tester.test_proxy(proxy)
+    except tester.TestError as exc:
+        message = ("Mihomo 核心不可用，请在运行设置中安装"
+                   if str(exc).startswith("Mihomo 核心不可用")
+                   else "测速失败，请检查节点配置")
+        raise HTTPException(400, message)
+    except Exception:
+        raise HTTPException(400, "测速失败，请检查节点配置")
+    now = db.now()
+    with db.tx() as conn:
+        conn.execute(
+            "UPDATE local_nodes SET test_status=?, test_delay=?, tested_at=? "
+            "WHERE id=?",
+            ("ok" if result["ok"] else "failed",
+             max(0, int(result["delay"])), now, node_id))
+        security.audit(conn, user["username"], "本地节点测速", "local_node",
+                       node_id, {"name": row["name"], "ok": result["ok"],
+                                 "delay": result["delay"]})
+    return {
+        "id": node_id,
+        "ok": result["ok"],
+        "delay": max(0, int(result["delay"])) if result["ok"] else 0,
+        "status": "ok" if result["ok"] else "failed",
+        "tested_at": now,
+    }
 
 @router.patch("/{node_id}/enabled")
 def set_node_enabled(node_id: int, body: EnabledBody, user=CurrentUser):

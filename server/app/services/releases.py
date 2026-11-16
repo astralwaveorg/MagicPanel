@@ -127,7 +127,8 @@ def build_public(row, with_results: bool = False) -> dict:
             safe['sha256'] = digest if isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{64}', digest) else ''
             # 核心/渲染器诊断可能带回配置正文，普通读取只返回数量。
             safe['errors'] = ['构建校验未通过'] * len(item.get('errors', []))
-            safe['warnings'] = ['构建存在警告'] * len(item.get('warnings', []))
+            # 警告只含策略组、节点来源与本地节点的名称，不含凭据，可以原样返回。
+            safe['warnings'] = [str(w) for w in item.get('warnings', [])]
             data['results'][name] = safe
     return data
 

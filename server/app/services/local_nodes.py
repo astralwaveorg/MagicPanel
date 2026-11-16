@@ -135,6 +135,23 @@ PROTOCOLS = {
             _field("udp", "启用 UDP", "switch", default=True),
         ],
     },
+    "hysteria": {
+        "label": "Hysteria",
+        "default_port": 443,
+        "fields": [
+            _field("password", "密码 (auth-str)", "password", required=True),
+            _field("protocol", "传输协议", "select", default="udp",
+                   options=[{"value": value, "label": value} for value in ["udp", "wechat-video", "faketcp"]]),
+            _field("sni", "SNI", "text", default=""),
+            _field("skip_cert_verify", "跳过证书校验", "switch", default=False),
+            _field("obfs", "混淆", "text", default=""),
+            _field("obfs_password", "混淆密码", "password", default=""),
+            _field("alpn", "ALPN（逗号分隔）", "text", default=""),
+            _field("up", "上行带宽 (Mbps)", "bandwidth", default=0),
+            _field("down", "下行带宽 (Mbps)", "bandwidth", default=0),
+            _field("udp", "启用 UDP", "switch", default=True),
+        ],
+    },
     "hysteria2": {
         "label": "Hysteria2",
         "default_port": 443,
@@ -432,6 +449,28 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
             entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params, sni_field="sni", sni_key="sni")
         _put_network(entry, params)
+    elif protocol == "hysteria":
+        # Hysteria v1：密码在 Mihomo 与 Stash 都叫 auth-str
+        entry["auth-str"] = params.get("password", "")
+        entry["protocol"] = params.get("protocol") or "udp"
+        if not stash:
+            entry["udp"] = bool(params.get("udp", True))
+        up = _bandwidth_mbps(params.get("up"))
+        down = _bandwidth_mbps(params.get("down"))
+        if up:
+            entry["up"] = f"{up} Mbps"
+        if down:
+            entry["down"] = f"{down} Mbps"
+        if params.get("obfs"):
+            entry["obfs"] = params["obfs"]
+            if params.get("obfs_password"):
+                entry["obfs-password"] = params["obfs_password"]
+        if params.get("sni"):
+            entry["sni"] = params["sni"]
+        if params.get("skip_cert_verify"):
+            entry["skip-cert-verify"] = True
+        if params.get("alpn"):
+            entry["alpn"] = [x.strip() for x in str(params["alpn"]).split(",") if x.strip()]
     elif protocol == "hysteria2":
         # Stash 用 auth / up-speed / down-speed；Mihomo 用 password / up / down
         if stash:

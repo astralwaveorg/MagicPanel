@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from .. import config, db, security
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import fetcher, refs, repo_manager, repo_sync, updater
-from ..services.access_dto import rule_provider_public, url_summary
+from ..services.access_dto import describe_error, rule_provider_public, url_summary
 from ..services.capabilities import require_capability
 
 router = APIRouter(prefix="/api/v1/rule-providers", tags=["rule-providers"])
@@ -471,6 +471,7 @@ def refresh_provider(rp_id: int, user=RequireCapabilities("probe")):
         raise HTTPException(404, str(exc))
     except updater.InvalidOperation as exc:
         raise HTTPException(400, str(exc))
-    except fetcher.FetchError:
-        raise HTTPException(502, "抓取失败，详情需授权查看（已保留最近一次成功快照）")
+    except fetcher.FetchError as exc:
+        reason = describe_error(str(exc))
+        raise HTTPException(502, f"抓取失败：{reason}（已保留最近一次成功快照）")
     return _public(row)

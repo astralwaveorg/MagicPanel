@@ -1,6 +1,11 @@
 """规则内容严格验证与健康时效。"""
 import pytest
 
+# 真实 .mrs 文件头：zstd 帧 magic + 帧数据（本地 zstd 生成，非自造标志位）
+MRS_ZSTD_FRAME = bytes.fromhex(
+    '28b52ffd04589900006d72732d666978747572652d7061796c6f616411b84759')
+
+
 def test_html_and_bad_mrs_are_not_valid():
     from app.services.rule_content import RuleContentError, validate_rule_content
     with pytest.raises(RuleContentError, match='html_rejected'):
@@ -9,6 +14,18 @@ def test_html_and_bad_mrs_are_not_valid():
     with pytest.raises(RuleContentError, match='mrs_magic_invalid'):
         validate_rule_content(b'not mrs', fmt='mrs', behavior='domain',
                               engine_caps={})
+    # 旧实现把 "MRS" 文本头当成 mrs 标志，真实 .mrs 并不是这个头
+    with pytest.raises(RuleContentError, match='mrs_magic_invalid'):
+        validate_rule_content(b'MRS\x00fixture', fmt='mrs', behavior='domain',
+                              engine_caps={})
+
+
+def test_zstd_framed_mrs_passes_validation():
+    from app.services.rule_content import validate_rule_content
+    result = validate_rule_content(MRS_ZSTD_FRAME, fmt='mrs',
+                                   behavior='domain', engine_caps={})
+    assert result['format'] == 'mrs' and result['behavior'] == 'domain'
+    assert result['body_sha'] and result['semantic_sha']
 
 
 def test_yaml_structure_and_behavior_count():
@@ -81,7 +98,7 @@ def test_valid_mrs_fetch_creates_exact_revision(client, monkeypatch):
                            VALUES('fixture-mrs','domain','mrs','remote','https://rules.example/rule.mrs',
                            1,86400,'',0,'old','ok',?,?)""", (db.now(), db.now()))
         rp_id = cur.lastrowid
-    body = b'MRS\x00exact-bytes'
+    body = MRS_ZSTD_FRAME + b'exact-bytes'
     monkeypatch.setattr(updater.fetcher, 'fetch', lambda *a, **k: body)
     updater.refresh_provider(rp_id, 'fixture')
     with db.connect() as conn:

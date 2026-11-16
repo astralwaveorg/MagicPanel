@@ -2,15 +2,14 @@
 import base64
 import json
 import re
-from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .. import config, db, security
 from ..deps import CurrentUser, RequireCapabilities
-from ..services import fetcher, probe_store, refs, source_nodes, tester, updater, node_catalog
+from ..services import fetcher, refs, source_nodes, tester, updater, node_catalog
+from ..services.access_dto import describe_error
 from ..services.capabilities import require_capability
 from ..schemas.nodes import is_secret_key
 
@@ -641,25 +640,26 @@ def refresh_source(source_id: int, user=RequireCapabilities('probe')):
     except updater.NotFound as exc:
         raise HTTPException(404, str(exc))
     except fetcher.FetchError as exc:
-        raise HTTPException(502, f"抓取失败：{exc}（已保留最近一次成功快照）")
+        reason = describe_error(str(exc))
+        raise HTTPException(502, f"抓取失败：{reason}（已保留最近一次成功快照）")
     return _public(row)
 
 
 @router.post("/{source_id}/test")
 def test_source(source_id: int, user=RequireCapabilities('probe')):
-    """创建受管探测任务；旧同步全量测速入口改为 202。"""
-    with db.tx(immediate=True) as conn:
-        row = _get_or_404(conn, source_id)
-        nodes = db.all_(conn, 'SELECT node_uid,current_revision FROM node_catalog '
-                              'WHERE source_id=? AND retired=0 AND enabled=1 ORDER BY ordinal', (source_id,))
-        if not nodes:
-            raise HTTPException(400, '该来源没有可用节点')
-        now = datetime.now(timezone.utc)
-        job = probe_store.enqueue(conn, trigger='manual-source', observer_id='nas',
-            nodes=[(item['node_uid'], item['current_revision']) for item in nodes],
-            services=('basic',), schedule_key=None, now=now,
-            deadline=now + timedelta(hours=4))
-        security.audit(conn, user['username'], '创建来源探测任务', 'source', source_id,
-                       {'job_id': job['id'], 'node_count': len(nodes)})
-    return JSONResponse({'job_id': job['id'], 'state': job['state'],
-                              'node_count': len(nodes), 'poll': f"/api/v1/probe-jobs/{job['id']}"}, status_code=202)
+    """用本地 Mihomo 核心逐个测试节点连通性；结果供过滤与展示。
+
+    结果只反映从本服务器所在网络出发的连通性，不代表客户端侧一定可用。
+
+    受管探测（/api/v1/probe-jobs）测的是服务可用性观测，语义不同，
+    两者不共用入口：受管探测需要注册观测视角并激活运行时才有执行者。
+    """
+    try:
+        row = updater.test_source(source_id, user["username"])
+    except updater.NotFound as exc:
+        raise HTTPException(404, str(exc))
+    except updater.InvalidOperation as exc:
+        raise HTTPException(400, str(exc))
+    except tester.TestError as exc:
+        raise HTTPException(400, str(exc))
+    return _public(row)

@@ -536,7 +536,8 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             fetch_sources = _enabled(conn, "auto_fetch_sources", "1")
             fetch_rules = _enabled(conn, "auto_fetch_rules", "1")
             fetch_snippets = _enabled(conn, "auto_fetch_snippets", "1")
-            test_sources = _enabled(conn, "auto_test_sources", "0") and _setting(conn, "v2_runtime_activation", "staged") == "active"
+            # 自动测速走本地 Mihomo 核心，受管探测运行时是否激活与它无关
+            test_sources = _enabled(conn, "auto_test_sources", "0")
         if not master and not force:
             summary["skipped"] = "定时任务未启用"
         else:
