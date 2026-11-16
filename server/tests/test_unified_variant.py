@@ -12,7 +12,9 @@ def test_unified_variant_script_updates_default_and_stages_legacy(client):
     from scripts.configure_unified_variant import GROUP_MEMBERS, apply_changes
     with db.tx() as conn:
         now = db.now()
-        for index, name in enumerate(GROUP_MEMBERS):
+        member_names = sorted({name for members in GROUP_MEMBERS.values()
+                               for name in members if name not in GROUP_MEMBERS})
+        for index, name in enumerate(list(GROUP_MEMBERS) + member_names):
             conn.execute("INSERT INTO proxy_groups(variant_id,name,type,sort,hidden,use_sources,"
                          "local_nodes,proxies,url,interval,timeout,tolerance,lazy,strategy,"
                          "targets,devices,local_first,created_at,updated_at) VALUES("

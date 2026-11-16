@@ -18,7 +18,7 @@ if str(ROOT / 'server') not in sys.path:
 
 from app import db, security  # noqa: E402
 from app.routers import builds  # noqa: E402
-from app.services import releases  # noqa: E402
+from app.services import node_refs, releases  # noqa: E402
 
 # 成员顺序就是客户端里的候选顺序。Google/AI 严格 US -> SG -> JP；
 # TikTok 先日本/新加坡，避免美国出口成为默认；普通代理仍保留机场容量。
@@ -55,21 +55,37 @@ def _load(conn, name: str):
     return row, json.loads(row['proxies'] or '[]')
 
 
+def _canonicalize(conn, group_id: int, desired: list[str]) -> None:
+    groups, nodes = node_refs.context(conn)
+    refs = node_refs.legacy_refs(desired, variant_id=0, groups=groups,
+                                 nodes=nodes)
+    node_refs.canonical_group(conn, group_id, refs)
+
+
 def apply_changes(conn) -> list[dict]:
     changes = []
     for name, desired in GROUP_MEMBERS.items():
         row, current = _load(conn, name)
-        if current != desired:
-            conn.execute('UPDATE proxy_groups SET proxies=?,updated_at=? '
-                         'WHERE id=?',
-                         (json.dumps(desired, ensure_ascii=False), db.now(),
-                          row['id']))
-            security.audit(conn, 'codex-unified-variant', '收敛默认策略组成员',
+        groups, nodes = node_refs.context(conn)
+        stale_members = None
+        members = node_refs.decoded(
+            db.one(conn, 'SELECT members_v2 FROM proxy_groups WHERE id=?',
+                   (row['id'],))['members_v2'], [])
+        if members:
+            try:
+                stale_members = node_refs.resolve_refs(
+                    members, variant_id=0, groups=groups, nodes=nodes)
+            except ValueError:
+                stale_members = ['<invalid>']
+        if current != desired or stale_members != desired:
+            _canonicalize(conn, row['id'], desired)
+            security.audit(conn, 'codex-unified-variant', '收敛默认策略组类型引用',
                            'proxy_group', row['id'],
                            {'name': name, 'before_count': len(current),
                             'after_count': len(desired)})
             changes.append({'group': name, 'before_count': len(current),
-                            'after_count': len(desired)})
+                            'after_count': len(desired),
+                            'canonicalized': stale_members != desired})
     variant = db.one(conn, 'SELECT id,enabled,note FROM variants WHERE id=1')
     if variant is None:
         raise SystemExit('legacy variant missing; rollback snapshot required')
