@@ -38,6 +38,7 @@ BINARY_FORMATS = {MRS_FORMAT}
 # 「包含所有」哨兵：多选列表里放这个值表示"全部"（节点来源 = 所有来源，
 # 含以后新增的；引擎平台 / 设备 = 全部）。
 ALL_SCOPE = "*"
+MAX_CHECK_INTERVAL = 604800  # 周检测显式上限；300秒哨兵由运行合同单独控制
 GROUP_TYPES = {"select", "url-test", "fallback", "load-balance", "relay"}
 LB_STRATEGIES = {"consistent-hashing", "round-robin", "sticky-sessions"}
 RULE_TYPES = {

@@ -25,7 +25,7 @@ class GroupBody(BaseModel):
     proxies: list[str] = Field(default_factory=list)
     members_v2: list[dict] | None = None
     url: str = Field(default=config.HEALTH_CHECK_URL, max_length=256)
-    interval: int = Field(default=600, ge=30, le=86400)
+    interval: int = Field(default=600, ge=0, le=config.MAX_CHECK_INTERVAL)
     timeout: int = Field(default=8000, ge=100, le=60000)
     tolerance: int = Field(default=150, ge=0, le=5000)
     lazy: bool = True
