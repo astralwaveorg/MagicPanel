@@ -116,6 +116,7 @@ PROTOCOLS = {
                    show_if={"key": "network", "in": ["grpc"]}),
             _field("reality_public_key", "Reality 公钥", "text", default=""),
             _field("reality_short_id", "Reality Short ID", "text", default=""),
+            _field("reality_support_x25519mlkem768", "支持 X25519MLKEM768", "switch", default=False),
             _field("udp", "启用 UDP", "switch", default=True),
         ],
     },
@@ -443,6 +444,10 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
                 "public-key": params["reality_public_key"],
                 "short-id": params.get("reality_short_id", ""),
             }
+            # 仅 mihomo 识别此键：开启后 ClientHello 带 X25519MLKEM768 混合密钥共享，
+            # 这是 Xray v26.9.9+ 服务端 REALITY 指纹校验的必要条件（Stash 不识别，故不输出）
+            if params.get("reality_support_x25519mlkem768") and not stash:
+                entry["reality-opts"]["support-x25519mlkem768"] = True
     elif protocol == "trojan":
         entry["password"] = params.get("password", "")
         if not stash:
