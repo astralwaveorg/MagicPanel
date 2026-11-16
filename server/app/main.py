@@ -13,6 +13,7 @@ from . import config, db
 from .routers import (auth, automation, backups, base_config, builds, deps, feed,
                       local_nodes, misc, nodes, policy, portal, probe_jobs, rule_providers, snippets,
                       sources, targets_devices, variants)
+from .feed_freeze_compat import install_freeze_reader
 from .services import retention, scheduler, webdav
 
 
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
               feed.router, portal.router, snippets.router, probe_jobs.router, deps.router):
         app.include_router(r)
 
+    install_freeze_reader(app)
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         resp = await call_next(request)
