@@ -44,6 +44,17 @@
 6. WireGuard、SQM、AdGuard Home、OpenClash 最终切换仍属 Router Final。本轮不重启 OpenClash、不刷新订阅、不改 WAN/LAN/PPPoE/DNS 转发。
 7. 住宅 IP 当前不存在，探测授权为零。未来添加住宅资源时必须单独登记用途、硬配额和预算，不能默认进入通配检测。
 
+## 2D. 2026-11-16 DNS 方案修订
+
+用户已创建 `dns-hk.magichub.top` / `dns-kr.magichub.top` A 记录，但这两项不再作为 Router Final 必备。修订原因：自有 VPS 会把续费、单机、单域封锁和单地域故障引入家庭 DNS 关键路径；公共多源 DoH/DoT 是更合理的默认方向，但必须多运营方并用并分别实测，不能单一公共服务商。
+
+当前结论：
+
+- HK/KR 18443 部署暂停；两 A 记录可休眠，不进入 R6S 候选配置。
+- Router Final 不再因 HK/KR DNS 未部署而阻塞。
+- 仍要求 DNS 不依赖 Mihomo 业务核心；海外解析源使用多公共端点健康检查与降级。
+- 旧契约 §4 如与本节冲突，以 §4.0 修订为准。
+
 ## 2C. 2026-11-16 路由器安全准备与构建 261 回执
 
 - R6S 基线备份：`/root/mp-final-prep/20261116T151500/router-baseline.tar.gz`，26.4 MiB，SHA256 `c1d467b7438cd551fc787b7bee0c624911066261b31860f1f67855abe065668e`。
