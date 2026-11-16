@@ -26,7 +26,7 @@
       </div>
 
       <div class="mp-card stat-tile">
-        <div class="stat-label">节点可用率</div>
+        <div class="stat-label">基础连通样本</div>
         <template v-if="totalTested">
           <div class="stat-main" :style="{ color: availColor(totalRate) }">{{ totalRate }}%</div>
           <div class="stat-sub">
@@ -35,8 +35,8 @@
           </div>
         </template>
         <div v-else class="stat-empty">
-          暂无测速数据
-          <span>在「节点来源」执行测速后这里汇总可用率</span>
+          暂无基础连通样本
+          <span>受管探测完成后这里展示样本数量，不代表业务已加载</span>
         </div>
       </div>
 
@@ -47,7 +47,7 @@
         </div>
         <div class="stat-sub">
           最近更新 {{ latestConfig ? fmtTime(latestConfig) : '—' }}<br />
-          {{ configPulledRecently }}/{{ data.devices?.length || 0 }} 台 24 小时内更新过配置
+          {{ configPulledRecently }}/{{ data.devices?.length || 0 }} 台最近24小时有配置拉取记录；是否加载成功另列
         </div>
         <div v-if="data.counts?.devices_stale > 0" class="stat-sub">
           <span class="mp-cell-flag">
@@ -84,6 +84,15 @@
         <div v-else class="stat-sub">暂无出口观测，未发起主动检测。</div>
         <div class="stat-sub">出口归属地不能证明测速已绕过透明代理。</div>
         <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击刷新重试。</div>
+      </div>
+    </div>
+
+    <div class="mp-card">
+      <h3>发布指针</h3>
+      <div class="mp-health-note">
+        生产 revision <span class="mono">{{ data.release_state?.release_revisions?.production ?? '—' }}</span>
+        · 测试 revision <span class="mono">{{ data.release_state?.release_revisions?.testing ?? '—' }}</span>
+        · 发布失败会保留原指针，不会部分生效
       </div>
     </div>
 

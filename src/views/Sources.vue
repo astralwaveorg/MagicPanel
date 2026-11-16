@@ -976,10 +976,11 @@ async function onUploadCore(file) {
 async function testRow(row, silent = false) {
   row._testing = true
   try {
-    const updated = await api(`/api/v1/sources/${row.id}/test`, { method: 'POST' })
-    Object.assign(row, updated)
-    if (!silent) {
-      ElMessage.success(`测速完成：${updated.tested_ok} 可用 / ${updated.tested_failed} 不可用`)
+    const accepted = await api(`/api/v1/sources/${row.id}/test`, { method: 'POST' })
+    if (accepted.job_id) {
+      if (!silent) ElMessage.success(`已创建受管探测任务 #${accepted.job_id.slice(0, 8)}`)
+    } else if (!silent) {
+      ElMessage.success(`测速完成：${accepted.tested_ok} 可用 / ${accepted.tested_failed} 不可用`)
     }
     return true
   } catch (e) {
@@ -1361,15 +1362,19 @@ async function copyRevealed() {
 async function testLocal(row) {
   testingLocal.value = row.id
   try {
-    const res = await api(`/api/v1/local-nodes/${row.id}/test`, { method: 'POST' })
-    const item = localNodes.value.find((n) => n.id === row.id)
-    if (item) {
-      item.test_status = res.status
-      item.test_delay = res.delay
-      item.tested_at = res.tested_at
+    const accepted = await api(`/api/v1/local-nodes/${row.id}/test`, { method: 'POST' })
+    if (accepted.job_id) {
+      ElMessage.success(`已创建受管探测任务 #${accepted.job_id.slice(0, 8)}`)
+    } else {
+      const item = localNodes.value.find((n) => n.id === row.id)
+      if (item) {
+        item.test_status = accepted.status
+        item.test_delay = accepted.delay
+        item.tested_at = accepted.tested_at
+      }
+      if (accepted.ok) ElMessage.success(`节点测速通过（${accepted.delay} ms）`)
+      else ElMessage.warning('节点测速失败：无法通过该节点访问测试地址')
     }
-    if (res.ok) ElMessage.success(`节点测速通过（${res.delay} ms）`)
-    else ElMessage.warning('节点测速失败：无法通过该节点访问测试地址')
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -1394,14 +1399,8 @@ async function testAllLocal() {
   try {
     for (const node of targets) {
       try {
-        const res = await api(`/api/v1/local-nodes/${node.id}/test`, { method: 'POST' })
-        const item = localNodes.value.find((n) => n.id === node.id)
-        if (item) {
-          item.test_status = res.status
-          item.test_delay = res.delay
-          item.tested_at = res.tested_at
-        }
-        if (res.ok) ok += 1
+        const accepted = await api(`/api/v1/local-nodes/${node.id}/test`, { method: 'POST' })
+        if (accepted.job_id) ok += 1
         else failed += 1
       } catch (e) {
         failed += 1
@@ -1410,9 +1409,9 @@ async function testAllLocal() {
       localTestDone.value += 1
     }
     if (failed) {
-      ElMessage.warning(`测速完成：${ok} 个可用，${failed} 个不可用`)
+      ElMessage.warning(`任务提交完成：${ok} 个入队，${failed} 个失败`)
     } else {
-      ElMessage.success(`测速完成：${ok} 个本地节点全部可用`)
+      ElMessage.success(`已创建 ${ok} 个受管探测任务`)
     }
   } finally {
     testingLocalBatch.value = false
