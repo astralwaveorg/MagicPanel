@@ -3,7 +3,8 @@ dist/
 # 文档站点源码（由 scripts/build_docs_site.py 生成）
 docs_site/
 data/
-.venv/
+# 同时覆盖 .venv 目录与 .venv 符号链接（venv 放在仓库外时用链接指过去）
+.venv
 __pycache__/
 *.pyc
 .DS_Store
