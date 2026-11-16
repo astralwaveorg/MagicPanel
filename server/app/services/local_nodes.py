@@ -558,4 +558,8 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
     extra = parse_extra(node.get("extra_yaml", ""))
     if extra:
         entry.update(extra)
+    # REALITY 客户端必须带 uTLS 指纹：缺省时 mihomo 走原生 TLS，REALITY 握手会被服务端拒
+    # （2026-11-17 实测：无指纹延迟测试 503，补 client-fingerprint: chrome 后恢复）
+    if entry.get("reality-opts") and not entry.get("client-fingerprint"):
+        entry["client-fingerprint"] = "chrome"
     return entry
