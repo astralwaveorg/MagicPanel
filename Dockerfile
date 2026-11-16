@@ -1,5 +1,12 @@
 # ---- 前端构建 ----
+# 显式声明构建代理，防止守护进程旧代理注入导致 NAS 构建不可复现。
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 FROM node:22-alpine AS web
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -10,6 +17,9 @@ RUN npm run build
 
 # ---- 运行时 ----
 FROM python:3.12-slim
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 ENV PYTHONUNBUFFERED=1 \
     MAGICPANEL_DATA_DIR=/app/data
 WORKDIR /app
