@@ -13,7 +13,8 @@ import threading
 import yaml
 
 from .. import config, db, security
-from . import fetcher, source_nodes, tester, node_catalog
+from . import fetcher, rule_content, source_nodes, tester, node_catalog
+from .resource_revisions import freeze_bytes
 
 
 class NotFound(Exception):
@@ -269,26 +270,45 @@ def refresh_provider(rp_id: int, operator: str, automatic: bool = False):
                     "rule_provider", rp_id, {"name": name, "error": error},
                 )
             else:
-                if fmt in config.BINARY_FORMATS:
-                    # 二进制格式（MRS）：按 base64 存库，下发时还原成字节，
-                    # 指纹对原始字节计算，与客户端拿到的一致。
-                    text = base64.b64encode(body).decode("ascii")
-                    sha = security.sha256_bytes(body)
+                try:
+                    validated = rule_content.validate_rule_content(body, fmt=fmt,
+                                                                   behavior=behavior,
+                                                                   engine_caps={})
+                except rule_content.RuleContentError as exc:
+                    error = f"规则内容验证失败：{exc}"
+                if error:
+                    conn.execute(
+                        "UPDATE rule_providers SET last_status='failed', last_error=?, "
+                        "last_attempt_at=?, updated_at=? WHERE id=?",
+                        (error, now, now, rp_id),
+                    )
+                    security.audit(
+                        conn, operator,
+                        _action(automatic, "刷新规则来源失败", "自动抓取规则来源失败"),
+                        "rule_provider", rp_id, {"name": name, "error": error},
+                    )
                 else:
-                    text = body.decode("utf-8", "replace")
-                    sha = security.sha256_text(text)
-                conn.execute(
-                    "UPDATE rule_providers SET last_status='ok', last_error='', "
-                    "last_fetched_at=?, last_attempt_at=?, rule_count=?, sha256=?, "
-                    "content=?, updated_at=? WHERE id=?",
-                    (now, now, count, sha, text, now, rp_id),
-                )
-                security.audit(
-                    conn, operator,
-                    _action(automatic, "刷新规则来源", "自动抓取规则来源"),
-                    "rule_provider", rp_id,
-                    {"name": name, "rule_count": count},
-                )
+                    freeze_bytes(conn, kind='rule', name=name, body=body,
+                                 behavior=behavior, format=fmt)
+                    if fmt in config.BINARY_FORMATS:
+                        # MRS 按原始字节加密存库；公开库只保存 base64 展示副本。
+                        text = base64.b64encode(body).decode("ascii")
+                        sha = security.sha256_bytes(body)
+                    else:
+                        text = body.decode("utf-8", "replace")
+                        sha = security.sha256_text(text)
+                    conn.execute(
+                        "UPDATE rule_providers SET last_status='ok', last_error='', "
+                        "last_fetched_at=?, last_attempt_at=?, rule_count=?, sha256=?, "
+                        "content=?, updated_at=? WHERE id=?",
+                        (now, now, count, sha, text, now, rp_id),
+                    )
+                    security.audit(
+                        conn, operator,
+                        _action(automatic, "刷新规则来源", "自动抓取规则来源"),
+                        "rule_provider", rp_id,
+                        {"name": name, "rule_count": count},
+                    )
         if error:
             raise fetcher.FetchError(error)
         with db.connect() as conn:
