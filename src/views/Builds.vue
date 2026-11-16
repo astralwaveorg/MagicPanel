@@ -211,12 +211,34 @@
             {{ result.size }} 字节 · 摘要 <span class="mono">{{ shortSha(result.sha256) }}</span>
           </div>
           <template v-if="result.errors?.length">
-            <div v-for="(e, i) in result.errors" :key="'e' + i"
-                 style="color:var(--mp-danger);font-size:12.5px;margin-top:6px">错误：{{ e }}</div>
+            <div style="color:var(--mp-danger);font-size:12.5px;margin-top:6px">
+              错误：{{ result.errors.length }} 项校验未通过
+              <el-button v-if="result.errors.length > 1" link type="danger" size="small"
+                         @click="toggleDetail(name, 'errors')">
+                {{ expanded[name + ':errors'] ? '收起' : '展开明细' }}
+              </el-button>
+            </div>
+            <div v-if="expanded[name + ':errors']" style="margin-top:4px">
+              <div v-for="(e, i) in groupByText(result.errors)" :key="'e' + i"
+                   style="color:var(--mp-danger);font-size:12.5px;margin-top:4px">
+                {{ e.text }}<span v-if="e.count > 1" class="mono">（出现 {{ e.count }} 次）</span>
+              </div>
+            </div>
           </template>
           <template v-if="result.warnings?.length">
-            <div v-for="(w, i) in result.warnings" :key="'w' + i"
-                 style="color:var(--mp-warn);font-size:12.5px;margin-top:6px">提示：{{ w }}</div>
+            <div style="color:var(--mp-warn);font-size:12.5px;margin-top:6px">
+              提示：构建存在 {{ result.warnings.length }} 条警告
+              <el-button link type="warning" size="small"
+                         @click="toggleDetail(name, 'warnings')">
+                {{ expanded[name + ':warnings'] ? '收起' : '展开明细' }}
+              </el-button>
+            </div>
+            <div v-if="expanded[name + ':warnings']" style="margin-top:4px">
+              <div v-for="(w, i) in groupByText(result.warnings)" :key="'w' + i"
+                   style="color:var(--mp-warn);font-size:12.5px;margin-top:4px">
+                {{ w.text }}<span v-if="w.count > 1" class="mono">（出现 {{ w.count }} 次）</span>
+              </div>
+            </div>
           </template>
         </div>
       </template>
@@ -301,6 +323,19 @@ const selected = ref([])
 const blockedVisible = ref(false)
 const blockedItems = ref([])
 const deletedCount = ref(0)
+// 构建结果里的警告常常成百上千条同文案，默认折叠，按需展开明细
+const expanded = ref({})
+
+function toggleDetail(name, kind) {
+  const key = name + ':' + kind
+  expanded.value[key] = !expanded.value[key]
+}
+
+function groupByText(list) {
+  const counts = new Map()
+  for (const item of list || []) counts.set(item, (counts.get(item) || 0) + 1)
+  return [...counts.entries()].map(([text, count]) => ({ text, count }))
+}
 
 function onPageChange({ page: p, limit: l }) {
   page.value = p

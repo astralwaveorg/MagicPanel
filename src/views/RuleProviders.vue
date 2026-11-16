@@ -108,12 +108,10 @@
             <template #default="{ row }">
               <!-- 内联规则直接写在面板里，不存在抓取；仓库来源看的是同步状态 -->
               <StatusDot v-if="row.kind !== 'inline'" v-bind="sourceStatus(row)" />
-              <el-tooltip v-if="row.kind !== 'inline' && row.last_status === 'failed' && row.rule_count"
-                         :content="row.kind === 'repo'
-                           ? `同步失败，客户端继续用上次同步的内容（${row.rule_count} 条）`
-                           : `抓取失败，客户端继续用上次抓到的内容（${row.rule_count} 条）`"
+              <el-tooltip v-if="row.kind !== 'inline' && row.last_status === 'failed'"
+                         :content="failReason(row)"
                          placement="top">
-                <span class="mp-cell-sub">仍用上次内容</span>
+                <span class="mp-cell-sub">{{ row.rule_count ? '仍用上次内容' : '抓取失败' }}</span>
               </el-tooltip>
               <!-- 占位符只属于内联来源（没有抓取概念）；此前 v-else 错挂在
                    失败提示上，导致抓取成功也跟着一个悬空的 — -->
@@ -327,6 +325,14 @@ import { fmtTime, shortSha, sourceStatus } from '../format'
 
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管由自主维护同步而来）
 const KIND_LABELS = { remote: '远程', inline: '内联', repo: '维护仓库' }
+
+// 失败原因要能看懂：后端给的是脱敏后的中文说明（不回显含凭据的原文）
+function failReason(row) {
+  const reason = row.last_error || '原因未知'
+  return row.kind === 'repo'
+    ? `同步失败：${reason}；客户端继续用上次同步的内容（${row.rule_count || 0} 条）`
+    : `抓取失败：${reason}${row.rule_count ? `；客户端继续用上次抓到的内容（${row.rule_count} 条）` : ''}`
+}
 const INTERVAL_PRESETS = [  { label: '15 分钟', value: 900 },
   { label: '1 小时', value: 3600 },
   { label: '6 小时', value: 21600 },

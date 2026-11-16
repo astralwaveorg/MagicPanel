@@ -36,7 +36,7 @@
         </template>
         <div v-else class="stat-empty">
           暂无基础连通样本
-          <span>受管探测完成后这里展示样本数量，不代表业务已加载</span>
+          <span>样本来自本服务器经节点测速，反映服务器侧连通性</span>
         </div>
       </div>
 
