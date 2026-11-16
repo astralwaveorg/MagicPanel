@@ -4,6 +4,7 @@
 版本状态（已构建 / 测试中 / 生产中 / 已下线），失败或空结果不会覆盖现网。
 """
 import json
+from datetime import datetime, timezone
 import shutil
 
 from fastapi import APIRouter, HTTPException
@@ -14,7 +15,7 @@ from ..compiler import render, validate
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
 from ..services import runtime_profiles
-from ..services import releases, node_catalog
+from ..services import publish_gate, releases, node_catalog
 from ..services import source_nodes as source_node_service
 from ..services import tester
 
@@ -502,46 +503,78 @@ def diff_builds(bid: int, other_id: int, user=CurrentUser):
 
 class PublishBody(BaseModel):
     reason: str = Field(default="", max_length=256)
+    expected_release_revision: int | None = Field(default=None, ge=0)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
 
 
-def _publish(action: str, bid: int, reason: str, operator: str) -> dict:
-    """执行一次状态切换并把状态机错误翻译成 400。"""
+def _publish(action: str, bid: int, reason: str, operator: str, body=None) -> dict:
+    """发布票据、CAS 与状态切换必须在同一事务内完成。"""
+    body = body or PublishBody()
+    env = {"test": releases.Env.TESTING, "prod": releases.Env.PRODUCTION,
+           "both": releases.Env.PRODUCTION, "rollback": releases.Env.PRODUCTION,
+           "offline": releases.Env.TESTING}[action]
+    if (body.expected_release_revision is None) != (body.idempotency_key is None):
+        raise HTTPException(400, "expected_release_revision 与 idempotency_key 必须同时提供")
     try:
         with db.tx(immediate=True) as conn:
             build = _get_build(conn, bid)
+            target_status = {"test": releases.BuildStatus.TESTING.value,
+                             "prod": releases.BuildStatus.PRODUCTION.value,
+                             "both": releases.BuildStatus.PRODUCTION.value,
+                             "rollback": releases.BuildStatus.PRODUCTION.value,
+                             "offline": releases.BuildStatus.OFFLINE.value}[action]
+            payload_sha = json.dumps({"build": int(build["id"]), "reason": reason,
+                                      "status": target_status}, ensure_ascii=False,
+                                     sort_keys=True, separators=(',', ':'))
+            replay = releases._idempotent(conn, {"test": "publish", "prod": "publish",
+                                                  "both": "publish", "rollback": "rollback",
+                                                  "offline": "offline"}[action], env,
+                                          operator, body.idempotency_key, payload_sha)
+            if replay is not None:
+                return {"ok": True, **replay}
+            publish_gate.prepare_ticket(conn, bid, env=env.value, now=datetime.now(timezone.utc))
+            expected = body.expected_release_revision
+            idem = body.idempotency_key
             if action == "test":
                 result = releases.publish_to_testing(
-                    conn, build, operator, reason)
+                    conn, build, operator, reason, expected_revision=expected,
+                    idempotency_key=idem)
             elif action == "prod":
                 result = releases.publish_to_production(
-                    conn, build, operator, reason)
+                    conn, build, operator, reason, expected_revision=expected,
+                    idempotency_key=idem)
             elif action == "both":
-                # 一步到位：同一事务内先置测试再置生产，发布历史只记一条。
-                # publish_build 内部就是这两步，语义与自动任务一致。
                 if build["status"] == releases.BuildStatus.PRODUCTION.value:
                     raise releases.ReleaseError("该构建已是当前生产版本")
-                result = releases.publish_build(conn, build, operator, reason,
-                                                releases.Env.PRODUCTION)
+                result = releases.publish_build(
+                    conn, build, operator, reason, releases.Env.PRODUCTION,
+                    expected_revisions={"production": expected},
+                    idempotency_keys={"production": idem})
             elif action == "rollback":
                 result = releases.publish_to_production(
-                    conn, build, operator, reason, rollback=True)
+                    conn, build, operator, reason, rollback=True,
+                    expected_revision=expected, idempotency_key=idem)
             else:
-                result = releases.offline(conn, build, operator, reason)
+                result = releases.offline(conn, build, operator, reason,
+                    expected_revision=expected, idempotency_key=idem)
     except releases.ReleaseError as exc:
-        raise HTTPException(400, str(exc))
+        message = str(exc)
+        status = 409 if (message == 'release_revision_changed' or
+                         message.startswith('发布版本已变化')) else 400
+        raise HTTPException(status, message)
     return {"ok": True, **result}
 
 
 @router.post("/builds/{bid}/publish-to-test")
 def publish_to_test(bid: int, body: PublishBody, user=RequireCapabilities('publish_test')):
     """发布至测试环境：已构建 / 已下线 → 测试中。"""
-    return _publish("test", bid, body.reason, user["username"])
+    return _publish("test", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/publish-to-prod")
 def publish_to_prod(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
     """发布至生产环境：测试中 / 已下线 → 生产中。"""
-    return _publish("prod", bid, body.reason, user["username"])
+    return _publish("prod", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/publish-both")
@@ -550,19 +583,19 @@ def publish_both(bid: int, body: PublishBody, user=RequireCapabilities('publish_
 
     两步同处一个事务，状态原子切换；发布历史只记最终那一条。
     """
-    return _publish("both", bid, body.reason, user["username"])
+    return _publish("both", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/rollback-to-prod")
 def rollback_to_prod(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
     """回滚生产版本：把已下线的历史构建重新设为生产版本。"""
-    return _publish("rollback", bid, body.reason, user["username"])
+    return _publish("rollback", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/offline")
 def offline_build(bid: int, body: PublishBody, user=RequireCapabilities('publish_test')):
     """手动下线：测试中 → 已下线（测试环境空置）。"""
-    return _publish("offline", bid, body.reason, user["username"])
+    return _publish("offline", bid, body.reason, user["username"], body)
 
 
 @router.get("/release-state")

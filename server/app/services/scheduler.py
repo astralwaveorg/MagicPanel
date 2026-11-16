@@ -396,7 +396,7 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
         with db.connect() as conn:
             row = db.one(conn, "SELECT results FROM builds WHERE id=?", (build_id,))
         results = json.loads(row["results"] or "{}")
-        unchecked = _unchecked_core_targets(results) if _core_available() else []
+        unchecked = _unchecked_core_targets(results)
         if unchecked:
             summary["build_error"] = (
                 "以下 Mihomo 目标未做核心校验（mihomo -t），已跳过自动构建发布："

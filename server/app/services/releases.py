@@ -96,6 +96,8 @@ def state_public(conn) -> dict:
     for env in (Env.PRODUCTION, Env.TESTING):
         row = current(conn, env)
         out[env.value] = build_public(row) if row else None
+    out["release_revisions"] = {env.value: revision(conn, env)
+                                for env in (Env.PRODUCTION, Env.TESTING)}
     return out
 
 
@@ -147,18 +149,79 @@ def _check_publishable(build) -> None:
         raise ReleaseError("该构建未通过校验，不能发布")
 
 
-def _switch(conn, build, env: Env, status: BuildStatus, action: str,
-            operator: str, reason: str, record: bool = True) -> dict:
-    """执行一次状态切换（调用方必须已开启写事务）。
+def revision(conn, env) -> int:
+    """环境发布指针独立单调；不存在时按零版本兼容。"""
+    row = db.one(conn, "SELECT revision FROM release_state WHERE env=?", (_env_of(env).value,))
+    return int(row["revision"]) if row else 0
 
-    record=False 时不写发布历史：两步流转（自动构建发布到生产）算一次操作，
-    只留最终那一条历史，否则 10 条上限会被一轮操作吃掉两条。
-    """
+
+def _user_id(conn, operator: str) -> int:
+    row = db.one(conn, "SELECT id FROM users WHERE username=?", (operator,))
+    return int(row["id"]) if row else 0
+
+
+def _operation_key(conn, action: str, env: Env, operator: str) -> tuple[str, str, int]:
+    names = {"test": "publish", "prod": "publish", "both": "publish",
+             "publish": "publish", "rollback": "rollback", "offline": "offline"}
+    return names[action], _env_of(env).value, _user_id(conn, operator)
+
+
+def _idempotent(conn, action: str, env: Env, operator: str,
+                idempotency_key: str | None, payload_sha: str):
+    if not idempotency_key:
+        return None
+    action_name, env_name, user_id = _operation_key(conn, action, env, operator)
+    row = db.one(conn, "SELECT * FROM operation_requests WHERE action=? AND scope=? "
+                       "AND actor_id=? AND idempotency_key=?",
+                 (action_name, env_name, user_id, idempotency_key))
+    if not row:
+        return None
+    if row["payload_sha"] != payload_sha:
+        raise ReleaseError("release_idempotency_conflict")
+    return json.loads(row["response_json"])
+
+
+def _save_operation(conn, action: str, env: Env, operator: str,
+                    idempotency_key: str | None, payload_sha: str,
+                    response: dict) -> None:
+    if not idempotency_key:
+        return
+    action_name, env_name, user_id = _operation_key(conn, action, env, operator)
+    conn.execute("INSERT OR IGNORE INTO operation_requests(action,scope,actor_id,"
+                 "idempotency_key,payload_sha,response_json,state,created_at) "
+                 "VALUES(?,?,?,?,?,?,'completed',?)",
+                 (action_name, env_name, user_id, idempotency_key, payload_sha,
+                  json.dumps(response, ensure_ascii=False, sort_keys=True,
+                             separators=(',', ':')), db.now()))
+
+
+def _bump_release_state(conn, env: Env, build_id) -> int:
+    now = db.now()
+    conn.execute("INSERT OR IGNORE INTO release_state(env,revision,current_build_id,updated_at) "
+                 "VALUES(?,0,?,?)", (env.value, str(build_id), now))
+    conn.execute("UPDATE release_state SET revision=revision+1,current_build_id=?,updated_at=? "
+                 "WHERE env=?", (str(build_id), now, env.value))
+    return revision(conn, env)
+
+
+def _switch(conn, build, env: Env, status: BuildStatus, action: str,
+            operator: str, reason: str, record: bool = True,
+            expected_revision: int | None = None,
+            idempotency_key: str | None = None) -> dict:
+    """执行一次已验证状态切换；调用方必须已开启写事务。"""
+    current_revision = revision(conn, env)
+    if expected_revision is not None and expected_revision != current_revision:
+        raise ReleaseError(f"发布版本已变化：期望 {expected_revision}，当前 {current_revision}")
+    payload_sha = json.dumps({"build": int(build["id"]), "reason": reason,
+                              "status": status.value}, ensure_ascii=False,
+                             sort_keys=True, separators=(',', ':'))
+    replay = _idempotent(conn, action, env, operator, idempotency_key, payload_sha)
+    if replay is not None:
+        return replay
     now = db.now()
     old = current(conn, env)
     replaced = None
     if old and int(old["id"]) != int(build["id"]):
-        # 先下线旧版本：唯一索引要求同一环境至多一条生效记录
         conn.execute(
             "UPDATE builds SET status=?, status_updated_at=? WHERE id=?",
             (BuildStatus.OFFLINE.value, now, old["id"]))
@@ -172,7 +235,6 @@ def _switch(conn, build, env: Env, status: BuildStatus, action: str,
             "INSERT INTO releases(build_id, env, action, operator, reason, created_at) "
             "VALUES(?,?,?,?,?,?)",
             (build["id"], env.value, action, operator, reason, now))
-        # 发布历史只保留最近 N 条；完整操作仍可在审计日志中追溯
         conn.execute(
             "DELETE FROM releases WHERE id NOT IN "
             "(SELECT id FROM releases ORDER BY id DESC LIMIT ?)",
@@ -185,8 +247,11 @@ def _switch(conn, build, env: Env, status: BuildStatus, action: str,
         "build", build["id"],
         {"status": status.value, "env": env.value, "action": action,
          "reason": reason, "replaced": replaced})
-    return {"build_id": int(build["id"]), "status": status.value,
-            "env": env.value, "action": action, "replaced": replaced}
+    result = {"build_id": int(build["id"]), "status": status.value,
+              "env": env.value, "action": action, "replaced": replaced,
+              "release_revision": _bump_release_state(conn, env, build["id"])}
+    _save_operation(conn, action, env, operator, idempotency_key, payload_sha, result)
+    return result
 
 
 def _check_artifacts(build) -> None:
@@ -197,7 +262,8 @@ def _check_artifacts(build) -> None:
 
 
 def publish_to_testing(conn, build, operator: str, reason: str = "",
-                       record: bool = True) -> dict:
+                       record: bool = True, expected_revision: int | None = None,
+                       idempotency_key: str | None = None) -> dict:
     """发布至测试环境：BUILT / OFFLINE → TESTING。"""
     status = build["status"]
     if status == BuildStatus.TESTING.value:
@@ -207,11 +273,15 @@ def publish_to_testing(conn, build, operator: str, reason: str = "",
     _check_publishable(build)
     _check_artifacts(build)
     return _switch(conn, build, Env.TESTING, BuildStatus.TESTING,
-                   ACTION_PUBLISH, operator, reason, record=record)
+                   ACTION_PUBLISH, operator, reason, record=record,
+                   expected_revision=expected_revision,
+                   idempotency_key=idempotency_key)
 
 
 def publish_to_production(conn, build, operator: str, reason: str = "",
-                          rollback: bool = False, record: bool = True) -> dict:
+                          rollback: bool = False, record: bool = True,
+                          expected_revision: int | None = None,
+                          idempotency_key: str | None = None) -> dict:
     """发布至生产环境：TESTING / OFFLINE → PRODUCTION。
 
     未经过测试的构建（BUILT）不允许直接上线。
@@ -225,10 +295,14 @@ def publish_to_production(conn, build, operator: str, reason: str = "",
     _check_artifacts(build)
     action = ACTION_ROLLBACK if rollback else ACTION_PUBLISH
     return _switch(conn, build, Env.PRODUCTION, BuildStatus.PRODUCTION,
-                   action, operator, reason, record=record)
+                   action, operator, reason, record=record,
+                   expected_revision=expected_revision,
+                   idempotency_key=idempotency_key)
 
 
-def offline(conn, build, operator: str, reason: str = "") -> dict:
+def offline(conn, build, operator: str, reason: str = "",
+            expected_revision: int | None = None,
+            idempotency_key: str | None = None) -> dict:
     """手动下线：TESTING → OFFLINE（测试环境空置）。"""
     if build["status"] != BuildStatus.TESTING.value:
         raise ReleaseError("只有当前测试版本可以下线")
@@ -246,12 +320,18 @@ def offline(conn, build, operator: str, reason: str = "") -> dict:
         (config.RELEASE_HISTORY_LIMIT,))
     security.audit(conn, operator, "下线构建", "build", build["id"],
                    {"status": BuildStatus.OFFLINE.value, "reason": reason})
-    return {"build_id": int(build["id"]), "status": BuildStatus.OFFLINE.value,
-            "env": Env.TESTING.value, "action": ACTION_OFFLINE, "replaced": None}
+    result = {"build_id": int(build["id"]), "status": BuildStatus.OFFLINE.value,
+              "env": Env.TESTING.value, "action": ACTION_OFFLINE, "replaced": None,
+              "release_revision": _bump_release_state(conn, Env.TESTING, build["id"])}
+    _save_operation(conn, "offline", Env.TESTING, operator, idempotency_key,
+                    json.dumps(result, sort_keys=True, separators=(",", ":")), result)
+    return result
 
 
 def publish_build(conn, build, operator: str, reason: str = "",
-                  env: Env = Env.PRODUCTION) -> dict:
+                  env: Env = Env.PRODUCTION,
+                  expected_revisions: dict | None = None,
+                  idempotency_keys: dict | None = None) -> dict:
     """一步到位地发布构建到指定环境。
 
     规格要求"发布至生产"的来源状态必须是 TESTING 或 OFFLINE，
@@ -262,7 +342,11 @@ def publish_build(conn, build, operator: str, reason: str = "",
     """
     env = _env_of(env)
     if env is Env.TESTING:
-        return publish_to_testing(conn, build, operator, reason)
+        return publish_to_testing(conn, build, operator, reason,
+            expected_revision=(expected_revisions or {}).get("testing"),
+            idempotency_key=(idempotency_keys or {}).get("testing"))
     publish_to_testing(conn, build, operator, reason, record=False)
     fresh = db.one(conn, "SELECT * FROM builds WHERE id=?", (build["id"],))
-    return publish_to_production(conn, fresh, operator, reason)
+    return publish_to_production(conn, fresh, operator, reason,
+        expected_revision=(expected_revisions or {}).get("production"),
+        idempotency_key=(idempotency_keys or {}).get("production"))

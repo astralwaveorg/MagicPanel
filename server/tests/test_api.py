@@ -527,7 +527,9 @@ def test_overview(client):
     make_policy(client, csrf)
     data = client.get("/api/v1/overview").json()
     # 顶部发布状态：两个环境各一个生效版本（此处都还没有）
-    assert data["release_state"] == {"production": None, "testing": None}
+    assert data["release_state"]["production"] is None
+    assert data["release_state"]["testing"] is None
+    assert data["release_state"]["release_revisions"] == {"production": 0, "testing": 0}
     assert "channels" not in data
     assert len(data["sources"]) == 1 and len(data["devices"]) == 0
     assert "note" in data
@@ -1076,16 +1078,12 @@ def test_auto_publish_waits_for_filtered_speed_test(client, monkeypatch):
         )
     summary = scheduler.run_once(force=True)
     assert summary["build"]["status"] == "success"
-    assert summary["published"] == "production"
-    # 自动构建发布到生产是"同一事务内先置测试再置生产"的一步操作，
-    # 发布历史只记最终那一条（否则 10 条上限一轮就吃掉两条）
-    history = client.get("/api/v1/releases").json()
-    assert len(history) == 1
-    assert history[0]["env"] == "production"
-    assert history[0]["action"] == "publish"
-    # 自动构建发布后该构建就是生产版本
+    # 新合同：缺核心时候选可以生成，但不得自动改变生产指针。
+    assert summary["published"] == ""
+    assert "未做核心校验" in summary["build_error"]
+    assert client.get("/api/v1/releases").json() == []
     state = client.get("/api/v1/release-state").json()
-    assert state["production"]["id"] == summary["build"]["id"]
+    assert state["production"] is None
 
 
 def test_auto_fetch_switch_skips_scheduled_fetch(client, monkeypatch):
