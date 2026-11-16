@@ -117,7 +117,7 @@ def create_app() -> FastAPI:
     for r in (auth.router, sources.router, rule_providers.router, policy.router,
               variants.router, targets_devices.router, builds.router, misc.router,
               backups.router, automation.router, local_nodes.router, nodes.router, base_config.router,
-              feed.router, portal.router, snippets.router, probe_jobs.router, deps.router):
+              feed.router, portal.router, snippets.router, probe_jobs.router, deps.router, unlock.router):
         app.include_router(r)
 
     install_freeze_reader(app)

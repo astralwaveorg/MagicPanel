@@ -10,10 +10,12 @@
         </span>
       </div>
       <el-menu :default-active="route.path" router>
-        <el-menu-item v-for="item in menu" :key="item.path" :index="item.path">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.title }}</span>
-        </el-menu-item>
+        <el-menu-item-group v-for="group in menuGroups" :key="group.label" :title="group.label">
+          <el-menu-item v-for="item in group.items" :key="item.path" :index="item.path">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.title }}</span>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
       <div class="mp-aside-footer">
         <span class="mp-aside-user">
@@ -38,10 +40,12 @@
         </span>
       </div>
       <el-menu :default-active="route.path" @select="drawer = false" router>
-        <el-menu-item v-for="item in menu" :key="item.path" :index="item.path">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.title }}</span>
-        </el-menu-item>
+        <el-menu-item-group v-for="group in menuGroups" :key="group.label" :title="group.label">
+          <el-menu-item v-for="item in group.items" :key="item.path" :index="item.path">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.title }}</span>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
       <div class="mp-aside-footer">
         <span class="mp-aside-user">
@@ -105,20 +109,30 @@ const isAuthPage = computed(() =>
 // 侧边栏按依赖顺序排列：先看当前生效的配置（策略组、分流策略、来源），
 // 再看产物形态与设备，最后是构建发布与运维。高频页面同时尽量靠上，
 // 日常改策略的路径最短——策略组和分流策略挨着，因为规则的目标就是策略组。
-const menu = [
-  { path: '/admin', title: '系统概览', icon: Odometer },
-  { path: '/admin/groups', title: '策略组', icon: SetUp },
-  { path: '/admin/rules', title: '分流策略', icon: Filter },
-  { path: '/admin/sources', title: '节点来源', icon: Connection },
-  { path: '/admin/rule-providers', title: '规则来源', icon: Collection },
-  { path: '/admin/artifact', title: '基础配置', icon: Operation },
-  { path: '/admin/devices', title: '设备管理', icon: Iphone },
-  { path: '/admin/snippets', title: '拓展模块', icon: MagicStick },
-  { path: '/admin/builds', title: '构建发布', icon: Promotion },
-  { path: '/admin/unlock', title: '网络体检', icon: Compass },
-  { path: '/admin/dependencies', title: '自主维护', icon: FolderOpened },
-  { path: '/admin/audit', title: '审计日志', icon: Document },
-  { path: '/admin/settings', title: '系统设置', icon: Tools },
+// 菜单按使用场景分四组：日常看状态 → 改分流 → 发设备 → 运维收尾。
+// 仅显示层分组，路由路径与页面保持不变（约束 29）。
+const menuGroups = [
+  { label: '运营', items: [
+    { path: '/admin', title: '系统概览', icon: Odometer },
+    { path: '/admin/unlock', title: '网络体检', icon: Compass },
+  ] },
+  { label: '分流配置', items: [
+    { path: '/admin/groups', title: '策略组', icon: SetUp },
+    { path: '/admin/rules', title: '分流策略', icon: Filter },
+    { path: '/admin/sources', title: '节点来源', icon: Connection },
+    { path: '/admin/rule-providers', title: '规则来源', icon: Collection },
+    { path: '/admin/artifact', title: '基础配置', icon: Operation },
+  ] },
+  { label: '分发与设备', items: [
+    { path: '/admin/devices', title: '设备管理', icon: Iphone },
+    { path: '/admin/builds', title: '构建发布', icon: Promotion },
+  ] },
+  { label: '运维', items: [
+    { path: '/admin/snippets', title: '拓展模块', icon: MagicStick },
+    { path: '/admin/dependencies', title: '自主维护', icon: FolderOpened },
+    { path: '/admin/audit', title: '审计日志', icon: Document },
+    { path: '/admin/settings', title: '系统设置', icon: Tools },
+  ] },
 ]
 
 async function onLogout() {

@@ -112,3 +112,27 @@ def test_catalog_integrity():
     for c in u.CHECKS:
         assert c["category"] in u.CATEGORY_NAMES
         assert c["url"].startswith("https://")
+
+
+def test_unlock_routes_registered(tmp_path, monkeypatch):
+    """unlock 路由必须真正注册进 app（曾发生 import 了却没 include 的回归）。"""
+    import os, sys
+    monkeypatch.setenv("MAGICPANEL_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MAGICPANEL_SCHEDULER", "0")
+    for name in list(sys.modules):
+        if name.startswith("app"):
+            del sys.modules[name]
+    from app import config as mp_config, security as mp_security
+    mp_config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    mp_security.load_master_material(require_existing=False)  # 全新空目录：生成密钥文件
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+    app = create_app()
+    with TestClient(app) as tc:
+        # 已注册且带鉴权的路径返回 401；未注册会 404
+        # （新 FastAPI 把路由包进 _IncludedRouter，无法按 path 断言，用语义断言）
+        assert tc.get("/api/v1/unlock/catalog").status_code == 401
+        assert tc.get("/api/v1/unlock/last").status_code == 401
+        assert tc.post("/api/v1/unlock/run").status_code == 401
+        # 门户公开端点匿名可达
+        assert tc.get("/api/v1/portal/unlock").status_code == 200
