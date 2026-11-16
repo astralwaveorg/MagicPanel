@@ -1,10 +1,16 @@
 import importlib
 import os
 import sys
+import tempfile
 
 import pytest
 
 TEST_DATA = None
+
+# macOS 的临时目录挂在 /var/folders 下，而 /var 本身是 /private/var 的符号链接。
+# 归档路径校验会拒绝父目录是符号链接的路径，于是备份相关的用例在本机必然失败。
+# 把临时目录切到解析后的真实路径，Linux 上是恒等操作。
+tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
 
 
 @pytest.fixture()

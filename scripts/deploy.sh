@@ -118,6 +118,11 @@ finish_deploy() {
   exit "$status"
 }
 trap finish_deploy EXIT
+# 宿主 shell 里的代理变量会被 docker compose 当作 build args 传进构建容器，
+# 一旦指向本机已停用的代理端口（Stash 已停用就是 127.0.0.1:7890），
+# 构建阶段的 pip/npm 会去连容器内的那个端口，直接失败。
+# 家庭网络由路由器的 OpenClash 透明代理，构建不需要额外代理。
+unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
 # 刚重启时 NAS 的外网可能还没恢复，npm/pip 拉包会失败；
 # 需要时用 DEPLOY_PROXY=http://host:port 走局域网代理。
 # 家庭网络已由路由器的 OpenClash 透明代理，通常无需设置 DEPLOY_PROXY。
