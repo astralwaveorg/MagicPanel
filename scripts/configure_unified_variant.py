@@ -55,7 +55,7 @@ def _load(conn, name: str):
     return row, json.loads(row['proxies'] or '[]')
 
 
-def apply(conn, *, publish: bool) -> None:
+def apply_changes(conn) -> list[dict]:
     changes = []
     for name, desired in GROUP_MEMBERS.items():
         row, current = _load(conn, name)
@@ -80,29 +80,30 @@ def apply(conn, *, publish: bool) -> None:
         security.audit(conn, 'codex-unified-variant', '停用旧分流方案入口',
                        'variant', 1, {'kept_for_rollback': True})
         changes.append({'variant': '自建美日', 'enabled': False})
-    print(json.dumps({'changes': changes, 'catalog_policy_sha': 'pending'},
-                     ensure_ascii=False))
-    if not publish:
-        return
-    snapshot, policy_sha = builds.current_policy(conn)
+    return changes
+
+
+def publish_changes() -> None:
+    snapshot, policy_sha = builds.current_policy(db.connect())
     if not snapshot['targets']:
         raise SystemExit('no targets')
     build_id, status = builds.create_build(
         'codex-unified-variant', note='收敛默认方案并停用旧方案入口',
         snapshot=snapshot, policy_sha=policy_sha)
-    build = db.one(conn, 'SELECT * FROM builds WHERE id=?', (build_id,))
-    expected = {
-        'testing': releases.revision(conn, releases.Env.TESTING),
-        'production': releases.revision(conn, releases.Env.PRODUCTION),
-    }
-    idempotency = {
-        'testing': f'unified-variant-{build_id}-testing',
-        'production': f'unified-variant-{build_id}-production',
-    }
-    result = releases.publish_build(
-        conn, build, 'codex-unified-variant',
-        '收敛默认方案并保留旧链接兼容', releases.Env.PRODUCTION,
-        expected_revisions=expected, idempotency_keys=idempotency)
+    with db.tx(immediate=True) as conn:
+        build = db.one(conn, 'SELECT * FROM builds WHERE id=?', (build_id,))
+        expected = {
+            'testing': releases.revision(conn, releases.Env.TESTING),
+            'production': releases.revision(conn, releases.Env.PRODUCTION),
+        }
+        idempotency = {
+            'testing': f'unified-variant-{build_id}-testing',
+            'production': f'unified-variant-{build_id}-production',
+        }
+        result = releases.publish_build(
+            conn, build, 'codex-unified-variant',
+            '收敛默认方案并保留旧链接兼容', releases.Env.PRODUCTION,
+            expected_revisions=expected, idempotency_keys=idempotency)
     print(json.dumps({'build_id': build_id, 'build_status': status,
                       'release': result}, ensure_ascii=False))
 
@@ -115,7 +116,10 @@ def main() -> int:
     if args.publish and not args.apply:
         parser.error('--publish requires --apply')
     with db.tx(immediate=True) as conn:
-        apply(conn, publish=args.publish)
+        changes = apply_changes(conn)
+    print(json.dumps({'changes': changes}, ensure_ascii=False))
+    if args.publish:
+        publish_changes()
     return 0
 
 

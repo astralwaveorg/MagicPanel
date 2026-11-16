@@ -9,7 +9,7 @@ def test_unified_variant_script_updates_default_and_stages_legacy(client):
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from scripts.configure_unified_variant import GROUP_MEMBERS, apply
+    from scripts.configure_unified_variant import GROUP_MEMBERS, apply_changes
     with db.tx() as conn:
         now = db.now()
         for index, name in enumerate(GROUP_MEMBERS):
@@ -20,7 +20,7 @@ def test_unified_variant_script_updates_default_and_stages_legacy(client):
                          (name, index + 1, now, now))
         conn.execute("INSERT INTO variants(id,name,note,enabled,is_system,sort,created_at,updated_at) "
                      "VALUES(1,'自建美日','fixture',1,0,1,?,?)", (now, now))
-        apply(conn, publish=False)
+        apply_changes(conn)
         google = db.one(conn, "SELECT proxies FROM proxy_groups "
                               "WHERE variant_id=0 AND name='🔍 谷歌服务'")
         ai = db.one(conn, "SELECT proxies FROM proxy_groups "
