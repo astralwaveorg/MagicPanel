@@ -60,13 +60,22 @@ def canonical_material(proxy: dict) -> dict:
         material.pop('name', None)
         material.pop('x-magicpanel', None)
         material['server'] = _server(material.get('server'))
-        port = material.get('port')
-        if type(port) is not int or not 1 <= port <= 65535:
-            raise ValueError
         protocol = material.get('type')
         if type(protocol) is not str or not re.fullmatch(r'[A-Za-z][A-Za-z0-9-]*', protocol):
             raise ValueError
         material['type'] = protocol.lower()
+        port = material.get('port')
+        # Hysteria2 允许 port-hopping：订阅只给 ports range，客户端据此随机选口。
+        # 目录身份用首个可用端口作为稳定投影，原始 ports 仍完整保留在材料中。
+        if port is None and material['type'] == 'hysteria2':
+            match = re.fullmatch(r'([0-9]{1,5})(?:-([0-9]{1,5}))?', str(material.get('ports', '')))
+            if match:
+                low, high = int(match.group(1)), int(match.group(2) or match.group(1))
+                if 1 <= low <= 65535 and 1 <= high <= 65535 and low <= high:
+                    port = low
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise ValueError
+        material['port'] = port
         _serialize(material)
         return material
     except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError):

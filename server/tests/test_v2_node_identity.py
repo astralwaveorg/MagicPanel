@@ -182,3 +182,14 @@ def test_header_credential_rotation_preserves_identity_but_host_does_not(header)
     changed_host = copy.deepcopy(value)
     changed_host["ws-opts"]["headers"]["Host"] = "second.example"
     assert before["identity_hmac"] != fingerprints(changed_host, source_id=4, key=KEY)["identity_hmac"]
+
+
+def test_hysteria2_port_range_keeps_stable_identity():
+    from app.services.node_identity import canonical_material, fingerprints
+    value = {'name': 'hy2', 'type': 'hysteria2', 'server': 'Example.TEST',
+             'ports': '40001-50000', 'password': 'secret'}
+    material = canonical_material(value)
+    assert material['port'] == 40001 and material['ports'] == '40001-50000'
+    first = fingerprints(value, source_id=4, key=KEY)
+    second = fingerprints(dict(value, name='renamed'), source_id=4, key=KEY)
+    assert first['identity_hmac'] == second['identity_hmac']
