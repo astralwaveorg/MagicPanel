@@ -118,3 +118,53 @@ def test_direct_check_api(client, monkeypatch):
     data = r.json()
     assert data["state"] in ("ok", "risk", "unknown")
     assert "notes" in data and "egress" in data
+
+
+def _patch_echoes(monkeypatch, foreign, domestic):
+    monkeypatch.setattr("app.services.direct._fetch_egress", lambda: foreign)
+    monkeypatch.setattr("app.services.direct._fetch_domestic_egress", lambda: domestic)
+
+
+def test_observe_active_transparent_proxy(monkeypatch):
+    from app.services import direct
+    _patch_echoes(monkeypatch,
+                  {"ip": "192.220.75.184", "country_code": "US", "org": "NTT"},
+                  {"ip": "60.176.48.51", "via": "https://myip.ipip.net"})
+    obs = direct.observe()
+    ev = obs["path_evidence"]
+    assert ev["transparent_proxy"] == "active"
+    assert "透明代理" in ev["conclusion"]
+    assert obs["state"] == "observed" and obs["source_kind"] == "path_probe"
+
+
+def test_observe_bypassed(monkeypatch):
+    from app.services import direct
+    direct._cache["observation"] = None
+    _patch_echoes(monkeypatch,
+                  {"ip": "60.176.48.51", "country_code": "CN"},
+                  {"ip": "60.176.48.51", "via": "https://cip.cc"})
+    obs = direct.observe()
+    assert obs["path_evidence"]["transparent_proxy"] == "bypassed"
+
+
+def test_observe_unreachable(monkeypatch):
+    from app.services import direct
+    direct._cache["observation"] = None
+    _patch_echoes(monkeypatch, {}, {})
+    obs = direct.observe()
+    assert obs["path_evidence"]["transparent_proxy"] == "unknown"
+
+
+def test_domestic_echo_parsing(monkeypatch):
+    import app.services.direct as direct
+    class _Resp:
+        status_code = 200
+        text = "IP\t: 60.176.48.51\n地址\t: 中国 浙江 杭州 电信"
+        def raise_for_status(self): pass
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url): return _Resp()
+    monkeypatch.setattr("app.services.direct.httpx.Client", lambda **k: _Client())
+    r = direct._fetch_domestic_egress()
+    assert r["ip"] == "60.176.48.51"

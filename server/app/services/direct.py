@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import re
 import math
 import time
 from datetime import datetime, timezone
@@ -97,6 +98,84 @@ def egress(refresh: bool = False) -> dict:
     return data
 
 
+# 境内回显服务：服务器在国内（CN IP），路由器规则命中 cn-ip → DIRECT，
+# 面板访问它拿到的必然是家宽公网 IP——这是「直连路径」的独立证据。
+# 注意：ipip.net 已被 magic-proxy 规则代理（会拿到代理出口 IP），不能用作境内回显
+DOMESTIC_ECHO_URLS = ("https://cip.cc", "http://members.3322.org/dyndns/getip")
+
+
+def _fetch_domestic_egress() -> dict:
+    """境内回显：拿家宽公网 IP。两个服务都失败时返回空。"""
+    for url in DOMESTIC_ECHO_URLS:
+        try:
+            with httpx.Client(timeout=EGRESS_TIMEOUT, follow_redirects=True,
+                              trust_env=False,
+                              headers={"User-Agent": "curl/8.0"}) as client:
+                resp = client.get(url)
+                resp.raise_for_status()
+                text = resp.text
+        except Exception:
+            continue
+        m = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", text)
+        if m:
+            return {"ip": m.group(1), "via": url}
+    return {}
+
+
+def _is_china_egress(info: dict) -> bool:
+    code = str(info.get("country_code") or "").upper()
+    country = str(info.get("country") or "")
+    return code == "CN" or ("中国" in country and "台湾" not in country)
+
+
+def observe() -> dict:
+    """主动路径观测：用「境外回显 + 境内回显」差分证明真实路径。
+
+    出口归属地本身不能区分「透明代理接管」和「本地网络就在那个地区」；
+    但境内回显（cn 规则必然直连）拿到的是家宽公网 IP，把它与境外回显
+    对比就能得出路径结论：
+
+    * 两边 IP 一致 → 境外流量也直连出去了（透明代理未接管，测速已旁路）；
+    * 两边不一致、境外出口非中国 → 境外流量经透明代理转发（测速拨号
+      同样会被接管，面板的三条防线只保证不叠加环境代理）。
+    """
+    foreign = _fetch_egress()
+    domestic = _fetch_domestic_egress()
+    checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _cache["at"] = time.monotonic()
+    _cache["data"] = foreign
+    _cache["checked_at"] = checked_at
+
+    evidence = {"foreign": foreign, "domestic": domestic, "checked_at": checked_at}
+    f_ip, d_ip = foreign.get("ip"), domestic.get("ip")
+    if f_ip and d_ip and f_ip == d_ip:
+        evidence["transparent_proxy"] = "bypassed"
+        evidence["conclusion"] = "境外与境内回显同源（家宽公网 IP）：透明代理未接管境外流量，测速已旁路。"
+    elif f_ip and d_ip and not _is_china_egress(foreign):
+        evidence["transparent_proxy"] = "active"
+        evidence["conclusion"] = (
+            f"境外回显为 {foreign.get('country_code') or '境外'} 出口（{f_ip}），"
+            f"境内回显为家宽公网 IP（{d_ip}）：境外流量经路由器透明代理转发，"
+            "测速拨号同样会被接管。")
+    elif f_ip and d_ip:
+        evidence["transparent_proxy"] = "active"
+        evidence["conclusion"] = "境外与境内回显不同源但境外出口显示中国归属，路径判定存疑，请结合路由器连接列表复核。"
+    else:
+        evidence["transparent_proxy"] = "unknown"
+        evidence["conclusion"] = "回显服务不可达，无法判定路径；请稍后重试。"
+
+    observation = last_observation()
+    observation["state"] = "observed"
+    observation["source_kind"] = "path_probe"
+    observation["path_evidence"] = evidence
+    observation["notes"] = [
+        evidence["conclusion"],
+        "境内回显走 cn-ip 直连规则，是独立于出口归属地的路径证据。",
+    ]
+    _cache["observation"] = observation
+    return observation
+
+
 def last_observation() -> dict:
     """只读安全摘要；出口归属地不能证明透明代理旁路。"""
     raw = _cache.get("data")
@@ -118,7 +197,11 @@ def last_observation() -> dict:
             if age >= 0:
                 freshness = "fresh" if age < CACHE_TTL else "stale"
     proxies = sorted(env_proxies())
-    notes = ["出口地址只是最近观测，不能证明 NAS 已绕过路由器透明代理。"]
+    cached_obs = _cache.get("observation")
+    if isinstance(cached_obs, dict) and cached_obs.get("path_evidence"):
+        cached_obs["env_proxies"] = proxies
+        return cached_obs
+    notes = ["尚未发起主动路径检测；出口地址只是被动观测。点击「发起检测」获取路径证据。"]
     if proxies:
         notes.append("检测到代理环境变量（" + "、".join(proxies) + "）；应用请求忽略这些变量。")
     return {

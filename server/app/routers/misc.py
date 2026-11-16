@@ -140,6 +140,15 @@ def direct_check(refresh: bool = False, user=CurrentUser):
     return direct.last_observation()
 
 
+@router.post("/direct-observe")
+def direct_observe(user=RequireCapabilities("probe")):
+    """主动发起路径观测：境外/境内回显差分，判定透明代理是否接管。"""
+    try:
+        return direct.observe()
+    except Exception as exc:
+        raise HTTPException(502, f"路径观测失败：{exc}")
+
+
 @router.get("/audit")
 def list_audit(limit: int = 100, offset: int = 0, keyword: str = "",
                user=CurrentUser):

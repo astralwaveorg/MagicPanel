@@ -72,18 +72,25 @@
         <div class="stat-label">出口观测</div>
         <div class="stat-direct">
           <StatusDot :kind="directKind" :text="directTitle" />
-          <el-button size="small" :loading="directLoading" @click="loadDirect">
-            刷新记录
+          <el-button size="small" type="primary" :loading="directLoading" @click="observeNow">
+            {{ direct.path_evidence ? '重新检测' : '发起检测' }}
           </el-button>
         </div>
-        <div v-if="direct.egress?.ip" class="stat-sub">
+        <div v-if="direct.path_evidence" class="stat-sub">
+          境外出口 <span class="mono">{{ direct.path_evidence.foreign?.ip || '—' }}</span>
+          （{{ direct.path_evidence.foreign?.country_code || '未知' }}）<br />
+          家宽出口 <span class="mono">{{ direct.path_evidence.domestic?.ip || '—' }}</span><br />
+          观测于 {{ direct.checked_at ? fmtTime(direct.checked_at) : '时间未确认' }}
+        </div>
+        <div v-else-if="direct.egress?.ip" class="stat-sub">
           出口 <span class="mono">{{ direct.egress.ip }}</span><br />
           {{ direct.egress.country || direct.egress.country_code || '未知地区' }}
           · 观测于 {{ direct.checked_at ? fmtTime(direct.checked_at) : '时间未确认' }}
         </div>
-        <div v-else class="stat-sub">暂无出口观测，未发起主动检测。</div>
-        <div class="stat-sub">出口归属地不能证明测速已绕过透明代理。</div>
-        <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击刷新重试。</div>
+        <div v-else class="stat-sub">尚未发起路径检测——点「发起检测」主动验证。</div>
+        <div v-if="direct.path_evidence" class="stat-sub">路径结论：{{ direct.path_evidence.conclusion }}</div>
+        <div v-else class="stat-sub">出口归属地不能证明测速已绕过透明代理——点「发起检测」用境内/境外双回显取证。</div>
+        <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击重试。</div>
       </div>
 
       <div class="mp-card stat-tile">
@@ -207,8 +214,28 @@ const data = computed(() => overviewRequest.state.data || {})
 const error = computed(() => overviewRequest.state.error?.message || '')
 const direct = computed(() => directRequest.state.data || {})
 const directLoading = computed(() => directRequest.state.loading)
-const directKind = 'warn'
-const directTitle = computed(() => direct.value.freshness === 'stale' ? '观测已过期' : '路径未验证')
+const directKind = computed(() => {
+  const t = direct.value.path_evidence?.transparent_proxy
+  if (t === 'active') return 'warn'
+  if (t === 'bypassed') return 'ok'
+  return 'warn'
+})
+const directTitle = computed(() => {
+  const t = direct.value.path_evidence?.transparent_proxy
+  if (t === 'active') return '境外经透明代理'
+  if (t === 'bypassed') return '测速已旁路'
+  return '路径未验证'
+})
+
+async function observeNow() {
+  try {
+    const entry = await api('/api/v1/direct-observe', { method: 'POST' })
+    directRequest.state.data = entry
+    directRequest.state.error = null
+  } catch (e) {
+    directRequest.state.error = e
+  }
+}
 
 const testedSources = computed(() =>
   (data.value.sources || []).filter((s) => s.tested_at))

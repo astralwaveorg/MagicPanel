@@ -14,7 +14,7 @@
           <el-option v-for="n in nodeOptions" :key="n" :label="'节点：' + n" :value="n" />
         </el-select>
         <el-button size="small" type="primary" :loading="running" @click="runAll">全部检测</el-button>
-        <el-button size="small" :disabled="!results.length" @click="copyResults">复制结果</el-button>
+        <el-button size="small" :disabled="!hasResults" @click="copyResults">复制结果</el-button>
         <span v-if="lastRun" class="unlock-meta">
           {{ exitLabel }} · {{ new Date(lastRun.checked_at * 1000).toLocaleString() }}
           <span v-if="lastRun.ip && lastRun.ip.ip" class="mono">
@@ -100,6 +100,7 @@ async function loadNodes() {
 }
 
 const stateMap = ref({})
+const hasResults = computed(() => Object.keys(stateMap.value).length > 0)
 function stateOf(id) {
   const r = stateMap.value[id]
   return r ? r.state : 'idle'
