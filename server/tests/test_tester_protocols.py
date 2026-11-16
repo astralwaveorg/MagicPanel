@@ -13,6 +13,17 @@ def test_describe_error_translates_known_codes():
     assert describe_error('') == ''
 
 
+def test_error_summary_keeps_healthy_rows_clean():
+    """没有错误就没有错误文案：空值不能兜底成「抓取失败」。"""
+    from app.services.access_dto import error_summary
+    assert error_summary('') == ''
+    assert error_summary(None) == ''
+    assert error_summary('   ') == ''
+    # 真有错误时仍然给一句能看懂的说明
+    assert '规则集格式无效' in error_summary('规则内容验证失败：mrs_magic_invalid')
+    assert error_summary('某个没被识别的错误') == '抓取失败，具体原因见审计日志'
+
+
 def test_start_failure_locates_unreadable_node():
     from app.services.tester import _start_failure
     log = ["Parse config error: proxy 3: unsupport proxy type: juicity\n"]

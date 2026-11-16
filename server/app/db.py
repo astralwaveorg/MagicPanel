@@ -1052,16 +1052,24 @@ def _migrate_build_snapshots(conn) -> None:
 
 
 @contextmanager
-def tx(immediate: bool = False):
+def tx(immediate: bool = True):
     """写事务：提交或回滚，连接随上下文关闭。
 
-    immediate=True 时用 BEGIN IMMEDIATE 立即取写锁：
-    状态切换（发布/下线/回滚）必须串行执行，否则两个并发请求
-    可能各自读到"旧版本"并同时写入，出现同一环境两条生效记录。
+    默认用 BEGIN IMMEDIATE 一开始就取写锁，理由有二：
+
+    1. WAL 下「先读后写」的延迟事务，写锁升级会**立刻**返回 SQLITE_BUSY
+       （这种忙等不了 busy_timeout），于是并发写者一提交，别的事务再写就报
+       database is locked，接口随机 500（2026-11-16 实测：规则来源批量刷新
+       期间登录接口 500，栈在 create_session 的 INSERT 上）。
+       先拿写锁就变成排队等锁，busy_timeout 才真正生效。
+    2. 状态切换（发布/下线/回滚）本来就必须串行执行，否则两个并发请求
+       可能各自读到"旧版本"并同时写入，出现同一环境两条生效记录。
+
+    传 immediate=False 可退回延迟事务（只读快照场景）；
+    注意不要在事务块里再开事务（会自锁），本仓库已确认无嵌套事务。
     """
     conn = connect()
-    if immediate:
-        conn.isolation_level = None      # 关闭 Python 的隐式事务，改用显式 BEGIN
+    conn.isolation_level = None      # 关闭 Python 的隐式事务，改用显式 BEGIN
     try:
         conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
         yield conn

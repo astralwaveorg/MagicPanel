@@ -69,7 +69,13 @@ def url_summary(value: str) -> str:
 
 
 def error_summary(value: str) -> str:
-    return describe_error(value) or "抓取失败"
+    # 没有错误就是没有错误：空值必须原样返回空串。
+    # 早先这里对空值兜底成「抓取失败」，于是每次抓取成功的规则来源
+    # 在接口里都带着一句「抓取失败」，与 has_error=False 自相矛盾。
+    text = (value or '').strip()
+    if not text:
+        return ''
+    return describe_error(text) or "抓取失败"
 
 
 def audit_public(row) -> dict:
