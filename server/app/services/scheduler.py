@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from .. import config, db, security
 from ..routers import builds
-from . import releases, repo_sync, retention, tester, updater
+from . import probe_schedule, releases, repo_sync, retention, tester, updater
 from .capabilities import require_capability
 
 logger = logging.getLogger("magicpanel.scheduler")
@@ -536,7 +536,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             fetch_sources = _enabled(conn, "auto_fetch_sources", "1")
             fetch_rules = _enabled(conn, "auto_fetch_rules", "1")
             fetch_snippets = _enabled(conn, "auto_fetch_snippets", "1")
-            test_sources = _enabled(conn, "auto_test_sources", "1")
+            test_sources = _enabled(conn, "auto_test_sources", "0") and _setting(conn, "v2_runtime_activation", "staged") == "active"
         if not master and not force:
             summary["skipped"] = "定时任务未启用"
         else:
@@ -548,6 +548,8 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             if fetch_snippets:
                 _run_snippet_fetch(summary, now, force=force)
             _run_deps_sync(summary, now, force=force)
+            with db.tx() as probe_conn:
+                summary["probe_jobs_created"] = len(probe_schedule.tick(probe_conn, now))
             if test_sources:
                 _run_source_test(summary, now, force=force)
             _run_auto_build(summary, now, force=force, actor_user_id=actor_user_id)
@@ -591,7 +593,7 @@ def status() -> dict:
                 ("scheduler_enabled", "1"),
                 ("auto_fetch_sources", "1"),
                 ("auto_fetch_rules", "1"),
-                ("auto_test_sources", "1"),
+                ("auto_test_sources", "0"),
                 ("auto_build_enabled", "1"),
                 ("auto_build_interval_hours",
                  str(config.SETTINGS_DEFAULTS.get("auto_build_interval_hours", 1))),

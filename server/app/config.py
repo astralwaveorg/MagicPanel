@@ -109,7 +109,7 @@ SETTINGS_DEFAULTS = {
     "scheduler_enabled": "1",
     "auto_fetch_sources": "1",
     "auto_fetch_rules": "1",
-    "auto_test_sources": "1",
+    "auto_test_sources": "0",
     "auto_build_enabled": "1",
     "auto_build_interval_hours": "1",
     "auto_publish_enabled": "1",

@@ -906,6 +906,10 @@ def test_scheduler_fetch_test_build_and_publish(client, monkeypatch):
              "2026-01-01T00:00:00+08:00", source["id"]),
         )
 
+    with db.tx() as conn:
+        db.set_setting(conn, "auto_test_sources", "1")
+        db.set_setting(conn, "v2_runtime_activation", "active")
+
     calls = []
 
     def fake_refresh(source_id, operator, automatic=False):
@@ -1177,8 +1181,8 @@ def test_auto_test_switch_skips_scheduled_test(client, monkeypatch):
     with db.tx() as conn:
         conn.execute("UPDATE sources SET auto_test=1 WHERE id=?", (source["id"],))
     summary = scheduler.run_once(force=True)
-    assert summary["tests_run"] == 1
-    assert called == [source["id"]]
+    assert summary["tests_run"] == 0
+    assert called == []
 
 
 

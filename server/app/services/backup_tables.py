@@ -5,7 +5,12 @@ BACKUP_TABLES = (
     "node_catalog", "catalog_state", "node_revisions", "node_aliases", "catalog_issues",
     "targets", "snippets", "devices", "base_configs", "proxy_groups", "rules",
     "builds", "releases", "repo_migrations", "automation_runs", "settings",
-    "schema_version",
+    "schema_version", "probe_observers", "probe_jobs", "probe_items", "probe_results",
+    "probe_reservations", "probe_paths", "probe_adapter_health", "routing_plans",
+    "resource_revisions", "build_manifests", "build_resources", "resource_aliases",
+    "artifact_leases", "distribution_envelopes", "deployment_bundles", "owner_receipts",
+    "resource_gc_queue", "release_state", "operation_requests",
+    "probe_schedule_state", "probe_recovery_windows",
 )
 
 # 历史导出唯一缺少的长期表。只允许 v1 使用这些安全缺省值。

@@ -3,6 +3,7 @@ import base64
 import json
 
 import yaml
+from datetime import datetime, timedelta, timezone
 
 from conftest import auth_headers, setup_admin
 
@@ -45,3 +46,8 @@ def assert_no_secrets(value):
     assert "example-test-password" not in text
     assert "params_enc" not in text
     assert "snapshot_enc" not in text
+
+
+def at(minutes: int) -> datetime:
+    """固定 UTC 时钟，minutes 是相对每周一 04:00 的偏移。"""
+    return datetime(2027, 1, 4, 4, 0, tzinfo=timezone.utc) + timedelta(minutes=minutes)

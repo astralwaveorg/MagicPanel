@@ -11,7 +11,7 @@ from fastapi.exceptions import HTTPException as StarletteHTTPException, RequestV
 
 from . import config, db
 from .routers import (auth, automation, backups, base_config, builds, deps, feed,
-                      local_nodes, misc, nodes, policy, portal, rule_providers, snippets,
+                      local_nodes, misc, nodes, policy, portal, probe_jobs, rule_providers, snippets,
                       sources, targets_devices, variants)
 from .services import retention, scheduler, webdav
 
@@ -116,7 +116,7 @@ def create_app() -> FastAPI:
     for r in (auth.router, sources.router, rule_providers.router, policy.router,
               variants.router, targets_devices.router, builds.router, misc.router,
               backups.router, automation.router, local_nodes.router, nodes.router, base_config.router,
-              feed.router, portal.router, snippets.router, deps.router):
+              feed.router, portal.router, snippets.router, probe_jobs.router, deps.router):
         app.include_router(r)
 
     @app.middleware("http")
