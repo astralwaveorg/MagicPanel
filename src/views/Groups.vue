@@ -531,7 +531,7 @@ async function load() {
       api('/api/v1/sources'), api('/api/v1/local-nodes'),
       api('/api/v1/targets'), api('/api/v1/devices'),
     ])
-    rows.value = groups.items
+    rows.value = groups.items ?? []
     total.value = groups.total
     totalAll.value = groups.total_all ?? groups.total
     sources.value = srcs.filter((s) => s.enabled)

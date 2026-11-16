@@ -54,7 +54,7 @@
       <h3>{{ cat.name }} <span class="unlock-cat-count">{{ catItems(cat.id).length }}</span></h3>
       <div class="unlock-grid">
         <div v-for="c in catItems(cat.id)" :key="c.id" class="unlock-card"
-             :class="'st-' + stateOf(c.id)" :title="detailOf(c.id)"
+             :class="['st-' + stateOf(c.id), { 'is-testing': stateOf(c.id) === 'testing' }]" :title="detailOf(c.id)"
              @click="runOne(c.id)">
           <div class="unlock-icon">{{ c.icon }}</div>
           <div class="unlock-info">
@@ -107,7 +107,7 @@ function stateOf(id) {
 }
 function labelFor(state) {
   return { unlocked: '解锁', blocked: '区域拒绝', unsupported: '不支持',
-           error: '异常', idle: '未测' }[state] || '未测'
+           error: '异常', idle: '未测', testing: '检测中…' }[state] || '未测'
 }
 function stateLabel(id) { return labelFor(stateOf(id)) }
 function resultOf(id) { return stateMap.value[id] || {} }
@@ -166,6 +166,20 @@ async function run(ids) {
 function runAll() { run([]) }
 function runOne(id) { run([id]) }
 
+async function copyToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const area = document.createElement('textarea')
+  area.value = text
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  try { document.execCommand('copy') } finally { area.remove() }
+}
+
 async function copyResults() {
   const lines = [`出口：${exitLabel.value}`, ...catalog.value.map(c => {
     const r = stateMap.value[c.id]
@@ -173,7 +187,7 @@ async function copyResults() {
     const extra = [r.region && `地区 ${r.region}`, `${r.latency_ms}ms`, r.detail].filter(Boolean).join('，')
     return `${c.name}: ${labelFor(r.state)}${extra ? '（' + extra + '）' : ''}`
   })]
-  await navigator.clipboard.writeText(lines.join('\n'))
+  await copyToClipboard(lines.join('\n'))
   ElMessage.success('已复制')
 }
 
@@ -229,6 +243,7 @@ onMounted(async () => {
 .unlock-card.st-unlocked { border-left: 3px solid var(--el-color-success); }
 .unlock-card.st-blocked, .unlock-card.st-unsupported { border-left: 3px solid var(--el-color-danger); }
 .unlock-card.st-error { border-left: 3px solid var(--el-color-warning); }
+.unlock-card.is-testing { opacity: .55; pointer-events: none; }
 .unlock-icon { font-size: 22px; width: 34px; text-align: center; }
 .unlock-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .unlock-info b { font-size: 13px; }

@@ -718,7 +718,7 @@ watch(raw, (text) => {
 
 async function loadScopes() {
   const data = await api('/api/v1/base-config/scopes')
-  scopes.value = data.scopes
+  scopes.value = data.scopes ?? []
 }
 
 async function loadSchema(engine) {

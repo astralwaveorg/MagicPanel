@@ -926,7 +926,7 @@ async function load() {
       api('/api/v1/core/status'),
       api('/api/v1/local-nodes'), api('/api/v1/local-nodes/schema'),
     ])
-    rows.value = paged.items
+    rows.value = paged.items ?? []
     total.value = paged.total
     totalAll.value = paged.total_all ?? paged.total
     core.value = coreStatus

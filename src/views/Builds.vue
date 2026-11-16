@@ -352,7 +352,7 @@ async function load() {
       api(`/api/v1/builds/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
       api('/api/v1/releases'),
     ])
-    rows.value = paged.items
+    rows.value = paged.items ?? []
     total.value = paged.total
     releaseState.value = state
     releases.value = rel

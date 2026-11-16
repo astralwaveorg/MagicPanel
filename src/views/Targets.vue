@@ -223,7 +223,7 @@ async function load() {
   error.value = ''
   try {
     const paged = await api(`/api/v1/targets/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`)
-    rows.value = paged.items
+    rows.value = paged.items ?? []
     total.value = paged.total
   } catch (e) {
     error.value = e.message

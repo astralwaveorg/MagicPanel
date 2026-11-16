@@ -80,7 +80,7 @@ async function load() {
     const q = new URLSearchParams({ limit: String(limit.value), offset: String(offset) })
     if (keyword.value.trim()) q.set('keyword', keyword.value.trim())
     const data = await api(`/api/v1/audit?${q.toString()}`)
-    rows.value = data.items
+    rows.value = data.items ?? []
     total.value = data.total
     selection.value = []
   } catch (e) {

@@ -466,7 +466,7 @@ async function load() {
     if (filters.status) params.set('status', filters.status)
     if (filters.referenced) params.set('referenced', filters.referenced)
     const paged = await api(`/api/v1/rule-providers/page?${params.toString()}`)
-    rows.value = paged.items
+    rows.value = paged.items ?? []
     total.value = paged.total
     totalAll.value = paged.total_all ?? paged.total
   } catch (e) {

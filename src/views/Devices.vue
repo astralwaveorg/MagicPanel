@@ -240,7 +240,7 @@ async function load() {
       api(`/api/v1/devices/page?limit=${limit.value}&offset=${(page.value - 1) * limit.value}`),
       api('/api/v1/targets'),
     ])
-    rows.value = paged.items
+    rows.value = paged.items ?? []
     total.value = paged.total
     targets.value = ts
   } catch (e) {

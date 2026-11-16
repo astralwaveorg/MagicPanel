@@ -434,7 +434,7 @@ async function load() {
       api('/api/v1/rule-providers'),
       api('/api/v1/targets'), api('/api/v1/devices'),
     ])
-    rows.value = paged.items
+    rows.value = paged.items ?? []
     total.value = paged.total
     totalAll.value = paged.total_all ?? paged.total
     groups.value = gs
