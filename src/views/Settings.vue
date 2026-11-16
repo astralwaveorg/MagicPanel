@@ -18,6 +18,16 @@
         <el-form-item label="核心下载代理（可选，仅用于安装测速核心，例如 http://127.0.0.1:7890）">
           <el-input v-model="settings.core_proxy" class="mono" placeholder="留空表示直连" />
         </el-form-item>
+        <el-form-item>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">构建时规范化节点名称</span>
+            <el-switch v-model="settings.node_name_normalize" />
+          </div>
+          <p class="mp-form-hint">
+            机场节点统一成「旗帜 地区 序号 [倍率·来源]」格式并丢弃占位节点（剩余流量/套餐到期）。
+            本地节点命名不受影响；关闭后产物与订阅恢复原始名称。
+          </p>
+        </el-form-item>
         <el-button :loading="savingSettings" @click="saveSettings" type="primary">保存设置</el-button>
       </el-form>
     </div>
@@ -260,7 +270,7 @@ import { uploadCore } from '../core'
 import UserAvatar from '../components/UserAvatar.vue'
 import StatusDot from '../components/StatusDot.vue'
 
-const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '' })
+const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '', node_name_normalize: true })
 const webdav = reactive({
   enabled: false, url: '', directory: 'magicpanel', username: '',
   password: '', password_set: false, interval_hours: 12, keep: 7,
@@ -301,6 +311,7 @@ async function load() {
       session_ttl_hours: Number(s.session_ttl_hours) || 168,
       profile_update_interval: Number(s.profile_update_interval) || 1,
       core_proxy: s.core_proxy || '',
+      node_name_normalize: s.node_name_normalize !== '0',
     })
     users.value = u
     portalEnabled.value = p.enabled
@@ -385,6 +396,7 @@ async function saveSettings() {
       session_ttl_hours: String(settings.session_ttl_hours),
       profile_update_interval: String(settings.profile_update_interval),
       core_proxy: settings.core_proxy,
+      node_name_normalize: settings.node_name_normalize ? '1' : '0',
     } } })
     ElMessage.success('已保存')
   } catch (e) {

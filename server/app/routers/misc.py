@@ -20,12 +20,12 @@ EDITABLE_SETTINGS = {
     "base_url", "session_ttl_hours", "profile_update_interval", "core_proxy",
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
-    "auto_build_interval_hours", "auto_publish_enabled", "auto_publish_env",
+    "auto_build_interval_hours", "auto_publish_enabled", "auto_publish_env", "node_name_normalize",
 }
 BOOL_SETTINGS = {
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
-    "auto_publish_enabled",
+    "auto_publish_enabled", "node_name_normalize",
 }
 
 

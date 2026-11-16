@@ -20,6 +20,7 @@ from .. import config
 from ..services import base_config as base_config_service
 from ..services import config_resolution, runtime_profiles
 from ..services import local_nodes as local_node_service
+from ..services import node_rename
 from ..services import source_nodes as source_node_service
 
 HEALTH_CHECK = {
@@ -342,7 +343,8 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
 
 def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                   device: dict | None = None,
-                  variant: dict | None = None) -> str:
+                  variant: dict | None = None,
+                  normalize_nodes: bool = True) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
@@ -468,6 +470,35 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             warnings.append(
                 f"节点来源“{src['name']}”设为内联下发，但没有可用节点"
                 "（尚未抓取，或全部被来源过滤正则/测速结果排除）")
+
+    # 节点名称规范化（Sub-Store 风格）：机场来源的节点统一成
+    # 「旗帜 地区 序号 [标签·来源]」的确定性格式。只作用于来源节点——
+    # 本地节点是用户亲自维护的，命名保持权威不动（约束 17）。
+    # 节点本体与组成员引用共用同一张映射表，客户端看到的组员名与节点名
+    # 永远一致；地区关键词（旗帜 + 中文地区名）被保留，策略组过滤正则不失配。
+    if normalize_nodes:
+        rename_map: dict[str, str | None] = {}
+        for src in inline_sources:
+            rename_map.update(node_rename.rename_batch(
+                inline_names[src["name"]], source=src["name"]))
+        fixed_by_source: dict[str, list[str]] = {}
+        sources_by_id = {s.get('source_id'): s for s in snapshot['sources']}
+        for node in fixed_nodes:
+            src = sources_by_id.get(node.get('source_id'))
+            fixed_by_source.setdefault(src["name"] if src else "", []).append(node["name"])
+        for sname, names in fixed_by_source.items():
+            rename_map.update(node_rename.rename_batch(names, source=sname))
+        dropped = {old for old, new in rename_map.items() if new is None}
+        keep = {old: new for old, new in rename_map.items() if new is not None}
+        inline_nodes = [n for n in inline_nodes if n["name"] not in dropped]
+        fixed_nodes = [n for n in fixed_nodes if n["name"] not in dropped]
+        for n in inline_nodes + fixed_nodes:
+            n["name"] = keep.get(n["name"], n["name"])
+        for sname, names in inline_names.items():
+            inline_names[sname] = [keep.get(n, n) for n in names if n not in dropped]
+        for group in groups:
+            group["proxies"] = [keep.get(p, p) for p in (group.get("proxies") or [])
+                                if p not in dropped]
 
     cfg["proxies"] = [_guard_proxy(engine)]
     for node in local_enabled.values():

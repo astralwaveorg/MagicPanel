@@ -14,6 +14,7 @@ from .. import config, db, security
 from ..services import base_config as base_config_service
 from ..services import runtime_profiles
 from ..compiler import render, validate
+from ..services import node_rename
 from ..services import tester
 from .builds import artifact_file
 
@@ -229,6 +230,9 @@ def provider_resource(token: str, name: str, request: Request):
                     text = tester.filter_snapshot(text, failed)
                 except tester.TestError:
                     pass  # 快照异常时回退为完整内容，不阻断分发
+        # 节点名称规范化（构建端与分发端同一套规则，见 services/node_rename）
+        if db.get_setting(conn, "node_name_normalize", "1") == "1":
+            text = node_rename.normalize_snapshot(text, source=source["name"])
         etag_src = (source["sha256"] or "") + (
             ":filtered" if source["filter_unavailable"] else "")
         if source["filter_unavailable"]:

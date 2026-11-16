@@ -1,0 +1,171 @@
+"""节点名称规范化（Sub-Store 风格）：机场订阅的节点名千奇百怪——
+有中英混杂、有超长宣传语、有「剩余流量」这类占位节点。构建与分发时统一
+成「旗帜 地区 序号 [标签·来源]」的确定性格式，客户端里看起来整齐划一。
+
+设计约束：
+* 确定性：同一个名字在同一个来源批次里永远得到同一个结果（序号按出现顺序分配），
+  客户端拉两次 feed 得到一致的名称，不会随机抖动。
+* 地区关键词保留：策略组的过滤正则靠 🇺🇸/美国/Japan 这类 token 匹配节点，
+  规范化后的名字必须仍然包含「旗帜 + 中文地区名」，否则地区组会失配。
+* 测速结果不受影响：测速以原始节点名为键，规范化只发生在产物/分发出口，
+  原始名 → 新名的映射不会回写数据库。
+"""
+import re
+
+# 占位/信息节点：对分流毫无意义（server 都不是真实节点），构建与分发时直接丢弃
+INFO_NODE_PATTERN = re.compile(
+    r"剩余流量|套餐到期|到期时间|距离下次|重置剩余|订阅提醒|官网|官方网站|"
+    r"expire|traffic|valid until|subscription", re.IGNORECASE)
+
+# 地区识别表：按顺序首个命中的生效。英文与缩写都用词边界，避免
+# "IEPL" 里的 PL、"RUSsia" 里的 US 这类误伤。
+_REGIONS = (
+    (r"🇹🇼|台湾|臺灣|tw\b|taiwan", "🇹🇼", "台湾"),
+    (r"🇭🇰|香港|\bhk\b|hkg\b|hong ?kong", "🇭🇰", "香港"),
+    (r"🇯🇵|日本|日馆|jp\b|japan|tokyo|东京|東京|大阪|osaka", "🇯🇵", "日本"),
+    (r"🇸🇬|新加坡|sg\b|singapore", "🇸🇬", "新加坡"),
+    (r"🇰🇷|韩国|韓國|kr\b|korea|seoul|首尔|首爾", "🇰🇷", "韩国"),
+    (r"🇺🇸|美国|美國|us\b|u\.s\.|usa|united states|america|los angeles|圣何塞|聖何塞|seattle|西雅图|西雅圖|portland", "🇺🇸", "美国"),
+    (r"🇨🇦|加拿大|canada|\bca\b|ottawa|toronto|温哥华|溫哥華", "🇨🇦", "加拿大"),
+    (r"🇬🇧|英国|英國|\buk\b|\bgb\b|britain|london|伦敦|倫敦", "🇬🇧", "英国"),
+    (r"🇩🇪|德国|德國|\bde\b|germany|frankfurt|法兰克福|法蘭克福", "🇩🇪", "德国"),
+    (r"🇫🇷|法国|法國|\bfr\b|france|paris|巴黎", "🇫🇷", "法国"),
+    (r"🇳🇱|荷兰|荷蘭|\bnl\b|amsterdam|阿姆斯特丹", "🇳🇱", "荷兰"),
+    (r"🇹🇷|土耳其|\btr\b|istanbul|伊斯坦布尔|伊斯坦布爾", "🇹🇷", "土耳其"),
+    (r"🇷🇺|俄罗斯|俄羅斯|\bru\b|moscow|莫斯科", "🇷🇺", "俄罗斯"),
+    (r"🇦🇺|澳大利亚|澳洲|\bau\b|australia|sydney|悉尼", "🇦🇺", "澳大利亚"),
+    (r"🇮🇳|印度|\bin\b|india|mumbai|孟买|孟買", "🇮🇳", "印度"),
+    (r"🇧🇷|巴西|\bbr\b|brazil|sao paulo", "🇧🇷", "巴西"),
+    (r"🇦🇷|阿根廷|\bar\b|argentina", "🇦🇷", "阿根廷"),
+    (r"🇲🇾|马来西亚|馬來西亞|\bmy\b|malaysia|kuala", "🇲🇾", "马来西亚"),
+    (r"🇹🇭|泰国|泰國|\bth\b|thailand|bangkok|曼谷", "🇹🇭", "泰国"),
+    (r"🇻🇳|越南|\bvn\b|vietnam|hanoi|河内", "🇻🇳", "越南"),
+    (r"🇵🇭|菲律宾|菲律賓|\bph\b|philippines|manila", "🇵🇭", "菲律宾"),
+    (r"🇮🇩|印尼|印度尼西亚|\bid\b|indonesia|jakarta", "🇮🇩", "印尼"),
+    (r"🇮🇹|意大利|義大利|\bit\b|italy|milan|米兰|米蘭", "🇮🇹", "意大利"),
+    (r"🇪🇸|西班牙|\bes\b|spain|madrid|马德里|馬德里", "🇪🇸", "西班牙"),
+    (r"🇸🇪|瑞典|\bse\b|sweden|stockholm", "🇸🇪", "瑞典"),
+    (r"🇨🇭|瑞士|\bch\b|switzerland|zurich", "🇨🇭", "瑞士"),
+    (r"🇳🇴|挪威|\bno\b|norway|oslo", "🇳🇴", "挪威"),
+    (r"🇫🇮|芬兰|芬蘭|\bfi\b|finland|helsinki", "🇫🇮", "芬兰"),
+    (r"🇵🇱|波兰|波蘭|\bpl\b|poland|warsaw", "🇵🇱", "波兰"),
+    (r"🇪🇺|欧洲|歐洲|\beu\b|europe", "🌍", "欧洲"),
+)
+_REGION_COMPILED = [(re.compile(p, re.IGNORECASE), flag, cn) for p, flag, cn in _REGIONS]
+
+# 附加标签：倍率 / 家宽 / 专线 / 运营商
+_MULTIPLIER_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*[xX倍]")
+_HOME_PATTERN = re.compile(r"家宽|家寬|家庭宽带|住宅|宽带|\bhome\b|\bisp\b", re.IGNORECASE)
+_IEPL_PATTERN = re.compile(r"iepl|iplc|专线|專線", re.IGNORECASE)
+_CARRIER_PATTERN = re.compile(r"(移动|移動|cmcc|china mobile|联通|聯通|unicom|电信|電信|telecom)")
+
+
+def is_info_node(name: str) -> bool:
+    """「剩余流量」「套餐到期」这类占位节点，不进产物。"""
+    return bool(INFO_NODE_PATTERN.search(name or ""))
+
+
+def _extract_multiplier(name: str) -> str | None:
+    m = _MULTIPLIER_PATTERN.search(name)
+    if not m:
+        return None
+    value = m.group(1)
+    return f"{float(value):g}x"
+
+
+def detect_region(name: str) -> tuple[str, str] | None:
+    text = name or ""
+    for pattern, flag, cn in _REGION_COMPILED:
+        if pattern.search(text):
+            return flag, cn
+    return None
+
+
+def normalize_name(name: str, source: str = "", alloc: dict | None = None) -> str | None:
+    """规范化单个节点名。
+
+    返回 None 表示这是占位/信息节点，应从产物与分发中丢弃。
+    alloc 是 (旗帜, 地区, 家宽) → 下一个序号 的分配表，调用方对同一批次
+    传入同一个 dict，序号才会按出现顺序稳定递增。
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    if is_info_node(name):
+        return None
+    region = detect_region(name)
+    home = bool(_HOME_PATTERN.search(name))
+    multiplier = _extract_multiplier(name)
+    tags = []
+    if _IEPL_PATTERN.search(name):
+        tags.append("IEPL")
+    carrier = _CARRIER_PATTERN.search(name)
+    if carrier:
+        tags.append(carrier.group(1))
+    if not region:
+        # 识别不出地区：保留原名（清理多余空白），保证确定性
+        cleaned = re.sub(r"\s+", " ", name)
+        return cleaned
+    flag, cn = region
+    region_name = cn + ("家宽" if home else "")
+    key = (flag, region_name)
+    if alloc is None:
+        alloc = {}
+    seq = alloc.get(key, 0) + 1
+    alloc[key] = seq
+    label = f"{flag} {region_name} {seq:02d}"
+    if multiplier:
+        tags.insert(0, multiplier)
+    if source:
+        tags.append(source)
+    if tags:
+        label += " [" + "·".join(tags) + "]"
+    return label
+
+
+def rename_batch(names: list[str], source: str = "") -> dict[str, str | None]:
+    """对一批节点名做规范化，返回 {原名: 新名或 None}。
+
+    None 表示占位节点应丢弃。批内序号按列表出现顺序分配；
+    重复出现的原名只分配一次（首个生效），保证同名节点映射一致。
+    """
+    alloc: dict = {}
+    result: dict[str, str | None] = {}
+    for name in names:
+        if name in result:
+            continue
+        result[name] = normalize_name(name, source=source, alloc=alloc)
+    return result
+
+
+def normalize_snapshot(snapshot_text: str, source: str = "") -> str:
+    """规范化 provider 快照 YAML：重命名节点并丢弃占位节点。
+
+    仅当开关开启时由分发端调用；内容不可解析时原样返回，不阻断分发。
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(snapshot_text)
+    except Exception:
+        return snapshot_text
+    if not isinstance(data, dict) or not isinstance(data.get("proxies"), list):
+        return snapshot_text
+    mapping = rename_batch(
+        [str(p.get("name") or "") for p in data["proxies"] if isinstance(p, dict)],
+        source=source,
+    )
+    kept = []
+    for p in data["proxies"]:
+        if not isinstance(p, dict):
+            continue
+        new = mapping.get(str(p.get("name") or ""))
+        if new is None:
+            continue
+        p["name"] = new
+        kept.append(p)
+    data["proxies"] = kept
+    try:
+        return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=4096)
+    except Exception:
+        return snapshot_text

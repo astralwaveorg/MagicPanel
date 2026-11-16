@@ -12,7 +12,7 @@ from fastapi.exceptions import HTTPException as StarletteHTTPException, RequestV
 from . import config, db
 from .routers import (auth, automation, backups, base_config, builds, deps, feed,
                       local_nodes, misc, nodes, policy, portal, probe_jobs, rule_providers, snippets,
-                      sources, targets_devices, variants)
+                      sources, targets_devices, unlock, variants)
 from .feed_freeze_compat import install_freeze_reader
 from .services import retention, scheduler, webdav
 

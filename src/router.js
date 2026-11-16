@@ -16,6 +16,7 @@ const routes = [
   { path: '/admin/artifact', component: () => import('./views/BaseConfig.vue'), meta: { title: '基础配置' } },
   { path: '/admin/devices', component: () => import('./views/Devices.vue'), meta: { title: '设备管理' } },
   { path: '/admin/builds', component: () => import('./views/Builds.vue'), meta: { title: '构建发布' } },
+  { path: '/admin/unlock', component: () => import('./views/Unlock.vue'), meta: { title: '网络体检' } },
   { path: '/admin/dependencies', component: () => import('./views/Dependencies.vue'), meta: { title: '自主维护' } },
   { path: '/admin/audit', component: () => import('./views/Audit.vue'), meta: { title: '审计日志' } },
   { path: '/admin/settings', component: () => import('./views/Settings.vue'), meta: { title: '系统设置' } },

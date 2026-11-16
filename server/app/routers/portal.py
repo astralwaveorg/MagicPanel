@@ -15,7 +15,9 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
-from .. import config, db, security
+from .. import config, db
+from .. import security
+from ..services import unlock_check
 from ..deps import CurrentUser, RequireCapabilities
 from ..services.capabilities import effective_capabilities
 from ..services.access_dto import url_summary
@@ -432,3 +434,23 @@ def portal_provider_detail(body: ProviderDetailBody, request: Request, response:
         "total_lines": len(lines),
         "truncated": len(lines) > _PREVIEW_LINES,
     }
+
+
+@router.get("/unlock")
+def portal_unlock_last():
+    """门户公开：最近一次面板出口的解锁检测结果。"""
+    return unlock_check.last_results("panel")
+
+
+@router.post("/unlock/run")
+def portal_unlock_run():
+    """门户公开：触发一次面板出口的全量检测（60 秒内复用缓存）。"""
+    import time as _time
+    last = unlock_check.last_results("panel")
+    now = int(_time.time())
+    if last.get("checked_at") and now - last.get("checked_at", 0) < 60:
+        return last
+    try:
+        return unlock_check.run_checks("panel", operator="portal")
+    except Exception as exc:
+        raise HTTPException(502, f"检测执行失败：{exc}")

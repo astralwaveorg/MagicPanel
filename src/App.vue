@@ -80,7 +80,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
+import { Compass,
   Menu, Moon, Odometer, Connection, Collection, SetUp, Filter,
   Iphone, Promotion, Document, Sunny, Tools, MagicStick, Operation, FolderOpened,
 } from '@element-plus/icons-vue'
@@ -115,6 +115,7 @@ const menu = [
   { path: '/admin/devices', title: '设备管理', icon: Iphone },
   { path: '/admin/snippets', title: '拓展模块', icon: MagicStick },
   { path: '/admin/builds', title: '构建发布', icon: Promotion },
+  { path: '/admin/unlock', title: '网络体检', icon: Compass },
   { path: '/admin/dependencies', title: '自主维护', icon: FolderOpened },
   { path: '/admin/audit', title: '审计日志', icon: Document },
   { path: '/admin/settings', title: '系统设置', icon: Tools },

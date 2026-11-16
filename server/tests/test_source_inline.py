@@ -55,7 +55,12 @@ def test_inline_nodes_go_to_top_level_proxies():
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     names = [p["name"] for p in cfg["proxies"]]
-    assert "香港 01" in names
+    # 名称规范化默认开启：统一成「旗帜 地区 序号 [来源]」
+    assert "🇭🇰 香港 01 [机场A]" in names
+    # 关闭开关后恢复原始名称
+    cfg_raw = yaml.safe_load(render.render_target(
+        snap, {"engine": "stash"}, normalize_nodes=False))
+    assert "香港 01" in [p["name"] for p in cfg_raw["proxies"]]
     # 内联来源不再产出 proxy-providers 段
     assert "proxy-providers" not in cfg
 
@@ -72,7 +77,8 @@ def test_inline_source_suffix_makes_names_unique():
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     names = [p["name"] for p in cfg["proxies"]]
-    assert "香港 01-A" in names and "香港 01-B" in names
+    # 规范化后跨来源区分靠 [来源] 标签
+    assert "🇭🇰 香港 01 [机场A]" in names and "🇭🇰 香港 01 [机场B]" in names
     assert len(names) == len(set(names))
 
 
@@ -88,7 +94,7 @@ def test_inline_source_filter_removes_pseudo_nodes():
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     names = [p["name"] for p in cfg["proxies"]]
-    assert "香港 01" in names
+    assert "🇭🇰 香港 01 [机场A]" in names
     assert "剩余流量" not in names
 
 
@@ -105,7 +111,7 @@ def test_inline_respects_filter_unavailable():
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     names = [p["name"] for p in cfg["proxies"]]
-    assert "香港 01" in names
+    assert "🇭🇰 香港 01 [机场A]" in names
     assert "香港 02" not in names
     # 组里也不能再出现被排除的节点
     grp = next(g for g in cfg["proxy-groups"] if g["name"] == "🇭🇰 香港")
@@ -138,7 +144,7 @@ def test_group_expands_inline_sources_into_members():
     )
     cfg = yaml.safe_load(render.render_target(snap, {"engine": "stash"}))
     grp = next(g for g in cfg["proxy-groups"] if g["name"] == "🇭🇰 香港")
-    assert "香港 01" in grp["proxies"]
+    assert "🇭🇰 香港 01 [机场A]" in grp["proxies"]
     assert "日本 01" not in grp["proxies"]   # 组自己的过滤正则只筛来源节点
     assert "use" not in grp                  # 内联来源不再走 provider
     # 没有 provider 时不再下发这个正则（已经筛过一遍）

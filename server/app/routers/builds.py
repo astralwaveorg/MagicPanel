@@ -324,6 +324,8 @@ def create_build(operator: str, note: str = "",
 
     results: dict = {}
     overall = "success"
+    with db.connect() as _conn:
+        normalize_nodes = db.get_setting(_conn, "node_name_normalize", "1") == "1"
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
         policy_errors, policy_warnings = validations.get(vid, ([], []))
@@ -335,7 +337,8 @@ def create_build(operator: str, note: str = "",
         if not policy_errors:
             try:
                 text = render.render_target(snapshot, target, warnings,
-                                            device=device, variant=variant)
+                                            device=device, variant=variant,
+                                            normalize_nodes=normalize_nodes)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
