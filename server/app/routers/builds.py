@@ -532,7 +532,9 @@ def _publish(action: str, bid: int, reason: str, operator: str, body=None) -> di
                                           operator, body.idempotency_key, payload_sha)
             if replay is not None:
                 return {"ok": True, **replay}
-            publish_gate.prepare_ticket(conn, bid, env=env.value, now=datetime.now(timezone.utc))
+            if action != "offline":
+                publish_gate.prepare_ticket(conn, bid, env=env.value,
+                                            now=datetime.now(timezone.utc))
             expected = body.expected_release_revision
             idem = body.idempotency_key
             if action == "test":

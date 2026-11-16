@@ -181,10 +181,14 @@ def list_groups_paged(limit: int = 50, offset: int = 0, keyword: str = "",
         if member == "source":
             where.append(_has_real_source_sql())
         elif member == "local":
-            where.append("COALESCE(json_array_length(local_nodes), 0) > 0")
+            where.append("""(COALESCE(json_array_length(local_nodes), 0) > 0 OR EXISTS (
+                SELECT 1 FROM json_each(members_v2) typed
+                JOIN node_catalog nc ON nc.node_uid=json_extract(typed.value,'$.ref')
+                WHERE members_format='typed-v2' AND nc.local_node_id IS NOT NULL))""")
         elif member == "manual":
-            where.append(f"NOT {_has_real_source_sql()} "
-                         "AND COALESCE(json_array_length(local_nodes), 0) = 0")
+            where.append(f"""NOT {_has_real_source_sql()} AND COALESCE(json_array_length(local_nodes), 0) = 0 AND NOT EXISTS (
+                SELECT 1 FROM json_each(members_v2) typed
+                WHERE members_format='typed-v2' AND json_extract(typed.value,'$.kind')='node')""")
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         data = db.paged(conn, "proxy_groups", clause, args, "sort, id", limit, offset)
         data["items"] = [_group_public(r) for r in data["items"]]

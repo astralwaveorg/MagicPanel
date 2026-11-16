@@ -4,6 +4,7 @@
 排在其后的规则永远匹配不到。这组用例盯住这条约束的三处落点：
 新增规则时的插入位、重复兜底、拖拽排序，以及产物里的兜底归位与告警。
 """
+import json
 import sys
 import os
 
@@ -136,9 +137,11 @@ def test_artifact_moves_fallback_to_end_and_warns(client):
     r = client.post("/api/v1/builds", headers=h, json={})
     assert r.status_code == 201, r.text
     bid = r.json()["id"]
-    detail = client.get(f"/api/v1/builds/{bid}", headers=h).json()
+    from app import db as appdb
+    with appdb.connect() as conn:
+        results = json.loads(appdb.one(conn, "SELECT results FROM builds WHERE id=?", (bid,))["results"])
     warnings = []
-    for res in detail["results"].values():
+    for res in results.values():
         warnings += res.get("warnings") or []
     assert any("现已生效" in w for w in warnings), warnings
 

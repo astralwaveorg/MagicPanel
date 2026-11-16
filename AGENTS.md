@@ -19,6 +19,12 @@
 本文中的构建号、条数与 `sort` 清单是注明日期的记录，不能直接当作当前线上状态，
 更不能据此覆盖用户后来在面板里做的调整。
 
+**2026-11-16 实施快照**：核心探测/预算/资格/Google planner/资源冻结/发布CAS/旧feed冻结已进入
+本分支，详见[实施状态与运行手册](docs/superpowers/specs/2026-11-16-MagicPanel-V2-实施状态与运行手册.md)。
+`v2_runtime_activation` 仍为 `staged`；真实设备/R6S 验收前不得激活自动外发。
+发布新调用必须携带 `expected_release_revision` 与 `idempotency_key`；缺核心不得自动生产。
+旧 feed freeze 生产 arm 必须基于 R6S 实际缓存基线和 owner 回执。
+
 **V2 实施入口**：[总体设计与审查稿](docs/superpowers/specs/2026-11-15-MagicPanel-V2-总体设计与审查稿.md)
 及其配套规范记录了全面迭代。用户已于2026-11-15授权方案定案后完整实施、提交、部署和测试；现状约束在对应迁移生效前继续有效，不能把未来能力当成已经部署。
 

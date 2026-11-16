@@ -74,7 +74,8 @@ def test_builtin_to_testing_to_production(client):
 
     build = _create_build(client, h, "首个版本")
     bid = build["id"]
-    assert _release_state(client) == {"production": None, "testing": None}
+    assert _release_state(client)["production"] is None
+    assert _release_state(client)["testing"] is None
 
     r = client.post(f"/api/v1/builds/{bid}/publish-to-test", headers=h,
                     json={"reason": "先上测试"})
@@ -199,7 +200,8 @@ def test_failed_verification_cannot_be_published(client):
     r = client.post(f"/api/v1/builds/{build['id']}/publish-to-prod", headers=h,
                     json={"reason": "试试"})
     assert r.status_code == 400
-    assert _release_state(client) == {"production": None, "testing": None}
+    assert _release_state(client)["production"] is None
+    assert _release_state(client)["testing"] is None
 
 
 def test_publish_to_testing_twice_is_rejected(client):
@@ -480,7 +482,7 @@ def test_release_state_shape(client):
                 json={"reason": "上测试"})
 
     state = _release_state(client)
-    assert set(state) == {"production", "testing"}
+    assert set(state) == {"production", "testing", "release_revisions"}
     assert state["production"] is None
     entry = state["testing"]
     assert set(entry) == {

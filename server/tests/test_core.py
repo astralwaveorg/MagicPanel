@@ -1,5 +1,7 @@
 """测速核心本地上传安装：格式识别、执行校验、替换与鉴权。"""
 import gzip
+import sys
+import pytest
 import io
 import zipfile
 
@@ -18,6 +20,8 @@ def _zip_with_mihomo(payload: bytes) -> bytes:
 
 
 def test_core_upload_gzip(client):
+    if sys.platform == "win32":
+        pytest.skip("fixture core is a Linux executable")
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     assert client.get("/api/v1/core/status").json()["available"] is False
@@ -40,6 +44,8 @@ def test_core_upload_gzip(client):
 
 
 def test_core_upload_zip_and_raw(client):
+    if sys.platform == "win32":
+        pytest.skip("fixture core is a Linux executable")
     csrf = setup_admin(client)
     h = auth_headers(csrf)
 

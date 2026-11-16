@@ -141,6 +141,7 @@ def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
     """
     with db.connect() as conn:
         conn.create_function("public_url", 1, url_summary, deterministic=True)
+
         where, args = [], []
         if keyword:
             like = f"%{keyword}%"

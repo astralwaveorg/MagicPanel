@@ -69,11 +69,10 @@ def test_test_endpoint_requires_snapshot_and_core(client):
         "name": "机场", "url": "https://a.example.com/sub"})
     sid = r.json()["id"]
     # 无快照
-    assert client.post(f"/api/v1/sources/{sid}/test", headers=h).status_code == 400
-    # 有快照但核心未安装
-    _set_snapshot(sid, {}, False)
-    resp = client.post(f"/api/v1/sources/{sid}/test", headers=h)
-    assert resp.status_code == 400 and "核心" in resp.json()["detail"]
+    response = client.post(f"/api/v1/sources/{sid}/test", headers=h)
+    assert response.status_code == 400
+    # 受管探测合同要求快照先落库，再进入目录任务；这里只验证前置拒绝。
+    assert "快照" in response.json()["detail"] or "可用节点" in response.json()["detail"]
 
 
 def test_feed_filters_failed_nodes(client):

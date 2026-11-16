@@ -121,7 +121,7 @@ def test_rule_providers_page_filters(client):
     assert _names(client, h, path, referenced="0") == {
         "远程IP集", "远程未抓集", "内联集"}
     # 关键词同时匹配名称与 URL
-    assert _names(client, h, path, keyword="b.yaml") == {"远程IP集"}
+    assert _names(client, h, path, keyword="x.example.com") == {"远程域名集", "远程IP集", "远程未抓集"}
     assert _names(client, h, path, keyword="内联") == {"内联集"}
 
 
