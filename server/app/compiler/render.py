@@ -330,13 +330,12 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
 
     # 剔除策略组成员里指向不存在策略组的引用
     for g in groups:
+        # 设备专属组（如日本移动）被其它组引用时，非该设备的产物里剔除
+        # 该成员是作用域机制的预期行为，不作告警；指向不存在组的引用
+        # 在构建校验里已经报错，走不到这里。
         proxies = [p for p in (g.get("proxies") or [])
                    if p in config.BUILTIN_TARGETS or p in group_names
                    or p in local_display or p == config.GUARD_PROXY]
-        if len(proxies) != len(g.get("proxies") or []):
-            if warnings is not None:
-                warnings.append(
-                    f"策略组“{g['name']}”剔除了不适用于本目标的成员引用")
         g["proxies"] = proxies
     return groups, rules
 

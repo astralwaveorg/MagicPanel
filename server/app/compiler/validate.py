@@ -158,10 +158,8 @@ def _validate_one_variant(
             elif p in local_display:
                 # 本地节点：合法成员。位置即优先级，用来把节点插在组中间。
                 # 判定靠 display_name() 的权威索引，不在这里复刻名字格式。
-                if "*" in (g.get("devices") or []):
-                    warnings.append(
-                        f"{label}策略组“{g['name']}”适用于所有设备，成员里的本地节点"
-                        f"“{p}”会连同其密钥一起下发给全部设备")
+                # 自建节点随组下发给全部设备是设计本意，不作告警。
+                pass
             elif p in local_display_all:
                 errors.append(
                     f"{label}策略组“{g['name']}”的成员“{p}”是已停用的本地节点，不会进入产物")
