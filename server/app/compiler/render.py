@@ -111,13 +111,6 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
         else:
             provider_use.append(name)
     use = provider_use
-    if group["type"] in ("url-test", "fallback", "load-balance") \
-            and config.GUARD_PROXY not in proxies:
-        # 放在末尾而不是开头：占位节点永远连不通（127.0.0.1:1），
-        # 它的作用只是让组非空，防止客户端把空组隐式改写成 DIRECT。
-        # 放末尾可保证任何客户端（哪怕不做健康检查直接取第一个成员）
-        # 拿到的都是真实节点，而不是这个占位。
-        proxies.append(config.GUARD_PROXY)
     if inline_members:
         # 组的过滤正则只作用在来源节点上（客户端的组过滤也只筛 provider 节点），
         # 显式成员不受影响。组内没有 provider 时不再下发这个正则：
@@ -131,6 +124,17 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
         inline_members.sort()
         # 位置与 provider 模式一致：客户端把 provider 节点排在 proxies 之后
         proxies = list(dict.fromkeys(proxies + inline_members))
+    if group["type"] in ("url-test", "fallback", "load-balance") \
+            and config.GUARD_PROXY not in proxies and not proxies:
+        # 只有组最终一个已知成员都没有时才追加占位节点（空组保护，
+        # 127.0.0.1:1 的死节点，作用是让组非空，防止客户端把空组隐式改写成
+        # DIRECT）。显式成员在构建期已校验存在、内联成员在此处已展开，
+        # 二者只要有一个就永远非空，不塞占位——非空组放占位只会让客户端
+        # 多一个永远超时的死项。仍需要占位的只有 provider + 过滤的组：
+        # 客户端侧能否匹配到节点构建期无法确认。provider 节点由客户端追加在
+        # proxies 之后，因此这类组的占位会出现在已知成员之前；url-test /
+        # fallback 会健康检查跳过死节点，不影响选路。
+        proxies.append(config.GUARD_PROXY)
     if proxies:
         entry["proxies"] = proxies
     if use:
