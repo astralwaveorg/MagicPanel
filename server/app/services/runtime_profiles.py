@@ -27,6 +27,10 @@ def get_profile(profile_id: str, *, engine: str, platform: str = '') -> dict:
 
 
 def effective_profile(target: dict, device: dict | None = None) -> dict:
+    if not isinstance(target, dict):
+        target = dict(target)
+    if device is not None and not isinstance(device, dict):
+        device = dict(device)
     selected = target.get('default_runtime_profile', 'legacy-v1')
     if device and device.get('runtime_profile') is not None:
         selected = device['runtime_profile']

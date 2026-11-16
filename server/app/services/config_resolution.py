@@ -33,6 +33,7 @@ def resolve_layers(*, engine: str, platform: str = '', device_id: int = 0,
             'runtime_profile': profile['id'], 'profile_version': profile['version'],
             'inherited': deepcopy(inherited), 'overlay': deepcopy(overlay),
             'effective': effective, 'provenance': provenance,
+            'layers': deepcopy(layers), 'leaf_sources': base_config.leaf_sources(layers),
             'input_sha256': hashlib.sha256(raw).hexdigest(),
         }
     except (TypeError, ValueError, KeyError, RecursionError, OverflowError):

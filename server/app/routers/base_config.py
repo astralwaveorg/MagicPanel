@@ -11,6 +11,7 @@
 - 界面可以逐层展示"生效值来自哪一层"。
 """
 import json
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -20,7 +21,7 @@ from ..compiler import render
 from ..deps import CurrentUser, RequireCapabilities
 from ..routers import builds
 from ..services import base_config as base_config_service
-from ..services import releases
+from ..services import releases, config_resolution
 from ..services.capabilities import require_capability
 
 ENGINE_LABELS = config.ENGINE_LABELS
@@ -219,18 +220,30 @@ def list_scopes(user=CurrentUser):
     return {"scopes": scopes}
 
 
-def _baseline(engine: str, plat: str, dev_id: int, layers) -> dict:
-    """本层的比较基线：本层保存的差异是"相对基线"的差异。
+def _profile_id(conn, engine, platform, device_id):
+    if device_id:
+        device = db.one(conn, 'SELECT runtime_profile FROM devices WHERE id=?', (device_id,))
+        if device and device['runtime_profile'] is not None:
+            return device['runtime_profile']
+    if platform:
+        target = db.one(conn, 'SELECT default_runtime_profile FROM targets WHERE engine=? AND platform=?',
+                        (engine, platform))
+        if target:
+            return target['default_runtime_profile']
+    return 'legacy-v1'
 
-    引擎默认配置层没有上层可比，比的是程序内置的默认值；
-    其余两层比的是上层合并后的生效值。
-    """
-    if not plat and not dev_id:
-        return base_config_service.default_doc(engine)
-    if len(layers) > 1:
-        inherited, _ = base_config_service.cascade(layers[:-1])
-        return inherited
-    return {}
+
+def _resolve_scope(engine, platform, device_id, docs, profile_id):
+    try:
+        return config_resolution.resolve_layers(engine=engine, platform=platform,
+            device_id=device_id, docs=docs, runtime_profile=profile_id)
+    except ValueError:
+        raise HTTPException(400, {'code': 'config_resolution_invalid',
+            'message': '运行档案或基础配置无法解析', 'request_id': uuid4().hex}) from None
+
+
+def _profile_meta(resolved):
+    return {key: resolved[key] for key in ('runtime_profile', 'profile_version', 'input_sha256')}
 
 
 @router.get("")
@@ -240,14 +253,17 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
     engine = _engine(engine)
     with db.connect() as conn:
         plat, dev_id = _check_scope(conn, engine, platform, device_id)
+        profile_id = _profile_id(conn, engine, plat, dev_id)
         docs = _all_docs(conn)
         _, overlay, updated_at = _load_scope(conn, engine, plat, dev_id)
         layer_scopes = _layer_scopes(conn, engine, plat, dev_id)
-    layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-    inherited = _baseline(engine, plat, dev_id, layers)
-    effective, sources = base_config_service.cascade(layers)
+    resolved = _resolve_scope(engine, plat, dev_id, docs, profile_id)
+    layers = resolved["layers"]
+    inherited = resolved["inherited"]
+    effective, sources = resolved["effective"], resolved["provenance"]
     return {
         "engine": engine,
+        **_profile_meta(resolved),
         "platform": plat,
         "device_id": dev_id,
         "readonly": False,   # 引擎默认配置也可改（存的是与默认值的差异）
@@ -255,7 +271,7 @@ def get_base_config(engine: str = "stash", platform: str = "", device_id: int = 
         "overlay": overlay,
         "effective": effective,
         "sources": sources,
-        "leaf_sources": base_config_service.leaf_sources(layers),
+        "leaf_sources": resolved["leaf_sources"],
         "layers": [{"label": label, "scope": scope_name,
                     "keys": sorted(doc.keys())}
                    for (label, scope_name), (_, doc) in zip(layer_scopes, layers)],
@@ -272,6 +288,7 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
     engine = _engine(engine)
     with db.tx() as conn:
         plat, dev_id = _check_scope(conn, engine, platform, device_id, for_write=True)
+        profile_id = _profile_id(conn, engine, plat, dev_id)
         docs = _all_docs(conn)
         _, _, updated_at = _load_scope(conn, engine, plat, dev_id)
         if body.updated_at and updated_at and body.updated_at != updated_at:
@@ -286,9 +303,10 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
                                              allow_dns=True)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
-        layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
+        resolved = _resolve_scope(engine, plat, dev_id, docs, profile_id)
+        layers = resolved["layers"]
         # 引擎默认配置：与"程序默认值"求差异，只把改动过的键存下来
-        inherited = _baseline(engine, plat, dev_id, layers)
+        inherited = resolved["inherited"]
         # 设备独立配置层是"个性化"语义：列表存新增项（追加），
         # 其余两层是"这一层的完整配置"语义：列表存整份（替换）。
         lists = (base_config_service.LIST_APPEND if dev_id
@@ -304,18 +322,20 @@ def put_base_config(body: BaseConfigBody, engine: str = "stash", platform: str =
                     user["username"])
         content, stored, updated_at = _load_scope(conn, engine, plat, dev_id)
         docs = _all_docs(conn)
-    layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-    effective, sources = base_config_service.cascade(layers)
+    resolved = _resolve_scope(engine, plat, dev_id, docs, profile_id)
+    layers = resolved["layers"]
+    effective, sources = resolved["effective"], resolved["provenance"]
     return {
         "ok": True,
         "engine": engine,
+        **_profile_meta(resolved),
         "platform": plat,
         "device_id": dev_id,
-        "inherited": _baseline(engine, plat, dev_id, layers),
+        "inherited": resolved["inherited"],
         "overlay": stored,
         "effective": effective,
         "sources": sources,
-        "leaf_sources": base_config_service.leaf_sources(layers),
+        "leaf_sources": resolved["leaf_sources"],
         "content": content,
         "updated_at": updated_at,
         "is_default": not stored,
@@ -329,6 +349,7 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
     engine = _engine(engine)
     with db.tx() as conn:
         plat, dev_id = _check_scope(conn, engine, platform, device_id, for_write=True)
+        profile_id = _profile_id(conn, engine, plat, dev_id)
         _, overlay, _ = _load_scope(conn, engine, plat, dev_id)
         if not plat and not dev_id:
             # 引擎默认配置：删掉覆盖记录即恢复默认（默认值来自源码，不需要保留任何键）
@@ -337,15 +358,17 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
                 (engine,))
             overlay = {}
             docs = _all_docs(conn)
-            layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-            effective, sources = base_config_service.cascade(layers)
+            resolved = _resolve_scope(engine, plat, dev_id, docs, profile_id)
+            layers = resolved["layers"]
+            effective, sources = resolved["effective"], resolved["provenance"]
             security.audit(conn, user["username"], "恢复引擎默认配置",
                            "base_config", f"{engine}:内置", {})
             return {
                 "ok": True, "engine": engine, "platform": plat, "device_id": dev_id,
-                "inherited": _baseline(engine, plat, dev_id, layers),
+                **_profile_meta(resolved),
+                "inherited": resolved["inherited"],
                 "overlay": overlay, "effective": effective, "sources": sources,
-                "leaf_sources": base_config_service.leaf_sources(layers),
+                "leaf_sources": resolved["leaf_sources"],
                 "content": base_config_service.to_yaml(effective),
                 "updated_at": "", "is_default": True,
             }
@@ -364,18 +387,20 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
                 "DELETE FROM base_configs WHERE engine=? AND platform=? AND device_id=?",
                 (engine, plat or "", dev_id))
         docs = _all_docs(conn)
-    layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
-    effective, sources = base_config_service.cascade(layers)
+    resolved = _resolve_scope(engine, plat, dev_id, docs, profile_id)
+    layers = resolved["layers"]
+    effective, sources = resolved["effective"], resolved["provenance"]
     return {
         "ok": True,
         "engine": engine,
+        **_profile_meta(resolved),
         "platform": plat,
         "device_id": dev_id,
-        "inherited": _baseline(engine, plat, dev_id, layers),
+        "inherited": resolved["inherited"],
         "overlay": overlay,
         "effective": effective,
         "sources": sources,
-        "leaf_sources": base_config_service.leaf_sources(layers),
+        "leaf_sources": resolved["leaf_sources"],
         "content": base_config_service.to_yaml(effective),
         "updated_at": "",
         "is_default": True,
@@ -383,21 +408,18 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
 
 
 def _pick_target(conn, engine: str, platform: str) -> dict:
-    """按「引擎 + 平台」挑一个引擎平台（预览用）。"""
+    """按「引擎 + 平台」挑一个引擎平台（预览用），保留运行档案。"""
     rows = db.all_(conn, "SELECT * FROM targets ORDER BY id")
-    if platform:
-        for row in rows:
-            if row["engine"] == engine and row["platform"] == platform:
-                return {"name": row["name"], "engine": row["engine"],
-                        "platform": row["platform"],
-                        "extra_yaml": row["extra_yaml"]}
-        raise HTTPException(404, "没有该引擎与平台的引擎平台")
-    for row in rows:
-        if row["engine"] == engine:
-            return {"name": row["name"], "engine": row["engine"],
-                    "platform": row["platform"],
-                    "extra_yaml": row["extra_yaml"]}
-    raise HTTPException(400, "还没有该引擎的引擎平台，请先在“引擎平台”中添加")
+    candidates = (row for row in rows
+                  if row["engine"] == engine and (not platform or row["platform"] == platform))
+    row = next(candidates, None)
+    if not row:
+        error = (404, "没有该引擎与平台的引擎平台") if platform else \
+            (400, "还没有该引擎的引擎平台，请先在“引擎平台”中添加")
+        raise HTTPException(error[0], error[1])
+    return {"id": int(row["id"]), "name": row["name"], "engine": row["engine"],
+            "platform": row["platform"], "extra_yaml": row["extra_yaml"],
+            "default_runtime_profile": row["default_runtime_profile"]}
 
 
 @router.post("/preview")
@@ -406,20 +428,25 @@ def preview(body: PreviewBody, user=RequireCapabilities('reveal')):
     warnings: list[str] = []
     with db.connect() as conn:
         target = _pick_target(conn, engine, body.platform)
-        snapshot, _sha = builds.current_policy(conn)
-    text = render.render_target(snapshot, target, warnings)
-    if body.device_id:
-        with db.connect() as conn:
-            docs = _all_docs(conn)
+        dev = None
+        if body.device_id:
+            _check_scope(conn, target["engine"], target["platform"], body.device_id)
             dev = db.one(conn, "SELECT * FROM devices WHERE id=?", (body.device_id,))
-        if dev:
-            device_doc = docs.get((target["engine"], target["platform"], int(dev["id"])))
-            if device_doc:
-                try:
-                    text = render.apply_device_overlay(
-                        text, base_config_service.to_yaml(device_doc))
-                except ValueError as exc:
-                    raise HTTPException(400, str(exc))
+        snapshot, _sha = builds.current_policy(conn)
+        docs = _all_docs(conn)
+    try:
+        text = render.render_target(snapshot, target, warnings,
+                                    device=dev if dev else None)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    if dev:
+        device_doc = docs.get((target["engine"], target["platform"], int(dev["id"])))
+        if device_doc:
+            try:
+                text = render.apply_device_overlay(
+                    text, base_config_service.to_yaml(device_doc))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
     return {
         "target": target["name"],
         "engine": target["engine"],
@@ -437,6 +464,7 @@ def apply(body: ApplyBody, user=RequireCapabilities('edit', 'reveal')):
         raise HTTPException(400, "发布环境仅支持 production / testing")
     with db.tx() as conn:
         plat, dev_id = _check_scope(conn, engine, body.platform, body.device_id)
+        profile_id = _profile_id(conn, engine, plat, dev_id)
         docs = _all_docs(conn)
         try:
             effective = base_config_service.parse_content(body.content)
@@ -445,9 +473,10 @@ def apply(body: ApplyBody, user=RequireCapabilities('edit', 'reveal')):
                                              allow_dns=True)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
-        layers = base_config_service.scope_layers(engine, plat, dev_id, docs)
+        resolved = _resolve_scope(engine, plat, dev_id, docs, profile_id)
+        layers = resolved["layers"]
         # 与「保存」同一条规则：相对基线求差异，设备层列表只存新增项
-        inherited = _baseline(engine, plat, dev_id, layers)
+        inherited = resolved["inherited"]
         lists = (base_config_service.LIST_APPEND if dev_id
                  else base_config_service.LIST_REPLACE)
         try:

@@ -7,13 +7,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 import json
+from uuid import uuid4
 
 import yaml
 
 from .. import db, security
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
-from ..services import refs
+from ..services import refs, runtime_profiles
 from ..services.capabilities import require_capability
 
 router = APIRouter(prefix="/api/v1", tags=["targets-devices"])
@@ -29,6 +30,8 @@ class TargetBody(BaseModel):
     platform: str
     description: str = Field(default="", max_length=256)
     extra_yaml: str = Field(default="", max_length=200_000)
+    default_runtime_profile: str = Field(default='legacy-v1', min_length=1, max_length=64)
+    expected_config_revision: int | None = Field(default=None, ge=1, strict=True)
 
 
 class DeviceBody(BaseModel):
@@ -37,6 +40,8 @@ class DeviceBody(BaseModel):
     target_id: int
     env: str = "production"
     note: str = Field(default="", max_length=256)
+    runtime_profile: str | None = Field(default=None, min_length=1, max_length=64)
+    expected_config_revision: int | None = Field(default=None, ge=1, strict=True)
     # 设备级个性化统一走「基础配置 → 设备独立配置」作用域，
     # 这里的 extra_yaml 曾是另一条从未接通的通道（写了不生效），已移除。
 
@@ -46,6 +51,7 @@ def _check_target(body: TargetBody) -> None:
         raise HTTPException(400, "引擎仅支持 stash / mihomo")
     if body.platform not in PLATFORMS:
         raise HTTPException(400, f"平台仅支持：{'、'.join(sorted(PLATFORMS))}")
+    _profile(body.default_runtime_profile, body.engine, body.platform)
     if body.extra_yaml.strip():
         try:
             overlay = yaml.safe_load(body.extra_yaml)
@@ -58,9 +64,29 @@ def _check_target(body: TargetBody) -> None:
                 raise HTTPException(400, f"平台扩展不能包含“{key}”：{reason}")
 
 
+def _profile(profile_id, engine, platform):
+    try:
+        return runtime_profiles.get_profile(profile_id, engine=engine, platform=platform)
+    except ValueError:
+        raise HTTPException(400, {'code': 'runtime_profile_invalid',
+            'message': '该运行档案不可用于此引擎平台', 'request_id': uuid4().hex}) from None
+
+
+def _profile_revision(body, field, old):
+    if field in body.model_fields_set and body.expected_config_revision != old['config_revision']:
+        raise HTTPException(409, {'code': 'stale_revision',
+            'message': '配置已变化，请刷新后重新选择运行档案', 'request_id': uuid4().hex,
+            'current_revision': old['config_revision']})
+
+
+def _device_profile(target, profile_id):
+    return _profile(profile_id if profile_id is not None else target['default_runtime_profile'],
+                    target['engine'], target['platform'])
+
+
 def _target_public(row) -> dict:
     return {key: row[key] for key in (
-        "id", "name", "engine", "platform", "description", "update_interval", "sort", "created_at", "updated_at")}
+        "id", "name", "engine", "platform", "description", "update_interval", "sort", "created_at", "updated_at", "default_runtime_profile", "config_revision")}
 
 
 def _device_public(row, base_url: str = "") -> dict:
@@ -71,6 +97,8 @@ def _device_public(row, base_url: str = "") -> dict:
         "display_name": row["note"] or row["name"],
         "platform": row["platform"],
         "target_id": row["target_id"],
+        "runtime_profile": row['runtime_profile'],
+        "config_revision": row['config_revision'],
         "env": row["env"],
         "token_hint": row["token_hint"],
         "note": row["note"],
@@ -253,9 +281,9 @@ def create_target(body: TargetBody, user=CurrentUser):
             sort = db.one(conn, "SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM targets")["n"]
             cur = db.insert_unique(conn,
                 "INSERT INTO targets(name, engine, platform, description, extra_yaml, "
-                "sort, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                "sort, created_at, updated_at, default_runtime_profile) VALUES(?,?,?,?,?,?,?,?,?)",
                 (body.name, body.engine, body.platform, body.description,
-                 body.extra_yaml, sort, now, now),
+                 body.extra_yaml, sort, now, now, body.default_runtime_profile),
             )
             security.audit(conn, user["username"], "新增引擎平台", "target", cur.lastrowid,
                            {"name": body.name})
@@ -283,14 +311,20 @@ def reorder_targets(ids: list[int], user=CurrentUser):
 
 @router.put("/targets/{tid}")
 def update_target(tid: int, body: TargetBody, user=CurrentUser):
-    with db.tx() as conn:
+    with db.tx(immediate=True) as conn:
         old = _get_target(conn, tid)
+        _profile_revision(body, 'default_runtime_profile', old)
+        if 'default_runtime_profile' not in body.model_fields_set:
+            body = body.model_copy(update={'default_runtime_profile': old['default_runtime_profile']})
         if ("extra_yaml" in body.model_fields_set or body.engine != old["engine"]
                 or body.platform != old["platform"]):
             require_capability(user, "reveal")
         if "extra_yaml" not in body.model_fields_set:
             body = body.model_copy(update={"extra_yaml": old["extra_yaml"]})
         _check_target(body)
+        for device in db.all_(conn, 'SELECT runtime_profile FROM devices WHERE target_id=?', (tid,)):
+            _profile(device['runtime_profile'] if device['runtime_profile'] is not None
+                     else body.default_runtime_profile, body.engine, body.platform)
         clash = db.one(
             conn, "SELECT id FROM targets WHERE name=? AND id!=?", (body.name, tid)
         )
@@ -300,9 +334,9 @@ def update_target(tid: int, body: TargetBody, user=CurrentUser):
         old = _get_target(conn, tid)
         conn.execute(
             "UPDATE targets SET name=?, engine=?, platform=?, description=?, "
-            "extra_yaml=?, updated_at=? WHERE id=?",
+            "extra_yaml=?, updated_at=?, default_runtime_profile=?, config_revision=config_revision+1 WHERE id=?",
             (body.name, body.engine, body.platform, body.description,
-             body.extra_yaml, db.now(), tid),
+             body.extra_yaml, db.now(), body.default_runtime_profile, tid),
         )
         remapped = 0
         if old["name"] != body.name:
@@ -357,13 +391,22 @@ def delete_target(tid: int, force: bool = False, move_to: int | None = None,
         if devices:
             if not move_to:
                 raise HTTPException(400, "请先指定把设备迁移到哪个引擎平台")
-            dest = db.one(conn, "SELECT id, name FROM targets WHERE id=?", (move_to,))
+            dest = db.one(conn, "SELECT id, name, engine, platform, default_runtime_profile FROM targets WHERE id=?", (move_to,))
             if not dest:
                 raise HTTPException(400, "目标引擎平台不存在")
             if dest["id"] == tid:
                 raise HTTPException(400, "设备不能迁移到正在删除的引擎平台")
-            conn.execute("UPDATE devices SET target_id=? WHERE target_id=?",
-                         (dest["id"], tid))
+            actual_devices = db.all_(conn, "SELECT id, name, runtime_profile "
+                                           "FROM devices WHERE target_id=?", (tid,))
+            for device in actual_devices:
+                _device_profile(dest, device["runtime_profile"])
+            for device in actual_devices:
+                conn.execute(
+                    "UPDATE devices SET target_id=?, platform=?, "
+                    "config_revision=config_revision+1 WHERE id=?",
+                    (dest["id"], dest["platform"], device["id"]))
+                _rekey_device_base_config(conn, int(device["id"]),
+                                          dest["engine"], dest["platform"])
             moved = [d["name"] for d in devices]
         cleaned = _clean_target_refs(conn, row["name"])
         conn.execute("DELETE FROM targets WHERE id=?", (tid,))
@@ -416,17 +459,18 @@ def create_device(body: DeviceBody, request: Request, user=RequireCapabilities("
         raise HTTPException(400, f"平台仅支持：{'、'.join(sorted(PLATFORMS))}")
     token = security.new_device_token()
     with db.tx() as conn:
-        _get_target(conn, body.target_id)
+        target = _get_target(conn, body.target_id)
+        _device_profile(target, body.runtime_profile)
         if db.one(conn, "SELECT id FROM devices WHERE name=?", (body.name,)):
             raise HTTPException(409, "同名设备已存在")
         sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM devices"))["s"]
         cur = conn.execute(
             "INSERT INTO devices(name, platform, target_id, env, token_hash, "
-            "token_hint, token_enc, note, created_at, sort) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "token_hint, token_enc, note, created_at, sort, runtime_profile) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (body.name, body.platform, body.target_id, body.env,
              security.sha256_text(token), token[:10], security.encrypt_text(token),
-             body.note, db.now(), sort),
+             body.note, db.now(), sort, body.runtime_profile),
         )
         security.audit(conn, user["username"], "新增设备", "device", cur.lastrowid,
                        {"name": body.name})
@@ -444,9 +488,13 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
         raise HTTPException(400, "订阅环境仅支持 production / testing")
     if body.platform not in PLATFORMS:
         raise HTTPException(400, f"平台仅支持：{'、'.join(sorted(PLATFORMS))}")
-    with db.tx() as conn:
-        _get_device(conn, did)
-        _get_target(conn, body.target_id)
+    with db.tx(immediate=True) as conn:
+        old_row = _get_device(conn, did)
+        _profile_revision(body, 'runtime_profile', old_row)
+        if 'runtime_profile' not in body.model_fields_set:
+            body = body.model_copy(update={'runtime_profile': old_row['runtime_profile']})
+        target = _get_target(conn, body.target_id)
+        _device_profile(target, body.runtime_profile)
         clash = db.one(
             conn, "SELECT id FROM devices WHERE name=? AND id!=?", (body.name, did)
         )
@@ -454,9 +502,9 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
             raise HTTPException(409, "同名设备已存在")
         old_row = _get_device(conn, did)
         conn.execute(
-            "UPDATE devices SET name=?, platform=?, target_id=?, env=?, note=? "
+            "UPDATE devices SET name=?, platform=?, target_id=?, env=?, note=?, runtime_profile=?, config_revision=config_revision+1 "
             "WHERE id=?",
-            (body.name, body.platform, body.target_id, body.env, body.note, did),
+            (body.name, body.platform, body.target_id, body.env, body.note, body.runtime_profile, did),
         )
         if int(old_row["target_id"]) != int(body.target_id):
             target = _get_target(conn, body.target_id)
@@ -519,19 +567,19 @@ def batch_update_devices(body: BatchDevicePatch, user=CurrentUser):
         if body.target_id is not None:
             target = _get_target(conn, body.target_id)
         for did in ids:
-            row = db.one(conn, "SELECT * FROM devices WHERE id=?", (did,))
+            row = dict(db.one(conn, "SELECT * FROM devices WHERE id=?", (did,)) or {})
             if not row:
                 missing.append(did)
                 continue
             fields: list[str] = []
             args: list = []
             notes: list[str] = []
-            if body.target_id is not None:
-                fields.append("target_id=?")
-                args.append(body.target_id)
-                # 平台跟随目标，避免出现"目标是 Stash-iOS、平台却是 macOS"
-                fields.append("platform=?")
-                args.append(target["platform"])
+            target_changed = (body.target_id is not None
+                              and int(row["target_id"]) != int(body.target_id))
+            if target_changed:
+                _device_profile(target, row.get("runtime_profile"))
+                fields.extend(["target_id=?", "platform=?"])
+                args.extend([body.target_id, target["platform"]])
             if body.env is not None:
                 fields.append("env=?")
                 args.append(body.env)
@@ -540,9 +588,13 @@ def batch_update_devices(body: BatchDevicePatch, user=CurrentUser):
                 args.append(body.note)
             if not fields:
                 continue
+            fields.append("config_revision=config_revision+1")
             conn.execute(
                 f"UPDATE devices SET {', '.join(fields)} WHERE id=?",
                 (*args, did))
+            if target_changed:
+                _rekey_device_base_config(conn, did, target["engine"],
+                                          target["platform"])
             updated += 1
             if notes:
                 skipped.append({"id": did, "name": row["name"],

@@ -12,6 +12,7 @@ import urllib.parse
 
 from .. import config, db, security
 from ..services import base_config as base_config_service
+from ..services import runtime_profiles
 from ..compiler import render, validate
 from ..services import tester
 from .builds import artifact_file
@@ -134,9 +135,14 @@ def device_config(token: str, request: Request, preview: bool = False,
                         f"当前版本没有方案“{variant}”的产物，请先在后台构建发布",
                         status_code=404)
                 return Response("artifact missing", status_code=503)
+        try:
+            runtime_profiles.effective_profile(target, device)
+        except ValueError as exc:
+            return Response(str(exc), status_code=500)
         feed_base = f"{_base_url(request, conn)}/feed/{token}"
         raw = path.read_text(encoding="utf-8")
-        # 设备专属配置：叠加在该设备目标产物之上（结构键受保护）
+        # 设备专属配置：叠加在该设备目标产物之上（结构键受保护）。
+        # 这是分发时的 live envelope，不冒充构建期不可变产物。
         overlay = _device_overlay(conn, device)
         if overlay:
             try:
@@ -167,6 +173,7 @@ def device_config(token: str, request: Request, preview: bool = False,
         quoted_name = urllib.parse.quote(device["name"])
         extra = {
             "profile-update-interval": interval,
+            "X-MagicPanel-Config-Source": "live-envelope" if overlay else "frozen-build",
             "Content-Disposition":
                 f"attachment; filename=\"{ascii_name}.yaml\"; "
                 f"filename*=UTF-8''{quoted_name}.yaml",

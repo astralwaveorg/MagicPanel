@@ -13,6 +13,7 @@ from .. import config, db, security
 from ..compiler import render, validate
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
+from ..services import runtime_profiles
 from ..services import releases, node_catalog
 from ..services import source_nodes as source_node_service
 from ..services import tester
@@ -98,14 +99,15 @@ def collect_snapshot(conn) -> dict:
             node_materials.append({'node_uid':entry['node_uid'],'revision':entry['revision'],'proxy':proxy})
     targets = [
         {"id": int(r["id"]), "name": r["name"], "engine": r["engine"],
-         "platform": r["platform"], "extra_yaml": r["extra_yaml"]}
+         "platform": r["platform"], "extra_yaml": r["extra_yaml"],
+         "default_runtime_profile": r["default_runtime_profile"]}
         for r in db.all_(conn, "SELECT * FROM targets ORDER BY id")
     ]
     devices = [
         {"id": int(r["id"]), "name": r["name"], "target_id": int(r["target_id"]),
-         "env": r["env"]}
-        for r in db.all_(conn, "SELECT id, name, target_id, env FROM devices "
-                               "ORDER BY id")
+         "env": r["env"], "runtime_profile": r["runtime_profile"]}
+        for r in db.all_(conn, "SELECT id, name, target_id, env, runtime_profile "
+                               "FROM devices ORDER BY id")
     ]
     base_docs: dict[str, dict] = {}      # 引擎平台配置：引擎+平台 → 覆盖文档
     base_devices: dict[str, dict] = {}   # 设备专属配置：设备 id → 覆盖文档
@@ -265,14 +267,33 @@ def create_build(operator: str, note: str = "",
         build_id = cur.lastrowid
 
     def scoped_devices(variant_id: int) -> list[dict]:
-        """该方案下出现在「适用设备」里的设备：需要单独出设备专属产物。"""
+        """该方案下需要设备专属产物的设备。
+
+        显式适用设备必须单独产物；设备 runtime profile 改变最终生效配置时，
+        即使没有被规则 scope 引用也要进入产物矩阵。
+        """
         names = set()
         for item in snapshot["groups"] + snapshot["rules"]:
             if int(item.get("variant_id", 0)) != variant_id:
                 continue
             names.update(d for d in (item.get("devices") or []) if d != "*")
         by_name = {d["name"]: d for d in snapshot.get("devices", [])}
-        return [by_name[n] for n in sorted(names) if n in by_name]
+        result = [by_name[n] for n in sorted(names) if n in by_name]
+        target_by_id = {int(t["id"]): t for t in snapshot.get("targets", [])}
+        for device in snapshot.get("devices", []):
+            target = target_by_id.get(int(device["target_id"]))
+            if not target or device["name"] in names:
+                continue
+            try:
+                runtime_profiles.effective_profile(target, device)
+                target_profile = runtime_profiles.effective_profile(target)
+                device_profile = runtime_profiles.effective_profile(target, device)
+            except ValueError:
+                # 渲染阶段会给出稳定的 runtime_profile_invalid；这里只负责矩阵。
+                continue
+            if device_profile != target_profile:
+                result.append(device)
+        return sorted(result, key=lambda item: item["name"])
 
     # 产物计划：(产物名, 目标, 设备或 None, 方案或 None)。
     # 默认方案沿用 {target}.yaml / {device}.yaml 命名；自定义方案带 @方案 后缀。
