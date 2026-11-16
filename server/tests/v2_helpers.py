@@ -48,6 +48,11 @@ def assert_no_secrets(value):
     assert "snapshot_enc" not in text
 
 
-def at(minutes: int) -> datetime:
+def at(minutes: int = 0) -> datetime:
     """固定 UTC 时钟，minutes 是相对每周一 04:00 的偏移。"""
     return datetime(2027, 1, 4, 4, 0, tzinfo=timezone.utc) + timedelta(minutes=minutes)
+
+
+def node(node_uid: str) -> dict:
+    return {"node_uid": node_uid, "revision": 1, "enabled": True,
+            "emit_name": node_uid + "-emit", "scope": "default"}
