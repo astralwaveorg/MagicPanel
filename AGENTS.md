@@ -19,6 +19,12 @@
 本文中的构建号、条数与 `sort` 清单是注明日期的记录，不能直接当作当前线上状态，
 更不能据此覆盖用户后来在面板里做的调整。
 
+**2026-11-16 Router 安全准备**：R6S 基线备份在路由器 `/root/mp-final-prep/20261116T151500/`，
+候选构建 #261 已放在 `/etc/openclash/candidates/mp261/` 并通过当前核心 `-t`；
+live 仍是旧 selfbuilt 配置，禁止无窗口切换。WireGuard peer 清单已持久修正。
+HK/KR DNS 入口与生产化外部 guard 仍阻塞 Router DNS/Gateway Final；不要用公共 DoH 或
+旧 watchdog 冒充已验收。详情见 2026-11-16 运行手册 2C。
+
 **2026-11-16 方案收敛**：生产已切换到默认方案为唯一 canonical 方案；`自建美日`
 已停用并移出门户/新构建。旧 `?variant=自建美日` 链接由 feed 回退默认产物并带
 `X-MagicPanel-Variant-Fallback: default`。不得未审查就重新启用旧方案。

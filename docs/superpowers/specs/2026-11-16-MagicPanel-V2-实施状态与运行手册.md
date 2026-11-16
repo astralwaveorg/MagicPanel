@@ -44,6 +44,24 @@
 6. WireGuard、SQM、AdGuard Home、OpenClash 最终切换仍属 Router Final。本轮不重启 OpenClash、不刷新订阅、不改 WAN/LAN/PPPoE/DNS 转发。
 7. 住宅 IP 当前不存在，探测授权为零。未来添加住宅资源时必须单独登记用途、硬配额和预算，不能默认进入通配检测。
 
+## 2C. 2026-11-16 路由器安全准备与构建 261 回执
+
+- R6S 基线备份：`/root/mp-final-prep/20261116T151500/router-baseline.tar.gz`，26.4 MiB，SHA256 `c1d467b7438cd551fc787b7bee0c624911066261b31860f1f67855abe065668e`。
+- 已持久修正 WireGuard peer 清单为 `client_phone client_macbook`；运行中两个 peer 均存在。这是配置一致性修复，不改默认路由。
+- 已发现并修正默认组只改 `proxies` 投影的问题；现在通过 `node_refs.canonical_group()` 固化 `members_v2` 类型化引用。构建 #260 是错误中间态，已被 #261 替换。
+- 生产构建 #261：production release revision `4`。
+- 语义校验通过：
+  - Google/AI：美国 NTT 自动 -> 美国机房 -> 美国自动 -> 新加坡自动 -> 日本机房 -> 日本自动 -> 空组保护；
+  - TikTok：日本自动 -> 新加坡自动 -> 美国 NTT 自动 -> 区域/默认代理；
+  - 开发/社交：美国 NTT 落地优先，再机房/区域/默认；
+  - 日本组不含美国 NTT 落地。
+- Mihomo 已移除废弃的 `global-client-fingerprint`；节点级 `client-fingerprint` 保留。生产镜像 `sha256:8269d734974d6fabb7af60df29e2cc75ad8037cda54a3ba79d92ba41f8125c78`。
+- R6S 候选包：`/etc/openclash/candidates/mp261/OpenClash-Mihomo.yaml`，SHA256 `845a3d1d7f98ca62308fef24b04426a02a126bdc4b81250bf0b4b419332bca6c`，110 个规则缓存已随包，当前核心 `-t` 通过。
+- 当前 OpenClash live 仍是旧 `MagicPanel-自建美日.yaml`，未切换；符合冻结要求。
+- 策略快照：`2026-11-16-post-typed-groups.json`，digest `efcd038e013db7b8`。
+- HK/KR DNS：`dns-hk.magichub.top` / `dns-kr.magichub.top` 仍无 A 记录；18443 未部署。因此仍阻塞 Router DNS Final，不能用公共 DoH 冒充可信控制面。
+- 生产化 gateway/dns guard 未安装；仓库脚本当前仅限离线 namespace，不能直接上生产。外部守护生产 inventory 封包仍待完成。
+
 ## 2B. 2026-11-16 方案收敛与构建 259 回执
 
 - 变更前策略快照：`2026-11-16-pre-unified-variant.json`，digest `2d5e8a6c1605278a`
