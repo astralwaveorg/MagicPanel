@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 import sys
 
@@ -80,7 +81,26 @@ def main(argv=None) -> int:
     safe.add_argument("--inventory", type=Path, required=True)
     safe.add_argument("--proof-dir", type=Path, required=True)
     safe.add_argument("--apply", action="store_true")
+    lab = sub.add_parser('lab', allow_abbrev=False)
+    lab_sub = lab.add_subparsers(dest='lab_command', required=True)
+    lab_run = lab_sub.add_parser('run', allow_abbrev=False)
+    lab_run.add_argument('--case', default='all')
+    lab_run.add_argument('--candidate-manifest', type=Path, required=True)
+    lab_run.add_argument('--out-private', type=Path, required=True)
+    lab_run.add_argument('--prefix')
     args = parser.parse_args(argv)
+    if args.command == 'lab':
+        from scripts.ops.network_lab import main as lab_main
+        parameters = ['run', '--case', args.case,
+            '--candidate-manifest', str(args.candidate_manifest),
+            '--out-private', str(args.out_private)]
+        if args.prefix:
+            parameters.extend(['--prefix', args.prefix])
+        try:
+            return lab_main(parameters)
+        except (EvidenceError, OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+            print(json.dumps({'blockers': ['LAB_INPUT_OR_EXECUTION_INVALID'], 'production_ready': False}))
+            return 42
     try:
         if args.command == "init":
             result = init_run(args.run_root, _json(args.inventory), phase=args.phase)

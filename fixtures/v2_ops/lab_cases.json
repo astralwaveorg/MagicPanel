@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "policy_revision": "family-2026-11-15-r1",
+  "required_cases": [
+    "core_stop", "core_kill", "core_hang", "stale_redirect", "fw4_reload",
+    "all_nodes_failed_core_alive", "all_nodes_slow_core_alive",
+    "dns_trusted_single_failed", "dns_trusted_both_failed", "agh_hang",
+    "hot_dns", "cold_dns_concurrent", "shared_ip", "cn_overseas_cdn",
+    "unknown_domain", "ech_opaque", "client_own_dns", "ipv6_tcp", "ipv4_udp", "ipv6_udp",
+    "google_tiers", "core_health_semantics", "guard_boot", "guard_recovery", "old_conntrack",
+    "negative_core_direct_only", "negative_dead_redirect", "negative_all_blocked", "negative_blind_ipset"
+  ],
+  "virtual_regions_are_path_labels": true,
+  "limits": {"period_ms": 2000, "shared_probe_ms": 1000, "failures": 3,
+    "owner_withdraw_ms": 8000, "cn_recovered_ms": 10000,
+    "recovery_successes": 5, "cooldown_ms": 60000,
+    "dns_degraded_ms": 3000, "dns_recovery_successes": 3, "dns_recovery_interval_ms": 10000}
+}
