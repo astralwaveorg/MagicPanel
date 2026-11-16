@@ -2,7 +2,7 @@
 
 日期：2026-11-16  
 分支：`codex/magicpanel-v2`  
-状态：**核心后端与候选运维脚本已完成；生产部署和最终网络切换仍按门禁分阶段执行。**
+状态：**核心后端、候选运维脚本与 NAS 生产代码镜像已完成部署；auto_stable_v1 仍 staged，Router Final 未执行。**
 
 ## 1. 本次已落地的能力
 
@@ -36,13 +36,28 @@
 
 ## 2. 当前边界与未完成项
 
-1. 生产 NAS 尚未部署本分支；当前生产仍运行旧镜像和旧策略。部署前必须完成数据备份、策略快照和回滚镜像记录。
+1. 生产 NAS 已部署本分支核心镜像；这是代码/迁移部署，不是 `auto_stable_v1` 激活，也不代表 Router Final 完成。部署前已保存数据库备份、策略快照和回滚镜像。
 2. `v2_runtime_activation` 仍为 `staged`。这是有意状态：没有完成真实 Stash/R6S 故障矩阵和预算复核前，不得改为 `active`。
 3. Plan 02 Task 12 的新版 build manifest、versioned URL 与完整 artifact ACL 还未实现；当前 feed 兼容旧 URL。
 4. Plan 03 只完成关键状态、选择和任务适配，不等于 U03–U09 全部浏览器旅程完成。
 5. 旧 feed freeze 代码可用，但生产冻结必须以 R6S 实际 raw/缓存字节和 NAS live 逐项对比为基线；不能用当前 NAS 内容冒充旧客户端基线。
 6. WireGuard、SQM、AdGuard Home、OpenClash 最终切换仍属 Router Final。本轮不重启 OpenClash、不刷新订阅、不改 WAN/LAN/PPPoE/DNS 转发。
 7. 住宅 IP 当前不存在，探测授权为零。未来添加住宅资源时必须单独登记用途、硬配额和预算，不能默认进入通配检测。
+
+## 2A. 2026-11-16 NAS 部署回执
+
+- 部署前生产镜像：`sha256:1a02658dbea6a3944b2295df3592158f5f184b20c04703f19cb072a3f7c5646c`
+- 部署后生产镜像：`sha256:dcbaa297961d6527cf46f58def4e08b7531b0880012ead0aae84f592ea1a3f00`
+- 数据库备份：`data/magicpanel-backup-pre-v2-core-20261116.db`（11,198,464 字节）
+- 策略快照：`policy/snapshots/2026-11-16-pre-v2-core.json`，digest `c49ecf7ad5616f85`
+- 容器健康：healthy；启动时间 `2026-11-16T06:00:43.484152063Z`
+- 数据自检通过；`probe_jobs`、`resource_revisions`、`release_state`、`operation_requests` 全部存在
+- 运行模式：`auto_stable_v1`；激活状态：`staged`
+- 线上检查：`/api/v1/setup/status`、`/`、`/admin/login` 均 200；旧设备 feed 200（97,092 字节）
+- 受管 API 未登录访问：`/api/v1/probe-jobs` 与 preview 均 401
+- 生产 release_state：production revision 1，testing revision 0；feed freeze 未 arm
+
+首次迁移在生产备份副本中发现 Hysteria2 port-range 节点缺 `port`；已在迁移前用副本验证兼容，再把新镜像切上生产。守护进程旧 Docker proxy 只影响构建，通过临时 `DOCKER_CONFIG` 隔离绕过，未永久修改 NAS Docker 配置。
 
 ## 3. 执行命令
 
