@@ -19,6 +19,12 @@
 本文中的构建号、条数与 `sort` 清单是注明日期的记录，不能直接当作当前线上状态，
 更不能据此覆盖用户后来在面板里做的调整。
 
+**2026-11-16 方案收敛**：生产已切换到默认方案为唯一 canonical 方案；`自建美日`
+已停用并移出门户/新构建。旧 `?variant=自建美日` 链接由 feed 回退默认产物并带
+`X-MagicPanel-Variant-Fallback: default`。不得未审查就重新启用旧方案。
+Google/AI 默认组成员顺序为 US(NTT/机房/自动) -> SG -> JP；TikTok 先 JP/SG；
+开发/社交优先 NTT/机房，再回退默认代理。变更证据见 2026-11-16 运行手册。
+
 **2026-11-16 实施快照**：核心探测/预算/资格/Google planner/资源冻结/发布CAS/旧feed冻结已进入
 本分支，详见[实施状态与运行手册](docs/superpowers/specs/2026-11-16-MagicPanel-V2-实施状态与运行手册.md)。
 `v2_runtime_activation` 仍为 `staged`；真实设备/R6S 验收前不得激活自动外发。

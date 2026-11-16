@@ -44,6 +44,24 @@
 6. WireGuard、SQM、AdGuard Home、OpenClash 最终切换仍属 Router Final。本轮不重启 OpenClash、不刷新订阅、不改 WAN/LAN/PPPoE/DNS 转发。
 7. 住宅 IP 当前不存在，探测授权为零。未来添加住宅资源时必须单独登记用途、硬配额和预算，不能默认进入通配检测。
 
+## 2B. 2026-11-16 方案收敛与构建 259 回执
+
+- 变更前策略快照：`2026-11-16-pre-unified-variant.json`，digest `2d5e8a6c1605278a`
+- 变更后策略快照：`2026-11-16-post-unified-variant.json`，digest `8c0d908e882f0afe`
+- 生产镜像：`sha256:edcd4100daf247b9d641c685bbbc85dfbdf5224fa0346e914d7b571a30d45aee`
+- 新生产构建：#259；生产 release revision `2`，testing revision `1`
+- `自建美日` 已停用；新构建 18 个产物，没有 `@自建美日` artifact
+- 默认组修正：
+  - Google/AI：US(NTT/机房/自动) -> SG -> JP；
+  - TikTok：JP -> SG -> US NTT -> 区域/默认；
+  - 开发/社交：NTT/机房优先，再默认代理；
+  - 日本组移除美国 NTT 干扰成员；
+  - 普通代理继续保留机场与自建容量。
+- 数据自检通过。
+- 旧订阅验证：无参数与 `?variant=自建美日` 均返回 200；正文 SHA 前 12 位同为
+  `5267fdc9e1e3`；旧链接响应头 `X-MagicPanel-Variant-Fallback: default`。
+- 第一次收敛尝试在嵌套写锁处回滚；脚本已拆分策略事务和构建/发布事务后重跑成功。
+
 ## 2A. 2026-11-16 NAS 部署回执
 
 - 部署前生产镜像：`sha256:1a02658dbea6a3944b2295df3592158f5f184b20c04703f19cb072a3f7c5646c`
