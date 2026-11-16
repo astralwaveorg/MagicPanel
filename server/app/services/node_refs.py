@@ -9,6 +9,13 @@ class ReferenceResolutionError(ValueError):
         super().__init__(code)
 
 
+def check_format(group):
+    value = group.get('members_format','legacy')
+    if value not in ('legacy','typed-v2'):
+        raise ReferenceResolutionError('members_format_invalid')
+    return value
+
+
 def decoded(value, default):
     return json.loads(value) if isinstance(value, str) else (default if value is None else value)
 
@@ -16,6 +23,8 @@ def decoded(value, default):
 def resolve_refs(refs: list[dict], *, variant_id: int, groups: list[dict], nodes: list[dict]) -> list[str]:
     groups = [dict(g) for g in groups]
     nodes = [dict(n) for n in nodes]
+    for group in groups:
+        check_format(group)
     by_id = {str(g['id']): g for g in groups if 'id' in g}
     by_uid = {n['node_uid']: n for n in nodes}
 
@@ -98,11 +107,15 @@ def legacy_refs(names, *, variant_id, groups, nodes, local_ids=(), local_first=F
 
 def context(conn):
     from .node_catalog import list_active_nodes
-    return [dict(g) for g in conn.execute('SELECT * FROM proxy_groups')], list_active_nodes(conn)
+    groups = [dict(g) for g in conn.execute('SELECT * FROM proxy_groups')]
+    for group in groups:
+        check_format(group)
+    return groups, list_active_nodes(conn)
 
 
 def project_group(conn, row):
     group = dict(row)
+    check_format(group)
     if group.get('members_format') == 'typed-v2':
         groups, nodes = context(conn)
         group['proxies'] = json.dumps(resolve_refs(decoded(group['members_v2'], []),
@@ -136,7 +149,7 @@ def canonical_rule(conn, rid, ref=None):
         ref = legacy_refs([row['target']], variant_id=row['variant_id'], groups=groups, nodes=nodes)[0]
     if isinstance(ref,dict) and ref.get('kind') == 'node':
         raise ReferenceResolutionError('reference_invalid')
-    name = resolve_refs([ref], variant_id=row['variant_id'], groups=groups, nodes=nodes)[0]
+    name = resolve_rule_target(ref, variant_id=row['variant_id'], groups=groups, nodes=nodes)
     conn.execute("UPDATE rules SET target_ref_v2=?,target=? WHERE id=?", (json.dumps(ref),name,rid))
     return ref
 
@@ -149,6 +162,8 @@ def migrate_refs(conn):
     ):
         if column not in {r[1] for r in conn.execute(f'PRAGMA table_info({table})')}:
             conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+    for group in conn.execute('SELECT members_format FROM proxy_groups'):
+        check_format(dict(group))
     for group in list(conn.execute("SELECT id FROM proxy_groups WHERE members_format='legacy'")):
         try:
             canonical_group(conn, group['id'])
@@ -172,6 +187,7 @@ def resolve_snapshot(snapshot, *, variant_id=None):
     for group in groups:
         if variant_id is not None and group.get('variant_id',0) != variant_id:
             continue
+        check_format(group)
         if group.get('members_format') == 'typed-v2':
             group['proxies'] = resolve_refs(decoded(group.get('members_v2'), []),
                 variant_id=group.get('variant_id',0),groups=groups,nodes=nodes)
@@ -181,5 +197,40 @@ def resolve_snapshot(snapshot, *, variant_id=None):
             continue
         ref = decoded(rule.get('target_ref_v2'), None)
         if ref is not None:
-            rule['target'] = resolve_refs([ref],variant_id=rule.get('variant_id',0),groups=groups,nodes=nodes)[0]
+            rule['target'] = resolve_rule_target(ref,variant_id=rule.get('variant_id',0),groups=groups,nodes=nodes)
+        else:
+            target = next((g for g in groups if g.get('variant_id',0) == rule.get('variant_id',0) and g['name'] == rule.get('target')),None)
+            if target and target.get('hidden'):
+                raise ReferenceResolutionError('reference_hidden')
     return result
+
+
+def resolve_rule_target(ref, *, variant_id, groups, nodes):
+    name = resolve_refs([ref],variant_id=variant_id,groups=groups,nodes=nodes)[0]
+    if ref['kind'] == 'node':
+        raise ReferenceResolutionError('reference_invalid')
+    if ref['kind'] == 'group':
+        group = next(g for g in groups if str(g['id']) == ref['ref'])
+        if group.get('hidden'):
+            raise ReferenceResolutionError('reference_hidden')
+    return name
+
+
+def replace_local_refs(conn, gid, local_ids, *, local_first=None):
+    groups,nodes = context(conn)
+    group = next(g for g in groups if g['id'] == gid)
+    refs = decoded(group['members_v2'],[])
+    local_uids = {n['node_uid'] for n in nodes if n['origin_kind'] == 'local'}
+    old_local = [r for r in refs if r['kind'] == 'node' and r['ref'] in local_uids]
+    non_local = [r for r in refs if not (r['kind'] == 'node' and r['ref'] in local_uids)]
+    replacements = legacy_refs([],variant_id=group['variant_id'],groups=groups,nodes=nodes,
+                               local_ids=local_ids)
+    first = group['local_first'] if local_first is None else local_first
+    if first:
+        position = 0
+    elif old_local:
+        position = next(i for i,r in enumerate(refs) if r['kind'] == 'node' and r['ref'] in local_uids)
+        position -= sum(1 for r in refs[:position] if r not in non_local)
+    else:
+        position = len(non_local)
+    return canonical_group(conn,gid,non_local[:position]+replacements+non_local[position:])

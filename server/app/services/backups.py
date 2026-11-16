@@ -251,6 +251,9 @@ def _list(row: dict, field: str) -> list:
 
 def _validate_references(tables: dict) -> None:
     from . import node_refs
+    for group in tables['proxy_groups']:
+        if group.get('members_format') not in ('legacy', 'typed-v2'):
+            raise ValueError('backup_invalid')
     try:
         groups = tables['proxy_groups']
         # Restore checks identity while preserving disabled/retired state.

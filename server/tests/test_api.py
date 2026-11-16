@@ -2656,12 +2656,12 @@ def test_batch_update_and_delete_rules(client):
         ids.append(r.json()["id"])
     # 批量改目标 + 停用
     r = client.patch("/api/v1/rules/batch", headers=h, json={
-        "ids": ids[:2], "target": "地区自动", "enabled": False, "note": "批量备注"})
+        "ids": ids[:2], "target": "节点选择", "enabled": False, "note": "批量备注"})
     assert r.status_code == 200, r.text
     assert r.json()["updated"] == 2
     rules = client.get("/api/v1/rules", headers=h).json()
     by_value = {x["value"]: x for x in rules}
-    assert by_value["batch0.example.com"]["target"] == "地区自动"
+    assert by_value["batch0.example.com"]["target"] == "节点选择"
     assert by_value["batch0.example.com"]["enabled"] is False
     assert by_value["batch0.example.com"]["note"] == "批量备注"
     assert by_value["batch2.example.com"]["target"] == "节点选择"   # 未选中不动

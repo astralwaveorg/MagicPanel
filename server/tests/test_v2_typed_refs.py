@@ -1,5 +1,7 @@
 import pytest
 
+from conftest import auth_headers, setup_admin
+
 
 def test_group_ref_cannot_cross_variant(client):
     from app.services.node_refs import resolve_refs
@@ -223,3 +225,62 @@ def test_backup_keeps_disabled_typed_identity_state(client):
         backups.restore_logical(conn,payload)
         assert conn.execute('SELECT enabled FROM node_catalog').fetchone()[0] == 0
         assert conn.execute('SELECT members_format FROM proxy_groups').fetchone()[0] == 'typed-v2'
+def node(client,h,name):
+    r=client.post('/api/v1/local-nodes',headers=h,json={'name':name,'protocol':'ss','server':'fixture.example','port':8388,'params':{'cipher':'aes-256-gcm','password':'fixture-only'}})
+    assert r.status_code==201,r.text
+    return r.json()
+
+def test_batch_clear_local_nodes(client):
+    h=auth_headers(setup_admin(client)); a=node(client,h,'a')
+    group=client.post('/api/v1/groups',headers=h,json={'name':'group','proxies':['DIRECT'],'local_nodes':[a['id']],'use_sources':[]}).json()
+    r=client.patch('/api/v1/groups/batch',headers=h,json={'ids':[group['id']],'local_nodes':[]}); assert r.status_code==200,r.text
+    group=client.get('/api/v1/groups',headers=h).json()[0]
+    assert group['members_v2']==[{'kind':'builtin','ref':'DIRECT'}],group
+
+def test_batch_replace_local_nodes(client):
+    h=auth_headers(setup_admin(client)); a=node(client,h,'a'); b=node(client,h,'b')
+    group=client.post('/api/v1/groups',headers=h,json={'name':'group','proxies':['DIRECT'],'local_nodes':[a['id']],'use_sources':[]}).json()
+    r=client.patch('/api/v1/groups/batch',headers=h,json={'ids':[group['id']],'local_nodes':[b['id']]}); assert r.status_code==200,r.text
+    group=client.get('/api/v1/groups',headers=h).json()[0]
+    assert group['proxies']==['DIRECT','b (本地)'],group
+
+def test_hidden_rule_build_guard(client):
+    from app.compiler.render import render_target
+    from app.compiler.validate import validate_policy
+    h=auth_headers(setup_admin(client))
+    g=client.post('/api/v1/groups',headers=h,json={'name':'hidden','proxies':['DIRECT'],'hidden':True}).json()
+    rejected=client.post('/api/v1/rules',headers=h,json={'type':'MATCH','target_ref_v2':{'kind':'group','ref':str(g['id'])}})
+    assert rejected.status_code==400
+    assert rejected.json()['detail']=='reference_hidden'
+
+    # 旧数据/历史快照仍要有构建期防线，不能只依赖写入期校验。
+    snapshot={'sources':[],'local_nodes':[],'node_catalog':[],'rule_providers':[],'variants':[{'id':0,'name':'默认','enabled':True}],
+        'groups':[{'id':g['id'],'variant_id':0,'name':'hidden','type':'select','hidden':True,'proxies':['DIRECT'],'local_nodes':[],'members_format':'legacy'}],
+        'rules':[{'variant_id':0,'type':'MATCH','value':'','target':'hidden','enabled':True,'targets':['*'],'devices':['*']}]}
+    assert validate_policy(snapshot)[0][0]
+    try:
+        render_target(snapshot,{'name':'stash-ios','engine':'stash','platform':'ios','extra_yaml':''})
+    except ValueError as exc:
+        assert str(exc)=='reference_hidden'
+    else:
+        raise AssertionError('hidden render was allowed')
+
+def test_pure_snapshot_no_db(client,monkeypatch):
+    from app.services.node_refs import resolve_snapshot
+    from app import db
+    monkeypatch.setattr(db,'connect',lambda:pytest.fail('live DB read'))
+    s={'groups':[{'id':1,'variant_id':0,'name':'a','members_format':'typed-v2','members_v2':[{'kind':'builtin','ref':'DIRECT'}]}],'rules':[{'variant_id':0,'target_ref_v2':{'kind':'group','ref':'1'}}]}
+    assert resolve_snapshot(s)['rules'][0]['target']=='a'
+
+def test_unknown_format_backup_fails(client):
+    from app import db
+    from app.services import backups
+    h=auth_headers(setup_admin(client))
+    client.post('/api/v1/groups',headers=h,json={'name':'a','proxies':['DIRECT']})
+    with db.connect() as conn:
+        conn.execute('BEGIN'); payload=backups.export_logical(conn)
+    row=payload['tables']['proxy_groups'][0]
+    row['members_format']='typed-v3'; row['members_v2']='[{"kind":"group","ref":"9999"}]'
+    with db.tx() as conn:
+        with pytest.raises(ValueError,match='backup_invalid'):
+            backups.restore_logical(conn,payload)

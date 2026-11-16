@@ -452,10 +452,11 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
             conn.execute(
                 f"UPDATE proxy_groups SET {', '.join(fields)} WHERE id=?",
                 (*args, db.now(), gid))
-            if body.proxies is not None or body.local_nodes is not None:
-                if body.proxies is None and row['members_format'] == 'typed-v2':
-                    projected = node_refs.project_group(conn,row)
-                    conn.execute('UPDATE proxy_groups SET proxies=? WHERE id=?',(projected['proxies'],gid))
+            if body.local_nodes is not None and body.proxies is None \
+                    and row['members_format'] == 'typed-v2':
+                _canonical_group(conn,gid,node_refs.replace_local_refs(
+                    conn,gid,keep))
+            elif body.proxies is not None or body.local_nodes is not None:
                 _canonical_group(conn,gid)
             updated += 1
             if notes:
