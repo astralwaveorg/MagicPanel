@@ -85,16 +85,22 @@
         <div class="stat-sub">出口归属地不能证明测速已绕过透明代理。</div>
         <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击刷新重试。</div>
       </div>
-    </div>
 
-    <div class="mp-card">
-      <h3>发布指针</h3>
-      <div class="mp-health-note">
-        生产 revision <span class="mono">{{ data.release_state?.release_revisions?.production ?? '—' }}</span>
-        · 测试 revision <span class="mono">{{ data.release_state?.release_revisions?.testing ?? '—' }}</span>
-        · 发布失败会保留原指针，不会部分生效
+      <div class="mp-card stat-tile">
+        <div class="stat-label">发布指针</div>
+        <div class="stat-main mono">
+          R{{ data.release_state?.release_revisions?.production ?? '—' }}
+          <span class="stat-unit">/</span>
+          T{{ data.release_state?.release_revisions?.testing ?? '—' }}
+        </div>
+        <div class="stat-sub">
+          生产 revision <span class="mono">{{ data.release_state?.release_revisions?.production ?? '—' }}</span><br />
+          测试 revision <span class="mono">{{ data.release_state?.release_revisions?.testing ?? '—' }}</span><br />
+          发布失败会保留原指针，不会部分生效
+        </div>
       </div>
     </div>
+
 
     <div v-if="data.release_state?.testing" class="mp-card">
       <h3>当前测试版本</h3>
@@ -282,7 +288,7 @@ onUnmounted(() => { overviewRequest.cancel(); directRequest.cancel() })
 <style scoped>
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }
