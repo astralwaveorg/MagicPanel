@@ -35,6 +35,16 @@ Mihomo WARNING 若来自 NAS BT peer 连接拒绝/超时，属于 P2P 正常失�
 live 已切 `MagicPanel-默认.yaml`，OpenClash 进程使用官方 Mihomo `v1.19.34`，
 Smart 已关闭，宽泛 CN-IP 提前旁路已关闭，IPv6 LAN→WAN 已阻断，
 `find-process-mode=strict`。当前 NAS 生产构建 #262。WireGuard peer 清单已持久修正。
+
+**2026-11-17 UDP 代理已开启（向阳批准）**：`enable_udp_proxy=1`，nft `openclash_mangle`
+TPROXY :7895 劫持 LAN UDP。境外 UDP 经代理链（美国VPS 的 vless TCP 隧道中转），
+国内 UDP 命中 cn/cn-ip 保持直连；境外 QUIC/443 仍被约束 34 规则 REJECT 回退 TCP。
+开启动因：杭州电信对境外高位端口 UDP/QUIC 系统性丢包，hy2 节点（自建与机场）此前
+全超时；开启后面板测速与家庭 WiFi 下 hy2 全部可用（NTT02 657ms、软银01 709ms）。
+UCI 改前备份：路由器 `/etc/openclash/backup/openclash-uci-backup-*` 与
+`/tmp/openclash-uci-pre-udp`；回滚：还原该文件后 `uci commit openclash &&
+/etc/init.d/openclash restart`。观察项：境外 BT peer 的 UDP 进隧道带来的带宽与
+日志噪声（属 P2P 正常失败，不代表故障）；游戏主机境外 UDP 走隧道后 NAT 类型变严。
 HK/KR DNS 入口与生产化外部 guard 仍阻塞 Router DNS/Gateway Final；不要用公共 DoH 或
 旧 watchdog 冒充已验收。详情见 2026-11-16 运行手册 2C。
 
