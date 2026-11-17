@@ -318,11 +318,11 @@
             <div><dt>条目</dt><dd>{{ providerDetail.rule_count || '—' }}</dd></div>
             <div><dt>大小</dt><dd>{{ sizeText(providerDetail.size) }}</dd></div>
             <div><dt>{{ providerDetail.kind === 'repo' ? '同步状态' : '抓取状态' }}</dt>
-              <dd>{{ providerDetail.last_status || '—' }}</dd></div>
+              <dd>{{ providerStatusText(providerDetail.last_status) }}</dd></div>
             <div><dt>{{ providerDetail.kind === 'repo' ? '最近同步' : '最近抓取' }}</dt>
               <dd>{{ timeText(providerDetail.last_fetched_at) }}</dd></div>
-            <div><dt>面板抓取间隔</dt><dd>{{ durationText(providerDetail.interval) }}</dd></div>
-            <div><dt>客户端间隔</dt><dd>{{ providerDetail.client_interval ? durationText(providerDetail.client_interval) : '跟随面板' }}</dd></div>
+            <div><dt>面板抓取间隔</dt><dd>{{ intervalText(providerDetail.interval) }}</dd></div>
+            <div><dt>客户端间隔</dt><dd>{{ providerDetail.client_interval ? intervalText(providerDetail.client_interval) : '跟随面板' }}</dd></div>
           </dl>
           <p
             class="pt-detail-url"
@@ -388,6 +388,8 @@ import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { api } from '../api'
 import { highlightYaml, lineGutter } from '../yamlHighlight'
+import { sizeText, intervalText } from '../format'
+import { copyText } from '../utils/clipboard'
 import { createPortalGate, portalDeviceResource, validPortalPin } from '../v2/portalGate'
 
 const GATE_TITLE = 'MagicPanel - 订阅配置服务中心'
@@ -589,30 +591,23 @@ function providerGroupMeta(g) {
 
 function behaviorLabel(b) { return BEHAVIOR_LABELS[b] || b }
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管是自主维护带来的第三种）
-const PROVIDER_KIND_LABELS = { remote: '远程', inline: '内联', repo: '仓库' }
+const PROVIDER_KIND_LABELS = { remote: '远程', inline: '内联', repo: '维护仓库' }
 function providerKindLabel(k) { return PROVIDER_KIND_LABELS[k] || k }
 function formatLabel(f) { return FORMAT_LABELS[f] || f }
 
 function providerMeta(p) {
   const parts = [behaviorLabel(p.behavior), formatLabel(p.format)]
   parts.push(p.rule_count ? `${p.rule_count} 条` : (p.format === 'mrs' ? '二进制' : '未统计'))
-  parts.push(p.client_interval ? `客户端 ${durationText(p.client_interval)}` : '客户端跟随面板')
+  parts.push(p.client_interval ? `客户端 ${intervalText(p.client_interval)}` : '客户端跟随面板')
   return parts.join(' · ')
 }
 
-function durationText(sec) {
-  if (!sec) return '—'
-  if (sec % 86400 === 0) return `${sec / 86400} 天`
-  if (sec % 3600 === 0) return `${sec / 3600} 小时`
-  if (sec % 60 === 0) return `${sec / 60} 分钟`
-  return `${sec} 秒`
-}
-
-function sizeText(n) {
-  if (!n) return '—'
-  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${n} B`
+function providerStatusText(status) {
+  // 与管理端一致的中语文案：ok/failed/never 直接显示原始值会像乱码
+  return status === 'ok' ? '抓取成功'
+    : status === 'failed' ? '抓取失败'
+    : status === 'never' ? '从未抓取'
+    : (status || '—')
 }
 
 // 后端给的是 ISO 时间，详情里只显示到分钟
@@ -701,15 +696,8 @@ function ruleLine(r) {
 async function copy(text, key) {
   if (!text) return
   try {
-    await navigator.clipboard.writeText(text)
-  } catch {
-    const el = document.createElement('textarea')
-    el.value = text
-    document.body.appendChild(el)
-    el.select()
-    document.execCommand('copy')
-    el.remove()
-  }
+    await copyText(text)
+  } catch { /* 复制失败不阻断界面，用户可手动复制 */ }
   copied.value = key
   setTimeout(() => { if (copied.value === key) copied.value = '' }, 1600)
 }

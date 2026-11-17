@@ -43,7 +43,7 @@
           </span>
         </template>
         <template v-else>
-          <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting" @click="refreshMany(rows)" type="primary">一键抓取</el-button>
+          <el-button :loading="batchRefreshing" :disabled="batchRefreshing || batchTesting" @click="refreshMany()" type="primary">一键抓取</el-button>
           <el-button :loading="batchTesting" :disabled="batchRefreshing || batchTesting" @click="testMany(rows)" type="success" plain>一键测速</el-button>
           <el-button class="mp-push-right" @click="openEdit()" type="primary">添加订阅</el-button>
           <el-button @click="openFileImport()" type="primary" plain>上传订阅文件</el-button>
@@ -98,18 +98,18 @@
 
 
     <EmptyState
-      v-if="!rows.length && !hasFilter"
+      v-if="!error && !rows.length && !hasFilter"
       reason="还没有订阅来源。"
       next="点击“添加订阅”，填入订阅地址后执行抓取。"
     />
     <EmptyState
-      v-else-if="!rows.length"
+      v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的来源。"
       next="换个关键词，或点上方“清空筛选”看全部来源。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
-        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id"
+        <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
           <el-table-column prop="name" label="名称" min-width="100" :fixed="isMobile ? false : 'left'" />
@@ -128,7 +128,7 @@
               <StatusDot v-else v-bind="sourceStatus(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="节点数" width="90" align="left">
+          <el-table-column label="节点数" width="90" align="left" sortable>
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="下发方式" width="90" align="center">
@@ -177,7 +177,13 @@
           </el-table-column>
           <el-table-column label="最近错误" min-width="160">
             <template #default="{ row }">
-              {{ row.auto_fetch === false ? '—' : (row.last_error || '—') }}
+              <el-tooltip v-if="row.auto_fetch !== false && row.last_error" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-note-tip mono">{{ row.last_error }}</div>
+                </template>
+                <span class="mp-clamp2">{{ row.last_error }}</span>
+              </el-tooltip>
+              <span v-else>—</span>
             </template>
           </el-table-column>
           <el-table-column label="测速" min-width="150">
@@ -269,7 +275,7 @@
       </div>
     </div>
 
-    <el-dialog v-model="localDialog" :title="localEditing ? '编辑本地节点' : '添加本地节点'"
+    <el-dialog :close-on-click-modal="false" v-model="localDialog" :title="localEditing ? '编辑本地节点' : '添加本地节点'"
                width="min(760px, 94vw)">
       <el-form :model="localForm" label-position="top">
         <!-- 一行最多两项：挤在一行时端口的输入框会被压到看不见 -->
@@ -356,7 +362,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑订阅来源' : '添加订阅来源'"
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑订阅来源' : '添加订阅来源'"
                width="min(560px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-form-item label="名称">
@@ -499,7 +505,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="curlDialog" title="从 curl 命令导入" width="min(640px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="curlDialog" title="从 curl 命令导入" width="min(640px, 94vw)">
       <el-input v-model="curlText" type="textarea" :rows="6" class="mono"
                 placeholder="粘贴 curl 命令，例如：curl -k -X GET -H &quot;Cookie: acw_tc=…&quot; &quot;https://…/subscribe?token=…&quot;" />
       <div class="mp-form-hint">
@@ -513,7 +519,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="fileDialog" title="上传订阅文件" width="min(560px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="fileDialog" title="上传订阅文件" width="min(560px, 94vw)">
       <el-form label-position="top">
         <el-form-item label="名称">
           <el-input v-model="fileForm.name" placeholder="例如：机场A（文件）" />
@@ -541,7 +547,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="intervalDialog" title="批量修改间隔"
+    <el-dialog :close-on-click-modal="false" v-model="intervalDialog" title="批量修改间隔"
                width="min(480px, 94vw)">
       <p class="mp-dialog-desc">
         将选中的 {{ selected.length }} 个节点来源的间隔统一修改。
@@ -561,7 +567,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="urlDialog" :title="urlCopied ? 'URL 已复制' : 'URL 复制失败'"
+    <el-dialog :close-on-click-modal="false" v-model="urlDialog" :title="urlCopied ? 'URL 已复制' : 'URL 复制失败'"
                width="min(620px, 94vw)">
       <p class="mp-dialog-desc">
         {{ urlCopied ? '已复制以下节点来源订阅地址：' : '自动复制失败，请手动选择下面的 URL：' }}
@@ -625,11 +631,15 @@ import { uploadCore } from '../core'
 import StatusDot from '../components/StatusDot.vue'
 import EnableToggle from '../components/EnableToggle.vue'
 import EmptyState from '../components/EmptyState.vue'
+import { useRefDialog } from '../useRefDialog'
+
+const { refDialog, openRefDialog, onRefConfirm } = useRefDialog()
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
+import { copyText } from '../utils/clipboard'
 
 const INTERVAL_PRESETS = [
   { label: '15 分钟', value: 900 },
@@ -711,10 +721,6 @@ const intervalDialog = ref(false)
 const savingInterval = ref(false)
 const batchInterval = ref(21600)
 const batchTestInterval = ref(21600)
-const refDialog = reactive({
-  visible: false, title: '', message: '', references: [], warnings: [],
-  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
-})
 const blockedVisible = ref(false)
 const blockedItems = ref([])
 const deletedCount = ref(0)
@@ -1162,13 +1168,14 @@ async function refresh(row) {
 
 async function refreshMany(list) {
   if (batchRefreshing.value || batchTesting.value) return
-  const all = (list || []).filter(Boolean)
+  // 不传列表时抓全部来源：表格只显示当前页，只抓当前页会静默漏掉其余页
+  const all = (list || await api('/api/v1/sources')).filter(Boolean)
   const targets = all.filter((row) => row.auto_fetch !== false)
   const skipped = all.length - targets.length
   if (!targets.length) {
-    return ElMessage.info(skipped
-      ? '选中的来源都已关闭自动抓取，只使用本地快照'
-      : '没有可抓取的节点来源')
+    return ElMessage.info(list
+      ? (skipped ? '选中的来源都已关闭自动抓取，只使用本地快照' : '没有可抓取的节点来源')
+      : '全部来源都已关闭自动抓取，只使用本地快照')
   }
   batchRefreshing.value = true
   refreshDone.value = 0
@@ -1271,16 +1278,7 @@ async function forceDeleteSource(row) {
   }
 }
 
-function openRefDialog({ title, message, references, warnings = [], hint, action, confirmText }) {
-  Object.assign(refDialog, {
-    visible: true, title, message, references, warnings, hint,
-    confirmText: confirmText || '删除并解除关联', busy: false, action,
-  })
-}
 
-async function onRefConfirm() {
-  if (refDialog.action) await refDialog.action()
-}
 
 async function removeSelected() {
   if (!selected.value.length) return
@@ -1425,19 +1423,10 @@ async function copyUrl(row) {
     urlContent.value = data.url
     urlCopied.value = false
     try {
-      await navigator.clipboard.writeText(data.url)
+      await copyText(data.url)
       urlCopied.value = true
     } catch {
-      try {
-        const el = document.createElement('textarea')
-        el.value = data.url
-        document.body.appendChild(el)
-        el.select()
-        urlCopied.value = document.execCommand('copy')
-        el.remove()
-      } catch {
-        urlCopied.value = false
-      }
+      urlCopied.value = false
     }
     urlDialog.value = true
   } catch (e) {

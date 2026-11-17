@@ -1,5 +1,9 @@
 <template>
-  <div ref="host" class="mp-code-editor" :style="{ height }"></div>
+  <!-- 降级：CodeMirror 懒加载失败时回退为纯文本域，保证仍可编辑（2026-11-18） -->
+  <textarea v-if="loadError" class="mp-code-fallback mono" :style="{ height }"
+            :value="modelValue" :readonly="readonly"
+            @input="$emit('update:modelValue', $event.target.value)" />
+  <div v-else ref="host" class="mp-code-editor" :style="{ height }"></div>
 </template>
 
 <script setup>
@@ -18,6 +22,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const host = ref(null)
+const loadError = ref(false)
 let view = null
 let pending = null
 
@@ -118,7 +123,13 @@ function applyDoc(text) {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
 }
 
-onMounted(() => { build().catch((e) => console.error('CodeEditor 初始化失败:', e)) })
+onMounted(() => {
+  build().catch((e) => {
+    console.error('CodeEditor 初始化失败:', e)
+    // 降级：编辑器起不来不能静默空白，回退为纯文本域，保证仍可编辑
+    loadError.value = true
+  })
+})
 onBeforeUnmount(() => { view?.destroy(); view = null })
 
 watch(() => props.modelValue, (v) => {
@@ -136,4 +147,15 @@ watch(() => props.modelValue, (v) => {
 }
 .mp-code-editor :deep(.cm-editor) { height: 100%; }
 .mp-code-editor :deep(.cm-scroller) { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mp-code-fallback {
+  width: 100%;
+  border: 1px solid var(--mp-border);
+  border-radius: 6px;
+  background: var(--mp-surface-2);
+  color: var(--mp-text-primary);
+  padding: 8px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  resize: vertical;
+}
 </style>

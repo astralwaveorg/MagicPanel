@@ -13,10 +13,10 @@
           <el-option label="面板出口（路由器代理链）" value="panel" />
           <el-option v-for="n in nodeOptions" :key="n" :label="'节点：' + n" :value="n" />
         </el-select>
-        <el-button size="small" type="primary" :loading="running" @click="runAll">全部检测</el-button>
+        <el-button size="small" type="success" :loading="running" @click="runAll">全部检测</el-button>
         <el-button size="small" :disabled="!hasResults" @click="copyResults">复制结果</el-button>
         <span v-if="lastRun" class="unlock-meta">
-          {{ exitLabel }} · {{ new Date(lastRun.checked_at * 1000).toLocaleString() }}
+          {{ exitLabel }} · {{ fmtTime(lastRun.checked_at) }}
           <span v-if="lastRun.ip && lastRun.ip.ip" class="mono">
             · 出口 {{ maskIp(lastRun.ip.ip) }} {{ lastRun.ip.country }} {{ lastRun.ip.org }}
           </span>
@@ -73,6 +73,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
+import { fmtTime } from '../format'
+import { copyText } from '../utils/clipboard'
 
 const exit = ref('panel')
 const nodeOptions = ref([])
@@ -166,19 +168,7 @@ async function run(ids) {
 function runAll() { run([]) }
 function runOne(id) { run([id]) }
 
-async function copyToClipboard(text) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-  const area = document.createElement('textarea')
-  area.value = text
-  area.style.position = 'fixed'
-  area.style.opacity = '0'
-  document.body.appendChild(area)
-  area.select()
-  try { document.execCommand('copy') } finally { area.remove() }
-}
+// 复制统一走 utils/clipboard（2026-11-18 收拢）
 
 async function copyResults() {
   const lines = [`出口：${exitLabel.value}`, ...catalog.value.map(c => {
@@ -187,8 +177,12 @@ async function copyResults() {
     const extra = [r.region && `地区 ${r.region}`, `${r.latency_ms}ms`, r.detail].filter(Boolean).join('，')
     return `${c.name}: ${labelFor(r.state)}${extra ? '（' + extra + '）' : ''}`
   })]
-  await copyToClipboard(lines.join('\n'))
-  ElMessage.success('已复制')
+  try {
+    await copyText(lines.join('\n'))
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败：浏览器拒绝了剪贴板权限，请手动选择文本复制')
+  }
 }
 
 async function checkLocal() {
@@ -211,9 +205,17 @@ function maskIp(ip) {
 }
 
 onMounted(async () => {
-  const cat = await api('/api/v1/unlock/catalog')
-  catalog.value = cat.checks
-  await loadLast()
+  try {
+    const cat = await api('/api/v1/unlock/catalog')
+    catalog.value = cat.checks
+  } catch (e) {
+    ElMessage.error(`检测目录加载失败：${e.message}`)
+  }
+  try {
+    await loadLast()
+  } catch (e) {
+    ElMessage.error(`最近检测结果加载失败：${e.message}`)
+  }
   loadNodes()
 })
 </script>

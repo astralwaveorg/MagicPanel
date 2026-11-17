@@ -71,7 +71,15 @@ ACTION_LABELS = {
 
 
 class ReleaseError(Exception):
-    """状态机拒绝的操作。调用方转成 400 返回给界面。"""
+    """状态机拒绝的操作。调用方按 code 映射状态码转成 HTTP 响应。
+
+    code 是机器可读的稳定标识：接口层据此决定 400/409，
+    不再依赖中文文案字符串做前缀匹配（文案改动不应改变语义）。
+    """
+
+    def __init__(self, message: str, code: str = "release_rejected"):
+        super().__init__(message)
+        self.code = code
 
 
 def _env_of(env) -> Env:
@@ -212,7 +220,9 @@ def _switch(conn, build, env: Env, status: BuildStatus, action: str,
     """执行一次已验证状态切换；调用方必须已开启写事务。"""
     current_revision = revision(conn, env)
     if expected_revision is not None and expected_revision != current_revision:
-        raise ReleaseError(f"发布版本已变化：期望 {expected_revision}，当前 {current_revision}")
+        raise ReleaseError(
+            f"发布版本已变化：期望 {expected_revision}，当前 {current_revision}",
+            code="release_revision_changed")
     payload_sha = json.dumps({"build": int(build["id"]), "reason": reason,
                               "status": status.value}, ensure_ascii=False,
                              sort_keys=True, separators=(',', ':'))
@@ -324,8 +334,14 @@ def offline(conn, build, operator: str, reason: str = "",
     result = {"build_id": int(build["id"]), "status": BuildStatus.OFFLINE.value,
               "env": Env.TESTING.value, "action": ACTION_OFFLINE, "replaced": None,
               "release_revision": _bump_release_state(conn, Env.TESTING, build["id"])}
+    # 幂等键公式必须与 _switch 一致（build+reason+status 摘要）：
+    # 原来存的是响应体 json.dumps(result)，接口层用 _switch 公式做重放比对，
+    # 同 key 重试永远 conflict，幂等保护对 offline 形同虚设（2026-11-18 修复）
+    payload_sha = json.dumps({"build": int(build["id"]), "reason": reason,
+                              "status": BuildStatus.OFFLINE.value}, ensure_ascii=False,
+                             sort_keys=True, separators=(',', ':'))
     _save_operation(conn, "offline", Env.TESTING, operator, idempotency_key,
-                    json.dumps(result, sort_keys=True, separators=(",", ":")), result)
+                    payload_sha, result)
     return result
 
 

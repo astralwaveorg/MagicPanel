@@ -70,7 +70,7 @@
       @confirm="onRefConfirm"
     />
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑引擎平台' : '添加引擎平台'"
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑引擎平台' : '添加引擎平台'"
                width="min(620px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-row :gutter="12">
@@ -131,6 +131,9 @@ import { api } from '../api'
 import { useMobile } from '../mobile'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
+import { useRefDialog } from '../useRefDialog'
+
+const { refDialog, openRefDialog, onRefConfirm } = useRefDialog()
 import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
@@ -171,11 +174,6 @@ const TEMPLATES = {
 }
 
 const rows = ref([])
-const refDialog = reactive({
-  visible: false, title: '', message: '', references: [], warnings: [],
-  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
-  choices: [], choiceLabel: '', choicePlaceholder: '请选择', choiceValue: null,
-})
 const isMobile = useMobile()
 const total = ref(0)
 const page = ref(1)
@@ -314,17 +312,6 @@ async function forceDeleteTarget(row) {
   }
 }
 
-function openRefDialog({ title, message, references, warnings = [], hint, action,
-  confirmText, choices = [], choiceLabel = '', choicePlaceholder = '请选择' }) {
-  Object.assign(refDialog, {
-    visible: true, title, message, references, warnings, hint,
-    confirmText: confirmText || '删除并解除关联', busy: false, action,
-    choices, choiceLabel, choicePlaceholder, choiceValue: null,
-  })
-}
 
-async function onRefConfirm() {
-  if (refDialog.action) await refDialog.action()
-}
 </script>
 

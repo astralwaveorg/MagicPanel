@@ -2,6 +2,8 @@ import { ALL_SCOPE } from './scopeOptions'
 
 export function fmtTime(value) {
   if (!value) return '—'
+  // 兼容 epoch 秒（部分接口返回秒级时间戳）
+  if (typeof value === 'number' && value < 1e12) value = value * 1000
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   const pad = (n) => String(n).padStart(2, '0')
@@ -105,4 +107,32 @@ export function noteBrief(note) {
   const chars = Array.from(String(note || ''))
   if (chars.length <= NOTE_BRIEF_MAX) return chars.join('')
   return `${chars.slice(0, NOTE_BRIEF_MAX).join('')}...`
+}
+
+/** 文件大小：自动选 B/KB/MB/GB，全站统一（避免"0.0 MB"或裸字节数）。 */
+export function sizeText(bytes) {
+  const n = Number(bytes)
+  if (!Number.isFinite(n) || n < 0) return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+/** 毫秒时长（延迟类）：自动选 ms/s，全站统一。 */
+export function latencyText(ms) {
+  const n = Number(ms)
+  if (!Number.isFinite(n) || n < 0) return '—'
+  if (n < 1000) return `${Math.round(n)} ms`
+  return `${(n / 1000).toFixed(1)} s`
+}
+
+/** 间隔秒数（抓取/测速间隔类）：自动选 天/小时/分钟/秒。 */
+export function intervalText(sec) {
+  const n = Number(sec)
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (n % 86400 === 0) return `${n / 86400} 天`
+  if (n % 3600 === 0) return `${n / 3600} 小时`
+  if (n % 60 === 0) return `${n / 60} 分钟`
+  return `${n} 秒`
 }

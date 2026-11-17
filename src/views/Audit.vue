@@ -5,21 +5,23 @@
 
     <div class="mp-toolbar" style="margin-bottom:12px">
       <div class="mp-btn-grid mp-toolbar-actions">
-        <el-button size="small" type="danger" plain :disabled="!selection.length" @click="removeSelected">
+        <el-button type="danger" plain :disabled="!selection.length" @click="removeSelected">
           删除选中（{{ selection.length }}）
         </el-button>
-        <el-button size="small" :disabled="!total" @click="clearAll" type="danger" plain>
+        <el-button :disabled="!total" @click="clearAll" type="danger" plain>
           清空全部
         </el-button>
       </div>
       <div class="mp-search-row">
-        <el-input v-model="keyword" size="small" placeholder="搜索操作 / 操作人 / 详情"
+        <el-input v-model="keyword" placeholder="搜索操作 / 操作人 / 详情"
                   clearable @keyup.enter="reload" @clear="reload" />
-        <el-button size="small" @click="reload">搜索</el-button>
+        <el-button @click="reload">搜索</el-button>
       </div>
     </div>
 
-    <EmptyState v-if="!loading && !rows.length" reason="暂无审计记录。" />
+    <ErrorState v-if="error" :error="error" @retry="reload" />
+
+    <EmptyState v-if="!loading && !error && !rows.length" reason="暂无审计记录。" />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
         <el-table :data="rows" v-loading="loading" @selection-change="onSelect" size="small">
@@ -60,6 +62,7 @@ import { ElMessage } from 'element-plus'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
 import Pager from '../components/Pager.vue'
 import { fmtTime } from '../format'
 import { useMobile } from '../mobile'
@@ -68,6 +71,7 @@ const isMobile = useMobile()
 const rows = ref([])
 const total = ref(0)
 const loading = ref(false)
+const error = ref('')
 const limit = ref(100)
 const page = ref(1)
 const keyword = ref('')
@@ -83,7 +87,9 @@ async function load() {
     rows.value = data.items ?? []
     total.value = data.total
     selection.value = []
+    error.value = ''
   } catch (e) {
+    error.value = e.message
     ElMessage.error(e.message)
   } finally {
     loading.value = false

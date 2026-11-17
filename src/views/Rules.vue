@@ -13,8 +13,8 @@
         <template v-if="selected.length">
           <span class="mp-selected-hint">已选 {{ selected.length }} 项</span>
           <el-button @click="openBatch">批量修改</el-button>
-          <el-button @click="batchEnable(true)">批量启用</el-button>
-          <el-button @click="batchEnable(false)">批量停用</el-button>
+          <el-button :loading="batchSaving" @click="batchEnable(true)">批量启用</el-button>
+          <el-button :loading="batchSaving" @click="batchEnable(false)">批量停用</el-button>
           <el-button :disabled="hasFilter" @click="moveSelected(-1)">批量上移</el-button>
           <el-button :disabled="hasFilter" @click="moveSelected(1)">批量下移</el-button>
           <el-button @click="removeSelected" type="danger" plain>批量删除</el-button>
@@ -64,7 +64,7 @@
 
 
     <EmptyState
-      v-if="!rows.length"
+      v-if="!error && !rows.length"
       :reason="hasFilter ? '没有符合筛选条件的规则。' : '还没有分流规则。'"
       :next="hasFilter ? '换个关键词，或点上方“清空筛选”看全部规则。' : '点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。'"
     />
@@ -83,7 +83,15 @@
             <template #default="{ row }"><span class="mono">{{ row.type }}</span></template>
           </el-table-column>
           <el-table-column label="匹配值" min-width="200">
-            <template #default="{ row }"><span class="mono">{{ row.value || '—' }}</span></template>
+            <template #default="{ row }">
+              <el-tooltip v-if="row.value && row.value.length > 40" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-note-tip mono">{{ row.value }}</div>
+                </template>
+                <span class="mp-clamp2 mono">{{ row.value }}</span>
+              </el-tooltip>
+              <span v-else class="mono">{{ row.value || '—' }}</span>
+            </template>
           </el-table-column>
           <el-table-column prop="target" label="目标" min-width="110" />
           <el-table-column label="适用平台" min-width="150">
@@ -131,7 +139,7 @@
       <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑规则' : '添加规则'" width="min(560px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑规则' : '添加规则'" width="min(560px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-form-item label="类型">
           <el-select v-model="form.type" style="width:100%">
@@ -207,7 +215,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchDialog" title="批量修改分流规则" width="min(560px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="batchDialog" title="批量修改分流规则" width="min(560px, 94vw)">
       <p class="mp-dialog-desc">
         将选中的 {{ selected.length }} 条规则按下面的设置统一修改。
         只勾选的项会生效：勾上但没选内容 = 清空该项；不勾 = 保持原样。
@@ -470,7 +478,13 @@ watch(variantId, () => {
 async function openFromQuery() {
   const id = Number(route.query.edit)
   if (!id) return
-  const all = await api('/api/v1/rules')
+  let all
+  try {
+    all = await api('/api/v1/rules')
+  } catch (e) {
+    ElMessage.error(`无法载入规则：${e.message}`)
+    return
+  }
   const row = all.find((r) => r.id === id)
   if (!row) {
     ElMessage.warning('这条规则已经不存在了')
@@ -498,6 +512,14 @@ function openEdit(row) {
 }
 
 async function save() {
+  // 提交前前端校验：非 MATCH/FINAL 类型匹配值必填、非法 target 不放行，
+  // 错误定位到字段而不是等后端 400（2026-11-18）
+  if (!isFinal.value && !(form.value || '').trim()) {
+    return ElMessage.warning('请填写匹配值（MATCH 兜底规则无需匹配值）')
+  }
+  if (form.pre_matching && !preMatchingTargetOk.value) {
+    return ElMessage.warning('pre-matching 的目标必须是 REJECT 字面量以外的出站（引擎限制）')
+  }
   saving.value = true
   try {
     const body = { ...form, value: isFinal.value ? '' : form.value }
@@ -624,7 +646,8 @@ async function saveBatch() {
 }
 
 async function batchEnable(enabled) {
-  if (!selected.value.length) return
+  if (!selected.value.length || batchSaving.value) return
+  batchSaving.value = true
   try {
     const resp = await api('/api/v1/rules/batch', {
       method: 'PATCH',
@@ -635,6 +658,8 @@ async function batchEnable(enabled) {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    batchSaving.value = false
   }
 }
 

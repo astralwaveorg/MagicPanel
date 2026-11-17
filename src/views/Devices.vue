@@ -21,12 +21,12 @@
 
 
     <EmptyState
-      v-if="!targets.length"
+      v-if="!error && !targets.length"
       reason="还没有引擎平台，无法添加设备。"
       next="先在「基础配置 → 引擎平台」中添加（引擎 + 平台）。"
     />
     <EmptyState
-      v-else-if="!rows.length"
+      v-else-if="!error && !rows.length"
       reason="还没有设备。"
       next="点击“添加设备”；订阅地址只显示一次，请立即保存。"
     />
@@ -88,7 +88,7 @@
       <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑设备' : '添加设备'" width="min(560px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑设备' : '添加设备'" width="min(560px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-form-item label="文件名">
           <el-input v-model="form.name" placeholder="例如：Stash-Macmini" />
@@ -126,7 +126,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchDialog" title="批量修改设备" width="min(560px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="batchDialog" title="批量修改设备" width="min(560px, 94vw)">
       <p class="mp-dialog-desc">
         将选中的 {{ selected.length }} 台设备按下面的设置统一修改。
         只勾选的项会生效：勾上但内容为空 = 清空该项；不勾 = 保持原样。
@@ -339,7 +339,7 @@ async function save() {
     dialog.value = false
     await load()
   } catch (e) {
-    error.value = e.message
+    // 弹窗保存失败只提示：页面级 error 会显示成"加载失败"横幅且弹窗还开着
     ElMessage.error(e.message)
   } finally {
     saving.value = false

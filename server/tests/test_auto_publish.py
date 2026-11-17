@@ -7,6 +7,7 @@
 """
 from app.services import scheduler
 from conftest import auth_headers, setup_admin
+from test_api import make_policy
 
 
 def test_unchecked_core_targets_ignores_verified_device_results():
@@ -107,3 +108,56 @@ def test_device_artifact_without_core_records_false(client, monkeypatch):
     # 没做核心校验就要拦下，不发生产（平台产物与设备产物都算）
     assert set(scheduler._unchecked_core_targets(build["results"])) == {
         "mihomo-android", dev["name"]}
+
+
+def test_auto_publish_backoff_and_reuse(client, monkeypatch):
+    """发布失败 → 指数退避（调度 tick 不再每 30 秒重建构建）；
+    退避到期后重试复用同策略的已构建版本，不重复建构建；成功后清除退避。
+
+    2026-11-18 修复：原来失败把 auto_build_last_attempt 清空，
+    下个 tick（30s）就重建一个完整构建再试，持续失败时构建互相驱逐。
+    """
+    from app import db
+    from app.services import releases, scheduler, tester
+
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    client.put("/api/v1/settings", headers=h, json={"values": {
+        "auto_fetch_sources": "0", "auto_fetch_rules": "0",
+    }})
+    # 假装核心可用：mihomo 产物过了核心校验，闸门放行到发布这一步
+    monkeypatch.setattr(tester, "validate_config", lambda *a, **k: (True, ""))
+
+    def boom(*a, **k):
+        raise releases.ReleaseError("模拟发布失败")
+    monkeypatch.setattr(releases, "publish_build", boom)
+
+    summary = scheduler.run_once(force=True)
+    assert "模拟发布失败" in summary["build_error"]
+    assert summary["retry_backoff_seconds"] >= 600
+    with db.connect() as conn:
+        fail_count = db.get_setting(conn, "auto_build_fail_count", "")
+        backoff = db.get_setting(conn, "auto_build_backoff_until", "")
+    assert fail_count == "1" and backoff
+
+    # 到了间隔（把 last_attempt 拨回过去），但还在退避期内：调度 tick 不重试
+    with db.tx() as conn:
+        db.set_setting(conn, "auto_build_last_attempt", "2000-01-01T00:00:00+08:00")
+    summary = scheduler.run_once(force=False)
+    assert summary["build"] == "上次发布失败，退避等待重试"
+    assert len(client.get("/api/v1/builds", headers=h).json()) == 1
+
+    # 退避到期：复用同策略已构建版本，不再新建构建
+    with db.tx() as conn:
+        db.set_setting(conn, "auto_build_backoff_until", "2000-01-01T00:00:00+08:00")
+    monkeypatch.setattr(releases, "publish_build",
+                        lambda *a, **k: {"ok": True})
+    summary = scheduler.run_once(force=False)
+    assert summary["build"]["status"] == "reuse"
+    assert summary["published"] == "production"
+    assert len(client.get("/api/v1/builds", headers=h).json()) == 1
+    # 发布成功：退避状态清除
+    with db.connect() as conn:
+        assert db.get_setting(conn, "auto_build_fail_count", "") == "0"
+        assert db.get_setting(conn, "auto_build_backoff_until", "") == ""

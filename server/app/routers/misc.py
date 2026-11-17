@@ -79,6 +79,8 @@ def overview(user=CurrentUser):
             # 配置本体没更新的设备数：这类故障在界面上必须看得见
             "devices_stale": sum(1 for d in devices if d["config_stale"]),
         }
+        # 健康结论要在连接存活时算：待生效变更等检查需要查库
+        health = _health_snapshot(conn)
     return {
         "release_state": release_state,
         "sources": sources,
@@ -86,7 +88,7 @@ def overview(user=CurrentUser):
         "devices": devices,
         "counts": counts,
         "recent_audit": recent_audit,
-        "health": _health_snapshot(conn),
+        "health": health,
         "note": "下载成功仅代表文件取回，不代表配置加载、VPN 启动或规则生效。",
     }
 
@@ -94,9 +96,10 @@ def overview(user=CurrentUser):
 def _health_snapshot(conn) -> dict:
     """运行状态自检：把"系统是否健康"一次性算清楚。
 
-    概览页直接展示这些结论。只保留备份与测速核心两类真正需要处理的项——
-    磁盘、设备拉取时效属于使用者自己掌握的运行细节，不进健康结论
-    （2026-10-28 概览改版时移除）。
+    概览页直接展示这些结论。备份与测速核心之外，2026-11-18 加入三类
+    "静默失效"检查——这类问题原来只落在 automation_runs / settings 里，
+    不主动进概览，管理者不点子页面就永远看不见：
+    待生效的基础配置改动、自动任务最近失败、自动发布退避中。
     """
     from datetime import datetime, timezone
 
@@ -119,6 +122,52 @@ def _health_snapshot(conn) -> dict:
     if not core.get("available"):
         issues.append("测速核心未安装，节点测速与 Mihomo 核心校验不可用")
 
+    # 待生效变更：基础配置层的改动晚于当前生产构建的创建时间。
+    # 保存成功 ≠ 产物生效，这个差值必须在概览看得见。
+    prod = db.one(conn, "SELECT created_at FROM builds WHERE status='PRODUCTION' LIMIT 1")
+    if prod:
+        # 空差异（"{}"）不是真实改动：保存相同内容也会刷新 updated_at，不能算待生效
+        pending = db.one(
+            conn,
+            "SELECT COUNT(*) c FROM base_configs "
+            "WHERE updated_at > ? AND REPLACE(REPLACE(TRIM(content), ' ', ''), CHAR(10), '') != '{}'",
+            (prod["created_at"],))["c"]
+        if pending:
+            issues.append(
+                f"有 {pending} 层基础配置改动尚未进入当前生产版本"
+                "——去「基础配置」重新保存并构建，或在「构建发布」创建新构建")
+
+    # 自动任务最近一次失败（24 小时内有 build_error 才报，避免陈旧噪声）
+    row = db.one(conn, "SELECT summary, at FROM automation_runs ORDER BY id DESC LIMIT 1")
+    if row:
+        try:
+            summary = json.loads(row["summary"] or "{}")
+        except ValueError:
+            summary = {}
+        err = str(summary.get("build_error") or "")
+        at = _parse_ts(row["at"])
+        if err and at and (datetime.now(timezone.utc).astimezone() - at).total_seconds() < 86400:
+            issues.append(f"自动任务最近失败（{row['at'][:16].replace('T', ' ')}）：{err[:120]}")
+
+    # 自动发布退避中：发布连续失败后的指数退避窗口
+    backoff = db.get_setting(conn, "auto_build_backoff_until", "")
+    if backoff:
+        try:
+            bt = datetime.fromisoformat(backoff)
+            if bt.tzinfo is None:
+                bt = bt.replace(tzinfo=timezone.utc)
+            if bt > datetime.now(timezone.utc):
+                issues.append("自动发布失败退避重试中"
+                              f"（约 {backoff[11:16].replace('T', ' ')} 后自动重试）")
+        except ValueError:
+            pass
+
+    # 依赖仓库同步失败（仅在功能开启时报，避免关闭后残留错误误报）
+    if db.get_setting(conn, "deps_enabled", "0") == "1":
+        deps_err = db.get_setting(conn, "deps_last_error", "")
+        if deps_err:
+            issues.append(f"依赖仓库同步失败：{deps_err[:120]}")
+
     return {
         "ok": not issues,
         "issues": issues,
@@ -128,6 +177,17 @@ def _health_snapshot(conn) -> dict:
         "core_available": bool(core.get("available")),
         "core_version": core.get("version", ""),
     }
+
+
+def _parse_ts(value: str):
+    from datetime import datetime, timezone
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone()
 
 
 @router.get("/direct-check")
@@ -272,6 +332,22 @@ def put_settings(body: SettingsBody, user=CurrentUser):
                 raise HTTPException(400, "自动构建间隔必须是整数小时")
             if not 1 <= hours <= 168:
                 raise HTTPException(400, "自动构建间隔需在 1–168 小时之间")
+        # 数值键必须有类型与范围校验：这两个键被 create_session / config_stale
+        # 直接 int() 读取，写进非数字会让所有登录接口 500（2026-11-18 修复）
+        if key == "session_ttl_hours":
+            try:
+                hours = int(value)
+            except ValueError:
+                raise HTTPException(400, "登录会话有效期必须是整数小时")
+            if not 1 <= hours <= 8760:
+                raise HTTPException(400, "登录会话有效期需在 1–8760 小时之间")
+        if key == "profile_update_interval":
+            try:
+                hours = int(value)
+            except ValueError:
+                raise HTTPException(400, "订阅更新间隔必须是整数小时")
+            if not 0 <= hours <= 168:
+                raise HTTPException(400, "订阅更新间隔需在 0–168 小时之间")
         if key == "auto_publish_env" and value not in ("production", "testing"):
             raise HTTPException(400, "自动构建发布环境仅支持 production / testing")
     with db.tx(immediate=True) as conn:

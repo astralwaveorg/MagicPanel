@@ -85,7 +85,7 @@
         <template v-if="current">
           <div class="mp-deps-detail-head">
             <strong class="mono">{{ current.path }}</strong>
-            <span class="mp-toolbar-hint">{{ current.size }} 字节</span>
+            <span class="mp-toolbar-hint">{{ sizeText(current.size) }}</span>
             <span v-if="current.binary" class="mp-toolbar-hint">二进制文件，只读</span>
           </div>
           <p v-if="current.desc" class="mp-form-hint">{{ current.desc }}</p>
@@ -126,7 +126,7 @@
     </div>
 
     <!-- 冲突 -->
-    <el-dialog v-model="conflictOpen" title="解决冲突" width="min(1100px, 96vw)">
+    <el-dialog :close-on-click-modal="false" v-model="conflictOpen" title="解决冲突" width="min(1100px, 96vw)">
       <div v-for="c in conflicts" :key="c.path" class="mp-deps-conflict">
         <p class="mp-deps-conflict-path mono">{{ c.path }}</p>
         <div class="mp-deps-three">
@@ -156,14 +156,16 @@
         </el-table-column>
         <el-table-column label="操作" width="110">
           <template #default="{ row }">
-            <el-button size="small" text @click="showDiff(row)">看改动</el-button>
-            <el-button size="small" text type="danger" @click="revert(row)">回滚</el-button>
+            <div class="op-grid">
+              <el-button size="small" text @click="showDiff(row)">看改动</el-button>
+              <el-button size="small" text type="danger" @click="revert(row)">回滚</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
     </el-drawer>
 
-    <el-dialog v-model="diffOpen" title="改动内容" width="min(820px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="diffOpen" title="改动内容" width="min(820px, 94vw)">
       <el-input :model-value="diffText" type="textarea" :rows="22" readonly class="mono" />
     </el-dialog>
 
@@ -227,7 +229,7 @@
     </el-drawer>
 
     <!-- 新建文件 -->
-    <el-dialog v-model="newFile" title="新建文件" width="min(520px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="newFile" title="新建文件" width="min(520px, 94vw)">
       <el-form label-position="top">
         <el-form-item label="仓库内相对路径">
           <el-input v-model="newPath" placeholder="rule/新集合.yaml" />
@@ -602,7 +604,6 @@ async function saveSettings() {
 async function genKey() {
   try {
     const r = await api('/api/v1/deps/generate-key', { method: 'POST' })
-    settings.private_key = r.public_key ? '' : ''
     ElMessage.success('已生成密钥对，私钥已加密保存')
     await loadSettings()
     await navigator.clipboard.writeText(r.public_key || '').catch(() => {})

@@ -64,12 +64,12 @@
 
 
     <EmptyState
-      v-if="!rows.length && !hasFilter"
+      v-if="!error && !rows.length && !hasFilter"
       reason="还没有策略组。"
       next="点击“添加策略组”，先建入口组（如“节点选择”），再建地区自动组。"
     />
     <EmptyState
-      v-else-if="!rows.length"
+      v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的策略组。"
       next="换个关键词，或点上方“清空筛选”看全部策略组。"
     />
@@ -161,7 +161,7 @@
       <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑策略组' : '添加策略组'"
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑策略组' : '添加策略组'"
                width="min(620px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-row :gutter="12">
@@ -305,7 +305,7 @@
       @confirm="onRefConfirm"
     />
 
-    <el-dialog v-model="batchDialog" title="批量修改策略组" width="min(620px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="batchDialog" title="批量修改策略组" width="min(620px, 94vw)">
       <p class="mp-dialog-desc">
         将选中的 {{ selected.length }} 个策略组按下面的设置统一修改。
         只勾选的项会生效：勾上但没选内容 = 清空该项；不勾 = 保持原样。
@@ -383,6 +383,9 @@ import { ALL_SCOPE, hasAllScope, collapseIfComplete } from '../scopeOptions'
 import { scopeBrief, proxiesBrief, sourceBrief, localNodeBrief } from '../format'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
+import { useRefDialog } from '../useRefDialog'
+
+const { refDialog, openRefDialog, onRefConfirm } = useRefDialog()
 import Pager from '../components/Pager.vue'
 import MultiSelectClear from '../components/MultiSelectClear.vue'
 import ScopeSelect from '../components/ScopeSelect.vue'
@@ -394,11 +397,9 @@ const rows = ref([])
 const isMobile = useMobile()
 // 当前分流方案：0 = 默认方案；列表、新建、批量都限定在这个方案里
 const variantId = ref(0)
+// 全量组名（含跨页）：供「包含策略」等下拉点选引用
+const allGroupNames = ref([])
 const selected = ref([])
-const refDialog = reactive({
-  visible: false, title: '', message: '', references: [], warnings: [],
-  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
-})
 const batchDialog = ref(false)
 const batchSaving = ref(false)
 const batch = reactive({
@@ -490,7 +491,7 @@ const hasHealthCheck = computed(() =>
 )
 
 const otherGroups = computed(() =>
-  rows.value.map((g) => g.name).filter((n) => n !== editing.value?.name),
+  allGroupNames.value.filter((n) => n !== editing.value?.name),
 )
 
 // 可作为成员的本地节点：名字直接用接口给的 display_name，
@@ -526,10 +527,12 @@ async function load() {
     if (filters.hidden) params.set('hidden', filters.hidden)
     if (filters.scope) params.set('scope', filters.scope)
     if (filters.member) params.set('member', filters.member)
-    const [groups, srcs, nodes, targetList, deviceList] = await Promise.all([
+    const [groups, srcs, nodes, targetList, deviceList, allGroups] = await Promise.all([
       api(`/api/v1/groups/page?${params.toString()}`),
       api('/api/v1/sources'), api('/api/v1/local-nodes'),
       api('/api/v1/targets'), api('/api/v1/devices'),
+      // 候选组全量拉取：跨页的策略组也要能点选引用（不能只用当前页 rows）
+      api(`/api/v1/groups?variant=${variantId.value}`),
     ])
     rows.value = groups.items ?? []
     total.value = groups.total
@@ -538,6 +541,7 @@ async function load() {
     localNodes.value = nodes
     targets.value = targetList
     devices.value = deviceList
+    allGroupNames.value = (allGroups ?? []).map((g) => g.name)
   } catch (e) {
     error.value = e.message
     ElMessage.error(e.message)
@@ -648,16 +652,7 @@ async function forceDeleteGroup(row) {
   }
 }
 
-function openRefDialog({ title, message, references, warnings = [], hint, action, confirmText }) {
-  Object.assign(refDialog, {
-    visible: true, title, message, references, warnings, hint,
-    confirmText: confirmText || '删除并解除关联', busy: false, action,
-  })
-}
 
-async function onRefConfirm() {
-  if (refDialog.action) await refDialog.action()
-}
 
 function onSelectionChange(selection) {
   selected.value = selection

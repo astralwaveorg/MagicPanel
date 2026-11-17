@@ -58,7 +58,7 @@
                    clearable @change="applyFilter">
           <el-option value="ok" label="抓取成功" />
           <el-option value="failed" label="抓取失败" />
-          <el-option value="none" label="没有抓取记录" />
+          <el-option value="none" label="从未抓取" />
         </el-select>
         <el-select v-model="filters.referenced" class="mp-filter-select" placeholder="全部引用情况"
                    clearable @change="applyFilter">
@@ -74,12 +74,12 @@
 
 
     <EmptyState
-      v-if="!rows.length && !hasFilter"
+      v-if="!error && !rows.length && !hasFilter"
       reason="还没有规则来源。"
       next="点击“添加规则来源”：远程来源填 URL，内联来源直接粘贴规则内容。"
     />
     <EmptyState
-      v-else-if="!rows.length"
+      v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的规则来源。"
       next="换个关键词，或点上方“清空筛选”看全部规则来源。"
     />
@@ -118,7 +118,7 @@
               <span v-if="row.kind === 'inline'" style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="规则数" width="90" align="right">
+          <el-table-column label="规则数" width="90" align="right" sortable>
             <template #default="{ row }">{{ row.rule_count ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="摘要" min-width="130">
@@ -158,7 +158,7 @@
              :sizes="[10, 20, 50, 100]" @change="onPagerChange" />
     </div>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑规则来源' : '添加规则来源'"
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑规则来源' : '添加规则来源'"
                width="min(620px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-row :gutter="12">
@@ -255,7 +255,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="intervalDialog" title="批量修改抓取间隔"
+    <el-dialog :close-on-click-modal="false" v-model="intervalDialog" title="批量修改抓取间隔"
                width="min(480px, 94vw)">
       <p class="mp-dialog-desc">
         将选中的 {{ selected.length }} 个规则来源的间隔统一设为（秒）。
@@ -291,7 +291,7 @@
       :items="blockedItems"
     />
 
-    <el-dialog v-model="urlDialog" :title="urlCopied ? 'URL 已复制' : 'URL 复制失败'"
+    <el-dialog :close-on-click-modal="false" v-model="urlDialog" :title="urlCopied ? 'URL 已复制' : 'URL 复制失败'"
                width="min(620px, 94vw)">
       <p class="mp-dialog-desc">
         {{ urlCopied ? '已复制以下规则来源 URL：' : '自动复制失败，请手动选择下面的 URL：' }}
@@ -299,7 +299,7 @@
       <el-input :model-value="urlContent" type="textarea" :rows="3" readonly class="mono" />
     </el-dialog>
 
-    <el-dialog v-model="previewDialog" :title="`内容快照 · ${previewName}`"
+    <el-dialog :close-on-click-modal="false" v-model="previewDialog" :title="`内容快照 · ${previewName}`"
                width="min(720px, 94vw)">
       <el-input :model-value="previewContent" type="textarea" :rows="18" readonly class="mono" />
     </el-dialog>
@@ -317,11 +317,15 @@ import { useMobile } from '../mobile'
 import StatusDot from '../components/StatusDot.vue'
 import EnableToggle from '../components/EnableToggle.vue'
 import EmptyState from '../components/EmptyState.vue'
+import { useRefDialog } from '../useRefDialog'
+
+const { refDialog, openRefDialog, onRefConfirm } = useRefDialog()
 import ErrorState from '../components/ErrorState.vue'
 import Pager from '../components/Pager.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
+import { copyText } from '../utils/clipboard'
 
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管由自主维护同步而来）
 const KIND_LABELS = { remote: '远程', inline: '内联', repo: '维护仓库' }
@@ -362,10 +366,6 @@ const refreshTotal = ref(0)
 const intervalDialog = ref(false)
 const savingInterval = ref(false)
 const batchInterval = ref(86400)
-const refDialog = reactive({
-  visible: false, title: '', message: '', references: [], warnings: [],
-  hint: '', confirmText: '删除并解除关联', busy: false, action: null,
-})
 const blockedVisible = ref(false)
 const blockedItems = ref([])
 const deletedCount = ref(0)
@@ -541,7 +541,7 @@ async function save() {
       })
       return
     }
-    error.value = e.message
+    // 弹窗保存失败只提示：页面级 error 会显示成"加载失败"横幅且弹窗还开着
     ElMessage.error(e.message)
   } finally {
     saving.value = false
@@ -635,16 +635,7 @@ async function saveBatchInterval() {
   }
 }
 
-function openRefDialog({ title, message, references, warnings = [], hint, action, confirmText }) {
-  Object.assign(refDialog, {
-    visible: true, title, message, references, warnings, hint,
-    confirmText: confirmText || '删除并解除关联', busy: false, action,
-  })
-}
 
-async function onRefConfirm() {
-  if (refDialog.action) await refDialog.action()
-}
 
 async function forceRenameProvider(row, body) {
   refDialog.busy = true
@@ -757,19 +748,10 @@ async function copyUrl(row) {
   urlContent.value = row.url
   urlCopied.value = false
   try {
-    await navigator.clipboard.writeText(row.url)
+    await copyText(row.url)
     urlCopied.value = true
   } catch {
-    try {
-      const el = document.createElement('textarea')
-      el.value = row.url
-      document.body.appendChild(el)
-      el.select()
-      urlCopied.value = document.execCommand('copy')
-      el.remove()
-    } catch {
-      urlCopied.value = false
-    }
+    urlCopied.value = false
   }
   urlDialog.value = true
 }

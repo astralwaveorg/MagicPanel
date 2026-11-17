@@ -563,10 +563,9 @@ def _publish(action: str, bid: int, reason: str, operator: str, body=None) -> di
                 result = releases.offline(conn, build, operator, reason,
                     expected_revision=expected, idempotency_key=idem)
     except releases.ReleaseError as exc:
-        message = str(exc)
-        status = 409 if (message == 'release_revision_changed' or
-                         message.startswith('发布版本已变化')) else 400
-        raise HTTPException(status, message)
+        # 状态码按 ReleaseError.code 映射，不再对文案做字符串前缀匹配
+        status = 409 if exc.code == "release_revision_changed" else 400
+        raise HTTPException(status, str(exc))
     return {"ok": True, **result}
 
 

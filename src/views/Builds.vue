@@ -75,7 +75,7 @@
         <ErrorState v-if="error" :error="error" @retry="load" />
 
         <EmptyState
-          v-if="!rows.length"
+          v-if="!error && !rows.length"
           reason="还没有构建。"
           next="点击“创建构建”，把当前策略编译为各目标的完整配置。"
         />
@@ -118,22 +118,22 @@
                   <span v-else style="color:var(--mp-muted)">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" :width="isMobile ? 190 : 240" :fixed="isMobile ? false : 'right'">
+              <el-table-column label="操作" :width="isMobile ? 190 : 200" :fixed="isMobile ? false : 'right'">
                 <template #default="{ row }">
                   <div class="op-grid">
                     <el-button size="small" @click="openDetail(row)" type="info" plain>详情</el-button>
                     <template v-if="row.status === 'BUILT'">
-                      <el-button size="small" :disabled="!verified(row)" @click="publishToTest(row)" type="primary" plain>发布测试</el-button>
-                      <el-button size="small" :disabled="!verified(row)" @click="publishBoth(row)" type="success" plain>一键发布</el-button>
-                      <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success" plain>发布测试</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishBoth(row)" type="success" plain>一键发布</el-button>
+                      <el-button size="small" :loading="busyId === row.id" @click="remove(row)" type="danger" plain>删除</el-button>
                     </template>
                     <template v-else-if="row.status === 'TESTING'">
-                      <el-button size="small" :disabled="!verified(row)" @click="publishToProd(row)" type="success" plain>发布至生产</el-button>
-                      <el-button size="small" @click="offlineBuild(row)" type="warning" plain>下线</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToProd(row)" type="success" plain>发布至生产</el-button>
+                      <el-button size="small" :loading="busyId === row.id" @click="offlineBuild(row)" type="warning" plain>下线</el-button>
                     </template>
                     <template v-else-if="row.status === 'OFFLINE'">
-                      <el-button size="small" :disabled="!verified(row)" @click="publishToTest(row)" type="primary">重新测试</el-button>
-                      <el-button size="small" :disabled="!verified(row)" @click="rollbackToProd(row)" type="warning" plain>回滚至生产</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success">重新测试</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="rollbackToProd(row)" type="warning" plain>回滚至生产</el-button>
                     </template>
                   </div>
                 </template>
@@ -145,7 +145,7 @@
 
         <div class="mp-card">
           <h3>发布历史（最近 10 条）</h3>
-          <EmptyState v-if="!releases.length" reason="还没有发布记录。" />
+          <EmptyState v-if="!error && !releases.length" reason="还没有发布记录。" />
           <div v-else class="mp-table-wrap">
             <el-table :data="releases" size="small">
               <el-table-column label="时间" width="140">
@@ -171,8 +171,9 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-drawer v-model="detailVisible" :title="`构建 #${detail?.id}`" size="min(720px, 94vw)">
-      <template v-if="detail">
+    <el-drawer v-model="detailVisible" :title="`构建 #${detail?.id ?? ''}`" size="min(720px, 94vw)">
+      <div v-if="!detail" v-loading="true" element-loading-text="正在载入构建详情…" style="min-height:200px" />
+      <template v-else>
         <p style="font-size:13px;color:var(--mp-text-secondary);margin-top:0">
           {{ fmtTime(detail.created_at) }} · {{ detail.created_by }} ·
           策略摘要 <span class="mono">{{ shortSha(detail.policy_sha) }}</span>
@@ -202,13 +203,13 @@
             </h3>
             <div class="mp-artifact-actions">
               <el-button v-if="result.ok" @click="previewArtifact(name)" type="info" plain>预览产物</el-button>
-              <el-button @click="openDiff(name)" type="primary" plain>与上一构建对比</el-button>
+              <el-button @click="openDiff(name)" type="info" plain>与上一构建对比</el-button>
             </div>
           </div>
           <div style="font-size:12.5px;color:var(--mp-text-secondary)">
             {{ result.engine }} / {{ PLATFORM_LABELS[result.platform] || result.platform }}
             <template v-if="result.device"> · 设备 {{ result.device }}</template> ·
-            {{ result.size }} 字节 · 摘要 <span class="mono">{{ shortSha(result.sha256) }}</span>
+            {{ sizeText(result.size) }} · 摘要 <span class="mono">{{ shortSha(result.sha256) }}</span>
           </div>
           <template v-if="result.errors?.length">
             <div style="color:var(--mp-danger);font-size:12.5px;margin-top:6px">
@@ -244,7 +245,7 @@
       </template>
     </el-drawer>
 
-    <el-dialog v-model="artifactVisible" :title="`产物预览 · ${artifactTarget}`"
+    <el-dialog :close-on-click-modal="false" v-model="artifactVisible" :title="`产物预览 · ${artifactTarget}`"
                width="min(760px, 94vw)">
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin-top:0">
         订阅来源以 <span class="mono">{FEED}</span> 占位，分发时才注入设备专属地址；
@@ -253,7 +254,7 @@
       <el-input :model-value="artifactContent" type="textarea" :rows="20" readonly class="mono" />
     </el-dialog>
 
-    <el-dialog v-model="diffVisible" :title="`差异 · ${diffTarget}`" width="min(760px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="diffVisible" :title="`差异 · ${diffTarget}`" width="min(760px, 94vw)">
       <el-input :model-value="diffContent || '（无差异或上一构建不存在该目标）'"
                 type="textarea" :rows="20" readonly class="mono" />
     </el-dialog>
@@ -283,7 +284,7 @@ import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import AutoBuildPanel from '../components/AutoBuildPanel.vue'
 import {
-  fmtTime, shortSha, PLATFORM_LABELS, BUILD_STATUS_LABELS, ENV_LABELS,
+  fmtTime, shortSha, sizeText, PLATFORM_LABELS, BUILD_STATUS_LABELS, ENV_LABELS,
   RELEASE_ACTION_LABELS, buildStatusTagType, buildStatusTagEffect,
 } from '../format'
 import { triggering, runAutoNow } from '../useAutoPublish'
@@ -309,6 +310,8 @@ const releaseState = ref({ production: null, testing: null })
 const releases = ref([])
 const loading = ref(false)
 const error = ref('')
+// 发布/删除操作防重入：确认框关闭后到接口返回之间按钮转圈，全局串行
+const busyId = ref(0)
 const building = ref(false)
 const detail = ref(null)
 const detailVisible = ref(false)
@@ -464,6 +467,7 @@ async function publishToTest(row) {
     `确定将构建 #${row.id} 发布至测试环境吗？发布后，当前测试版本（${currentBuildText(releaseState.value.testing)}）将被转为已下线。`,
     '发布至测试环境', { type: 'warning', confirmButtonText: '发布' },
   )) return
+  busyId.value = row.id
   try {
     await api(`/api/v1/builds/${row.id}/publish-to-test`, { method: 'POST', body: { reason: '' } })
     ElMessage.success(`构建 #${row.id} 已发布至测试环境`)
@@ -471,6 +475,8 @@ async function publishToTest(row) {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    busyId.value = 0
   }
 }
 
@@ -480,6 +486,7 @@ async function publishBoth(row) {
     + `当前生产版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
     '一键发布', { type: 'warning', confirmButtonText: '发布' },
   )) return
+  busyId.value = row.id
   try {
     await api(`/api/v1/builds/${row.id}/publish-both`, { method: 'POST', body: { reason: '' } })
     ElMessage.success(`构建 #${row.id} 已成为生产版本`)
@@ -487,6 +494,8 @@ async function publishBoth(row) {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    busyId.value = 0
   }
 }
 
@@ -495,12 +504,15 @@ async function publishToProd(row) {
     `⚠️ 确定将构建 #${row.id} 设为生产版本吗？这将会影响所有线上设备。当前的线上版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
     '发布至生产环境', { type: 'warning', confirmButtonText: '发布' },
   )) return
+  busyId.value = row.id
   try {
     await api(`/api/v1/builds/${row.id}/publish-to-prod`, { method: 'POST', body: { reason: '' } })
     ElMessage.success(`构建 #${row.id} 已成为生产版本`)
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    busyId.value = 0
   }
 }
 
@@ -509,12 +521,15 @@ async function rollbackToProd(row) {
     `确定将构建 #${row.id} 回滚为生产版本吗？这将会影响所有线上设备。当前的线上版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
     '回滚生产版本', { type: 'warning', confirmButtonText: '回滚' },
   )) return
+  busyId.value = row.id
   try {
     await api(`/api/v1/builds/${row.id}/rollback-to-prod`, { method: 'POST', body: { reason: '' } })
     ElMessage.success(`已回滚到构建 #${row.id}`)
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    busyId.value = 0
   }
 }
 
@@ -523,12 +538,15 @@ async function offlineBuild(row) {
     `确定将构建 #${row.id} 下线吗？下线后测试环境将没有生效版本，客户端会在下次拉取时收到 503。`,
     '下线构建', { type: 'warning', confirmButtonText: '下线' },
   )) return
+  busyId.value = row.id
   try {
     await api(`/api/v1/builds/${row.id}/offline`, { method: 'POST', body: { reason: '' } })
     ElMessage.success(`构建 #${row.id} 已下线`)
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    busyId.value = 0
   }
 }
 
@@ -538,12 +556,15 @@ async function remove(row) {
     + '只有「已构建」状态的构建可以手动删除；已发布过的版本由系统自动清理（保留最近 20 个，超出的会连同产物与发布历史一并删除）。',
     `删除构建 #${row.id}`, { type: 'warning', confirmButtonText: '删除' },
   )) return
+  busyId.value = row.id
   try {
     await api(`/api/v1/builds/${row.id}`, { method: 'DELETE' })
     ElMessage.success(`构建 #${row.id} 已删除`)
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    busyId.value = 0
   }
 }
 

@@ -277,3 +277,31 @@ def test_git_operation_blocks_concurrent_commit(client, origin_repo):
 
     st = client.get("/api/v1/deps/status", headers=h).json()
     assert st["busy"] is False
+
+
+def test_deps_sync_failure_persists_timestamp(client, origin_repo, monkeypatch):
+    """同步失败也要把 deps_last_sync_at 落库（独立短事务）。
+
+    2026-11-18 修复前：_record 在外层写事务里，失败 raise 把它一起回滚，
+    时间戳永不推进，调度器每 30 秒重试一次，形成"持锁 git pull"重试风暴。
+    """
+    from app import db
+    from app.services import repo_manager
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    _configure(client, h, origin_repo)
+    assert client.post("/api/v1/deps/clone", headers=h).status_code == 200
+
+    def boom(conn):
+        raise repo_manager.RepoError("模拟网络故障")
+    monkeypatch.setattr(repo_manager, "pull", boom)
+
+    r = client.post("/api/v1/deps/sync", headers=h)
+    assert r.status_code == 400
+    assert "模拟网络故障" in r.json()["detail"]
+    with db.connect() as conn:
+        last = db.get_setting(conn, "deps_last_sync_at", "")
+        err = db.get_setting(conn, "deps_last_error", "")
+    assert last, "失败后时间戳必须持久化，否则调度器每 30 秒重试"
+    assert "模拟网络故障" in err

@@ -15,10 +15,15 @@ from test_api import make_policy
 
 
 def _prepare(client, h, csrf):
-    """造一套最小策略，并关掉自动抓取（测试里不碰外网）。"""
+    """造一套最小策略，并关掉自动抓取（测试里不碰外网）。
+
+    本文件测的是门禁本身，显式打开全局自动测速：全局关闭时的豁免语义
+    在 test_api.py::test_auto_publish_skips_gate_when_global_test_disabled 里单独锁。
+    """
     make_policy(client, csrf)
     client.put("/api/v1/settings", headers=h, json={"values": {
         "auto_fetch_sources": "0", "auto_fetch_rules": "0",
+        "auto_test_sources": "1",
     }})
 
 

@@ -42,7 +42,7 @@ def _base_url(request: Request, conn) -> str:
 
 def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
              record=None, data: bytes | None = None,
-             allow_304: bool = True) -> Response:
+             allow_304: bool = True, record_304=None) -> Response:
     headers = dict(YAML_HEADERS)
     quoted = f'"{etag}"'
     headers["ETag"] = quoted
@@ -54,6 +54,11 @@ def _respond(request: Request, text: str, etag: str, extra: dict | None = None,
         if_none = request.headers.get("if-none-match", "")
         candidates = [t.strip() for t in if_none.split(",") if t.strip()]
         if quoted in candidates or etag in candidates or "*" in candidates:
+            # 304 也是一次有效到达：设备确实来核对过。不记录它会让一直
+            # 304 的客户端在面板上显示"很久没拉取"（2026-11-18 修复，
+            # 与 2026-11-04"配置卡住但面板全绿"是同一族观察盲区，反向误报）。
+            if record_304:
+                record_304()
             return Response(status_code=304, headers=headers)
     if record:
         record()
@@ -201,10 +206,23 @@ def device_config(token: str, request: Request, preview: bool = False,
                      db.now(), device["id"]),
                 )
 
+        def record_304():
+            # 304 = 配置本体没有变化，但设备确实来核对过：
+            # 只刷新 last_pull_at 与计数，不刷 last_config_at
+            #（"配置时效"的语义是配置本体下发的时刻）。
+            with db.tx() as wconn:
+                wconn.execute(
+                    "UPDATE devices SET last_pull_at=?, last_pull_ip=?, "
+                    "pull_count=pull_count+1 WHERE id=?",
+                    (db.now(), request.client.host if request.client else "",
+                     device["id"]),
+                )
+
         if preview:
             # 不记拉取；也不做 304 协商（预览正文与客户端下发正文不同）
             return _respond(request, text, etag, extra, allow_304=False)
-        return _respond(request, text, etag, extra, record=record)
+        return _respond(request, text, etag, extra, record=record,
+                        record_304=record_304)
 
 
 @router.api_route("/{token}/res/provider/{name}", methods=["GET", "HEAD"])
@@ -248,7 +266,7 @@ def provider_resource(token: str, name: str, request: Request):
                     (db.now(), request.client.host if request.client else "", device["id"]),
                 )
 
-        return _respond(request, text, etag, record=record)
+        return _respond(request, text, etag, record=record, record_304=record)
 
 
 @router.api_route("/{token}/res/rule/{name}", methods=["GET", "HEAD"])
@@ -264,10 +282,15 @@ def rule_resource(token: str, name: str, request: Request):
         etag = (rp["sha256"] or security.sha256_text(rp["content"]))[:32]
 
         def record():
-            conn.execute(
-                "UPDATE devices SET last_pull_at=?, last_pull_ip=? WHERE id=?",
-                (db.now(), request.client.host if request.client else "", device["id"]),
-            )
+            # 拉取计数必须用独立短事务：原来直接用外层只读连接 UPDATE，
+            # 延迟事务升级写锁会立刻 SQLITE_BUSY（读连接没有 busy_timeout
+            # 保护），设备随机拿到 500 且计数丢失（2026-11-18 修复，
+            # 与 provider_resource 的短事务模式对齐）。
+            with db.tx() as wconn:
+                wconn.execute(
+                    "UPDATE devices SET last_pull_at=?, last_pull_ip=? WHERE id=?",
+                    (db.now(), request.client.host if request.client else "", device["id"]),
+                )
 
         if (rp["format"] or "yaml") in config.BINARY_FORMATS:
             # MRS：库里存的是 base64，下发时还原成原始字节
@@ -276,4 +299,4 @@ def rule_resource(token: str, name: str, request: Request):
             except (ValueError, TypeError):
                 data = rp["content"].encode()
             return _respond(request, "", etag, record=record, data=data)
-        return _respond(request, rp["content"], etag, record=record)
+        return _respond(request, rp["content"], etag, record=record, record_304=record)

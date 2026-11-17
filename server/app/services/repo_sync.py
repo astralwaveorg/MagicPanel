@@ -159,46 +159,69 @@ def _sha(text: str) -> str:
     return security.sha256_text(text)
 
 
-def run_sync(conn, operator: str, automatic: bool = False) -> dict:
+def run_sync(operator: str, automatic: bool = False) -> dict:
     """一轮完整同步：拉取 → 同步内容 → 记录状态。
 
     定时任务只 pull 不 push（D7）；冲突时停在冲突态，不推。
+
+    事务纪律（2026-11-18 修复）：git 网络动作（pull/push，单条最长 120s）
+    **绝不占用数据库写事务**——原来整个同步包在 db.tx() 里，网络期间占住
+    全站写锁，登录等写接口全部排队（与 updater/scheduler 的"网络请求在
+    事务外"纪律相悖）。这里只在两处开短写事务：同步内容落库、状态记录。
+
+    失败路径的状态记录同样用独立短事务持久化：原来 _record 之后 raise，
+    异常把外层事务一起回滚，deps_last_sync_at 永不推进，调度器每个
+    tick（30s）都判定到期，网络故障期间变成"每 30 秒一次持锁 git pull"
+    的无限重试风暴。
     """
     summary = {"pulled": False, "created": 0, "updated": 0, "skipped": 0,
                "errors": [], "conflicts": [], "pushed": False}
     try:
         with repo_manager.operation("同步仓库"):
-            repo_manager.pull(conn)
+            if not repo_manager.is_cloned():
+                raise SyncError("仓库还没有克隆")
+            with db.connect() as conn:
+                cfg = repo_manager.get_settings(conn)
+                repo_manager.pull(conn)
             summary["pulled"] = True
-            conflicts = repo_manager.conflicted_files(conn)
+            with db.connect() as conn:
+                conflicts = repo_manager.conflicted_files(conn)
             if conflicts:
                 summary["conflicts"] = conflicts
                 summary["errors"].append(f"存在 {len(conflicts)} 个冲突文件，需要手工解决")
-                _record(conn, summary)
+                _record(summary)
                 return summary
-            result = sync_content(conn, operator)
+            with db.tx() as conn:
+                result = sync_content(conn, operator)
             summary["created"] = result["created"]
             summary["updated"] = result["updated"]
             summary["skipped"] = result["skipped"]
             summary["errors"].extend(result["errors"])
-            cfg = repo_manager.get_settings(conn)
-            if cfg["auto_push"] and repo_manager.dirty_files(conn):
-                repo_manager.commit_all(conn, "面板自动提交：同步仓库内容")
-                repo_manager.push(conn)
+            with db.connect() as conn:
+                cfg = repo_manager.get_settings(conn)
+                dirty = repo_manager.dirty_files(conn)
+            if cfg["auto_push"] and dirty:
+                with db.connect() as conn:
+                    repo_manager.commit_all(conn, "面板自动提交：同步仓库内容")
+                    repo_manager.push(conn)
                 summary["pushed"] = True
-            _record(conn, summary)
+            _record(summary)
     except repo_manager.BusyError:
         # 别的 Git 操作正在跑（用户在提交，或另一次同步）：本次跳过，不算故障
         logger.info("依赖仓库正被其它操作占用，本次同步跳过")
         return summary
     except Exception as exc:
         summary["errors"].append(str(exc))
-        _record(conn, summary, error=str(exc))
+        # 独立短事务：失败也要把时间戳落库，否则调度器每 30 秒重试一次
+        _record(summary, error=str(exc))
         raise
     return summary
 
 
-def _record(conn, summary: dict, error: str = "") -> None:
-    db.set_setting(conn, "deps_last_sync_at", db.now())
-    db.set_setting(conn, "deps_last_error", error)
-    db.set_setting(conn, "deps_last_commit", repo_manager.head_commit(conn))
+def _record(summary: dict, error: str = "") -> None:
+    with db.connect() as conn:
+        commit = repo_manager.head_commit(conn)
+    with db.tx() as conn:
+        db.set_setting(conn, "deps_last_sync_at", db.now())
+        db.set_setting(conn, "deps_last_error", error)
+        db.set_setting(conn, "deps_last_commit", commit)

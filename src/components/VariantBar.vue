@@ -14,7 +14,7 @@
     </div>
     <el-button @click="manageDialog = true">方案管理</el-button>
 
-    <el-dialog v-model="manageDialog" title="分流方案管理" width="min(680px, 94vw)"
+    <el-dialog :close-on-click-modal="false" v-model="manageDialog" title="分流方案管理" width="min(680px, 94vw)"
                @open="loadVariants">
       <p class="mp-dialog-desc">
         每个方案是一套完整、独立的策略组与分流规则；构建时每个方案各出一套产物，
@@ -66,7 +66,7 @@
         <el-table-column label="内容" width="120">
           <template #default="{ row }">{{ row.groups_count }} 组 · {{ row.rules_count }} 规则</template>
         </el-table-column>
-        <el-table-column label="操作" width="230">
+        <el-table-column label="操作" width="200">
           <template #default="{ row, $index }">
             <div class="op-grid">
               <el-button size="small" @click="move(row, -1)"
@@ -81,7 +81,7 @@
       </el-table>
     </el-dialog>
 
-    <el-dialog v-model="editDialog" title="编辑方案" width="min(480px, 94vw)" append-to-body>
+    <el-dialog :close-on-click-modal="false" v-model="editDialog" title="编辑方案" width="min(480px, 94vw)" append-to-body>
       <el-form label-position="top">
         <el-form-item label="方案名称">
           <el-input v-model="editForm.name" maxlength="32"

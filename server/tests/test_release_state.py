@@ -491,3 +491,28 @@ def test_release_state_shape(client):
     }
     assert entry["verify_status"] == "success"
     assert entry["status"] == "TESTING"
+
+
+def test_offline_idempotent_retry_same_key_replays(client):
+    """offline 用与其它动作一致的幂等键公式：同 key 重试返回同结果而不是冲突。
+
+    2026-11-18 修复：offline 落库的 payload_sha 原来是响应体摘要，
+    接口层用 build+reason+status 摘要做重放比对，同 key 重试必然 409。
+    """
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    build = _create_build(client, h)
+    client.post(f"/api/v1/builds/{build['id']}/publish-to-test", headers=h,
+                json={"reason": "上测试"})
+    revision = _release_state(client)["release_revisions"]["testing"]
+    body = {"reason": "有问题，先撤", "expected_release_revision": revision,
+            "idempotency_key": "offline-test-key-001"}
+    r = client.post(f"/api/v1/builds/{build['id']}/offline", headers=h, json=body)
+    assert r.status_code == 200, r.text
+    first = r.json()
+    assert _row(client, build["id"])["status"] == "OFFLINE"
+    # 同 key 重试：返回同一结果（重放），不再报 release_idempotency_conflict
+    r2 = client.post(f"/api/v1/builds/{build['id']}/offline", headers=h, json=body)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["build_id"] == first["build_id"]

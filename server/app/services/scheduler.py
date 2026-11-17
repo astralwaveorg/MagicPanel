@@ -222,8 +222,8 @@ def _run_deps_sync(summary: dict, now: datetime, force: bool = False) -> None:
     if not force and last and not _due(last, hours * 3600, now):
         return
     try:
-        with db.tx() as conn:
-            result = repo_sync.run_sync(conn, AUTO_OPERATOR, automatic=True)
+        # run_sync 自己管理事务：git 网络动作在事务外，落库与状态记录用短事务
+        result = repo_sync.run_sync(AUTO_OPERATOR, automatic=True)
         summary["deps_created"] += result["created"]
         summary["deps_updated"] += result["updated"]
         for message in result["errors"]:
@@ -234,11 +234,16 @@ def _run_deps_sync(summary: dict, now: datetime, force: bool = False) -> None:
         logger.warning("依赖仓库同步失败：%s", exc)
 
 
-def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str], list[str]]:
+def _publish_tests_ready(conn, global_tests: bool = True) -> tuple[bool, list[str], list[str], list[str]]:
     """自动构建发布前检查：启用“只分发可用节点”的来源必须有新鲜且可用的测速结果。
 
     关闭了自动测速（auto_test=0）或测速间隔为 0 的来源不会产生测速结果，
     不参与门禁，否则会永久阻塞自动构建发布。
+
+    **全局自动测速关闭（auto_test_sources=0）同样豁免**（2026-11-18 修复）：
+    updater 抓取成功后会清空测速结果、指望调度器"同一轮补测"，但补测被全局
+    开关挡住——开着"只分发可用节点"的来源每次抓取后"测速早于最近抓取"
+    永远成立，自动发布静默卡死（与 2026-11-04 空来源卡门禁同族）。
 
     **一个节点都没有的来源同样不参与门禁**：它还没抓到内容、进不了产物，
     也就不会违反“只分发可用节点”的承诺。留着它会把自动构建发布永久卡住
@@ -266,6 +271,10 @@ def _publish_tests_ready(conn) -> tuple[bool, list[str], list[str], list[str]]:
         "WHERE enabled=1 AND filter_unavailable=1 AND auto_test=1 "
         "AND test_interval>0 AND node_count>0 ORDER BY id",
     )
+    if not global_tests:
+        # 全局测速关闭时这些来源永远等不到新鲜结果：并入豁免清单，不参与门禁
+        skipped.extend(row["name"] for row in rows)
+        return True, [], skipped, empty
     missing: list[str] = []
     for row in rows:
         try:
@@ -319,6 +328,12 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
 
     构建过程可能跑几十秒的 mihomo -t，绝不能占着写锁，
     否则设备拉取配置会因 database is locked 失败。
+
+    发布失败退避（2026-11-18 修复）：原来失败后把 auto_build_last_attempt
+    清空，下一 tick（30s）就重建一个完整构建再试——发布持续失败时每
+    30 秒新建构建+产物落盘，构建记录互相驱逐。现在按指数退避重试
+    （10 分钟起步、每次翻倍、上限为构建间隔），且重试时复用最近一个
+    同策略的「已构建」版本，不再重复建构建。
     """
     with db.connect() as conn:
         if not _enabled(conn, "auto_build_enabled", "1"):
@@ -327,13 +342,23 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
         env = _setting(conn, "auto_publish_env", "production")
         if env not in ("production", "testing"):
             env = "production"
+        # 自动测速的全局开关决定门禁语义：关着时"只分发可用节点"的来源
+        # 等不到新鲜测速结果，不能拿它们卡门禁（否则自动发布永久卡死）
+        global_tests = _enabled(conn, "auto_test_sources", "0")
         _require_manual_actor(conn, actor_user_id, publish_env=env if publish else None)
         try:
             interval_hours = max(1, int(_setting(conn, "auto_build_interval_hours", "1")))
         except ValueError:
             interval_hours = 1
+        interval_seconds = interval_hours * 3600
+        # 发布失败后的指数退避：退避期内调度 tick 不建不发布。
+        # 手动 force 运行不受限：用户明确要求重试，且复用机制保证不重复建构建。
+        backoff_until = _parse_time(_setting(conn, "auto_build_backoff_until", ""))
+        if not force and backoff_until and now < backoff_until:
+            summary["build"] = "上次发布失败，退避等待重试"
+            return
         last_attempt = _setting(conn, "auto_build_last_attempt", "")
-        if not force and not _due(last_attempt, interval_hours * 3600, now):
+        if not force and not _due(last_attempt, interval_seconds, now):
             return
         try:
             snapshot, policy_sha = builds.current_policy(conn)
@@ -351,10 +376,25 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
         if released and released["policy_sha"] == policy_sha:
             with db.tx() as wconn:
                 db.set_setting(wconn, "auto_build_last_attempt", db.now())
+                _clear_publish_backoff(wconn)
             summary["build"] = "策略未变化，跳过"
             return
+        # 复用最近一个同策略的「已构建」版本：发布失败重试时不重复建构建；
+        # 关闭自动发布时存在同策略已构建版本也不再每小时产出新构建
+        reuse = db.one(
+            conn,
+            "SELECT id, results FROM builds WHERE policy_sha=? "
+            "AND status=? AND verify_status='success' ORDER BY id DESC LIMIT 1",
+            (policy_sha, releases.BuildStatus.BUILT.value),
+        )
+        if not publish and reuse:
+            with db.tx() as wconn:
+                db.set_setting(wconn, "auto_build_last_attempt", db.now())
+            summary["build"] = f"已有同策略的已构建版本 #{reuse['id']}，跳过"
+            return
         if publish:
-            ready, missing, skipped, empty = _publish_tests_ready(conn)
+            ready, missing, skipped, empty = _publish_tests_ready(
+                conn, global_tests=global_tests)
             notes = []
             if skipped:
                 notes.append("未开启测速的来源不参与门禁：" + "、".join(skipped))
@@ -375,23 +415,29 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
                 return
     with db.tx() as conn:
         db.set_setting(conn, "auto_build_last_attempt", db.now())
-    try:
-        build_id, status = builds.create_build(
-            AUTO_OPERATOR, note="自动构建", snapshot=snapshot,
-            policy_sha=policy_sha,
-        )
-    except builds.BuildError as exc:
-        summary["build_error"] = str(exc)
-        return
-    except Exception as exc:
-        summary["build_error"] = f"自动构建失败：{exc}"
-        logger.exception("自动构建失败")
-        return
-    summary["build"] = {"id": build_id, "status": status}
+    if reuse:
+        build_id = int(reuse["id"])
+        status = "success"
+        summary["build"] = {"id": build_id, "status": "reuse"}
+    else:
+        try:
+            build_id, status = builds.create_build(
+                AUTO_OPERATOR, note="自动构建", snapshot=snapshot,
+                policy_sha=policy_sha,
+            )
+        except builds.BuildError as exc:
+            summary["build_error"] = str(exc)
+            return
+        except Exception as exc:
+            summary["build_error"] = f"自动构建失败：{exc}"
+            logger.exception("自动构建失败")
+            return
+        summary["build"] = {"id": build_id, "status": status}
     if status != "success" or not publish:
         return
     # 核心缺失时 Mihomo 产物只做了静态校验：自动构建发布到生产环境前必须确认
     # 每个 Mihomo 目标都过了核心校验，否则先降级为候选，等核心就位再发。
+    # 复用的构建同样要过这道闸（结果以构建行里记录的为准）。
     try:
         with db.connect() as conn:
             row = db.one(conn, "SELECT results FROM builds WHERE id=?", (build_id,))
@@ -416,11 +462,35 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
     except Exception as exc:
         summary["build_error"] = f"自动构建发布失败：{exc}"
         logger.exception("自动构建发布失败")
-        # 不推进 auto_build_last_attempt：发布没成功，下一轮要继续尝试
+        # 指数退避：10 分钟起步、每次翻倍、上限为构建间隔。
+        # 不再把 last_attempt 清空——那会让每个 tick 都重建构建。
+        try:
+            fail_count = int(_setting_from_db("auto_build_fail_count", "0") or 0) + 1
+        except ValueError:
+            fail_count = 1
+        backoff = min(interval_seconds, 600 * 2 ** (fail_count - 1))
         with db.tx() as wconn:
-            db.set_setting(wconn, "auto_build_last_attempt", "")
+            db.set_setting(wconn, "auto_build_last_attempt", db.now())
+            db.set_setting(wconn, "auto_build_fail_count", str(fail_count))
+            db.set_setting(
+                wconn, "auto_build_backoff_until",
+                (now + timedelta(seconds=backoff)).isoformat(timespec="seconds"))
+        summary["retry_backoff_seconds"] = backoff
         return
+    # 发布成功：清除退避状态
+    with db.tx() as wconn:
+        _clear_publish_backoff(wconn)
     summary["published"] = env
+
+
+def _clear_publish_backoff(conn) -> None:
+    db.set_setting(conn, "auto_build_fail_count", "0")
+    db.set_setting(conn, "auto_build_backoff_until", "")
+
+
+def _setting_from_db(key: str, default: str = "") -> str:
+    with db.connect() as conn:
+        return db.get_setting(conn, key, default)
 
 
 def _run_retention(summary: dict) -> None:

@@ -148,10 +148,12 @@
             </el-table-column>
             <el-table-column v-if="!readonly" label="操作" width="150" align="right">
               <template #default="{ row }">
-                <el-button v-if="!row.isDict" size="small" text type="primary"
-                           @click="openKeyEditor(row)">编辑</el-button>
-                <el-button v-if="!row.isDict && row.overridden" size="small" text
-                           @click="revertKey(row)" type="warning">恢复继承</el-button>
+                <div class="op-grid">
+                  <el-button v-if="!row.isDict" size="small" text type="primary"
+                             @click="openKeyEditor(row)">编辑</el-button>
+                  <el-button v-if="!row.isDict && row.overridden" size="small" text
+                             @click="revertKey(row)" type="warning">恢复继承</el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -228,7 +230,7 @@
       </section>
     </div>
 
-    <el-dialog v-model="keyDialog" title="编辑参数" width="min(620px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="keyDialog" title="编辑参数" width="min(620px, 94vw)">
       <div class="mp-key-head">
         <span class="mono mp-key-path">{{ keyForm.path }}</span>
         <el-tag size="small" effect="plain"
@@ -275,7 +277,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="addDialog" title="新增参数" width="min(560px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="addDialog" title="新增参数" width="min(560px, 94vw)">
       <p class="mp-dialog-desc">
         在任意节点下新增参数。路径用点号分隔，如 <span class="mono">dns.nameserver</span>；
         顶层参数直接写名字。值按 YAML 解析：<span class="mono">true</span>、<span class="mono">123</span>、
@@ -296,7 +298,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="sourceVisible" title="源码编辑" width="min(760px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="sourceVisible" title="源码编辑" width="min(760px, 94vw)">
       <p class="mp-dialog-desc">
         直接编辑当前层级的 YAML 源码，必须是合法 YAML，层级用缩进表达。
         应用后回到编辑器，确认无误再点「保存」；保存时仍会做键级校验
@@ -309,7 +311,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="previewVisible" title="产物预览" width="min(920px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="previewVisible" title="产物预览" width="min(920px, 94vw)">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <el-select v-model="previewPlatform" size="small" style="width:200px" @change="doPreview">
           <el-option v-for="p in platforms" :key="p.value" :value="p.value" :label="p.label" />
@@ -737,6 +739,17 @@ watch(scopePicker, (key) => {
 })
 
 async function select(scope) {
+  // 切换作用域前检查未保存改动：直接覆盖会静默丢掉整层编辑（2026-11-18）
+  if (changedCount.value > 0 && current.value
+      && (!scope || scopeKey(scope) !== scopeKey(current.value))) {
+    const ok = await confirmBox(
+      `当前层还有 ${changedCount.value} 个未保存的改动，切换后将丢失。确定切换？`,
+      '未保存的改动', { type: 'warning', confirmButtonText: '丢弃并切换' })
+    if (!ok) {
+      scopePicker.value = scopeKey(current.value)
+      return
+    }
+  }
   const previous = current.value
   current.value = scope
   try {
@@ -846,6 +859,22 @@ async function reset() {
 async function apply() {
   if (!current.value) return
   if (isBuiltin.value && !(await confirmBuiltinChange())) return
+  // 「保存并构建发布」会直接发布到所选环境：发生产影响所有设备，
+  // 必须二次确认（2026-11-18 修复：原来只有 builtin 层有确认，
+  // 设备/平台层点击后直接构建并发生产）
+  if (env.value === 'production') {
+    const s = current.value
+    const scopeName = s.kind === 'builtin'
+      ? '引擎默认配置'
+      : (s.kind === 'general'
+        ? `引擎平台「${s.name || s.label || s.platform}」`
+        : `设备「${s.name || s.label || ''}」`)
+    const ok = await confirmBox(
+      `将构建新产物并直接发布到生产环境，影响所有生产设备。${scopeName}的基础配置会随之生效。确定继续？`,
+      '发布到生产环境',
+      { type: 'warning', confirmButtonText: '构建并发布生产' })
+    if (!ok) return
+  }
   applying.value = true
   try {
     const s = current.value

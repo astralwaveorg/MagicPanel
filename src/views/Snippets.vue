@@ -58,7 +58,7 @@
           <el-table-column label="更新时间" min-width="130">
             <template #default="{ row }">{{ fmtTime(row.updated_at) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="250" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
                 <el-button size="small" @click="preview(row)" type="info" plain>内容</el-button>
@@ -74,7 +74,7 @@
       <Pager :page="page" :limit="limit" :total="total" @change="onPageChange" />
     </div>
 
-    <el-dialog v-model="dialog" :title="editing ? '编辑模块' : '添加模块'"
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑模块' : '添加模块'"
                width="min(640px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-form-item v-if="form.source === 'inline'" label="常用预设（选好后点“填入”，内容可继续修改）">
@@ -185,7 +185,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="previewDialog" :title="`内容 · ${previewName}`"
+    <el-dialog :close-on-click-modal="false" v-model="previewDialog" :title="`内容 · ${previewName}`"
                width="min(680px, 94vw)">
       <el-input :model-value="previewContent" type="textarea" :rows="14" readonly class="mono" />
     </el-dialog>
@@ -319,7 +319,7 @@ async function save() {
     ElMessage.success('已保存，下次构建时生效')
     await load()
   } catch (e) {
-    error.value = e.message
+    // 弹窗保存失败只提示：页面级 error 会显示成"加载失败"横幅且弹窗还开着
     ElMessage.error(e.message)
   } finally {
     saving.value = false

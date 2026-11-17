@@ -1,5 +1,5 @@
 <template>
-  <el-dialog
+  <el-dialog :close-on-click-modal="false"
     :model-value="visible"
     title="订阅地址已生成"
     width="min(560px, 94vw)"
@@ -30,6 +30,7 @@
 
 <script setup>
 import { ElMessage } from 'element-plus'
+import { copyText } from '../utils/clipboard'
 
 const props = defineProps({
   visible: Boolean,
@@ -39,10 +40,10 @@ defineEmits(['update:visible'])
 
 async function copy() {
   try {
-    await navigator.clipboard.writeText(props.url)
+    await copyText(props.url)
     ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败，请手动选择复制')
+  } catch (e) {
+    ElMessage.warning(e.message || '复制失败，请手动选择复制')
   }
 }
 </script>

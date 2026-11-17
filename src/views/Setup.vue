@@ -4,13 +4,13 @@
       <h2 style="margin:0 0 20px">初始化 MagicPanel</h2>
       <el-form :model="form" label-position="top" @submit.prevent>
         <el-form-item label="用户名">
-          <el-input v-model="form.username" autocomplete="username" placeholder="字母、数字、_ . -" />
+          <el-input v-model="form.username" autocomplete="username" placeholder="字母、数字、_ . -" @keyup.enter="submit" />
         </el-form-item>
         <el-form-item label="显示名称（可选）">
           <el-input v-model="form.display_name" />
         </el-form-item>
         <el-form-item label="密码（至少 8 位）">
-          <el-input v-model="form.password" type="password" show-password autocomplete="new-password" />
+          <el-input v-model="form.password" type="password" show-password autocomplete="new-password" @keyup.enter="submit" />
         </el-form-item>
         <el-form-item label="确认密码">
           <el-input v-model="form.confirm" type="password" show-password autocomplete="new-password"

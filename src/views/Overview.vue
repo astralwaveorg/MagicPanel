@@ -72,7 +72,7 @@
         <div class="stat-label">出口观测</div>
         <div class="stat-direct">
           <StatusDot :kind="directKind" :text="directTitle" />
-          <el-button size="small" type="primary" :loading="directLoading" @click="observeNow">
+          <el-button size="small" type="success" :loading="directLoading" @click="observeNow">
             {{ direct.path_evidence ? '重新检测' : '发起检测' }}
           </el-button>
         </div>
@@ -93,7 +93,7 @@
         <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击重试。</div>
       </div>
 
-      <div class="mp-card stat-tile">
+      <div class="mp-card stat-tile" v-loading="!data.release_state">
         <div class="stat-label">发布指针</div>
         <div class="stat-main mono">
           R{{ data.release_state?.release_revisions?.production ?? '—' }}
@@ -369,6 +369,11 @@ onUnmounted(() => { overviewRequest.cancel(); directRequest.cancel() })
 .avail-meta { font-size: 12px; color: var(--mp-text-secondary); white-space: nowrap; }
 @media (max-width: 1024px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* 全站窄屏断点 768px：以下单列，避免长 mono 文本被挤压 */
+@media (max-width: 768px) {
+  .stat-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .stat-grid { grid-template-columns: 1fr; }

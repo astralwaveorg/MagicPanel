@@ -116,6 +116,9 @@ SETTINGS_DEFAULTS = {
     "auto_publish_enabled": "1",
     "auto_publish_env": "production",   # production / testing
     "auto_build_last_attempt": "",      # 内部：上次自动构建检查时间
+    "auto_build_fail_count": "0",       # 内部：发布连续失败次数（指数退避）
+    "auto_build_backoff_until": "",     # 内部：发布退避截止时间（ISO）
+    "auto_fetch_snippets": "1",         # 抓取远程拓展模块（原漏播种，设置页看不到开关却默认开启）
     # 自主维护：依赖文件库（单仓库）
     "deps_enabled": "0",
     "deps_url": "git@github.com:astralwaveorg/magic-sets.git",

@@ -1046,13 +1046,14 @@ def test_target_reorder(client):
 
 
 def test_auto_publish_waits_for_filtered_speed_test(client, monkeypatch):
-    """启用只分发可用节点的来源没有测速结果时，不自动构建/发布。"""
+    """全局自动测速开启时，启用只分发可用节点的来源没有测速结果则不自动构建/发布。"""
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
     source = client.get("/api/v1/sources").json()[0]
     client.put("/api/v1/settings", headers=h, json={"values": {
         "auto_fetch_sources": "0", "auto_fetch_rules": "0",
+        "auto_test_sources": "1",
     }})
 
     from app import db
@@ -1084,6 +1085,40 @@ def test_auto_publish_waits_for_filtered_speed_test(client, monkeypatch):
     assert client.get("/api/v1/releases").json() == []
     state = client.get("/api/v1/release-state").json()
     assert state["production"] is None
+
+
+def test_auto_publish_skips_gate_when_global_test_disabled(client):
+    """全局自动测速关闭（默认）时，「只分发可用节点」的来源不参与门禁。
+
+    2026-11-18 修复：抓取成功会清空测速结果，而补测被全局开关挡住，
+    若这些来源参与门禁，自动发布就永久卡死（与 2026-11-04 空来源卡门禁同族）。
+    """
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    source = client.get("/api/v1/sources").json()[0]
+    client.put("/api/v1/settings", headers=h, json={"values": {
+        "auto_fetch_sources": "0", "auto_fetch_rules": "0",
+        # auto_test_sources 保持默认 "0"
+    }})
+
+    from app import db
+    from app.services import scheduler
+
+    with db.tx() as conn:
+        conn.execute(
+            "UPDATE sources SET filter_unavailable=1, node_count=1, "
+            "test_results='{}', tested_at=NULL, test_attempt_at=NULL WHERE id=?",
+            (source["id"],),
+        )
+    summary = scheduler.run_once(force=True)
+    # 不再等测速：构建照常进行，豁免来源出现在说明里
+    assert summary["build"] and summary["build"]["status"] == "success"
+    assert "不参与门禁" in summary.get("skipped", "")
+    # 缺核心：候选可以生成，但不得自动改变生产指针
+    assert summary["published"] == ""
+    assert "未做核心校验" in summary["build_error"]
+    assert client.get("/api/v1/releases").json() == []
 
 
 def test_auto_fetch_switch_skips_scheduled_fetch(client, monkeypatch):
@@ -1576,6 +1611,11 @@ def test_scheduler_records_gate_reason_once(client):
     client.post("/api/v1/sources", headers=h, json={
         "name": "门禁机场", "url": "https://airport.example.com/sub",
         "filter_unavailable": True, "auto_fetch": False})
+    # 门禁只在全局自动测速开启时生效：全局关闭时来源豁免（见
+    # test_auto_publish_skips_gate_when_global_test_disabled）
+    client.put("/api/v1/settings", headers=h, json={"values": {
+        "auto_test_sources": "1",
+    }})
     # 有节点但没有测速结果 → 门禁要拦住（没有节点的来源不参与门禁，
     # 见 tests/test_publish_gate.py）
     from app import db
@@ -3016,3 +3056,82 @@ def test_target_engine_change_rekeys_device_configs(client):
     r = client.get("/api/v1/base-config", headers=h, params={
         "engine": "mihomo", "platform": "macos", "device_id": dev["id"]})
     assert r.json()["overlay"] == {"log-level": "debug"}, r.json()["overlay"]
+
+
+def test_overview_reports_pending_apply_and_automation_errors(client):
+    """概览健康结论要包含"保存成功但未生效"与"自动任务最近失败"。
+
+    2026-11-18 修复：这类静默失效原来只落在 automation_runs / settings，
+    不主动进概览就永远看不见。
+    """
+    csrf = setup_admin(client)
+    make_policy(client, csrf)
+    h = auth_headers(csrf)
+    from app import db
+    # 还没有生产版本：不报待生效
+    data = client.get("/api/v1/overview", headers=h).json()
+    assert not any("尚未进入当前生产版本" in i for i in data["health"]["issues"])
+
+    # 发布一个构建到生产（Stash 目标无需核心校验）
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert build["verify_status"] == "success"
+    client.post(f"/api/v1/builds/{build['id']}/publish-to-test", headers=h,
+                json={"reason": "上测试"})
+    client.post(f"/api/v1/builds/{build['id']}/publish-to-prod", headers=h,
+                json={"reason": "上生产"})
+
+    # 保存基础配置（不 apply）：改动时间晚于生产构建 → 待生效。
+    # db.now() 是秒级 ISO：把构建时间拨回过去，避免同秒边界漏报。
+    with db.tx() as conn:
+        conn.execute("UPDATE builds SET created_at='2000-01-01T00:00:00+08:00' "
+                     "WHERE status='PRODUCTION'")
+    cfg = client.get("/api/v1/base-config?engine=stash").json()
+    r = client.put("/api/v1/base-config?engine=stash", headers=h, json={
+        "content": cfg["content"] + "\nexternal-ui: ui\n",
+        "updated_at": cfg.get("updated_at") or ""})
+    assert r.status_code == 200, r.text
+
+    # 自动任务失败记录
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO automation_runs(at, trigger, summary) VALUES(?,?,?)",
+            (db.now(), "scheduled",
+             json.dumps({"build_error": "模拟自动失败"}, ensure_ascii=False)))
+
+    data = client.get("/api/v1/overview", headers=h).json()
+    issues = data["health"]["issues"]
+    assert any("尚未进入当前生产版本" in i for i in issues), issues
+    assert any("自动任务最近失败" in i and "模拟自动失败" in i for i in issues), issues
+
+
+def test_apply_rolls_back_config_when_build_fails(client, monkeypatch):
+    """apply 构建失败时补偿回滚：差异层已保存也必须恢复，不能"显示已保存但未生效"。"""
+    from app import db
+    from app.routers import builds as builds_router
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    cfg = client.get("/api/v1/base-config?engine=stash").json()
+    assert cfg["overlay"] == {}
+
+    def boom(*a, **k):
+        raise builds_router.BuildError("模拟构建失败")
+    monkeypatch.setattr(builds_router, "create_build", boom)
+    # 提交一个与基线不同的生效值（external-ui 键保证差异非空）：
+    # 若没有补偿回滚，差异层会留下 apply 想写的内容
+    r = client.post("/api/v1/base-config/apply", headers=h, json={
+        "engine": "stash", "content": cfg["content"] + "\nexternal-ui: ui\n",
+        "env": "testing"})
+    assert r.status_code == 400
+    assert "已回滚" in r.json()["detail"]
+    # 差异层恢复为保存前的内容（该层在初始化播种时即为空差异 "{}"）
+    cfg2 = client.get("/api/v1/base-config?engine=stash").json()
+    assert cfg2["overlay"] == {}
+    with db.connect() as conn:
+        row = db.one(conn, "SELECT * FROM base_configs WHERE engine='stash' "
+                           "AND platform='' AND device_id=0")
+    assert row is not None
+    assert "external-ui" not in (row["content"] or ""), row["content"]
+    # 审计留痕
+    audits = client.get("/api/v1/audit?keyword=回滚", headers=h).json()
+    assert any(a["action"] == "构建失败回滚基础配置" for a in audits["items"])

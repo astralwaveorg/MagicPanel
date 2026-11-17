@@ -1,5 +1,5 @@
 <template>
-  <el-dialog
+  <el-dialog :close-on-click-modal="false"
     :model-value="visible"
     :title="title"
     width="min(560px, 94vw)"

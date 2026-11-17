@@ -130,15 +130,17 @@ def deps_put_settings(body: SettingsBody, user=CurrentUser):
 
 @router.post("/clone")
 def deps_clone(user=CurrentUser):
-    with db.tx() as conn:
+    # git 克隆是最长 600s 的网络动作：绝不占用写事务（2026-11-18 事务纪律）。
+    # clone() 内部自带 operation("克隆仓库") 串行锁，这里只管读设置与审计。
+    with db.connect() as conn:
         try:
-            with repo_manager.operation("克隆仓库"):
-                result = repo_manager.clone(conn)
+            result = repo_manager.clone(conn)
         except repo_manager.RepoError as exc:
             _fail(exc)
+    with db.tx() as conn:
         security.audit(conn, user["username"], "克隆依赖仓库", "deps", "",
                        {"commit": result.get("commit", "")})
-        return {"ok": True, **result}
+    return {"ok": True, **result}
 
 
 @router.post("/generate-key")
@@ -233,35 +235,39 @@ def deps_delete_file(path: str = Query(...), user=CurrentUser):
 
 @router.post("/commit")
 def deps_commit(body: CommitBody, user=CurrentUser):
-    with db.tx() as conn:
-        try:
-            # 提交与推送算一整件事：中间不让别的操作插进来，
-            # 否则第二次点击会撞上"没有可提交的改动"。
-            with repo_manager.operation("提交并推送" if body.push else "提交改动"):
+    try:
+        # 提交与推送算一整件事：中间不让别的操作插进来，
+        # 否则第二次点击会撞上"没有可提交的改动"。
+        # git 动作只读设置、不写库，放在写事务之外（2026-11-18 事务纪律）。
+        with repo_manager.operation("提交并推送" if body.push else "提交改动"):
+            with db.connect() as conn:
                 commit = repo_manager.commit_all(conn, body.message or "面板提交")
                 if body.push:
                     repo_manager.push(conn)
-        except repo_manager.RepoError as exc:
-            _fail(exc)
+    except repo_manager.RepoError as exc:
+        _fail(exc)
+    with db.tx() as conn:
         security.audit(conn, user["username"], "提交仓库改动", "deps", "",
                        {"commit": commit, "push": body.push})
-        return {"ok": True, "commit": commit, "pushed": body.push}
+    return {"ok": True, "commit": commit, "pushed": body.push}
 
 
 @router.post("/sync")
 def deps_sync(user=CurrentUser):
-    """立即同步：拉取仓库并把 rule/*.yaml 同步进规则来源。"""
+    """立即同步：拉取仓库并把 rule/*.yaml 同步进规则来源。
+
+    run_sync 自己管理事务：git 在事务外，落库用短事务。
+    """
+    try:
+        result = repo_sync.run_sync(user["username"])
+    except repo_sync.SyncError as exc:
+        _fail(exc)
+    except repo_manager.RepoError as exc:
+        _fail(exc)
     with db.tx() as conn:
-        try:
-            with repo_manager.operation("同步仓库"):
-                result = repo_sync.run_sync(conn, user["username"])
-        except repo_sync.SyncError as exc:
-            _fail(exc)
-        except repo_manager.RepoError as exc:
-            _fail(exc)
         security.audit(conn, user["username"], "同步依赖仓库", "deps", "",
                        {"created": result["created"], "updated": result["updated"]})
-        return result
+    return result
 
 
 @router.get("/conflicts")
@@ -279,14 +285,16 @@ def deps_conflicts(user=RequireCapabilities('reveal')):
 
 @router.post("/conflicts/resolve")
 def deps_resolve(body: ResolveBody, user=RequireCapabilities('edit', 'reveal')):
-    with db.tx() as conn:
+    # conflict_stage 只写仓库文件与 git index，不写数据库：放在事务外
+    with db.connect() as conn:
         try:
             repo_manager.conflict_stage(conn, body.path, body.content, body.resolution)
         except repo_manager.RepoError as exc:
             _fail(exc)
+    with db.tx() as conn:
         security.audit(conn, user["username"], "解决仓库冲突", "deps", "",
                        {"path": body.path, "resolution": body.resolution})
-        return {"ok": True}
+    return {"ok": True}
 
 
 @router.get("/history")
@@ -309,14 +317,16 @@ def deps_diff(commit: str = Query(...), user=RequireCapabilities('reveal')):
 
 @router.post("/revert")
 def deps_revert(body: RevertBody, user=CurrentUser):
-    with db.tx() as conn:
+    # git revert 是本地操作但仍是子进程调用：与其它 git 动作一样不进写事务
+    with db.connect() as conn:
         try:
             commit = repo_manager.revert_commit(conn, body.commit, body.message)
         except repo_manager.RepoError as exc:
             _fail(exc)
+    with db.tx() as conn:
         security.audit(conn, user["username"], "回滚仓库提交", "deps", "",
                        {"commit": commit})
-        return {"ok": True, "commit": commit}
+    return {"ok": True, "commit": commit}
 
 
 @router.get("/migrations")

@@ -3,6 +3,9 @@
     <h2 class="mp-page-title">系统设置</h2>
     <p class="mp-page-desc">对外地址、测速核心、首页访问 PIN、账号与备份。</p>
 
+    <ErrorState v-if="loadError" :error="loadError" @retry="load" />
+
+    <template v-else>
     <div class="mp-card">
       <h3>分发设置</h3>
       <el-form label-position="top" style="max-width:560px">
@@ -74,7 +77,7 @@
           <el-button :loading="webdavSaving" @click="saveWebdav" type="primary">保存配置</el-button>
           <el-button :loading="webdavTesting" @click="testWebdav">测试连接</el-button>
           <el-button :loading="webdavUploading" @click="uploadWebdav" type="success" plain>立即备份到 WebDAV</el-button>
-          <el-button @click="loadWebdavFiles" type="info" plain>查看远端备份</el-button>
+          <el-button @click="loadWebdavFiles" :loading="webdavFilesBusy" type="info" plain>查看远端备份</el-button>
         </div>
       </el-form>
       <div v-if="webdavInfo" style="margin-top:12px;font-size:12.5px;color:var(--mp-text-secondary)">
@@ -89,12 +92,14 @@
         <el-table :data="webdavFiles" size="small">
           <el-table-column prop="name" label="远端文件" min-width="200" class="mono" />
           <el-table-column label="大小" width="110" align="right">
-            <template #default="{ row }">{{ (row.size / 1024 / 1024).toFixed(1) }} MB</template>
+            <template #default="{ row }">{{ sizeText(row.size) }}</template>
           </el-table-column>
           <el-table-column prop="modified" label="修改时间" min-width="180" />
-          <el-table-column label="操作" width="100" align="right">
+          <el-table-column label="操作" width="100" align="right" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <el-button v-if="row.name.endsWith('.db')" size="small" @click="restoreWebdav(row)" type="warning" plain>恢复</el-button>
+              <div class="op-grid">
+                <el-button v-if="row.name.endsWith('.db')" size="small" :loading="webdavBusy" @click="restoreWebdav(row)" type="warning" plain>恢复</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -200,9 +205,11 @@
           <el-table-column label="最近登录" min-width="135">
             <template #default="{ row }">{{ fmtTime(row.last_login_at) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="100">
+          <el-table-column label="操作" width="100" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <el-button size="small" :disabled="row.username === store.user?.username" @click="removeUser(row)" type="danger" plain>删除</el-button>
+              <div class="op-grid">
+                <el-button size="small" :disabled="row.username === store.user?.username" @click="removeUser(row)" type="danger" plain>删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -239,7 +246,7 @@
       </div>
     </div>
 
-    <el-dialog v-model="userDialog" title="添加维护者" width="min(480px, 94vw)">
+    <el-dialog :close-on-click-modal="false" v-model="userDialog" title="添加维护者" width="min(480px, 94vw)">
       <el-form :model="userForm" label-position="top">
         <el-form-item label="用户名">
           <el-input v-model="userForm.username" autocomplete="off" />
@@ -256,21 +263,27 @@
         <el-button :loading="savingUser" @click="addUser" type="primary">创建</el-button>
       </template>
     </el-dialog>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElLoading } from 'element-plus'
 import { api } from '../api'
 import { confirmBox } from '../confirm'
 import { store } from '../store'
-import { fmtTime } from '../format'
+import { fmtTime, sizeText } from '../format'
 import { uploadCore } from '../core'
 import UserAvatar from '../components/UserAvatar.vue'
+import ErrorState from '../components/ErrorState.vue'
 import StatusDot from '../components/StatusDot.vue'
 
 const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '', node_name_normalize: true })
+// 整页加载失败时给 ErrorState + 重试，而不是留一片空白表单
+const loadError = ref('')
+const webdavBusy = ref(false)
+const webdavFilesBusy = ref(false)
 const webdav = reactive({
   enabled: false, url: '', directory: 'magicpanel', username: '',
   password: '', password_set: false, interval_hours: 12, keep: 7,
@@ -319,7 +332,9 @@ async function load() {
     // 本人 PIN 状态以 /auth/me 为准（users 列表里也有，但这里同步当前会话）
     const me = users.value.find((x) => x.username === store.user?.username)
     if (me && store.user) store.user.has_portal_pin = me.has_portal_pin
+    loadError.value = ''
   } catch (e) {
+    loadError.value = e.message
     ElMessage.error(e.message)
   }
 }
@@ -362,7 +377,7 @@ async function savePin() {
     if (store.user) store.user.has_portal_pin = true
     portalEnabled.value = true
     portalPin.value = ''
-    ElMessage.success('Magic 概览访问 PIN 已设置')
+    ElMessage.success('Magic Panel 首页访问 PIN 已设置')
     await load()
   } catch (e) {
     ElMessage.error(e.message)
@@ -473,12 +488,15 @@ async function uploadWebdav() {
 }
 
 async function loadWebdavFiles() {
+  webdavFilesBusy.value = true
   try {
     const r = await api('/api/v1/backup/webdav/files')
     webdavFiles.value = r.files
     if (!r.files.length) ElMessage.info('远端还没有备份文件')
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    webdavFilesBusy.value = false
   }
 }
 
@@ -486,6 +504,9 @@ async function restoreWebdav(row) {
   if (!await confirmBox(
     `确定用远端快照 “${row.name}” 覆盖当前全部数据？该操作不可撤销。`,
     '从 WebDAV 恢复', { type: 'warning' })) return
+  // 覆盖全部数据的长操作：全屏 loading，防止期间误操作也防止看起来像卡死
+  webdavBusy.value = true
+  const fullscreen = ElLoading.service({ lock: true, text: '正在从远端恢复备份…' })
   try {
     const r = await api('/api/v1/backup/webdav/restore', {
       method: 'POST', body: { confirm: true, data: { file: row.name } },
@@ -495,6 +516,9 @@ async function restoreWebdav(row) {
       : '已恢复数据库')
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    fullscreen.close()
+    webdavBusy.value = false
   }
 }
 
@@ -602,6 +626,7 @@ async function importBackup(file) {
     return ElMessage.error('备份文件不是有效的 JSON')
   }
   if (!await confirmBox('恢复会覆盖当前全部数据（账号、策略、设备、构建记录），确定继续？', '恢复备份')) return
+  const fullscreen = ElLoading.service({ lock: true, text: '正在恢复备份…' })
   try {
     await api('/api/v1/backup/restore', { method: 'POST', body: { confirm: true, data } })
     ElMessage.success('已恢复，请重新登录')
@@ -609,6 +634,8 @@ async function importBackup(file) {
     location.assign('/admin/login')
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    fullscreen.close()
   }
 }
 </script>
