@@ -128,7 +128,7 @@
               <StatusDot v-else v-bind="sourceStatus(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="节点数" width="90" align="left" sortable>
+          <el-table-column prop="node_count" label="节点数" width="90" align="left" sortable>
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="下发方式" width="90" align="center">

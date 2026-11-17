@@ -518,7 +518,7 @@ async function save() {
     return ElMessage.warning('请填写匹配值（MATCH 兜底规则无需匹配值）')
   }
   if (form.pre_matching && !preMatchingTargetOk.value) {
-    return ElMessage.warning('pre-matching 的目标必须是 REJECT 字面量以外的出站（引擎限制）')
+    return ElMessage.warning('pre-matching 的目标只能是 REJECT / REJECT-DROP 字面量（引擎限制）')
   }
   saving.value = true
   try {

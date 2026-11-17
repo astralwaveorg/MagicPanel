@@ -183,9 +183,11 @@
                   title="存在未通过的校验，不能发布" style="margin-bottom:12px" />
         <!-- 发布动作区：已构建 / 已下线给「发布测试」与「一键发布」 -->
         <div v-if="detail.status === 'BUILT' || detail.status === 'OFFLINE'" class="mp-drawer-actions">
-          <el-button :disabled="detail.verify_status !== 'success'"
-                     @click="publishToTest(detail)" type="primary" plain>发布测试</el-button>
-          <el-button :disabled="detail.verify_status !== 'success'"
+          <el-button :disabled="detail.verify_status !== 'success' || !!busyId"
+                     :loading="busyId === detail.id"
+                     @click="publishToTest(detail)" type="success" plain>发布测试</el-button>
+          <el-button :disabled="detail.verify_status !== 'success' || !!busyId"
+                     :loading="busyId === detail.id"
                      @click="publishBoth(detail)" type="success" plain>一键发布</el-button>
           <span class="mp-form-hint">
             一键发布：同一事务内先置测试再置生产，发布历史只记一条
@@ -312,6 +314,7 @@ const loading = ref(false)
 const error = ref('')
 // 发布/删除操作防重入：确认框关闭后到接口返回之间按钮转圈，全局串行
 const busyId = ref(0)
+const batchDeleting = ref(false)
 const building = ref(false)
 const detail = ref(null)
 const detailVisible = ref(false)
@@ -433,7 +436,13 @@ function openDetail(build) {
   detail.value = build.results ? build : null
   detailVisible.value = true
   if (!build.results) {
-    api(`/api/v1/builds/${build.id}`).then((d) => { detail.value = d }).catch((e) => ElMessage.error(e.message))
+    api(`/api/v1/builds/${build.id}`)
+      .then((d) => { detail.value = d })
+      .catch((e) => {
+        ElMessage.error(e.message)
+        // 拉取失败关闭抽屉：否则 v-loading 永久转圈
+        detailVisible.value = false
+      })
   }
 }
 
@@ -569,12 +578,13 @@ async function remove(row) {
 }
 
 async function removeSelected() {
-  if (!selected.value.length) return
+  if (!selected.value.length || batchDeleting.value) return
   if (!await confirmBox(
     `删除选中的 ${selected.value.length} 个构建？产物文件与相关发布历史会一并删除；`
     + '已发布过的版本不能手动删除（系统会自动清理最近 20 个之外的版本），这里会列出保留原因。',
     '批量删除构建', { type: 'warning', confirmButtonText: '删除' },
   )) return
+  batchDeleting.value = true
   try {
     const ids = selected.value.map((r) => r.id)
     const resp = await api('/api/v1/builds/batch/delete', {
@@ -591,6 +601,8 @@ async function removeSelected() {
     await load()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    batchDeleting.value = false
   }
 }
 </script>

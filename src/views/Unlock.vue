@@ -94,7 +94,6 @@ const nodeOptions = ref([])
 const catalog = ref([])
 const lastRun = ref(null)
 const running = ref(false)
-const localIp = ref('')
 const browserRunning = ref(false)
 // 「你的网络」视角：浏览器端逐项探测结果与出口 IP
 const browserChecks = BROWSER_CHECKS
@@ -138,12 +137,6 @@ function browserMismatch(id) {
   // 面板出口解锁、你的设备却连不上 → 分流没把你送进代理链
   return stateOf(id) === 'unlocked'
     && ['unreachable', 'timeout'].includes(browserStateOf(id))
-}
-
-async function checkLocal() {
-  browserRunning.value = true
-  browserIp.value = await probeExitIp()
-  browserRunning.value = false
 }
 
 const categories = [

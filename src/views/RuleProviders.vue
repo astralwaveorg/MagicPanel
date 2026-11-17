@@ -118,7 +118,7 @@
               <span v-if="row.kind === 'inline'" style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="规则数" width="90" align="right" sortable>
+          <el-table-column prop="rule_count" label="规则数" width="90" align="right" sortable>
             <template #default="{ row }">{{ row.rule_count ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="摘要" min-width="130">

@@ -355,7 +355,9 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
         # 手动 force 运行不受限：用户明确要求重试，且复用机制保证不重复建构建。
         backoff_until = _parse_time(_setting(conn, "auto_build_backoff_until", ""))
         if not force and backoff_until and now < backoff_until:
-            summary["build"] = "上次发布失败，退避等待重试"
+            # 不写 summary["build"]：那个键算"有活动"，会绕过 _record_run 的
+            # 去重，退避期内每 30 秒刷一条 automation_runs（2026-11-18 红队修复）
+            summary["backoff"] = "上次发布失败，退避等待重试"
             return
         last_attempt = _setting(conn, "auto_build_last_attempt", "")
         if not force and not _due(last_attempt, interval_seconds, now):

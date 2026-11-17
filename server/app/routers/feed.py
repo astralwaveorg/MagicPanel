@@ -307,5 +307,5 @@ def rule_resource(token: str, name: str, request: Request):
                 data = base64.b64decode(rp["content"])
             except (ValueError, TypeError):
                 data = rp["content"].encode()
-            return _respond(request, "", etag, record=record, data=data)
+            return _respond(request, "", etag, record=record, record_304=record, data=data)
         return _respond(request, rp["content"], etag, record=record, record_304=record)

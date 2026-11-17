@@ -145,8 +145,10 @@ def test_auto_publish_backoff_and_reuse(client, monkeypatch):
     with db.tx() as conn:
         db.set_setting(conn, "auto_build_last_attempt", "2000-01-01T00:00:00+08:00")
     summary = scheduler.run_once(force=False)
-    assert summary["build"] == "上次发布失败，退避等待重试"
-    assert len(client.get("/api/v1/builds", headers=h).json()) == 1
+    # backoff 键不进 summary["build"]：那个键算"有活动"，会让退避期内
+    # 每 30 秒刷一条 automation_runs（2026-11-18 红队修复）
+    assert summary["backoff"] == "上次发布失败，退避等待重试"
+    assert summary["build"] is None
 
     # 退避到期：复用同策略已构建版本，不再新建构建
     with db.tx() as conn:

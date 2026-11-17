@@ -275,6 +275,7 @@ import { confirmBox } from '../confirm'
 import { store } from '../store'
 import { fmtTime, sizeText } from '../format'
 import { uploadCore } from '../core'
+import { useMobile } from '../mobile'
 import UserAvatar from '../components/UserAvatar.vue'
 import ErrorState from '../components/ErrorState.vue'
 import StatusDot from '../components/StatusDot.vue'
@@ -282,6 +283,7 @@ import StatusDot from '../components/StatusDot.vue'
 const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '', node_name_normalize: true })
 // 整页加载失败时给 ErrorState + 重试，而不是留一片空白表单
 const loadError = ref('')
+const isMobile = useMobile()
 const webdavBusy = ref(false)
 const webdavFilesBusy = ref(false)
 const webdav = reactive({

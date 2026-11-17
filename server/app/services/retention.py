@@ -128,24 +128,45 @@ def prune_probe_tables(conn) -> int:
 
 
 def prune_resource_revisions(conn) -> int:
-    """非当前引用的资源版本 BLOB 只保留最近 10 个（2026-11-18）。"""
+    """非当前引用的资源版本 BLOB 只保留最近 10 个（2026-11-18）。
+
+    被引用的行永远保留：resource_latest / build_resources 有 FK 指向
+    resource_revisions，删掉当前指针指向的行会让留存清理整个事务回滚。
+    """
     total = db.one(conn, "SELECT COUNT(*) c FROM resource_revisions")["c"]
     if total <= 10:
         return 0
-    keep = [r["blob_id"] for r in db.all_(
-        conn, "SELECT blob_id FROM resource_revisions ORDER BY created_at DESC, blob_id LIMIT 10")]
+    keep = [r["id"] for r in db.all_(
+        conn, "SELECT id FROM resource_revisions ORDER BY created_at DESC, id LIMIT 10")]
+    # 引用表 FK 指向 resource_revisions(id)：被引用的行永远保留
+    for r in db.all_(conn,
+                     "SELECT DISTINCT resource_id AS rid FROM resource_latest "
+                     "UNION SELECT DISTINCT resource_id AS rid FROM build_resources"):
+        if r["rid"] and r["rid"] not in keep:
+            keep.append(r["rid"])
     marks = ",".join("?" for _ in keep)
     cur = conn.execute(
-        f"DELETE FROM resource_revisions WHERE blob_id NOT IN ({marks})", keep)
+        f"DELETE FROM resource_revisions WHERE id NOT IN ({marks})", keep)
     return cur.rowcount or 0
 
 
 def prune_probe_tmp_dirs(data_dir) -> int:
-    """测速/校验临时目录（进程被杀时残留，finally 兜不住 SIGKILL）。"""
+    """测速/校验临时目录（进程被杀时残留，finally 兜不住 SIGKILL）。
+
+    只清 1 小时以上的残留：手动测速/构建可能正写到这些目录，
+    并发删除会让运行中的任务神秘失败（2026-11-18 红队修复）。
+    """
     import shutil
+    import time as _time
     removed = 0
+    cutoff = _time.time() - 3600
     for pattern in ("mihomo-test-*", "mp-validate-*"):
         for path in data_dir.glob(pattern):
+            try:
+                if path.stat().st_mtime > cutoff:
+                    continue
+            except OSError:
+                continue
             shutil.rmtree(path, ignore_errors=True)
             removed += 1
     return removed

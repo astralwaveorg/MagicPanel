@@ -739,9 +739,9 @@ watch(scopePicker, (key) => {
 })
 
 async function select(scope) {
-  // 切换作用域前检查未保存改动：直接覆盖会静默丢掉整层编辑（2026-11-18）
-  if (changedCount.value > 0 && current.value
-      && (!scope || scopeKey(scope) !== scopeKey(current.value))) {
+  // 切换（或重载当前层）前检查未保存改动：直接覆盖会静默丢掉整层编辑
+  // （2026-11-18；红队补充：点当前激活项也会重拉并重置 doc，同样要确认）
+  if (changedCount.value > 0 && current.value) {
     const ok = await confirmBox(
       `当前层还有 ${changedCount.value} 个未保存的改动，切换后将丢失。确定切换？`,
       '未保存的改动', { type: 'warning', confirmButtonText: '丢弃并切换' })

@@ -489,12 +489,16 @@ def apply(body: ApplyBody, user=RequireCapabilities('edit', 'reveal')):
                                              allow_dns=not plat and not dev_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
-        # 记住保存前的内容：构建失败时补偿回滚，否则"保存成功但产物还是旧值"，
-        # 界面却显示已保存（2026-11-18 修复）
+        # 记住保存前的内容与 updated_at：构建失败时补偿回滚，否则
+        # "保存成功但产物还是旧值"，界面却显示已保存（2026-11-18 修复）。
+        # updated_at 一并记录：恢复时写回原值，不然概览"待生效变更"
+        # 会把回滚动作本身误报成新改动
         prior = db.one(conn,
-                       "SELECT content FROM base_configs "
+                       "SELECT content, updated_at FROM base_configs "
                        "WHERE engine=? AND platform=? AND device_id=?",
                        (engine, plat or "", int(dev_id or 0)))
+        saved_content = base_config_service.to_yaml(
+            base_config_service.normalize(overlay))
         _save_scope(conn, engine, plat, dev_id,
                     base_config_service.to_yaml(base_config_service.normalize(overlay)),
                     user["username"])
@@ -502,12 +506,12 @@ def apply(body: ApplyBody, user=RequireCapabilities('edit', 'reveal')):
         build_id, status = builds.create_build(
             user["username"], note=body.note or "更新基础配置")
     except builds.BuildError as exc:
-        _restore_scope(engine, plat, dev_id, prior, user["username"])
+        _restore_scope(engine, plat, dev_id, prior, saved_content, user["username"])
         raise HTTPException(400, f"{exc}（本次配置改动已回滚）")
     if status != "success":
         with db.connect() as conn:
             row = builds._get_build(conn, build_id)
-        _restore_scope(engine, plat, dev_id, prior, user["username"])
+        _restore_scope(engine, plat, dev_id, prior, saved_content, user["username"])
         raise HTTPException(
             400, f"构建未通过校验：{json_results(row)}（本次配置改动已回滚）")
     try:
@@ -532,15 +536,28 @@ def json_results(row) -> str:
 
 
 def _restore_scope(engine: str, platform: str, device_id: int,
-                   prior, operator: str) -> None:
+                   prior, saved_content: str, operator: str) -> None:
     """构建失败后的补偿回滚：把该层配置恢复为保存前的内容（或整行删除）。
 
     apply 是"保存 + 构建 + 发布"的组合动作：保存与构建不在同一事务，
     构建失败时差异层已经落库。不做补偿的话界面显示"已保存"，
     生产产物却是旧值，且没有任何未生效提示。
+
+    防并发覆盖：回滚前确认该层内容仍是自己保存的那份——若别的维护者
+    在保存之后又成功改过这一层，跳过回滚（2026-11-18 红队修复）。
+    updated_at 写回保存前的原值，避免概览把回滚误报成待生效改动。
     """
     key_platform, key_device = (platform or "", int(device_id or 0))
     with db.tx() as conn:
+        current = db.one(conn,
+                         "SELECT content FROM base_configs "
+                         "WHERE engine=? AND platform=? AND device_id=?",
+                         (engine, key_platform, key_device))
+        if current is not None and (current["content"] or "") != (saved_content or ""):
+            security.audit(conn, operator, "构建失败回滚基础配置", "base_config",
+                           f"{engine}:{platform or '通用'}:{device_id or 0}",
+                           {"skipped": "该层已被其它改动覆盖，跳过回滚"})
+            return
         if prior is None:
             conn.execute(
                 "DELETE FROM base_configs WHERE engine=? AND platform=? AND device_id=?",
@@ -549,7 +566,8 @@ def _restore_scope(engine: str, platform: str, device_id: int,
             conn.execute(
                 "UPDATE base_configs SET content=?, updated_at=? "
                 "WHERE engine=? AND platform=? AND device_id=?",
-                (prior["content"], db.now(), engine, key_platform, key_device))
+                (prior["content"], prior["updated_at"] or db.now(),
+                 engine, key_platform, key_device))
         security.audit(conn, operator, "构建失败回滚基础配置", "base_config",
                        f"{engine}:{platform or '通用'}:{device_id or 0}",
                        {"restored": prior is not None})
