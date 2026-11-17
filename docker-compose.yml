@@ -27,6 +27,10 @@ services:
       https_proxy: ""
       all_proxy: ""
       ALL_PROXY: ""
+      # 生产由 OpenResty 反代对外（追加式 XFF）：必须信任它取真实客户端 IP，
+      # 否则登录/门户 PIN 限流按 127.0.0.1 共享一个桶——一个攻击者输错
+      # 5 次密码，全体维护者被锁 15 分钟（2026-11-18 红队修复）
+      MAGICPANEL_TRUST_PROXY: "1"
     volumes:
       - ./data:/app/data
     ports:
@@ -49,9 +53,6 @@ services:
     environment:
       TZ: Asia/Shanghai
       MAGICPANEL_DATA_DIR: /app/data
-      # 生产由 OpenResty 反代对外（追加式 XFF）：必须信任它取真实客户端 IP，
-      # 否则限流按 127.0.0.1 共享一个桶——一个攻击者输错 5 次密码全员登不进
-      MAGICPANEL_TRUST_PROXY: "1"
       BACKUP_KEEP: "14"
       # 备份是纯本地快照，不出网；同样挡掉 daemon 注入的代理变量
       HTTP_PROXY: ""
