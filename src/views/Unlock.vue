@@ -2,8 +2,9 @@
   <div>
     <h2 class="mp-page-title">网络体检</h2>
     <p class="mp-page-desc">
-      检测当前出口能否解锁海外 AI 与流媒体。支持「面板出口」（路由器代理链真实出口）
-      与「指定节点」（用测速核心临时起一个只含该节点的实例）两种模式；点卡片可单项重测。
+      两个视角分开看：<b>面板出口</b>（路由器代理链真实出口，含指定节点模式）检测
+      「能不能解锁」；<b>你的网络</b>（打开本页的这台设备）检测「能不能连上」。
+      两者不一致时，多半是该域名的分流没把你的设备送进代理链。点卡片可单项重测。
     </p>
 
     <div class="mp-card">
@@ -39,13 +40,20 @@
           <div class="cnt idle"><b>{{ countBy('idle') }}</b>未测</div>
         </div>
         <div class="unlock-local">
-          <h3>本机浏览器出口</h3>
-          <p v-if="localIp" class="mono">{{ localIp }}</p>
-          <p class="mp-form-hint">
-            本机检测用浏览器直连第三方查询服务，反映「你访问面板这台设备」的网络；
-            面板出口检测反映路由器代理链。两者不同时显示对比。
+          <h3>你的网络（浏览器端）</h3>
+          <p v-if="browserIp.ip" class="mono">
+            出口 {{ browserIp.ip }} {{ browserIp.country }}
           </p>
-          <el-button size="small" :loading="browserRunning" @click="checkLocal">查询本机出口</el-button>
+          <p v-if="browserDone" class="mp-form-hint">
+            可达 {{ browserCount('reachable') }} / {{ browserChecks.length }}
+            · 超时 {{ browserCount('timeout') }} · 不可达 {{ browserCount('unreachable') }}
+          </p>
+          <p class="mp-form-hint">
+            在你打开面板的这台设备上逐项探测（no-cors，不读内容，只判可达）；
+            面板出口测的是路由器代理链。两者对照才说明分流是否把你送对了路。
+          </p>
+          <el-button size="small" type="success" :loading="browserRunning"
+                     @click="runBrowserChecks">在你的网络里逐项检测</el-button>
         </div>
       </div>
     </div>
@@ -62,6 +70,10 @@
             <span class="unlock-state">{{ stateLabel(c.id) }}</span>
             <span class="unlock-sub" v-if="regionOf(c.id)">片源地区：{{ regionOf(c.id) }}</span>
             <span class="unlock-sub" v-else-if="latencyOf(c.id)">{{ latencyOf(c.id) }}ms</span>
+            <span class="unlock-sub" :class="{ 'browser-mismatch': browserMismatch(c.id) }"
+                  v-if="browserStateOf(c.id) !== 'idle'">
+              你的网络：{{ browserLabel(c.id) }}{{ browserLatency(c.id) }}
+            </span>
           </div>
         </div>
       </div>
@@ -75,6 +87,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
 import { fmtTime } from '../format'
 import { copyText } from '../utils/clipboard'
+import { BROWSER_CHECKS, probeAll, probeExitIp } from '../utils/browserChecks'
 
 const exit = ref('panel')
 const nodeOptions = ref([])
@@ -83,6 +96,55 @@ const lastRun = ref(null)
 const running = ref(false)
 const localIp = ref('')
 const browserRunning = ref(false)
+// 「你的网络」视角：浏览器端逐项探测结果与出口 IP
+const browserChecks = BROWSER_CHECKS
+const browserMap = ref({})
+const browserIp = ref({})
+const browserDone = ref(false)
+const browserChecksLoaded = ref(false)
+
+async function runBrowserChecks() {
+  if (browserRunning.value) return
+  browserRunning.value = true
+  browserChecksLoaded.value = true
+  browserDone.value = false
+  try {
+    probeExitIp().then((r) => { browserIp.value = r })
+    await probeAll(browserChecks, (r) => { browserMap.value = { ...browserMap.value, [r.id]: r } })
+    browserDone.value = true
+    ElMessage.success('你的网络检测完成')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    browserRunning.value = false
+  }
+}
+
+function browserStateOf(id) {
+  if (!browserChecksLoaded.value) return 'idle'
+  return (browserMap.value[id] || {}).state || 'idle'
+}
+function browserLabel(id) {
+  return { reachable: '可达', unreachable: '不可达', timeout: '超时' }[browserStateOf(id)] || '未测'
+}
+function browserLatency(id) {
+  const r = browserMap.value[id]
+  return r && r.latency_ms ? ` · ${r.latency_ms}ms` : ''
+}
+function browserCount(state) {
+  return Object.values(browserMap.value).filter((r) => r.state === state).length
+}
+function browserMismatch(id) {
+  // 面板出口解锁、你的设备却连不上 → 分流没把你送进代理链
+  return stateOf(id) === 'unlocked'
+    && ['unreachable', 'timeout'].includes(browserStateOf(id))
+}
+
+async function checkLocal() {
+  browserRunning.value = true
+  browserIp.value = await probeExitIp()
+  browserRunning.value = false
+}
 
 const categories = [
   { id: 'ai', name: '海外 AI' },
@@ -173,9 +235,13 @@ function runOne(id) { run([id]) }
 async function copyResults() {
   const lines = [`出口：${exitLabel.value}`, ...catalog.value.map(c => {
     const r = stateMap.value[c.id]
-    if (!r) return `${c.name}: 未测`
+    const b = browserMap.value[c.id]
+    const browser = browserChecksLoaded.value
+      ? `｜你的网络：${{ reachable: '可达', unreachable: '不可达', timeout: '超时' }[b?.state] || '未测'}`
+      : ''
+    if (!r) return `${c.name}: 未测${browser}`
     const extra = [r.region && `地区 ${r.region}`, `${r.latency_ms}ms`, r.detail].filter(Boolean).join('，')
-    return `${c.name}: ${labelFor(r.state)}${extra ? '（' + extra + '）' : ''}`
+    return `${c.name}: ${labelFor(r.state)}${extra ? '（' + extra + '）' : ''}${browser}`
   })]
   try {
     await copyText(lines.join('\n'))
@@ -185,18 +251,6 @@ async function copyResults() {
   }
 }
 
-async function checkLocal() {
-  browserRunning.value = true
-  try {
-    const r = await fetch('https://ipapi.co/json/', { cache: 'no-store' })
-    const d = await r.json()
-    localIp.value = `${d.ip} ${d.country_name || d.country || ''} ${d.org || ''}`.trim()
-  } catch {
-    localIp.value = '查询失败（本机网络或第三方服务不可用）'
-  } finally {
-    browserRunning.value = false
-  }
-}
 
 function maskIp(ip) {
   if (!ip) return ''
@@ -251,6 +305,7 @@ onMounted(async () => {
 .unlock-info b { font-size: 13px; }
 .unlock-state { font-size: 12px; color: var(--mp-text-secondary); }
 .unlock-sub { font-size: 11.5px; color: var(--mp-text-secondary); }
+.unlock-sub.browser-mismatch { color: var(--el-color-danger); font-weight: 600; }
 .unlock-cat-count { font-size: 12px; color: var(--mp-text-secondary); }
 @media (max-width: 768px) {
   .unlock-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }

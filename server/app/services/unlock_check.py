@@ -27,9 +27,11 @@ CHECK_TIMEOUT = 8.0
 # 检测目录：id 稳定（作为缓存键），icon 用 emoji（门户无外链资源依赖）
 CHECKS = [
     {"id": "gemini", "name": "Google Gemini", "icon": "✦", "category": "ai",
-     "url": "https://gemini.google.com/", "unlock": {200, 302, 301}},
+     "url": "https://gemini.google.com/", "unlock": {200, 302, 301}, "blocked": {403}},
+    # chat.openai.com 已整体迁移到 chatgpt.com（旧域 301 跟随；直接测新域，
+    # 数据中心 IP 会被 Cloudflare 403——RegionCheck 同款判定）
     {"id": "chatgpt", "name": "ChatGPT", "icon": "◎", "category": "ai",
-     "url": "https://chat.openai.com/", "unlock": {200, 302, 301}, "blocked": {403}},
+     "url": "https://chatgpt.com/", "unlock": {200, 302, 301}, "blocked": {403}},
     {"id": "claude", "name": "Claude", "icon": "✳", "category": "ai",
      "url": "https://claude.ai/", "unlock": {200, 302, 301},
      "region_marker": r"not available in your region|无法在您所在地区使用"},
