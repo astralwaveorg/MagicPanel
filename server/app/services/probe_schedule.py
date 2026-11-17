@@ -1,4 +1,7 @@
-"""auto_stable_v1 调度状态；staged 模式只建影子任务，不发真实请求。"""
+"""auto_stable_v1 调度状态；staged（默认）不入队，active 后才产出任务。"""
+import logging
+
+logger = logging.getLogger("magicpanel.probe_schedule")
 import json
 from datetime import timedelta
 from zoneinfo import ZoneInfo
@@ -18,8 +21,14 @@ def configure(conn, *, enabled: bool, timezone: str, weekday: int, hour: int,
     zone = ZoneInfo(timezone)
     if not (0 <= weekday <= 6 and 0 <= hour <= 23 and 0 <= minute <= 59 and observer_id):
         raise ValueError('probe_schedule_invalid')
-    local = now.astimezone(zone).replace(hour=hour, minute=minute, second=0, microsecond=0)
-    due = local.astimezone(now.tzinfo)
+    # weekday 此前被校验了却没用——next_due 永远落在"今天+时刻"，
+    # weekly 实际在配置当天+7 天触发（2026-11-18 修复）
+    local_now = now.astimezone(zone)
+    candidate = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    candidate += timedelta(days=(weekday - candidate.weekday()) % 7)
+    if candidate <= local_now:
+        candidate += timedelta(days=7)
+    due = candidate.astimezone(now.tzinfo)
     conn.execute('INSERT INTO probe_schedule_state(kind,observer_id,scope,next_due_at,cursor_json,revision) '
                  "VALUES('weekly',?,'global',?, ?,1) "
                  'ON CONFLICT(kind,observer_id,scope) DO UPDATE SET '
@@ -32,6 +41,11 @@ def configure(conn, *, enabled: bool, timezone: str, weekday: int, hour: int,
 def tick(conn, now) -> list[str]:
     if not conn.in_transaction:
         raise ValueError('probe_transaction_required')
+    # staged（默认）不入队：weekly 影子任务没有执行者（probe_store.claim
+    # 无调用方）、也没有留存清理，照常入队只会让 probe 三张表单调膨胀。
+    # active 后 tick 才真正产出任务（2026-11-18）
+    if db.get_setting(conn, 'v2_runtime_activation', 'staged') != 'active':
+        return []
     rows = db.all_(conn, "SELECT * FROM probe_schedule_state WHERE next_due_at<=? ORDER BY next_due_at",
                    (_iso(now),))
     created = []

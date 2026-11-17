@@ -2,6 +2,8 @@
 #   1. 仓库里不能混入凭据与运行数据（公开仓库，泄露不可逆）
 #   2. 引擎默认配置的每个键都要能在官方文档里找到出处
 #   3. 后端测试必须全绿
+#   4. 前端测试（vitest）与前端构建必须通过（2026-11-18 加入：
+#      「整页空白」类事故此前只能靠开发者本机自觉，CI 拦不住）
 name: ci
 
 on:
@@ -9,7 +11,7 @@ on:
   pull_request:
 
 jobs:
-  scan:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,3 +25,18 @@ jobs:
         run: python3 scripts/check_engine_defaults.py
       - name: 跑后端测试
         run: cd server && python3 -m pytest tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 跑前端测试（vitest，含 16 视图挂载冒烟）
+        run: npm run test:ui
+      - name: 前端构建（产物输出到 server/app/static）
+        run: npm run build

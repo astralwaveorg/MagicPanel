@@ -102,15 +102,70 @@ def mark_stale_builds_failed(conn) -> int:
     return cur.rowcount or 0
 
 
+def prune_probe_tables(conn) -> int:
+    """清理 probe 三张表：入队任务（2026-11-18 起 active 才产出）历史行
+    与结果行此前永不清理，单调膨胀。保留最近 200 条任务及其明细。"""
+    keep_ids = [r["id"] for r in db.all_(
+        conn, "SELECT id FROM probe_jobs ORDER BY created_at DESC, id DESC LIMIT 200")]
+    removed = 0
+    if keep_ids:
+        marks = ",".join("?" for _ in keep_ids)
+        item_ids = [r["id"] for r in db.all_(
+            conn, f"SELECT id FROM probe_items WHERE job_id NOT IN ({marks})", keep_ids)]
+        if item_ids:
+            marks_i = ",".join("?" for _ in item_ids)
+            removed += conn.execute(
+                f"DELETE FROM probe_results WHERE item_id IN ({marks_i})", item_ids).rowcount or 0
+            removed += conn.execute(
+                f"DELETE FROM probe_items WHERE id IN ({marks_i})", item_ids).rowcount or 0
+        removed += conn.execute(
+            f"DELETE FROM probe_jobs WHERE id NOT IN ({marks})", keep_ids).rowcount or 0
+    else:
+        removed += conn.execute("DELETE FROM probe_results").rowcount or 0
+        removed += conn.execute("DELETE FROM probe_items").rowcount or 0
+        removed += conn.execute("DELETE FROM probe_jobs").rowcount or 0
+    return removed
+
+
+def prune_resource_revisions(conn) -> int:
+    """非当前引用的资源版本 BLOB 只保留最近 10 个（2026-11-18）。"""
+    total = db.one(conn, "SELECT COUNT(*) c FROM resource_revisions")["c"]
+    if total <= 10:
+        return 0
+    keep = [r["blob_id"] for r in db.all_(
+        conn, "SELECT blob_id FROM resource_revisions ORDER BY created_at DESC, blob_id LIMIT 10")]
+    marks = ",".join("?" for _ in keep)
+    cur = conn.execute(
+        f"DELETE FROM resource_revisions WHERE blob_id NOT IN ({marks})", keep)
+    return cur.rowcount or 0
+
+
+def prune_probe_tmp_dirs(data_dir) -> int:
+    """测速/校验临时目录（进程被杀时残留，finally 兜不住 SIGKILL）。"""
+    import shutil
+    removed = 0
+    for pattern in ("mihomo-test-*", "mp-validate-*"):
+        for path in data_dir.glob(pattern):
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+    return removed
+
+
 def run_once() -> dict:
     """执行一轮清理，返回各项目删除数量。"""
+    from .. import config as _config
     with db.tx() as conn:
         stale = mark_stale_builds_failed(conn)
         artifacts, builds = prune_build_artifacts(conn)
         audits = prune_audit_log(conn)
         sessions = prune_sessions(conn)
-    if artifacts or audits or sessions or stale or builds:
-        logger.info("留存清理：构建产物 %s，构建记录 %s，审计 %s，会话 %s，僵尸构建 %s",
-                    artifacts, builds, audits, sessions, stale)
+        probe = prune_probe_tables(conn)
+        revisions = prune_resource_revisions(conn)
+    tmp_dirs = prune_probe_tmp_dirs(_config.DATA_DIR)
+    if artifacts or audits or sessions or stale or builds or probe or revisions or tmp_dirs:
+        logger.info("留存清理：构建产物 %s，构建记录 %s，审计 %s，会话 %s，僵尸构建 %s，"
+                    "probe %s，资源版本 %s，临时目录 %s",
+                    artifacts, builds, audits, sessions, stale, probe, revisions, tmp_dirs)
     return {"artifacts": artifacts, "builds": builds, "audit": audits,
-            "sessions": sessions, "stale_builds": stale}
+            "sessions": sessions, "stale_builds": stale,
+            "probe": probe, "resource_revisions": revisions, "tmp_dirs": tmp_dirs}

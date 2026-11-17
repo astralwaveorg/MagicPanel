@@ -448,6 +448,10 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
                 "以下 Mihomo 目标未做核心校验（mihomo -t），已跳过自动构建发布："
                 + "、".join(unchecked)
             )
+            # 核心缺失是持续状态：不退避的话每个 interval 都完整构建一遍再丢弃
+            # （含产物落盘），状态页的"自动任务最近失败"会持续给出这个原因
+            with db.tx() as wconn:
+                db.set_setting(wconn, "auto_build_last_attempt", db.now())
             return
     except Exception as exc:
         summary["build_error"] = f"读取构建结果失败：{exc}"

@@ -85,8 +85,13 @@ function stubFetch() {
   vi.stubGlobal('fetch', async (input) => {
     const path = typeof input === 'string' ? input : input.url
     const base = path.split('?')[0]
-    const body = Object.keys(DATA).find(k => path.startsWith(k)) ?? base
-    return new Response(JSON.stringify(DATA[body] ?? {}), { status: 200 })
+    const key = Object.keys(DATA).find(k => path.startsWith(k)) ?? base
+    if (!(key in DATA)) {
+      // 未登记的路径返回 503：漏 mock 从"静默空对象"变成显式信号——
+      // 视图必须自己兜底（?? []），否则冒烟会红（2026-11-18）
+      return new Response(JSON.stringify({ detail: 'stub 未登记该接口' }), { status: 503 })
+    }
+    return new Response(JSON.stringify(DATA[key]), { status: 200 })
   })
 }
 

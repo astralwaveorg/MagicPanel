@@ -344,15 +344,21 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
 def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                   device: dict | None = None,
                   variant: dict | None = None,
-                  normalize_nodes: bool = True) -> str:
+                  normalize_nodes: bool = True,
+                  resolved: dict | None = None) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
     传入设备 = 渲染这台设备自己的产物（含只属于它的策略组与规则）。
     variant 为空 = 默认方案；传入 {"id", "name"} = 渲染该方案的产物。
+    resolved 传入预解析好的快照：同一方案下 T×D 个产物不再各自全量
+    resolve 一次（2026-11-18 构建性能，按 variant 缓存在调用方）。
     """
-    from ..services.node_refs import resolve_snapshot
-    snapshot = resolve_snapshot(snapshot,variant_id=(variant or {}).get('id',0))
+    if resolved is None:
+        from ..services.node_refs import resolve_snapshot
+        snapshot = resolve_snapshot(snapshot, variant_id=(variant or {}).get('id', 0))
+    else:
+        snapshot = resolved
     engine = target["engine"]
     # ① 基础配置：引擎默认配置 → 引擎平台配置（引擎+平台）；设备独立配置在分发时叠加
     #

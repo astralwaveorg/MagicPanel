@@ -4,6 +4,9 @@ import json
 import re
 
 from fastapi import APIRouter, HTTPException
+import logging
+
+logger = logging.getLogger("magicpanel.sources")
 from pydantic import BaseModel, Field
 
 from .. import config, db, security
@@ -34,7 +37,7 @@ class SourceHeader(BaseModel):
 class SourceFileBody(BaseModel):
     """上传订阅文件用的表单（文件内容走 base64，避免引入 multipart 依赖）。"""
     name: str = Field(min_length=1, max_length=64, pattern=r"^[^\s/?#%&]+$")
-    content_b64: str = Field(min_length=1)
+    content_b64: str = Field(min_length=1, max_length=14_000_000)  # ≈10MB 原文的 base64；网络抓取有 FETCH_MAX_BYTES，文件导入同样要有上限
     filter: str = Field(default="", max_length=512)
     suffix: str = Field(default="", max_length=32)
     mode: str = Field(default=config.SOURCE_MODE_INLINE, max_length=16)
@@ -158,7 +161,9 @@ def _headers_of(row) -> list[dict]:
         return []
     try:
         return json.loads(security.decrypt_text(raw) or "[]")
-    except Exception:
+    except Exception as exc:
+        # 解密失败静默当空会让自定义请求头无声丢失：至少留日志线索
+        logger.warning("来源自定义请求头解密失败，按空处理：%s", exc)
         return []
 
 
@@ -277,7 +282,8 @@ def list_sources_paged(limit: int = 50, offset: int = 0, keyword: str = "",
         elif status == "none":
             where.append("COALESCE(last_status, '') IN ('never', '')")
         clause = ("WHERE " + " AND ".join(where)) if where else ""
-        data = db.paged(conn, "sources", clause, args, "id", limit, offset)
+        data = db.paged(conn, "sources", clause, args, "id", limit, offset,
+                        columns=('id, name, url_enc, enabled, filter, ua, suffix, mode, source_kind, headers_enc, interval, test_interval, client_interval, auto_fetch, auto_test, allow_private, filter_unavailable, trusted_upstream_id_key, proxy_url_enc, tested_at, test_attempt_at, last_status, last_error, last_fetched_at, last_attempt_at, node_count, sha256, fail_count, nodes_meta, test_results, created_at, updated_at'))
         data["items"] = [_public(r) for r in data["items"]]
         # 未筛选时的总数，界面好写"筛选出 N 个（共 M 个）"
         total_all = db.one(conn, "SELECT COUNT(*) AS c FROM sources")["c"]
@@ -288,7 +294,7 @@ def list_sources_paged(limit: int = 50, offset: int = 0, keyword: str = "",
 @router.get("")
 def list_sources(user=CurrentUser):
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM sources ORDER BY id")
+        rows = db.all_(conn, "SELECT id, name, url_enc, enabled, filter, ua, suffix, mode, source_kind, headers_enc, interval, test_interval, client_interval, auto_fetch, auto_test, allow_private, filter_unavailable, trusted_upstream_id_key, proxy_url_enc, tested_at, test_attempt_at, last_status, last_error, last_fetched_at, last_attempt_at, node_count, sha256, fail_count, nodes_meta, test_results, created_at, updated_at FROM sources ORDER BY id")
     return [_public(r) for r in rows]
 
 
@@ -340,8 +346,11 @@ def update_source(source_id: int, body: SourceBody, force: bool = False,
         require_capability(user, "edit")
     with db.tx() as conn:
         row = _get_or_404(conn, source_id)
-        fields = {"enabled", "filter", "ua", "suffix", "mode", "interval", "test_interval",
-                  "client_interval", "auto_fetch", "auto_test", "allow_private", "filter_unavailable"}
+        fields = {"name", "enabled", "filter", "ua", "suffix", "mode", "interval",
+                  "test_interval", "client_interval", "auto_fetch", "auto_test",
+                  "allow_private", "filter_unavailable"}
+        # name 与其它字段统一为"缺省=保持原值"（与 snippets / rule_providers 的
+        # PATCH 语义一致，2026-11-18）
         body = body.model_copy(update={key: row[key] for key in fields - body.model_fields_set})
         _check_filter(body.filter)
         _check_mode(body.mode)

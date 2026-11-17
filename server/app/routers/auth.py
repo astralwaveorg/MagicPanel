@@ -20,17 +20,19 @@ _login_failures: dict[str, list[float]] = {}
 
 
 def _client_ip(request: Request) -> str:
-    """取真实来源 IP。
+    """取真实来源 IP（限流的依据）。
 
-    反代（OpenResty 的 $proxy_add_x_forwarded_for）是**追加**式：
-    客户端可自带 X-Forwarded-For，真实 IP 落在最后一段。
-    取第一段等于让攻击者随便伪造，限流会被绕过。
+    仅当 config.TRUST_PROXY（MAGICPANEL_TRUST_PROXY=1）时才读反代注入的
+    X-Forwarded-For：OpenResty 的 $proxy_add_x_forwarded_for 是**追加**式，
+    真实 IP 落在最后一段。直连部署不信任该头——攻击者自带随机 XFF
+    就能轮换"IP"绕过登录限流（2026-11-18 修复）。
     """
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
-        if parts:
-            return parts[-1]
+    if config.TRUST_PROXY:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if parts:
+                return parts[-1]
     return request.client.host if request.client else ""
 
 

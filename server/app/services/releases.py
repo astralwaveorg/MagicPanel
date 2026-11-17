@@ -95,7 +95,10 @@ def current(conn, env):
     """取某环境当前生效的构建行，没有则返回 None。"""
     env = _env_of(env)
     status = ENV_STATUS[env].value
-    return db.one(conn, "SELECT * FROM builds WHERE status=? LIMIT 1", (status,))
+    # ORDER BY 纵深防御：正常由部分唯一索引保证单行，历史库索引缺失时
+    # 不至于随机挑"生效版本"
+    return db.one(conn, "SELECT * FROM builds WHERE status=? "
+                        "ORDER BY status_updated_at DESC LIMIT 1", (status,))
 
 
 def state_public(conn) -> dict:
@@ -216,7 +219,8 @@ def _bump_release_state(conn, env: Env, build_id) -> int:
 def _switch(conn, build, env: Env, status: BuildStatus, action: str,
             operator: str, reason: str, record: bool = True,
             expected_revision: int | None = None,
-            idempotency_key: str | None = None) -> dict:
+            idempotency_key: str | None = None,
+            bump_revision: bool = True) -> dict:
     """执行一次已验证状态切换；调用方必须已开启写事务。"""
     current_revision = revision(conn, env)
     if expected_revision is not None and expected_revision != current_revision:
@@ -258,9 +262,14 @@ def _switch(conn, build, env: Env, status: BuildStatus, action: str,
         "build", build["id"],
         {"status": status.value, "env": env.value, "action": action,
          "reason": reason, "replaced": replaced})
+    # bump_revision=False：publish_build 经测试环境的过渡步骤——
+    # 测试指针马上会被生产切换覆盖，bump 只会留下幽灵 revision 变更，
+    # 任何消费 release_state/revision 的对账都会看到无意义的 +1
     result = {"build_id": int(build["id"]), "status": status.value,
               "env": env.value, "action": action, "replaced": replaced,
-              "release_revision": _bump_release_state(conn, env, build["id"])}
+              "release_revision": (
+                  _bump_release_state(conn, env, build["id"]) if bump_revision
+                  else revision(conn, env))}
     _save_operation(conn, action, env, operator, idempotency_key, payload_sha, result)
     return result
 
@@ -274,7 +283,8 @@ def _check_artifacts(build) -> None:
 
 def publish_to_testing(conn, build, operator: str, reason: str = "",
                        record: bool = True, expected_revision: int | None = None,
-                       idempotency_key: str | None = None) -> dict:
+                       idempotency_key: str | None = None,
+                       bump_revision: bool = True) -> dict:
     """发布至测试环境：BUILT / OFFLINE → TESTING。"""
     status = build["status"]
     if status == BuildStatus.TESTING.value:
@@ -286,7 +296,8 @@ def publish_to_testing(conn, build, operator: str, reason: str = "",
     return _switch(conn, build, Env.TESTING, BuildStatus.TESTING,
                    ACTION_PUBLISH, operator, reason, record=record,
                    expected_revision=expected_revision,
-                   idempotency_key=idempotency_key)
+                   idempotency_key=idempotency_key,
+                   bump_revision=bump_revision)
 
 
 def publish_to_production(conn, build, operator: str, reason: str = "",
@@ -362,7 +373,9 @@ def publish_build(conn, build, operator: str, reason: str = "",
         return publish_to_testing(conn, build, operator, reason,
             expected_revision=(expected_revisions or {}).get("testing"),
             idempotency_key=(idempotency_keys or {}).get("testing"))
-    publish_to_testing(conn, build, operator, reason, record=False)
+    # 过渡步骤不 bump：一步发布只算一次发布（注释见 _switch）
+    publish_to_testing(conn, build, operator, reason, record=False,
+                       bump_revision=False)
     fresh = db.one(conn, "SELECT * FROM builds WHERE id=?", (build["id"],))
     return publish_to_production(conn, fresh, operator, reason,
         expected_revision=(expected_revisions or {}).get("production"),

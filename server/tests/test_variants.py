@@ -104,7 +104,7 @@ def test_copy_variant_and_scope_filtering(client):
         "type": "DOMAIN-SUFFIX", "value": "x.com", "target": "节点选择",
         "variant_id": 0}).status_code == 400
     # 不存在的方案 400
-    assert client.get("/api/v1/groups?variant=999", headers=h).status_code == 400
+    assert client.get("/api/v1/groups?variant=999", headers=h).status_code == 404
 
 
 def _publish(client, h, bid):
@@ -191,7 +191,7 @@ def test_variant_delete_guard_and_removal(client):
     left = client.get("/api/v1/variants", headers=h).json()
     assert all(x["id"] != v2["id"] for x in left)
     assert client.get(f"/api/v1/groups?variant={v2['id']}",
-                      headers=h).status_code == 400
+                      headers=h).status_code == 404
 
 
 def test_disabled_variant_excluded_from_new_build(client):

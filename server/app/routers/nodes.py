@@ -193,9 +193,10 @@ def patch_configuration(node_uid: str, body: ConfigurationBody, user=RequireCapa
             params = {**merged['public_params'], **merged['secrets']}
             local_nodes.normalize_params(protocol, params)
             local_nodes.parse_extra(merged['extra_yaml'])
-        except ValueError:
+        except ValueError as exc:
             raise HTTPException(400, {'code':'catalog_material_invalid',
-                'message':'节点配置无效，当前数据未修改','request_id':uuid4().hex}) from None
+                'message':f'节点配置无效，当前数据未修改：{exc or "请检查字段及必填凭据"}',
+                'request_id':uuid4().hex}) from None
         conn.execute('UPDATE local_nodes SET protocol=?,server=?,port=?,params_enc=?,extra_yaml_enc=?,updated_at=? WHERE id=?',
                      (protocol, body.server or local['server'],
                       body.port or local['port'], security.encrypt_text(json.dumps(params, ensure_ascii=False)),

@@ -96,6 +96,7 @@ def _rule_public(row) -> dict:
 def _check_group(body: GroupBody) -> None:
     if 'proxies' in body.model_fields_set and 'members_v2' in body.model_fields_set:
         raise HTTPException(400, '不能同时提交 proxies 与 members_v2')
+    _check_group_url(body.url)
     if body.type not in config.GROUP_TYPES:
         raise HTTPException(400, f"策略组类型仅支持：{'、'.join(sorted(config.GROUP_TYPES))}")
     if body.strategy:
@@ -138,7 +139,8 @@ def _check_variant(conn, vid: int) -> int:
     """方案归属校验：variant_id 必须真实存在，写错会被静默隔离在空列表里。"""
     vid = int(vid or 0)
     if not db.one(conn, "SELECT id FROM variants WHERE id=?", (vid,)):
-        raise HTTPException(400, f"分流方案不存在：#{vid}")
+        # 与 variants.py 的 _get_variant 一致：引用不存在的资源是 404
+        raise HTTPException(404, f"分流方案不存在：#{vid}")
     return vid
 
 
@@ -225,9 +227,14 @@ def create_group(body: GroupBody, user=CurrentUser):
             if body.type == "relay":
                 body.use_sources = []
             local_ids = _check_local_ids(conn, body.local_nodes)
-            # 排序键按方案分段：新组排在所属方案当前末尾，不碰其它方案的 sort 值
-            sort = (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM proxy_groups "
-                                 "WHERE variant_id=?", (body.variant_id,)))["s"]
+            # 排序键按方案分段：新组排在所属方案当前末尾，不碰其它方案的 sort 值。
+            # 段基线 = variant_id * VARIANT_SORT_STRIDE（config 约定 84-88 行）：
+            # 复制方案走这个偏移，新建也必须走，否则跨方案 sort 交错会让
+            # reorder 消歧把别的方案行一起重编号（2026-11-18 修复）
+            stride = int(body.variant_id or 0) * config.VARIANT_SORT_STRIDE
+            sort = (db.one(conn, "SELECT MAX(COALESCE(MAX(sort), ?), ?) + 1 AS s "
+                                 "FROM proxy_groups WHERE variant_id=?",
+                           (stride, stride, body.variant_id,)))["s"]
             now = db.now()
             cur = db.insert_unique(conn,
                 "INSERT INTO proxy_groups(variant_id, name, type, sort, hidden, filter, "
@@ -344,13 +351,14 @@ def delete_group(gid: int, force: bool = False, user=CurrentUser):
 # ---- 批量操作 ----
 
 class BatchIds(BaseModel):
-    ids: list[int] = Field(default_factory=list)
+    # 与 sources / rule_providers 的批量模型统一（min=1, max=200）
+    ids: list[int] = Field(min_length=1, max_length=200)
     force: bool = False
 
 
 class BatchGroupPatch(BaseModel):
     """批量修改策略组。字段为 null 表示不修改；空列表表示清空。"""
-    ids: list[int] = Field(default_factory=list)
+    ids: list[int] = Field(min_length=1, max_length=200)
     proxies: list[str] | None = None
     targets: list[str] | None = None
     local_nodes: list[int] | None = None
@@ -681,6 +689,7 @@ def _check_rule(body: RuleBody) -> None:
         raise HTTPException(400, f"不支持的规则类型：{body.type}")
     if body.type not in ("MATCH", "FINAL") and not body.value:
         raise HTTPException(400, "该规则类型需要填写匹配值")
+    _check_rule_value(body.type, body.value)
     if body.no_resolve and body.type not in config.NO_RESOLVE_TYPES:
         raise HTTPException(400, "no-resolve 仅适用于 IP 类规则（IP-CIDR / GEOIP / RULE-SET 等）")
     if body.no_track and body.type in ("MATCH", "FINAL"):
@@ -695,6 +704,41 @@ def _check_rule(body: RuleBody) -> None:
             raise HTTPException(
                 400, f"pre-matching 不能用于 {body.type} 规则"
                      "（官方只允许连接建立前就能判断的类型）")
+
+
+def _check_group_url(url: str) -> None:
+    """测速 URL 只允许 http(s)：写坏会原样进产物 yaml。"""
+    url = (url or "").strip()
+    if url and not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "测速地址必须以 http(s):// 开头")
+
+
+def _check_rule_value(rtype: str, value: str) -> None:
+    """按规则类型前置校验匹配值格式（2026-11-18）。
+
+    原来只查长度：IP/端口/正则写什么都存得进去，错误要到构建期
+    validate_policy 才暴露，用户定位不到是哪条规则写坏了。
+    只拦结构性错误（一眼能判定的），不追语义完备性。
+    """
+    value = (value or "").strip()
+    if not value or rtype in ("MATCH", "FINAL"):
+        return
+    if rtype in ("IP-CIDR", "IP-CIDR6", "SRC-IP-CIDR"):
+        import ipaddress
+        try:
+            ipaddress.ip_network(value, strict=False)
+        except ValueError:
+            raise HTTPException(
+                400, f"{rtype} 的匹配值必须是合法 CIDR 网段，收到：{value}")
+    elif rtype == "DST-PORT":
+        if not value.isdigit() or not 1 <= int(value) <= 65535:
+            raise HTTPException(
+                400, f"DST-PORT 的匹配值必须是 1-65535 的端口，收到：{value}")
+    elif rtype in ("DOMAIN-REGEX", "URL-REGEX"):
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise HTTPException(400, f"{rtype} 的正则不合法：{exc}")
 
 
 def _check_device_names(conn, names: list[str]) -> None:
@@ -752,15 +796,16 @@ def _rule_insert_sort(conn, is_fallback: bool,
     排序键是整数：兜底与其前驱之间有空位就占用空位；没有空位时，
     把兜底及之后的规则整体后移一位，空出来的位置就是新的排序位。
     """
+    stride = int(variant_id or 0) * config.VARIANT_SORT_STRIDE
     if is_fallback:
-        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules "
-                             "WHERE variant_id=?", (variant_id,)))["s"]
+        return (db.one(conn, "SELECT MAX(COALESCE(MAX(sort), ?), ?) + 1 AS s FROM rules "
+                             "WHERE variant_id=?", (stride, stride, variant_id,)))["s"]
     fb = db.one(conn, "SELECT MIN(sort) AS s FROM rules "
                      "WHERE type IN ('MATCH','FINAL') AND variant_id=?", (variant_id,))
     pos = fb["s"] if fb else None
     if pos is None:
-        return (db.one(conn, "SELECT COALESCE(MAX(sort),0)+1 AS s FROM rules "
-                             "WHERE variant_id=?", (variant_id,)))["s"]
+        return (db.one(conn, "SELECT MAX(COALESCE(MAX(sort), ?), ?) + 1 AS s FROM rules "
+                             "WHERE variant_id=?", (stride, stride, variant_id,)))["s"]
     prev = db.one(conn, "SELECT MAX(sort) AS s FROM rules "
                         "WHERE sort < ? AND variant_id=?", (pos, variant_id))
     if prev and prev["s"] is not None and pos - prev["s"] >= 2:
@@ -880,32 +925,31 @@ def create_rule(body: RuleBody, user=CurrentUser):
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from None
     _check_rule(body)
-    try:
-        with db.tx() as conn:
-            _check_variant(conn, body.variant_id)
-            _check_rule_refs(conn, body)
-            body.targets = _collapse_if_complete(conn, body.targets, "targets")
-            body.devices = _collapse_if_complete(conn, body.devices, "devices")
-            sort = _rule_insert_sort(conn, body.type in FALLBACK_TYPES,
-                                     body.variant_id)
-            now = db.now()
-            cur = db.insert_unique(conn,
-                "INSERT INTO rules(variant_id, sort, type, value, target, enabled, "
-                "note, no_resolve, no_track, pre_matching, targets, devices, "
-                "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (body.variant_id, sort, body.type, body.value, body.target,
-                 int(body.enabled),
-                 body.note, int(body.no_resolve), int(body.no_track),
-                 int(body.pre_matching),
-                 json.dumps(body.targets, ensure_ascii=False),
-                 json.dumps(body.devices, ensure_ascii=False), now, now),
-            )
-            security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
-                           {"rule": f"{body.type},{body.value},{body.target}"})
-            _canonical_rule(conn, cur.lastrowid, body.target_ref_v2)
-            row = _get_rule(conn, cur.lastrowid)
-    except db.UniqueViolation:
-        raise HTTPException(409, "同名规则已存在")
+    with db.tx() as conn:
+        _check_variant(conn, body.variant_id)
+        _check_rule_refs(conn, body)
+        body.targets = _collapse_if_complete(conn, body.targets, "targets")
+        body.devices = _collapse_if_complete(conn, body.devices, "devices")
+        sort = _rule_insert_sort(conn, body.type in FALLBACK_TYPES,
+                                 body.variant_id)
+        now = db.now()
+        cur = db.insert_unique(conn,
+            "INSERT INTO rules(variant_id, sort, type, value, target, enabled, "
+            "note, no_resolve, no_track, pre_matching, targets, devices, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (body.variant_id, sort, body.type, body.value, body.target,
+             int(body.enabled),
+             body.note, int(body.no_resolve), int(body.no_track),
+             int(body.pre_matching),
+             json.dumps(body.targets, ensure_ascii=False),
+             json.dumps(body.devices, ensure_ascii=False), now, now),
+        )
+        security.audit(conn, user["username"], "新增分流规则", "rule", cur.lastrowid,
+                       {"rule": f"{body.type},{body.value},{body.target}"})
+        _canonical_rule(conn, cur.lastrowid, body.target_ref_v2)
+        row = _get_rule(conn, cur.lastrowid)
+    # （2026-11-18）rules 表没有唯一约束，这里不会抛 UniqueViolation；
+    # 冲突场景由 _check_rule_refs 的 400 引用校验给出更准确的文案。
 
     return _rule_public(row)
 

@@ -39,7 +39,8 @@ class BatchIds(BaseModel):
 
 class BatchInterval(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=200)
-    interval: int = Field(ge=600, le=604800)
+    # 与节点来源的批量改间隔对齐：可空 + 至少一个（调用方校验）
+    interval: int | None = Field(default=None, ge=600, le=604800)
 
 
 def _public(row) -> dict:
@@ -168,7 +169,8 @@ def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
                       "AND rules.value = rule_providers.name)")
             where.append(clause if referenced == "1" else f"NOT {clause}")
         clause = ("WHERE " + " AND ".join(where)) if where else ""
-        data = db.paged(conn, "rule_providers", clause, args, "id", limit, offset)
+        data = db.paged(conn, "rule_providers", clause, args, "id", limit, offset,
+                        columns=("id, name, behavior, format, kind, url, repo_path, interval, client_interval, enabled, last_status, last_error, last_fetched_at, last_attempt_at, rule_count, sha256, proxy_url_enc, created_at, updated_at, CASE WHEN content != '' THEN 1 ELSE 0 END AS content"))
         data["items"] = [_public_with_refs(conn, r) for r in data["items"]]
         # 未筛选时的总数，界面好写"筛选出 N 个（共 M 个）"
         total_all = db.one(conn, "SELECT COUNT(*) AS c FROM rule_providers")["c"]
@@ -179,7 +181,7 @@ def list_providers_paged(limit: int = 50, offset: int = 0, keyword: str = "",
 @router.get("")
 def list_providers(user=CurrentUser):
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
+        rows = db.all_(conn, "SELECT id, name, behavior, format, kind, url, repo_path, interval, client_interval, enabled, last_status, last_error, last_fetched_at, last_attempt_at, rule_count, sha256, proxy_url_enc, created_at, updated_at, CASE WHEN content != '' THEN 1 ELSE 0 END AS content FROM rule_providers ORDER BY id")
         return [_public_with_refs(conn, r) for r in rows]
 
 
@@ -398,6 +400,8 @@ def delete_provider(rp_id: int, force: bool = False, user=CurrentUser):
 @router.patch("/batch")
 def batch_update_providers(body: BatchInterval, user=CurrentUser):
     """批量修改刷新间隔；内联来源的间隔同样会写入后续构建产物。"""
+    if body.interval is None:
+        raise HTTPException(400, "请提供要设置的刷新间隔")
     ids = list(dict.fromkeys(body.ids))
     with db.tx() as conn:
         rows = [r for r in (

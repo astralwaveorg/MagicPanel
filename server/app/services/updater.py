@@ -44,9 +44,11 @@ def _lock_for(key: str) -> threading.Lock:
 
 
 def _release_lock(key: str, lock: threading.Lock) -> None:
-    with _locks_guard:
-        if _locks.get(key) is lock and not lock.locked():
-            _locks.pop(key, None)
+    # 刻意不回收锁对象（2026-11-18）：原实现"未加锁即回收"存在竞态——
+    # A release 后、B（已从 dict 拿到锁对象）acquire 前把锁 pop 掉，
+    # C 再来时会创建新锁对象，与 B 对同一来源并发抓取，快照互相覆盖。
+    # 锁数量 = 来源数，量级可控，留着比回收安全。
+    del key, lock
 
 
 def _source_row(conn, source_id: int):

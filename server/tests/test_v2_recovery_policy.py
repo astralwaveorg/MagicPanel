@@ -47,18 +47,30 @@ def test_schedule_timezone_available_without_system_iana(tmp_path):
 
 
 def test_weekly_tick_and_restart_do_not_duplicate(client):
+    """staged（默认）不入队；active 后 weekly tick 入队且重启不重复。
+
+    2026-11-18 改语义：影子任务没有执行者与清理，staged 下照常入队只会
+    让 probe 三张表单调膨胀——weekly 入队从此尊重 v2_runtime_activation。
+    """
     from app import db
     from app.services import probe_schedule, probe_store
     from v2_helpers import at
     with db.tx() as conn:
         probe_schedule.configure(conn, enabled=True, timezone='Asia/Shanghai',
             weekday=0, hour=4, minute=0, observer_id='fixture', now=at(15))
-        first = probe_schedule.tick(conn, at(16))
+        # staged：不入队
+        staged = probe_schedule.tick(conn, at(16))
+        assert staged == []
+        assert probe_store.list_jobs(conn, limit=10, offset=0)['total'] == 0
+        assert probe_schedule.on_revision_changed(conn, 'n', 2, at(16)) == []
+        # active：到下一次到期时间才入队（weekday 修复后 next_due 是
+        # 下一个配置星期几 = 周一 04:00 = at(10080)），重复 tick 不重复
+        db.set_setting(conn, 'v2_runtime_activation', 'active')
+        first = probe_schedule.tick(conn, at(10085))
     with db.tx() as conn:
         second = probe_schedule.tick(conn, at(16))
         assert len(first) == 1 and second == []
         assert probe_store.list_jobs(conn, limit=10, offset=0)['total'] == 1
-        assert probe_schedule.on_revision_changed(conn, 'n', 2, at(16)) == []
 
 
 def test_probe_store_claim_finish_and_cancel(client):

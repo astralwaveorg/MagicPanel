@@ -25,6 +25,15 @@ REPO = Path(__file__).resolve().parent.parent
 
 # 疑似凭据：键名 + 足够长的值（排除占位符与常见示例）
 SECRET_PATTERNS = [
+    # 私钥块与 Fernet 密文：整块或前缀命中就是硬事故（2026-11-18 补模式）。
+    # tests/ 下的 fixture 假私钥豁免（真凭据不放测试文件是另一条纪律，
+    # 由 review 把关；扫描误报会让真信号被淹没）
+    (re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----"), "私钥块"),
+    (re.compile(r"\bgAAAA[A-Za-z0-9_\-]{40,}"), "Fernet 加密令牌"),
+    # vless/trojan/vmess/hy2 的分享链接必有 userinfo@host（ss:// 旧格式可能无 @，
+    # 但裸协议名只出现在文档里，要求 @ 避免把格式说明当凭据）
+    (re.compile(r"\b(?:vless|trojan|vmess|hysteria2?|hy2)://[^\s'\"<>/]{4,}@"), "带凭据的代理分享链接"),
+    (re.compile(r"\bss://[A-Za-z0-9+/=_\-]{12,}@[A-Za-z0-9.\-]+"), "带凭据的代理分享链接"),
     (re.compile(r"""(?i)\b(?:password|passwd|pwd|uuid|auth_str|auth-string)\s*[:=]\s*["']?([A-Za-z0-9_\-]{12,})"""), "节点/账号密码"),
     (re.compile(r"""(?i)\bws[-_]?path\s*[:=]\s*["']?([A-Za-z0-9_\-/]{12,})"""), "WS 路径（等同密码）"),
     (re.compile(r"""(?i)\?[a-z_]*key=([A-Za-z0-9_\-]{8,})"""), "订阅链接里的令牌"),
@@ -78,10 +87,22 @@ def is_data_file(path: str) -> bool:
 
 def scan(path: str, text: str) -> list[str]:
     hits: list[str] = []
+    is_test_fixture = "/tests/" in path or path.startswith("tests/")
+    # 扫描器自测文件里必须有完整凭据样例（它就是测这个的），整文件豁免
+    is_scanner_self_test = path.endswith("test_secrets_scanner.py")
+
     for pattern, label in SECRET_PATTERNS:
         for m in pattern.finditer(text):
-            value = m.group(1)
+            # 块级模式（私钥等）无捕获组：命中即整个匹配
+            value = m.group(1) if m.groups() else m.group(0)
             if PLACEHOLDER.match(value) or PLACEHOLDER_HINT.search(value):
+                continue
+            # 测试文件里的 fixture（假私钥 / example.com 假链接）不算事故：
+            # 解析测试必须放 URI 素材，域名一律用 example.com 惯例
+            if is_scanner_self_test or (
+                    is_test_fixture
+                    and (("PRIVATE KEY" in value and not re.search(r"[A-Za-z0-9+/]{200,}", value))
+                         or "example.com" in value)):
                 continue
             line = text[: m.start()].count("\n") + 1
             hits.append(f"{path}:{line}  {label}（值以 {value[:4]}… 开头，共 {len(value)} 位）")

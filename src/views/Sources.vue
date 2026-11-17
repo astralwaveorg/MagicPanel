@@ -640,6 +640,7 @@ import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import { fmtTime, shortSha, sourceStatus } from '../format'
 import { copyText } from '../utils/clipboard'
+import { parseCurl } from '../utils/curlParse'
 
 const INTERVAL_PRESETS = [
   { label: '15 分钟', value: 900 },
@@ -769,25 +770,7 @@ function openCurlImport() {
   curlNote.value = ''
   curlDialog.value = true
 }
-function parseCurl(text) {
-  const urlMatch = text.match(/https?:\/\/[^\s'"]+/)
-  const url = urlMatch ? urlMatch[0].replace(/['"]+$/, '') : ''
-  const found = []
-  const re = /(?:-H|--header)\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/g
-  let m = re.exec(text)
-  while (m !== null) {
-    const raw = m[1] ?? m[2] ?? m[3] ?? ''
-    const idx = raw.indexOf(':')
-    if (idx > 0) {
-      const name = raw.slice(0, idx).trim()
-      const value = raw.slice(idx + 1).trim()
-      // Host 由地址决定，重复设置没有意义
-      if (name && !/^host$/i.test(name)) found.push({ name, value })
-    }
-    m = re.exec(text)
-  }
-  return { url, headers: found }
-}
+// parseCurl 已抽到 utils/curlParse（纯函数，src/utils/curlParse.spec.js 有单测）
 function applyCurl() {
   const parsed = parseCurl(curlText.value)
   if (!parsed.url) {

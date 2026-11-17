@@ -129,7 +129,7 @@ def deps_put_settings(body: SettingsBody, user=CurrentUser):
 
 
 @router.post("/clone")
-def deps_clone(user=CurrentUser):
+def deps_clone(user=RequireCapabilities("edit", "reveal")):
     # git 克隆是最长 600s 的网络动作：绝不占用写事务（2026-11-18 事务纪律）。
     # clone() 内部自带 operation("克隆仓库") 串行锁，这里只管读设置与审计。
     with db.connect() as conn:
@@ -234,7 +234,7 @@ def deps_delete_file(path: str = Query(...), user=CurrentUser):
 
 
 @router.post("/commit")
-def deps_commit(body: CommitBody, user=CurrentUser):
+def deps_commit(body: CommitBody, user=RequireCapabilities("edit", "reveal")):
     try:
         # 提交与推送算一整件事：中间不让别的操作插进来，
         # 否则第二次点击会撞上"没有可提交的改动"。
@@ -253,7 +253,7 @@ def deps_commit(body: CommitBody, user=CurrentUser):
 
 
 @router.post("/sync")
-def deps_sync(user=CurrentUser):
+def deps_sync(user=RequireCapabilities("edit", "reveal")):
     """立即同步：拉取仓库并把 rule/*.yaml 同步进规则来源。
 
     run_sync 自己管理事务：git 在事务外，落库用短事务。
@@ -316,7 +316,7 @@ def deps_diff(commit: str = Query(...), user=RequireCapabilities('reveal')):
 
 
 @router.post("/revert")
-def deps_revert(body: RevertBody, user=CurrentUser):
+def deps_revert(body: RevertBody, user=RequireCapabilities("edit", "reveal")):
     # git revert 是本地操作但仍是子进程调用：与其它 git 动作一样不进写事务
     with db.connect() as conn:
         try:

@@ -82,3 +82,49 @@ proxies:
     data = yaml.safe_load(out)
     names = [p["name"] for p in data["proxies"]]
     assert names == ["🇺🇸 美国 01 [神龙机场]", "🇺🇸 美国 02 [神龙机场]"]
+
+
+def test_settings_gate_controls_build_and_feed(client):
+    """系统设置 node_name_normalize 是总开关（AGENTS.md 声明，此前零测试覆盖）。
+
+    走真实 API 链：inline 来源 → 构建 → 产物，再验 feed 端 provider 下发。
+    关闭时节点名保持来源原样；开启时统一规范化（本测试的来源节点不受
+    「本地节点不动」豁免——那是另一类节点）。
+    """
+    import base64
+    import yaml
+    from conftest import auth_headers, setup_admin
+    from test_api import make_policy
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    snap_text = (
+        "proxies:\n"
+        "  - name: '香港 IEPL 01'\n"
+        "    type: ss\n    server: 192.0.2.10\n    port: 8388\n"
+        "    cipher: aes-128-gcm\n    password: 'x'\n"
+    )
+    r = client.post("/api/v1/sources/import-file", headers=h, json={
+        "name": "原始机场",
+        "content_b64": base64.b64encode(snap_text.encode()).decode(),
+        "mode": "inline",
+    })
+    assert r.status_code == 201, r.text
+
+    # 关闭开关：产物节点名原样
+    client.put("/api/v1/settings", headers=h, json={"values": {"node_name_normalize": "0"}})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    content = client.get(
+        f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
+    cfg = yaml.safe_load(content)
+    names = [p["name"] for p in cfg["proxies"]]
+    assert "香港 IEPL 01" in names, names
+
+    # 开启开关：重新构建，产物节点名规范化（带来源标签）
+    client.put("/api/v1/settings", headers=h, json={"values": {"node_name_normalize": "1"}})
+    build2 = client.post("/api/v1/builds", headers=h, json={}).json()
+    content2 = client.get(
+        f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
+    assert "香港 IEPL 01" not in content2, "开启后应规范化改名"
+    assert "[IEPL·原始机场]" in content2, content2

@@ -95,14 +95,18 @@ def _device_build(conn, device):
     生效版本由 builds.status 唯一确定。
     """
     status = ("PRODUCTION" if device["env"] == "production" else "TESTING")
-    build = db.one(conn, "SELECT * FROM builds WHERE status=? LIMIT 1", (status,))
+    build = db.one(conn, "SELECT * FROM builds WHERE status=? "
+                         "ORDER BY status_updated_at DESC LIMIT 1", (status,))
     target = db.one(conn, "SELECT * FROM targets WHERE id=?", (device["target_id"],))
     return build, target
 
 
 @router.api_route("/{token}/config.yaml", methods=["GET", "HEAD"])
 def device_config(token: str, request: Request, preview: bool = False,
-                  variant: str = ""):
+                  variant: str = "", variant_name: str = ""):
+    # variant_name 是 variant 的无歧义别名：管理接口的 ?variant= 是方案 id，
+    # 这里是方案名，一词两义容易误用（2026-11-18）；两个参数同时给时
+    # variant_name 优先。
     # 预览模式（?preview=1）：给门户的「看配置源码」用。
     # 与正常下发**内容一致**，但三件事不同：
     #   1. 不记拉取——预览是人在看，不是客户端在更新，不能污染「配置时效」；
@@ -123,6 +127,7 @@ def device_config(token: str, request: Request, preview: bool = False,
         # 设备有专属策略组 / 规则时，构建会单独产出一份设备专属产物；
         # 没有就用该引擎平台的共享产物。方案产物同理：先找设备专属的，
         # 没有再找引擎平台的共享方案产物。
+        variant = variant_name or variant
         artifact = device["name"]
         variant_fallback = False
         if variant:
@@ -150,6 +155,7 @@ def device_config(token: str, request: Request, preview: bool = False,
         try:
             runtime_profiles.effective_profile(target, device)
         except ValueError as exc:
+            # 文案是运行档案校验的用户可读结论，可回；其余内部异常一律不回原文
             return Response(str(exc), status_code=500)
         feed_base = f"{_base_url(request, conn)}/feed/{token}"
         raw = path.read_text(encoding="utf-8")
@@ -159,8 +165,11 @@ def device_config(token: str, request: Request, preview: bool = False,
         if overlay:
             try:
                 raw = render.apply_device_overlay(raw, overlay)
-            except ValueError as exc:
-                return Response(str(exc), status_code=500)
+            except ValueError:
+                # 设备覆盖合并失败的细节属服务端内部信息：固定文案给设备端，
+                # 详情留在服务端日志；不能把栈级原文发给客户端（2026-11-18）
+                return Response("设备独立配置无法合并，请检查该设备的独立配置",
+                                status_code=500)
             # 设备覆盖从未参与构建期校验：下发前再校验一次，
             # 坏配置不能因为"只影响一台设备"就悄悄下发。
             problems = validate.validate_rendered(raw, target["engine"])

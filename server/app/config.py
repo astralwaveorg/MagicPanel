@@ -44,10 +44,12 @@ LB_STRATEGIES = {"consistent-hashing", "round-robin", "sticky-sessions"}
 RULE_TYPES = {
     "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-REGEX",
     "IP-CIDR", "IP-CIDR6", "GEOIP", "GEOSITE", "RULE-SET",
-    "SRC-IP-CIDR", "DST-PORT", "PROCESS-NAME", "MATCH",
+    "SRC-IP-CIDR", "DST-PORT", "PROCESS-NAME", "MATCH", "FINAL",
     # 逻辑规则：QUIC 兼容层用（AND,((NETWORK,udp),(DST-PORT,443)),REJECT，
     # 排在 MATCH 前：只拦"本来就要走代理"的 QUIC，国内直连流量不受影响）
     "AND",
+    # FINAL 是 MATCH 的旧写法（2026-11-18 收进白名单）：编译器校验、
+    # 兜底排序与历史数据都按兜底处理它，创建接口却拒绝，属"幽灵类型"
 }
 # 各引擎官方支持的规则类型（超出白名单的类型在产物里会导致客户端加载失败）
 # 依据：Stash https://stash.wiki/rules/rule-types ；
@@ -95,6 +97,11 @@ FETCH_TIMEOUT = 20.0
 SESSION_TTL_HOURS = 168
 # 内置调度器：单进程后台任务，随应用启动；测试环境用 MAGICPANEL_SCHEDULER=0 关闭
 SCHEDULER_AUTOSTART = os.environ.get("MAGICPANEL_SCHEDULER", "1") != "0"
+# 是否信任反代注入的 X-Forwarded-For（2026-11-18 安全修复）。
+# 生产部署在 OpenResty 后面时设 MAGICPANEL_TRUST_PROXY=1（反代是追加式，
+# 取最后一段才是真实客户端）；直连部署保持 0——否则攻击者自带随机 XFF
+# 就能轮换"IP"绕过登录与门户 PIN 的限流。
+TRUST_PROXY = os.environ.get("MAGICPANEL_TRUST_PROXY", "0") == "1"
 SCHEDULER_TICK_SECONDS = max(10, int(os.environ.get("MAGICPANEL_SCHEDULER_TICK", "30")))
 RELEASE_HISTORY_LIMIT = 20       # 发布历史只保留最近 20 条（每日两次约 10 天）
 # 磁盘留存策略：构建产物与审计日志都会随时间增长，NAS 磁盘有限，必须有上限。

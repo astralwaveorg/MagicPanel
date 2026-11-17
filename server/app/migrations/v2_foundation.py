@@ -14,6 +14,17 @@ def migrate(conn) -> None:
     if 'trusted_upstream_id_key' not in {r[1] for r in conn.execute('PRAGMA table_info(sources)')}:
         conn.execute("ALTER TABLE sources ADD COLUMN trusted_upstream_id_key TEXT NOT NULL DEFAULT ''")
     catalog_schema(conn)
+    # 高频等值查询列的索引：抓取同步（origin_key/source_id）、改名冲突检查
+    # （emit_name）、组内本地节点引用（local_node_id）此前都是全表扫描，
+    # 节点数上千后线性退化（2026-11-18；IF NOT EXISTS 保证幂等）
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_node_catalog_source ON node_catalog(source_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_node_catalog_emit_name ON node_catalog(emit_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_node_catalog_local_node ON node_catalog(local_node_id)")
+    # rules/proxy_groups 的 (variant_id, sort) 索引刻意不加：当前规则量级
+    # 无实际瓶颈（db.paged 全程 LIMIT），而旧库备份恢复流程会用
+    # ALTER TABLE DROP COLUMN 模拟降级，SQLite 要求先删依赖索引——
+    # 为一个预防性索引给恢复链路加一个先删索引的隐藏步骤不值得
+    # （2026-11-18 记录；规则涨到千级前再补，需同步 legacy_database fixture）
     profile_schema(conn)
     from ..services import node_catalog
     node_catalog.backfill(conn)

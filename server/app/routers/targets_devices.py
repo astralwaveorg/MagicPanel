@@ -35,7 +35,9 @@ class TargetBody(BaseModel):
 
 
 class DeviceBody(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
+    # 设备名是产物文件名（<name>.yaml）：禁止空白/路径分隔符等会让产物写盘、
+    # 分发查文件静默失败的字符（2026-11-18，与节点来源的约束对齐）
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[^\s/?#%&]+$")
     platform: str
     target_id: int
     env: str = "production"
@@ -124,17 +126,26 @@ def config_age_hours(row) -> float | None:
     return round((datetime.now(timezone.utc) - when).total_seconds() / 3600, 1)
 
 
-def config_stale(conn, row) -> bool:
+def config_stale(conn, row, interval: int | None = None) -> bool:
     """设备是不是很久没拿到新配置了。
 
     客户端按 profile-update-interval 拉配置（默认 1 小时），超过 3 倍间隔
     没更新就当作卡住。设备配置卡住不更新时，界面上必须看得见——
     「文件下载成功」不等于「配置生效」。
+
+    interval 可传入预先读好的设置值：概览/门户的设备循环每台都查一次
+    settings 表是纯浪费（2026-11-18 N+1 收口）。
     """
-    try:
-        interval = int(db.get_setting(conn, "profile_update_interval", "12") or 12)
-    except (TypeError, ValueError):
-        interval = 12
+    if interval is None:
+        try:
+            interval = int(db.get_setting(conn, "profile_update_interval", "12") or 12)
+        except (TypeError, ValueError):
+            interval = 12
+    else:
+        try:
+            interval = int(interval)
+        except (TypeError, ValueError):
+            interval = 12
     age = config_age_hours(row)
     if age is None:
         return True
@@ -519,12 +530,13 @@ def update_device(did: int, body: DeviceBody, user=CurrentUser):
 # ---- 设备的批量操作与排序 ----
 
 class BatchDeviceIds(BaseModel):
-    ids: list[int] = Field(default_factory=list)
+    # 与 sources / rule_providers 的批量模型统一（min=1）；空列表原来静默 ok
+    ids: list[int] = Field(min_length=1, max_length=200)
 
 
 class BatchDevicePatch(BaseModel):
     """批量修改设备。字段为 null 表示不修改；空字符串表示清空。"""
-    ids: list[int] = Field(default_factory=list)
+    ids: list[int] = Field(min_length=1, max_length=200)
     target_id: int | None = None
     env: str | None = None
     note: str | None = None

@@ -1,6 +1,7 @@
 """应用入口：路由、静态托管与安全响应头。"""
 import asyncio
 import logging
+logger = logging.getLogger("magicpanel.main")
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -24,8 +25,8 @@ async def _retention_loop() -> None:
     while True:
         try:
             await asyncio.to_thread(retention.run_once)
-        except Exception:  # 清理失败不能影响主进程
-            pass
+        except Exception as exc:  # 清理失败不能影响主进程，但要留痕（磁盘只读等）
+            logger.warning("留存清理失败：%s", exc)
         await asyncio.sleep(6 * 3600)
 
 
@@ -60,8 +61,8 @@ async def _webdav_backup_loop() -> None:
                         due = True
                 if due:
                     await asyncio.to_thread(_webdav_backup_once)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("WebDAV 定时备份异常：%s", exc)
         await asyncio.sleep(600)
 
 
@@ -106,7 +107,7 @@ def create_app() -> FastAPI:
         db.init_db()
     except Exception as exc:  # 迁移失败不应该让容器陷入崩溃循环
         logging.getLogger("magicpanel").error(
-            "数据库初始化/迁移失败，面板以只读降级模式启动：%s", exc)
+            "数据库初始化/迁移失败，接口可能随机不可用（没有只读降级，请修复后重启）：%s", exc)
         logging.getLogger("magicpanel").error(
             "请检查 data 目录权限与数据库文件，修复后重启容器")
     app = FastAPI(

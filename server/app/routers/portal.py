@@ -9,6 +9,7 @@ import json
 import math
 import secrets
 import re
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -86,12 +87,17 @@ def _pin_hash(pin: str, salt: str | None = None) -> str:
 
 
 def _client_ip(request: Request) -> str:
-    """真实来源 IP：反代追加式 XFF 的最后一段才是真实客户端。"""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
-        if parts:
-            return parts[-1]
+    """真实来源 IP：仅 TRUST_PROXY 开启时读反代追加式 XFF 的最后一段。
+
+    直连部署不信任该头，否则门户 PIN 限流可被自带随机 XFF 绕过
+    （2026-11-18 修复，与 auth._client_ip 同一约定）。
+    """
+    if config.TRUST_PROXY:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if parts:
+                return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -330,9 +336,13 @@ def portal_data(body: PinBody, request: Request, response: Response):
                 conn, "SELECT id, name, note FROM variants WHERE enabled=1 "
                       "ORDER BY sort, id")
         ]
+        # 预取：设备循环里每台一次 targets/builds 查询是 N+1（2026-11-18 收口）
+        targets_by_id = {int(t["id"]): t for t in db.all_(conn, "SELECT * FROM targets")}
+        ok_artifacts_by_env = {env: _build_ok_artifacts(conn, env)
+                               for env in ("production", "testing")}
         devices = []
         for r in db.all_(conn, "SELECT * FROM devices ORDER BY id"):
-            target = db.one(conn, "SELECT * FROM targets WHERE id=?", (r["target_id"],))
+            target = targets_by_id.get(int(r["target_id"]))
             item = {
                 "name": r["name"],
                 "display_name": r["note"] or r["name"],
@@ -356,7 +366,7 @@ def portal_data(body: PinBody, request: Request, response: Response):
                 item["subscription_url"] = f"{base}/feed/{token}/config.yaml"
                 item["preview_url"] = f"/feed/{token}/config.yaml?preview=1"
                 item["variants"] = _available_variants(
-                    _build_ok_artifacts(conn, r["env"]), variants,
+                    ok_artifacts_by_env.get(r["env"], set()), variants,
                     item["target_name"], r["name"])
             else:
                 item["note"] = (item["note"] + "；" if item["note"] else "") \
@@ -442,15 +452,32 @@ def portal_unlock_last():
     return unlock_check.last_results("panel")
 
 
+_unlock_run_lock = threading.Lock()
+
 @router.post("/unlock/run")
 def portal_unlock_run():
-    """门户公开：触发一次面板出口的全量检测（60 秒内复用缓存）。"""
+    """门户公开：触发一次面板出口的全量检测（60 秒内复用缓存）。
+
+    进程内锁串行化（2026-11-18）：缓存挡不住并发——未认证访客并发
+    打这个端点会让面板出口持续对外发请求。
+    """
     import time as _time
     last = unlock_check.last_results("panel")
     now = int(_time.time())
     if last.get("checked_at") and now - last.get("checked_at", 0) < 60:
         return last
+    if not _unlock_run_lock.acquire(blocking=False):
+        # 已有一轮在跑：等下一轮结果，不叠加外发
+        raise HTTPException(429, "已有检测在进行中，请稍后刷新结果")
     try:
-        return unlock_check.run_checks("panel", operator="portal")
-    except Exception as exc:
-        raise HTTPException(502, f"检测执行失败：{exc}")
+        # 双重检查：排队期间可能别人已经跑完
+        last = unlock_check.last_results("panel")
+        now = int(_time.time())
+        if last.get("checked_at") and now - last.get("checked_at", 0) < 60:
+            return last
+        try:
+            return unlock_check.run_checks("panel", operator="portal")
+        except Exception as exc:
+            raise HTTPException(502, f"检测执行失败：{exc}")
+    finally:
+        _unlock_run_lock.release()

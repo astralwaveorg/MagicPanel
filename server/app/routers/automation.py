@@ -48,4 +48,7 @@ def run_automation(background_tasks: BackgroundTasks, user=RequireCapabilities('
         )
     background_tasks.add_task(
         scheduler.run_once_safe, True, "manual", user["username"], actor_user_id=user["id"])
-    return {"accepted": True, "mode": "force"}
+    # run_once 用非阻塞锁：定时轮正在跑时手动这轮会被静默跳过，
+    # 结果只藏在 status.last_result——返回体必须把这一点说清（2026-11-18）
+    return {"accepted": True, "mode": "force",
+            "note": "若上一轮任务仍在运行，本轮会被跳过（结果见自动化状态页）"}

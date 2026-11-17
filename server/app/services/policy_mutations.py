@@ -149,26 +149,40 @@ def detach_rule_provider(conn, name: str) -> list[dict]:
 
 # ---- 策略组 ----
 
+def _group_id_map(conn) -> dict[tuple[int, str], int]:
+    """(variant_id, name) → 组 id 的全表映射，一次查询。
+
+    同一事务里组表不会变：循环内逐个 db.one 查同一个名字是 O(N²)，
+    组/规则规模上百时批量删除明显变慢（2026-11-18 收口）。
+    """
+    return {
+        (int(r["variant_id"]), r["name"]): int(r["id"])
+        for r in db.all_(conn, "SELECT id, name, variant_id FROM proxy_groups")
+    }
+
 def group_members(conn, name: str, variant_id: int | None = None) -> list[dict]:
     """把该策略组当作成员的其它策略组（方案内）。"""
+    id_map = _group_id_map(conn)
     out = []
     for g in _groups(conn, variant_id):
-        target = db.one(conn, "SELECT id FROM proxy_groups WHERE name=? AND variant_id=?", (name,g['variant_id']))
+        target_id = id_map.get((int(g['variant_id']), name))
         typed = node_refs.decoded(g['members_v2'], [])
-        if ((g['members_format'] == 'typed-v2' and target and {'kind':'group','ref':str(target['id'])} in typed)
+        typed_self = {'kind':'group','ref':str(target_id)} if target_id else None
+        if ((g['members_format'] == 'typed-v2' and typed_self and typed_self in typed)
                 or (g['members_format'] != 'typed-v2' and name in json.loads(g['proxies'] or '[]'))):
             out.append({"id": g["id"], "name": g["name"], "type": "策略组",
                         "group_type": g["type"]})
     return out
 
 def rules_targeting(conn, name: str, variant_id: int | None = None) -> list[dict]:
+    id_map = _group_id_map(conn)
     result = []
     for row in db.all_(conn,'SELECT * FROM rules ORDER BY sort,id'):
         if variant_id is not None and row['variant_id'] != variant_id:
             continue
-        target = db.one(conn,'SELECT id FROM proxy_groups WHERE name=? AND variant_id=?',(name,row['variant_id']))
+        target_id = id_map.get((int(row['variant_id']), name))
         ref = node_refs.decoded(row['target_ref_v2'],None)
-        matches = ref == {'kind':'group','ref':str(target['id'])} if ref is not None and target else ref is None and row['target'] == name
+        matches = ref == {'kind':'group','ref':str(target_id)} if ref is not None and target_id else ref is None and row['target'] == name
         if matches:
             result.append({'id':row['id'],'enabled':bool(row['enabled']),'type':row['type'],'value':row['value']})
     return result
@@ -179,19 +193,21 @@ def detach_group(conn, name: str, variant_id: int | None = None
 
     返回 (被改动的策略组名, 被删除的规则, 警告文案)。
     """
+    id_map = _group_id_map(conn)
     changed: list[str] = []
     warnings: list[str] = []
     for g in _groups(conn, variant_id):
         proxies = json.loads(g["proxies"] or "[]")
-        target = db.one(conn, 'SELECT id FROM proxy_groups WHERE name=? AND variant_id=?', (name,g['variant_id']))
+        target_id = id_map.get((int(g['variant_id']), name))
         members = node_refs.decoded(g['members_v2'], [])
-        typed_match = bool(target and {'kind':'group','ref':str(target['id'])} in members)
+        typed_self = {'kind':'group','ref':str(target_id)} if target_id else None
+        typed_match = bool(typed_self and typed_self in members)
         if (g['members_format'] == 'typed-v2' and not typed_match) or (g['members_format'] != 'typed-v2' and name not in proxies):
             continue
         rest = [p for p in proxies if p != name]
         if g['members_format'] == 'typed-v2':
             conn.execute('UPDATE proxy_groups SET members_v2=? WHERE id=?',
-                (json.dumps([r for r in members if r != {'kind':'group','ref':str(target['id'])}]),g['id']))
+                (json.dumps([r for r in members if r != typed_self]),g['id']))
         conn.execute(
             "UPDATE proxy_groups SET proxies=?, updated_at=? WHERE id=?",
             (json.dumps(rest, ensure_ascii=False), db.now(), g["id"]),

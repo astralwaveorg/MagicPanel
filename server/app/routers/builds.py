@@ -326,8 +326,19 @@ def create_build(operator: str, note: str = "",
     overall = "success"
     with db.connect() as _conn:
         normalize_nodes = db.get_setting(_conn, "node_name_normalize", "1") == "1"
+    # 同一方案的 resolve 只做一次：plan 按 variant 展开（T + D 个产物/方案），
+    # 原来每个产物都全量解析一遍引用图（2026-11-18 构建性能）
+    resolved_by_variant: dict[int, dict] = {}
+    from ..services.node_refs import resolve_snapshot
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
+        if vid not in resolved_by_variant:
+            try:
+                resolved_by_variant[vid] = resolve_snapshot(snapshot, variant_id=vid)
+            except Exception as exc:
+                # 解析失败按 variant 存异常对象：渲染时抛出并记入该产物结果，
+                # 与"渲染时才解析"的原行为一致（不中断其它产物）
+                resolved_by_variant[vid] = exc
         policy_errors, policy_warnings = validations.get(vid, ([], []))
         errors = list(policy_errors)
         warnings = list(policy_warnings)
@@ -336,9 +347,13 @@ def create_build(operator: str, note: str = "",
         core_checked = False
         if not policy_errors:
             try:
+                resolved = resolved_by_variant[vid]
+                if isinstance(resolved, Exception):
+                    raise resolved
                 text = render.render_target(snapshot, target, warnings,
                                             device=device, variant=variant,
-                                            normalize_nodes=normalize_nodes)
+                                            normalize_nodes=normalize_nodes,
+                                            resolved=resolved)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
@@ -408,7 +423,8 @@ def create_build_api(body: BuildBody, user=CurrentUser):
 def list_builds_paged(limit: int = 20, offset: int = 0, user=CurrentUser):
     """构建历史分页列表。"""
     with db.connect() as conn:
-        data = db.paged(conn, "builds", "", [], "id DESC", limit, offset)
+        data = db.paged(conn, "builds", "", [], "id DESC", limit, offset,
+                        columns=('id, created_at, created_by, status, verify_status, policy_sha, note, published_at, published_by, publish_reason, status_updated_at'))
     data["items"] = [_build_public(r) for r in data["items"]]
     return data
 
@@ -416,7 +432,7 @@ def list_builds_paged(limit: int = 20, offset: int = 0, user=CurrentUser):
 @router.get("/builds")
 def list_builds(user=CurrentUser):
     with db.connect() as conn:
-        rows = db.all_(conn, "SELECT * FROM builds ORDER BY id DESC LIMIT 200")
+        rows = db.all_(conn, "SELECT id, created_at, created_by, status, verify_status, policy_sha, note, published_at, published_by, publish_reason, status_updated_at FROM builds ORDER BY id DESC LIMIT 200")
     return [_build_public(r) for r in rows]
 
 
@@ -490,10 +506,13 @@ def diff_builds(bid: int, other_id: int, user=CurrentUser):
     with db.connect() as conn:
         _get_build(conn, bid)
         _get_build(conn, other_id)
-    build_dir_a = _build_dir(other_id)
-    build_dir_b = _build_dir(bid)
-    targets = sorted({p.stem for p in build_dir_a.glob("*.yaml")}
-                     | {p.stem for p in build_dir_b.glob("*.yaml")})
+    # 只读路径：读接口不该有副作用（与 artifact_file 的只读设计一致，
+    # 原来用 _build_dir 会给被清理过的构建凭空建出空目录，2026-11-18）
+    build_dir_a = config.BUILDS_DIR / str(other_id)
+    build_dir_b = config.BUILDS_DIR / str(bid)
+    a_files = {p.stem for p in build_dir_a.glob("*.yaml")} if build_dir_a.is_dir() else set()
+    b_files = {p.stem for p in build_dir_b.glob("*.yaml")} if build_dir_b.is_dir() else set()
+    targets = sorted(a_files | b_files)
     diffs = {}
     for name in targets:
         a = build_dir_a / f"{name}.yaml"

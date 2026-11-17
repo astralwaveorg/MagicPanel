@@ -386,6 +386,10 @@ def reset_base_config(engine: str = "stash", platform: str = "", device_id: int 
             conn.execute(
                 "DELETE FROM base_configs WHERE engine=? AND platform=? AND device_id=?",
                 (engine, plat or "", dev_id))
+            # 无保留键路径也补审计：否则该层恢复默认不留任何痕迹
+            security.audit(conn, user["username"], "恢复平台/设备配置",
+                           "base_config", f"{engine}:{plat or '通用'}:{dev_id or 0}",
+                           {"keys": sorted(overlay.keys())})
         docs = _all_docs(conn)
     resolved = _resolve_scope(engine, plat, dev_id, docs, profile_id)
     layers = resolved["layers"]

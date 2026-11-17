@@ -57,13 +57,15 @@ def overview(user=CurrentUser):
              "last_fetched_at": r["last_fetched_at"], "rule_count": r["rule_count"]}
             for r in db.all_(conn, "SELECT * FROM rule_providers ORDER BY id")
         ]
+        # profile_update_interval 全局一份：读一次传给每台设备的判断（N+1 收口）
+        profile_interval = db.get_setting(conn, "profile_update_interval", "12")
         devices = [
             {"id": r["id"], "name": r["name"],
              "display_name": r["note"] or r["name"],
              "platform": r["platform"],
              "env": r["env"], "last_pull_at": r["last_pull_at"],
              "last_config_at": r["last_config_at"],
-             "config_stale": targets_devices.config_stale(conn, r),
+             "config_stale": targets_devices.config_stale(conn, r, profile_interval),
              "pull_count": r["pull_count"]}
             for r in db.all_(conn, "SELECT * FROM devices ORDER BY id")
         ]
@@ -265,11 +267,14 @@ def delete_audit(body: AuditDeleteBody, user=CurrentUser):
     """
     if not body.all and not body.ids:
         raise HTTPException(400, "请选择要删除的记录")
+    if not body.all and len(body.ids) > 500:
+        # 原来静默截断到 500 条，多传的 id 无声丢弃：显式拒绝提示分批
+        raise HTTPException(400, "单次最多删除 500 条，请分批提交")
     with db.tx() as conn:
         if body.all:
             removed = conn.execute("DELETE FROM audit").rowcount
         else:
-            ids = [int(i) for i in body.ids][:500]
+            ids = [int(i) for i in body.ids]
             if not ids:
                 raise HTTPException(400, "请选择要删除的记录")
             marks = ",".join("?" * len(ids))

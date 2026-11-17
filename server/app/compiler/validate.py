@@ -87,6 +87,11 @@ def validate_policy(snapshot: dict) -> dict[int, tuple[list[str], list[str]]]:
     一个方案的数据坏了不能连累其它方案的产物（默认方案优先保住）。
     """
     from ..services.node_refs import resolve_snapshot
+    # 作用域白名单（2026-11-18）：targets/devices 里的值必须真实存在，
+    # 拼错或指向已删对象会让该组/规则静默从所有产物消失——render 的
+    # applies_to 按字面匹配，对不上就剔除，只有 warning 级提示
+    valid_targets = {t["name"] for t in snapshot.get("targets", [])}
+    valid_devices = {d["name"] for d in snapshot.get("devices", [])}
     sources = {s["name"] for s in snapshot["sources"] if s.get("enabled")}
     providers = {r["name"] for r in snapshot["rule_providers"] if r.get("enabled")}
     local_nodes = {
@@ -122,6 +127,19 @@ def validate_policy(snapshot: dict) -> dict[int, tuple[list[str], list[str]]]:
         _validate_one_variant(
             label, groups, rules, sources, providers, local_nodes,
             local_display, local_display_all, behaviors, errors, warnings)
+        for item in groups + rules:
+            for name in item.get("targets") or []:
+                if name != config.ALL_SCOPE and name not in valid_targets:
+                    errors.append(
+                        f"{label}{ '策略组' if item in groups else '规则' }"
+                        f"“{item.get('name', '')}”的适用平台“{name}”不存在"
+                        "（拼错或已删除，该对象会从所有产物消失）")
+            for name in item.get("devices") or []:
+                if name != config.ALL_SCOPE and name not in valid_devices:
+                    errors.append(
+                        f"{label}{ '策略组' if item in groups else '规则' }"
+                        f"“{item.get('name', '')}”的适用设备“{name}”不存在"
+                        "（拼错或已删除，该对象会从所有产物消失）")
         results[vid] = (errors, warnings)
     return results
 
@@ -396,6 +414,14 @@ def validate_rendered(text: str, engine: str = "") -> list[str]:
         # 内联模式下来源节点被过滤光时组会变空，这里挡住。
         if not (group.get("proxies") or group.get("use")):
             errors.append(f"策略组“{gname}”没有可用成员，客户端会拒绝加载配置")
+        # use 引用的 provider 必须真的写进了产物：scope 过滤把来源剔除时
+        # 组里的 use 会悬空，客户端加载失败（2026-11-18 补校验）
+        provider_names = set((data.get("proxy-providers") or {}).keys())
+        for use in (group.get("use") or []):
+            if isinstance(use, str) and use not in provider_names:
+                errors.append(
+                    f"策略组“{gname}”的 use 引用“{use}”不在产物的 proxy-providers 里，"
+                    "会导致客户端加载失败")
         for member in (group.get("proxies") or []):
             if not isinstance(member, str) or member in known:
                 continue

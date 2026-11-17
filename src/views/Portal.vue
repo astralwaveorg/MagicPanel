@@ -385,7 +385,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import QRCode from 'qrcode'
 import { api } from '../api'
 import { highlightYaml, lineGutter } from '../yamlHighlight'
 import { sizeText, intervalText } from '../format'
@@ -770,6 +769,7 @@ async function showQr(d) {
     return
   }
   try {
+    const QRCode = await import('qrcode')
     const qr = await QRCode.toDataURL(url, { width: 440, margin: 1 })
     if (id !== qrSequence) return
     qrCache.set(url, qr)

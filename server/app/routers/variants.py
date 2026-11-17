@@ -135,7 +135,11 @@ def _copy_variant_rows(conn, src: int, dst: int,
             members = node_refs.decoded(group['members_v2'],[])
             for ref in members:
                 if ref['kind'] == 'group':
-                    ref['ref'] = str(id_map[ref['ref']])
+                    # 源方案里可能残留指向已删组的悬空引用：跳过而不是 500
+                    # （id_map 只包含复制成功的组；悬空引用原样保留，由
+                    # 构建期校验给出可读报错）
+                    if str(ref['ref']) in {str(k) for k in id_map}:
+                        ref['ref'] = str(id_map[ref['ref']])
             conn.execute('UPDATE proxy_groups SET members_v2=? WHERE id=?',(json.dumps(members),new_id))
     rule_count = 0
     for r in db.all_(conn, "SELECT * FROM rules WHERE variant_id=? "
@@ -151,7 +155,9 @@ def _copy_variant_rows(conn, src: int, dst: int,
         ref = node_refs.decoded(r['target_ref_v2'],None)
         if ref is not None:
             if ref['kind'] == 'group':
-                ref['ref'] = str(id_map[ref['ref']])
+                # 同上：悬空引用跳过重映射，不在复制时 500
+                if str(ref['ref']) in {str(k) for k in id_map}:
+                    ref['ref'] = str(id_map[ref['ref']])
             node_refs.canonical_rule(conn,copied_rule.lastrowid,ref)
         rule_count += 1
     return group_count, rule_count

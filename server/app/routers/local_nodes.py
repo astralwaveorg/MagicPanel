@@ -66,7 +66,8 @@ def _prepare(body: LocalNodeBody) -> tuple[dict, str]:
         params = local_nodes.normalize_params(body.protocol, body.params)
         local_nodes.parse_extra(body.extra_yaml)
     except ValueError as exc:
-        raise HTTPException(400, "节点配置无效，请检查字段及必填凭据")
+        # 透传具体缺哪个字段：统一文案让用户只能盲猜（2026-11-18）
+        raise HTTPException(400, str(exc) or "节点配置无效，请检查字段及必填凭据")
     return params, body.extra_yaml
 
 
@@ -99,8 +100,8 @@ def create_node(body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal'))
         merged = node_dto.merge_configuration(current, patch)
         body.params = {**merged['public_params'], **merged['secrets']}
         body.extra_yaml = merged.get('extra_yaml', '')
-    except ValueError:
-        raise HTTPException(400, '节点配置无效，请检查字段及必填凭据')
+    except ValueError as exc:
+        raise HTTPException(400, str(exc) or '节点配置无效，请检查字段及必填凭据')
     params, extra_yaml = _prepare(body)
     marked = local_nodes.display_name(body.name.strip(), body.node_type)
     with db.tx() as conn:
@@ -146,8 +147,8 @@ def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edi
             body.params = {**merged['public_params'], **merged['secrets']}
             body.extra_yaml = merged.get('extra_yaml', '')
             params, extra_yaml = _prepare(body)
-        except ValueError:
-            raise HTTPException(400, '节点配置无效，请检查字段及必填凭据')
+        except ValueError as exc:
+            raise HTTPException(400, str(exc) or '节点配置无效，请检查字段及必填凭据')
         clash = db.one(
             conn, "SELECT id FROM local_nodes WHERE name=? AND id!=?",
             (body.name.strip(), node_id),
