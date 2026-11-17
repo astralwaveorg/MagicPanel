@@ -15,6 +15,14 @@
 [Agent 交接提示词](docs/reference/Agent-交接提示词.md)，里面写清了架构、硬性约束、
 改配置的方式和发布流程，再动手。
 
+**2026-11-17 Telegram/Claude 独立分流（向阳要求）**：新增可见 select 组 `✈️ Telegram`
+（默认 DIRECT，备选 日本软银01/02 节点直引、美国自建、默认代理）与 `🤖 Claude`
+（默认 美国自建NTT → 日本软银01/02 → 美国自动），排 sort 1/2；规则 anthropic/telegram/
+telegram-ip 移到 ai-cn 之后（sort 25-27，早于一切 AI/通讯集合）。日本自建选项用节点
+直引而不是引用「日本移动」组——该组是手机专属（设备作用域），共享产物会被渲染器剔除。
+注意：Telegram 默认直连在大陆无法连通（TG 被墙），此为向阳明确选择，客户端可手切。
+构建 #296。
+
 **2026-11-17 全视图逐页巡检**：前端 16 个视图（含 Login/Setup/Portal）全部纳入
 挂载冒烟测试（`src/v2/allViews.spec.js`，用生产数据形状做夹具）；修复 10 处
 `rows.value = resp.items` 无 undefined 兜底的整页崩溃隐患（`?? []`）。新增页面
