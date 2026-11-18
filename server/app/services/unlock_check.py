@@ -177,7 +177,9 @@ def _exit_proxy(exit_id: str) -> tuple[str | None, str]:
         for r in conn.execute(
                 "SELECT name, snapshot_enc FROM sources WHERE snapshot_enc IS NOT NULL"):
             try:
-                proxies = source_nodes.extract(security.decrypt_text(r["snapshot_enc"]))
+                # extract 收 bytes（快照密文解密出来是文本）
+                raw = security.decrypt_text(r["snapshot_enc"]) or ""
+                proxies = source_nodes.extract(raw.encode("utf-8", "replace"))
             except Exception:
                 continue
             hit = next((p for p in proxies if isinstance(p, dict) and p.get("name") == exit_id),
@@ -386,8 +388,11 @@ def detectable_nodes() -> list[str]:
     with _db_row_factory(db.connect()) as conn:
         for r in conn.execute("SELECT snapshot_enc FROM sources WHERE snapshot_enc IS NOT NULL"):
             try:
-                proxies = source_nodes.extract(security.decrypt_text(r["snapshot_enc"]))
-            except Exception:
+                # extract 收 bytes；快照密文解密出来是文本，要编码回去
+                raw = security.decrypt_text(r["snapshot_enc"]) or ""
+                proxies = source_nodes.extract(raw.encode("utf-8", "replace"))
+            except Exception as exc:
+                logger.warning("来源快照解析失败（跳过该来源的节点）：%s", exc)
                 continue
             for p in proxies:
                 if isinstance(p, dict) and p.get("name"):

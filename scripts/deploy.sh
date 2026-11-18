@@ -131,13 +131,21 @@ unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
 # 刚重启时 NAS 的外网可能还没恢复，npm/pip 拉包会失败；
 # 需要时用 DEPLOY_PROXY=http://host:port 走局域网代理。
 # 家庭网络已由路由器的 OpenClash 透明代理，通常无需设置 DEPLOY_PROXY。
+# 构建期的 docker 客户端配置：NAS 的 ~/.docker/config.json 里可能配了
+# proxies.default（曾指向 Mac mini 的 Stash 端口，停用后连不上），
+# docker 会把它自动注入 build 容器 → pip/npm 全部走那个失效代理而失败。
+# 这里用一个临时 DOCKER_CONFIG 绕开（不改 NAS 全局配置，构建完即删）：
+# 家庭网络由路由器 OpenClash 透明代理，NAS 直连即可。
 if [ -n "${DEPLOY_PROXY:-}" ]; then
   echo "使用构建代理：$DEPLOY_PROXY"
   ssh -o BatchMode=yes "$NAS_HOST" \
-    "cd '$NAS_DIR' && HTTP_PROXY='$DEPLOY_PROXY' HTTPS_PROXY='$DEPLOY_PROXY' \
-     NO_PROXY='localhost,127.0.0.1,10.0.0.0/8' docker compose up -d --build"
+    "cd '$NAS_DIR' && CFG=\$(mktemp -d) && \
+     HTTP_PROXY='$DEPLOY_PROXY' HTTPS_PROXY='$DEPLOY_PROXY' \
+     NO_PROXY='localhost,127.0.0.1,10.0.0.0/8' \
+     DOCKER_CONFIG=\$CFG docker compose up -d --build; rc=\$?; rm -rf \$CFG; exit \$rc"
 else
-  ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && docker compose up -d --build"
+  ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && CFG=\$(mktemp -d) && \
+   DOCKER_CONFIG=\$CFG docker compose up -d --build; rc=\$?; rm -rf \$CFG; exit \$rc"
 fi
 
 echo "== 等待健康检查 =="

@@ -235,3 +235,34 @@ def test_build_uses_capability_badges(client, monkeypatch):
             found = True
             break
     assert found, "产物里应出现带多维能力徽章的节点名"
+
+
+def test_detectable_nodes_reads_source_snapshots(client):
+    """候选节点要包含来源快照里的节点（机场节点才是主体）。
+
+    2026-11-18 线上缺陷：快照密文解密后是文本，而 source_nodes.extract
+    收 bytes → 抛 AttributeError 被 except 吞掉 → 候选节点只剩本地节点，
+    补测与能力徽章覆盖不到机场节点。
+    """
+    import base64
+    from app import db, security
+    from app.services import unlock_check
+    from conftest import auth_headers, setup_admin
+    from test_api import make_policy
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    snap = (
+        "proxies:\n"
+        "  - name: '机场节点A'\n    type: ss\n    server: 192.0.2.11\n"
+        "    port: 8388\n    cipher: aes-128-gcm\n    password: 'x'\n"
+        "  - name: '机场节点B'\n    type: ss\n    server: 192.0.2.12\n"
+        "    port: 8388\n    cipher: aes-128-gcm\n    password: 'x'\n"
+    )
+    with db.tx() as conn:
+        conn.execute("UPDATE sources SET snapshot_enc=? WHERE name='测试机场'",
+                     (security.encrypt_text(snap),))
+    nodes = unlock_check.detectable_nodes()
+    assert "机场节点A" in nodes, nodes[:5]
+    assert "机场节点B" in nodes
