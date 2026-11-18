@@ -163,3 +163,24 @@ def test_auto_publish_backoff_and_reuse(client, monkeypatch):
     with db.connect() as conn:
         assert db.get_setting(conn, "auto_build_fail_count", "") == "0"
         assert db.get_setting(conn, "auto_build_backoff_until", "") == ""
+
+
+def test_scheduler_survives_probe_schedule_lock_failure(client, monkeypatch):
+    """探测任务调度撞锁时，整轮 tick 不能崩——后面的构建与补测照常跑。
+
+    2026-11-18 线上实证：与其它写事务撞锁 → BEGIN IMMEDIATE 抛
+    database is locked → run_once 抛出 → 整轮 tick 中断，
+    自动构建发布与解锁补测都没机会跑（补测停在 10/199）。
+    """
+    from app import db
+    from app.services import probe_schedule, scheduler
+
+    def boom(conn, now):
+        raise db.OperationalError("database is locked")
+
+    monkeypatch.setattr(probe_schedule, "tick", boom)
+    summary = scheduler.run_once(force=True)
+    # 整轮没崩，且错误被记录下来
+    assert any("探测任务调度失败" in e for e in summary["errors"]), summary["errors"]
+    # 后面的环节照常执行（构建检查仍有结论）
+    assert "build" in summary or summary.get("build_error")

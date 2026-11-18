@@ -660,8 +660,15 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             if fetch_snippets:
                 _run_snippet_fetch(summary, now, force=force)
             _run_deps_sync(summary, now, force=force)
-            with db.tx() as probe_conn:
-                summary["probe_jobs_created"] = len(probe_schedule.tick(probe_conn, now))
+            # 探测任务调度：单点失败不能拖垮整轮（2026-11-18 线上实证：
+            # 与其它写事务撞锁时 BEGIN IMMEDIATE 抛 database is locked，
+            # 整轮 tick 崩掉 → 后面的构建发布与解锁补测都没机会跑）
+            try:
+                with db.tx() as probe_conn:
+                    summary["probe_jobs_created"] = len(probe_schedule.tick(probe_conn, now))
+            except Exception as exc:
+                summary["errors"].append(f"探测任务调度失败：{exc}")
+                logger.warning("探测任务调度失败：%s", exc)
             if test_sources:
                 _run_source_test(summary, now, force=force)
             _run_auto_build(summary, now, force=force, actor_user_id=actor_user_id)
