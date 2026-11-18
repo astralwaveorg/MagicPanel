@@ -20,6 +20,7 @@ const RUN_RESULT = {
             { id: 'netflix', status: 403, state: 'blocked', region: '', latency_ms: 600 }],
   ip: { ip: '192.220.75.184', country: 'US', org: 'NTT', city: 'LA' },
 }
+const COVERAGE = { total: 30, covered: 12, missing: 18, ratio: 0.4 }
 
 function stubFetch(responses) {
   vi.stubGlobal('fetch', async path => {
@@ -28,34 +29,44 @@ function stubFetch(responses) {
   })
 }
 
-test('页面挂载后渲染分类卡片与工具栏（非空白）', async () => {
+test('页面挂载后渲染两网络环境对照表与分类（非空白）', async () => {
   stubFetch({
     '/api/v1/unlock/catalog': CATALOG,
     '/api/v1/unlock/last?exit=panel': EMPTY_LAST,
+    '/api/v1/unlock/capability-coverage': COVERAGE,
+    '/api/v1/unlock/batch-status': { running: false, done: 0, total: 0 },
   })
   wrapper = mount(Unlock, { global: { plugins: [ElementPlus] } })
   await flushPromises()
   expect(wrapper.text()).toContain('网络体检')
+  // 两个网络环境是页面主体
+  expect(wrapper.text()).toContain('当前网络（这台设备）')
+  expect(wrapper.text()).toContain('服务器网络（面板出口）')
+  // 服务分类与服务名
   expect(wrapper.text()).toContain('海外 AI')
   expect(wrapper.text()).toContain('Google Gemini')
   expect(wrapper.text()).toContain('Netflix')
-  expect(wrapper.text()).toContain('全部检测')
+  // 两个检测入口
+  expect(wrapper.text()).toContain('检测服务器网络')
+  expect(wrapper.text()).toContain('检测当前网络')
   // 未测状态可见
   expect(wrapper.text()).toContain('未测')
+  // 节点能力区块说明能力在构建期测
+  expect(wrapper.text()).toContain('节点能力')
+  expect(wrapper.text()).toContain('12 / 30')
 })
 
-test('点击全部检测后显示结果与出口信息', async () => {
-  const postPaths = []
+test('检测服务器网络后展示解锁结论与出口信息', async () => {
   stubFetch({
     '/api/v1/unlock/catalog': CATALOG,
     '/api/v1/unlock/last?exit=panel': EMPTY_LAST,
-    '/api/v1/nodes?limit=200': { items: [], total: 0 },
-    '/api/v1/unlock/run': RUN_RESULT,
+    '/api/v1/unlock/capability-coverage': COVERAGE,
+    '/api/v1/unlock/batch-status': { running: false, done: 0, total: 0 },
   })
   const realFetch = globalThis.fetch
   wrapper = mount(Unlock, { global: { plugins: [ElementPlus] } })
   await flushPromises()
-  // 拦截 POST
+  const postPaths = []
   globalThis.fetch = async (path, opts) => {
     if (opts?.method === 'POST') {
       postPaths.push(path)
@@ -63,7 +74,7 @@ test('点击全部检测后显示结果与出口信息', async () => {
     }
     return realFetch(path, opts)
   }
-  const runBtn = wrapper.findAll('button').find(b => b.text() === '全部检测')
+  const runBtn = wrapper.findAll('button').find(b => b.text() === '检测服务器网络')
   expect(runBtn).toBeDefined()
   await runBtn.trigger('click')
   await flushPromises()
@@ -71,4 +82,6 @@ test('点击全部检测后显示结果与出口信息', async () => {
   expect(wrapper.text()).toContain('解锁')
   expect(wrapper.text()).toContain('192.220.*.*')
   expect(wrapper.text()).toContain('区域拒绝')
+  // 对照列给出结论
+  expect(wrapper.text()).toContain('对照')
 })

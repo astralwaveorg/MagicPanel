@@ -167,6 +167,18 @@ def _health_snapshot(conn) -> dict:
         except ValueError:
             pass
 
+    # 节点能力数据覆盖：构建时按能力给节点分类重命名，缺数据的节点没有徽章
+    try:
+        from ..services import unlock_check
+        cov = unlock_check.coverage()
+        if cov.get("total") and cov.get("missing"):
+            issues.append(
+                f"{cov['missing']} 个节点还没有解锁能力数据（已覆盖 {cov['covered']}/"
+                f"{cov['total']}），这些节点在产物里不带能力标记；"
+                "构建后会自动补测，补测完成再构建一次即可")
+    except Exception:
+        pass
+
     # 依赖仓库同步失败（仅在功能开启时报，避免关闭后残留错误误报）
     if db.get_setting(conn, "deps_enabled", "0") == "1":
         deps_err = db.get_setting(conn, "deps_last_error", "")

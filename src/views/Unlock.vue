@@ -2,96 +2,111 @@
   <div>
     <h2 class="mp-page-title">网络体检</h2>
     <p class="mp-page-desc">
-      两个视角分开看：<b>面板出口</b>（路由器代理链真实出口，含指定节点模式）检测
-      「能不能解锁」；<b>你的网络</b>（打开本页的这台设备）检测「能不能连上」。
-      两者不一致时，多半是该域名的分流没把你的设备送进代理链。点卡片可单项重测。
+      同一批服务在<b>两种网络环境</b>下的可达情况对照：
+      左列是<b>当前网络</b>（打开本页的这台设备所处网络），
+      右列是<b>服务器网络</b>（面板所在机器经路由器代理链的出口）。
+      两列不一致，说明该服务的分流规则没把你的设备送进代理链。
     </p>
 
     <div class="mp-card">
       <div class="unlock-toolbar">
-        <el-select v-model="exit" style="width:280px" size="small" filterable
-                   :disabled="running || browserRunning">
-          <el-option label="面板出口（路由器代理链）" value="panel" />
-          <el-option v-for="n in nodeOptions" :key="n" :label="'节点：' + n" :value="n" />
-        </el-select>
-        <el-button size="small" type="success" :loading="running" @click="runAll">全部检测</el-button>
+        <el-button size="small" type="success" :loading="running"
+                   @click="runServerChecks">检测服务器网络</el-button>
+        <el-button size="small" type="success" :loading="browserRunning"
+                   @click="runBrowserChecks">检测当前网络</el-button>
         <el-button size="small" :disabled="!hasResults" @click="copyResults">复制结果</el-button>
-        <span v-if="lastRun" class="unlock-meta">
-          {{ exitLabel }} · {{ fmtTime(lastRun.checked_at) }}
-          <span v-if="lastRun.ip && lastRun.ip.ip" class="mono">
-            · 出口 {{ maskIp(lastRun.ip.ip) }} {{ lastRun.ip.country }} {{ lastRun.ip.org }}
-          </span>
+        <span class="unlock-meta">
+          服务器网络<span v-if="serverIp.ip" class="mono">
+            · 出口 {{ maskIp(serverIp.ip) }} {{ serverIp.country }}</span>
+          <span v-if="browserIp.ip" class="mono">
+            · 当前网络 {{ maskIp(browserIp.ip) }} {{ browserIp.country }}</span>
         </span>
       </div>
     </div>
 
     <div class="mp-card">
       <div class="unlock-summary">
-        <svg viewBox="0 0 100 100" class="unlock-ring">
-          <circle cx="50" cy="50" r="42" class="ring-bg" />
-          <circle cx="50" cy="50" r="42" class="ring-fg"
-                  :stroke-dasharray="ringDash" transform="rotate(-90 50 50)" />
-          <text x="50" y="58" text-anchor="middle" class="ring-text">{{ unlockRate }}%</text>
-        </svg>
-        <div class="unlock-counts">
-          <div class="cnt ok"><b>{{ countBy('unlocked') }}</b>解锁</div>
-          <div class="cnt bad"><b>{{ countBy('blocked') + countBy('unsupported') }}</b>不支持</div>
-          <div class="cnt warn"><b>{{ countBy('error') }}</b>异常</div>
-          <div class="cnt idle"><b>{{ countBy('idle') }}</b>未测</div>
-        </div>
-        <div class="unlock-local">
-          <h3>你的网络（浏览器端）</h3>
-          <p v-if="browserIp.ip" class="mono">
-            出口 {{ browserIp.ip }} {{ browserIp.country }}
-          </p>
-          <p v-if="browserDone" class="mp-form-hint">
-            可达 {{ browserCount('reachable') }} / {{ browserChecks.length }}
-            · 超时 {{ browserCount('timeout') }} · 不可达 {{ browserCount('unreachable') }}
-          </p>
-          <p class="mp-form-hint">
-            在你打开面板的这台设备上逐项探测（no-cors，不读内容，只判可达）；
-            面板出口测的是路由器代理链。两者对照才说明分流是否把你送对了路。
-          </p>
-          <el-button size="small" type="success" :loading="browserRunning"
-                     @click="runBrowserChecks">在你的网络里逐项检测</el-button>
-        </div>
-        <div class="unlock-local">
-          <h3>节点解锁批量检测</h3>
-          <p class="mp-form-hint">
-            对全部节点逐个检测 AI 六项（Gemini/ChatGPT/Claude/Grok/Perplexity/Copilot），
-            AI 全部解锁的节点会在重命名时带 🔓 徽章（需在设置里开启
-            「解锁徽章」）。每节点约 15-20 秒，按批后台进行。
-          </p>
-          <p v-if="batch && batch.total" class="mp-form-hint">
-            {{ batch.running ? `进行中 ${batch.done}/${batch.total}：${batch.current}` :
-               `上次完成 ${batch.done}/${batch.total}，AI 全解锁 ${batch.unlocked} 个` }}
-          </p>
-          <el-button size="small" type="success" :loading="batchStarting"
-                     :disabled="batch && batch.running"
-                     @click="startBatch">检测下一批（3 个）</el-button>
+        <div class="unlock-cols">
+          <div class="unlock-col">
+            <div class="unlock-col-head">当前网络（这台设备）</div>
+            <div class="unlock-col-body">
+              <div class="cnt ok"><b>{{ browserCount('reachable') }}</b>可达</div>
+              <div class="cnt bad"><b>{{ browserCount('unreachable') }}</b>不可达</div>
+              <div class="cnt warn"><b>{{ browserCount('timeout') }}</b>超时</div>
+              <div class="cnt idle"><b>{{ browserCount('idle') }}</b>未测</div>
+            </div>
+          </div>
+          <div class="unlock-col">
+            <div class="unlock-col-head">服务器网络（面板出口）</div>
+            <div class="unlock-col-body">
+              <div class="cnt ok"><b>{{ serverCount('unlocked') }}</b>解锁</div>
+              <div class="cnt bad"><b>{{ serverCount('blocked') + serverCount('unsupported') }}</b>不支持</div>
+              <div class="cnt warn"><b>{{ serverCount('error') }}</b>异常</div>
+              <div class="cnt idle"><b>{{ serverCount('idle') }}</b>未测</div>
+            </div>
+          </div>
         </div>
       </div>
+      <el-alert v-if="mismatches.length" type="warning" :closable="false" show-icon
+                style="margin-top:12px"
+                :title="`${mismatches.length} 项服务两边结论不一致`">
+        <div class="mp-form-hint">
+          {{ mismatchHint }}
+        </div>
+      </el-alert>
     </div>
 
     <div v-for="cat in categories" :key="cat.id" class="mp-card">
       <h3>{{ cat.name }} <span class="unlock-cat-count">{{ catItems(cat.id).length }}</span></h3>
-      <div class="unlock-grid">
-        <div v-for="c in catItems(cat.id)" :key="c.id" class="unlock-card"
-             :class="['st-' + stateOf(c.id), { 'is-testing': stateOf(c.id) === 'testing' }]" :title="detailOf(c.id)"
-             @click="runOne(c.id)">
-          <div class="unlock-icon">{{ c.icon }}</div>
-          <div class="unlock-info">
-            <b>{{ c.name }}</b>
-            <span class="unlock-state">{{ stateLabel(c.id) }}</span>
-            <span class="unlock-sub" v-if="regionOf(c.id)">片源地区：{{ regionOf(c.id) }}</span>
-            <span class="unlock-sub" v-else-if="latencyOf(c.id)">{{ latencyOf(c.id) }}ms</span>
-            <span class="unlock-sub" :class="{ 'browser-mismatch': browserMismatch(c.id) }"
-                  v-if="browserStateOf(c.id) !== 'idle'">
-              你的网络：{{ browserLabel(c.id) }}{{ browserLatency(c.id) }}
-            </span>
-          </div>
-        </div>
+      <div class="mp-table-wrap">
+        <el-table :data="catItems(cat.id)" size="small" class="unlock-table">
+          <el-table-column label="服务" min-width="180">
+            <template #default="{ row }">
+              <span class="unlock-svc"><span class="unlock-icon-sm">{{ row.icon }}</span>{{ row.name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="当前网络（这台设备）" min-width="190">
+            <template #default="{ row }">
+              <StatusDot :kind="browserKind(row.id)" :text="browserLabel(row.id)" />
+              <span class="unlock-cell-sub">{{ browserLatency(row.id) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="服务器网络（面板出口）" min-width="190">
+            <template #default="{ row }">
+              <StatusDot :kind="serverKind(row.id)" :text="serverLabel(row.id)" />
+              <span class="unlock-cell-sub">{{ serverSub(row.id) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="对照" width="120">
+            <template #default="{ row }">
+              <span v-if="mismatchOf(row.id)" class="unlock-mismatch">不一致</span>
+              <span v-else-if="browserStateOf(row.id) !== 'idle' && serverStateOf(row.id) !== 'idle'"
+                    class="unlock-match">一致</span>
+              <span v-else style="color:var(--mp-muted)">—</span>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
+    </div>
+
+    <div class="mp-card">
+      <h3>节点能力（构建期产物里的节点名徽章）</h3>
+      <p class="mp-form-hint">
+        节点的解锁能力在<b>构建流程</b>里测：构建时按已有检测结果给节点分类并重命名
+        （🔓 AI 全解锁 / 🎬 流媒体解锁 / 📺 Netflix 高级版），构建完成后自动补测缺失的节点，
+        补测完成再构建一次，产物里的节点名就带上能力标记。
+      </p>
+      <p v-if="coverage" class="mp-form-hint">
+        能力数据覆盖：{{ coverage.covered }} / {{ coverage.total }} 个节点
+        <span v-if="coverage.missing">（还缺 {{ coverage.missing }} 个，构建后会自动补测）</span>
+      </p>
+      <p v-if="batch && batch.total" class="mp-form-hint">
+        {{ batch.running ? `补测进行中 ${batch.done}/${batch.total}：${batch.current}`
+           : `上次补测完成 ${batch.done}/${batch.total}，其中 ${batch.unlocked} 个有能力标记` }}
+      </p>
+      <el-button size="small" type="success" :loading="batchStarting"
+                 :disabled="batch && batch.running"
+                 @click="startBatch">补测下一批节点</el-button>
     </div>
   </div>
 </template>
@@ -103,11 +118,169 @@ import { api } from '../api.js'
 import { fmtTime } from '../format'
 import { copyText } from '../utils/clipboard'
 import { BROWSER_CHECKS, probeAll, probeExitIp } from '../utils/browserChecks'
+import StatusDot from '../components/StatusDot.vue'
 
-// 节点解锁批量检测：进度轮询（发起后每 2 秒查一次直到完成）
-const batch = ref(null)
+const catalog = ref([])
+const serverMap = ref({})
+const browserMap = ref({})
+const serverIp = ref({})
+const browserIp = ref({})
+const running = ref(false)
+const browserRunning = ref(false)
 const batchStarting = ref(false)
+const batch = ref(null)
+const coverage = ref(null)
 let batchTimer = null
+
+const categories = [
+  { id: 'ai', name: '海外 AI' },
+  { id: 'stream', name: '流媒体' },
+  { id: 'region', name: '服务地区检测' },
+  { id: 'web', name: '网站服务' },
+]
+
+const browserChecks = BROWSER_CHECKS
+
+function catItems(cid) { return catalog.value.filter(c => c.category === cid) }
+
+// ---- 当前网络（浏览器端）----
+function browserStateOf(id) {
+  return (browserMap.value[id] || {}).state || 'idle'
+}
+function browserLabel(id) {
+  const s = browserStateOf(id)
+  return { reachable: '可达', unreachable: '不可达', timeout: '超时' }[s] || '未测'
+}
+function browserKind(id) {
+  const s = browserStateOf(id)
+  return { reachable: 'ok', unreachable: 'bad', timeout: 'warn' }[s] || 'muted'
+}
+function browserLatency(id) {
+  const r = browserMap.value[id]
+  return r && r.latency_ms ? `${r.latency_ms}ms` : ''
+}
+function browserCount(state) {
+  return Object.values(browserMap.value).filter(r => r.state === state).length
+}
+
+// ---- 服务器网络（面板出口）----
+function serverStateOf(id) {
+  return (serverMap.value[id] || {}).state || 'idle'
+}
+function serverLabel(id) {
+  const s = serverStateOf(id)
+  return { unlocked: '解锁', blocked: '区域拒绝', unsupported: '不支持',
+           error: '异常' }[s] || '未测'
+}
+function serverKind(id) {
+  const s = serverStateOf(id)
+  return { unlocked: 'ok', blocked: 'bad', unsupported: 'muted',
+           error: 'warn' }[s] || 'muted'
+}
+function serverSub(id) {
+  const r = serverMap.value[id]
+  if (!r) return ''
+  const bits = []
+  if (r.region) bits.push(`地区 ${r.region}`)
+  if (r.latency_ms) bits.push(`${r.latency_ms}ms`)
+  if (r.detail) bits.push(r.detail)
+  return bits.join(' · ')
+}
+function serverCount(state) {
+  return Object.values(serverMap.value).filter(r => r.state === state).length
+}
+
+// ---- 对照 ----
+// 当前网络「不可达」而服务器网络「解锁」：服务器能走通但你这台设备走不通，
+// 说明该服务的分流没把你的设备送进代理链（客户端规则缺失或被直连规则抢先）。
+function mismatchOf(id) {
+  const b = browserStateOf(id)
+  const s = serverStateOf(id)
+  if (b === 'idle' || s === 'idle') return false
+  const bOk = b === 'reachable'
+  const sOk = s === 'unlocked'
+  return bOk !== sOk
+}
+const mismatches = computed(() => catalog.value.filter(c => mismatchOf(c.id)))
+const mismatchHint = computed(() => {
+  const onlyServer = mismatches.value.filter(c =>
+    browserStateOf(c.id) !== 'reachable' && serverStateOf(c.id) === 'unlocked')
+  const onlyBrowser = mismatches.value.filter(c =>
+    browserStateOf(c.id) === 'reachable' && serverStateOf(c.id) !== 'unlocked')
+  const parts = []
+  if (onlyServer.length) {
+    parts.push(`${onlyServer.map(c => c.name).join('、')}：服务器网络能解锁、你这台设备连不上——查客户端对这些域名的分流规则`)
+  }
+  if (onlyBrowser.length) {
+    parts.push(`${onlyBrowser.map(c => c.name).join('、')}：你这台设备能连上、服务器出口不行——出口 IP 被该服务限权`)
+  }
+  return parts.join('；')
+})
+
+const hasResults = computed(() =>
+  Object.keys(serverMap.value).length > 0 || Object.keys(browserMap.value).length > 0)
+
+function maskIp(ip) {
+  if (!ip) return ''
+  const parts = ip.split('.')
+  return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : ip.slice(0, 10) + '…'
+}
+
+async function loadCatalog() {
+  const data = await api('/api/v1/unlock/catalog')
+  catalog.value = data.checks || []
+}
+
+async function loadServerLast() {
+  const entry = await api('/api/v1/unlock/last?exit=panel')
+  if (entry && entry.results) {
+    const map = {}
+    for (const r of entry.results) map[r.id] = r
+    serverMap.value = map
+    serverIp.value = entry.ip || {}
+  }
+}
+
+async function loadCoverage() {
+  try {
+    coverage.value = await api('/api/v1/unlock/capability-coverage')
+  } catch { /* 覆盖率只是提示信息 */ }
+}
+
+async function runServerChecks() {
+  if (running.value) return
+  running.value = true
+  try {
+    const entry = await api('/api/v1/unlock/run', {
+      method: 'POST', body: { exit: 'panel', ids: [] },
+    })
+    const map = {}
+    for (const r of entry.results || []) map[r.id] = r
+    serverMap.value = map
+    serverIp.value = entry.ip || {}
+    ElMessage.success('服务器网络检测完成')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    running.value = false
+  }
+}
+
+async function runBrowserChecks() {
+  if (browserRunning.value) return
+  browserRunning.value = true
+  try {
+    probeExitIp().then((r) => { browserIp.value = r })
+    await probeAll(browserChecks, (r) => {
+      browserMap.value = { ...browserMap.value, [r.id]: r }
+    })
+    ElMessage.success('当前网络检测完成')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    browserRunning.value = false
+  }
+}
 
 async function refreshBatch() {
   try {
@@ -117,8 +290,9 @@ async function refreshBatch() {
     } else if (batchTimer) {
       clearInterval(batchTimer)
       batchTimer = null
+      loadCoverage()
     }
-  } catch { /* 静默：进度非关键信息 */ }
+  } catch { /* 进度非关键 */ }
 }
 
 async function startBatch() {
@@ -126,7 +300,7 @@ async function startBatch() {
   batchStarting.value = true
   try {
     await api('/api/v1/unlock/batch-detect', { method: 'POST', body: { qty: 3 } })
-    ElMessage.success('批量检测已启动，后台进行中')
+    ElMessage.success('补测已启动，后台进行中')
     refreshBatch()
   } catch (e) {
     ElMessage.error(e.message)
@@ -135,181 +309,34 @@ async function startBatch() {
   }
 }
 
-const exit = ref('panel')
-const nodeOptions = ref([])
-const catalog = ref([])
-const lastRun = ref(null)
-const running = ref(false)
-const browserRunning = ref(false)
-// 「你的网络」视角：浏览器端逐项探测结果与出口 IP
-const browserChecks = BROWSER_CHECKS
-const browserMap = ref({})
-const browserIp = ref({})
-const browserDone = ref(false)
-const browserChecksLoaded = ref(false)
-
-async function runBrowserChecks() {
-  if (browserRunning.value) return
-  browserRunning.value = true
-  browserChecksLoaded.value = true
-  browserDone.value = false
-  try {
-    probeExitIp().then((r) => { browserIp.value = r })
-    await probeAll(browserChecks, (r) => { browserMap.value = { ...browserMap.value, [r.id]: r } })
-    browserDone.value = true
-    ElMessage.success('你的网络检测完成')
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    browserRunning.value = false
-  }
-}
-
-function browserStateOf(id) {
-  if (!browserChecksLoaded.value) return 'idle'
-  return (browserMap.value[id] || {}).state || 'idle'
-}
-function browserLabel(id) {
-  return { reachable: '可达', unreachable: '不可达', timeout: '超时' }[browserStateOf(id)] || '未测'
-}
-function browserLatency(id) {
-  const r = browserMap.value[id]
-  return r && r.latency_ms ? ` · ${r.latency_ms}ms` : ''
-}
-function browserCount(state) {
-  return Object.values(browserMap.value).filter((r) => r.state === state).length
-}
-function browserMismatch(id) {
-  // 面板出口解锁、你的设备却连不上 → 分流没把你送进代理链
-  return stateOf(id) === 'unlocked'
-    && ['unreachable', 'timeout'].includes(browserStateOf(id))
-}
-
-const categories = [
-  { id: 'ai', name: '海外 AI' },
-  { id: 'stream', name: '流媒体' },
-  { id: 'region', name: '服务地区检测' },
-  { id: 'web', name: '网站服务' },
-]
-
-const nodeOptionsLoaded = ref(false)
-async function loadNodes() {
-  if (nodeOptionsLoaded.value) return
-  try {
-    const data = await api('/api/v1/nodes?limit=200')
-    nodeOptions.value = [...new Set(data.items.map(i => i.emit_name).filter(Boolean))]
-    nodeOptionsLoaded.value = true
-  } catch { /* 忽略：选择器留空也能用面板出口 */ }
-}
-
-const stateMap = ref({})
-const hasResults = computed(() => Object.keys(stateMap.value).length > 0)
-function stateOf(id) {
-  const r = stateMap.value[id]
-  return r ? r.state : 'idle'
-}
-function labelFor(state) {
-  return { unlocked: '解锁', blocked: '区域拒绝', unsupported: '不支持',
-           error: '异常', idle: '未测', testing: '检测中…' }[state] || '未测'
-}
-function stateLabel(id) { return labelFor(stateOf(id)) }
-function resultOf(id) { return stateMap.value[id] || {} }
-function regionOf(id) { return resultOf(id).region || '' }
-function latencyOf(id) { const l = resultOf(id).latency_ms; return l ? l : '' }
-function detailOf(id) {
-  const r = stateMap.value[id]
-  if (!r) return ''
-  const bits = [`HTTP ${r.status ?? '-'}`]
-  if (r.detail) bits.push(r.detail)
-  return bits.join(' · ')
-}
-function countBy(state) {
-  if (state === 'idle') {
-    return catalog.value.length - Object.keys(stateMap.value).length
-  }
-  return Object.values(stateMap.value).filter(r => r.state === state).length
-}
-const unlockRate = computed(() => {
-  const done = catalog.value.length - countBy('idle')
-  if (!done) return 0
-  return Math.round((countBy('unlocked') / done) * 100)
-})
-const ringDash = computed(() => `${(unlockRate.value / 100) * 264} 264`)
-const exitLabel = computed(() =>
-  exit.value === 'panel' ? '面板出口' : `节点 ${exit.value}`)
-
-function catItems(cid) { return catalog.value.filter(c => c.category === cid) }
-
-function applyEntry(entry) {
-  lastRun.value = entry
-  const map = {}
-  for (const r of entry.results || []) map[r.id] = r
-  stateMap.value = map
-}
-
-async function loadLast() {
-  const entry = await api(`/api/v1/unlock/last?exit=${encodeURIComponent(exit.value)}`)
-  if (entry && entry.results) applyEntry(entry)
-}
-
-async function run(ids) {
-  running.value = true
-  try {
-    const entry = await api('/api/v1/unlock/run', {
-      method: 'POST', body: { exit: exit.value, ids },
-    })
-    applyEntry(entry)
-    ElMessage.success(ids?.length ? '检测完成' : `检测完成：解锁 ${countBy('unlocked')} / ${catalog.value.length}`)
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    running.value = false
-  }
-}
-function runAll() { run([]) }
-function runOne(id) { run([id]) }
-
-// 复制统一走 utils/clipboard（2026-11-18 收拢）
-
 async function copyResults() {
-  const lines = [`出口：${exitLabel.value}`, ...catalog.value.map(c => {
-    const r = stateMap.value[c.id]
-    const b = browserMap.value[c.id]
-    const browser = browserChecksLoaded.value
-      ? `｜你的网络：${{ reachable: '可达', unreachable: '不可达', timeout: '超时' }[b?.state] || '未测'}`
-      : ''
-    if (!r) return `${c.name}: 未测${browser}`
-    const extra = [r.region && `地区 ${r.region}`, `${r.latency_ms}ms`, r.detail].filter(Boolean).join('，')
-    return `${c.name}: ${labelFor(r.state)}${extra ? '（' + extra + '）' : ''}${browser}`
-  })]
+  const lines = [`当前网络出口：${browserIp.value.ip || '未知'}`,
+    `服务器网络出口：${serverIp.value.ip || '未知'}`]
+  for (const c of catalog.value) {
+    lines.push(`${c.name}：当前网络 ${browserLabel(c.id)}｜服务器网络 ${serverLabel(c.id)}`
+      + `${serverSub(c.id) ? '（' + serverSub(c.id) + '）' : ''}`
+      + `${mismatchOf(c.id) ? ' ⚠不一致' : ''}`)
+  }
   try {
     await copyText(lines.join('\n'))
     ElMessage.success('已复制')
-  } catch {
-    ElMessage.error('复制失败：浏览器拒绝了剪贴板权限，请手动选择文本复制')
+  } catch (e) {
+    ElMessage.error(e.message)
   }
-}
-
-
-function maskIp(ip) {
-  if (!ip) return ''
-  const parts = ip.split('.')
-  return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : ip.slice(0, 10) + '…'
 }
 
 onMounted(async () => {
   try {
-    const cat = await api('/api/v1/unlock/catalog')
-    catalog.value = cat.checks
+    await loadCatalog()
   } catch (e) {
     ElMessage.error(`检测目录加载失败：${e.message}`)
   }
   try {
-    await loadLast()
+    await loadServerLast()
   } catch (e) {
     ElMessage.error(`最近检测结果加载失败：${e.message}`)
   }
-  loadNodes()
+  loadCoverage()
   refreshBatch()
 })
 
@@ -319,39 +346,17 @@ onUnmounted(() => { if (batchTimer) clearInterval(batchTimer) })
 <style scoped>
 .unlock-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .unlock-meta { font-size: 12.5px; color: var(--mp-text-secondary); }
-.unlock-summary { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
-.unlock-ring { width: 96px; height: 96px; }
-.ring-bg { fill: none; stroke: var(--mp-border, #444); stroke-width: 10; }
-.ring-fg { fill: none; stroke: var(--el-color-success); stroke-width: 10;
-          transition: stroke-dasharray .4s; }
-.ring-text { font-size: 22px; fill: var(--mp-text, #eee); }
-.unlock-counts { display: flex; gap: 16px; }
-.cnt { text-align: center; font-size: 12px; color: var(--mp-text-secondary); }
-.cnt b { display: block; font-size: 22px; }
-.cnt.ok b { color: var(--el-color-success); }
-.cnt.bad b { color: var(--el-color-danger); }
-.cnt.warn b { color: var(--el-color-warning); }
-.unlock-local { flex: 1; min-width: 240px; }
-.unlock-local h3 { margin: 0 0 6px; font-size: 14px; }
-.unlock-local p { margin: 4px 0 10px; font-size: 13px; }
-.unlock-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
-.unlock-card { display: flex; gap: 10px; padding: 10px; border: 1px solid var(--mp-border, #333);
-               border-radius: 8px; cursor: pointer; align-items: center; transition: border-color .2s; }
-.unlock-card:hover { border-color: var(--el-color-primary); }
-.unlock-card.st-unlocked { border-left: 3px solid var(--el-color-success); }
-.unlock-card.st-blocked, .unlock-card.st-unsupported { border-left: 3px solid var(--el-color-danger); }
-.unlock-card.st-error { border-left: 3px solid var(--el-color-warning); }
-.unlock-card.is-testing { opacity: .55; pointer-events: none; }
-.unlock-icon { font-size: 22px; width: 34px; text-align: center; }
-.unlock-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.unlock-info b { font-size: 13px; }
-.unlock-state { font-size: 12px; color: var(--mp-text-secondary); }
-.unlock-sub { font-size: 11.5px; color: var(--mp-text-secondary); }
-.unlock-sub.browser-mismatch { color: var(--el-color-danger); font-weight: 600; }
-.unlock-cat-count { font-size: 12px; color: var(--mp-text-secondary); }
-@media (max-width: 768px) {
-  .unlock-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
-  .unlock-summary { gap: 14px; }
-  .unlock-ring { width: 76px; height: 76px; }
-}
+.unlock-summary { display: flex; flex-direction: column; gap: 12px; }
+.unlock-cols { display: flex; gap: 16px; flex-wrap: wrap; }
+.unlock-col { flex: 1 1 260px; min-width: 240px; }
+.unlock-col-head { font-size: 12.5px; color: var(--mp-text-secondary); margin-bottom: 8px; }
+.unlock-col-body { display: flex; gap: 20px; flex-wrap: wrap; }
+.unlock-col-body .cnt { font-size: 12.5px; color: var(--mp-text-secondary); }
+.unlock-col-body .cnt b { font-size: 18px; color: var(--mp-text-primary); margin-right: 4px; }
+.unlock-cat-count { color: var(--mp-muted); font-size: 12px; margin-left: 6px; }
+.unlock-svc { display: inline-flex; align-items: center; gap: 6px; }
+.unlock-icon-sm { font-size: 13px; }
+.unlock-cell-sub { margin-left: 8px; font-size: 11.5px; color: var(--mp-muted); }
+.unlock-mismatch { color: var(--el-color-danger); font-weight: 600; font-size: 12px; }
+.unlock-match { color: var(--el-color-success); font-size: 12px; }
 </style>

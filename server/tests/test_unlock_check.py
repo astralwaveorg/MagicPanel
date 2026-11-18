@@ -136,3 +136,102 @@ def test_unlock_routes_registered(tmp_path, monkeypatch):
         assert tc.post("/api/v1/unlock/run").status_code == 401
         # 门户公开端点匿名可达
         assert tc.get("/api/v1/portal/unlock").status_code == 200
+
+
+def test_capability_badges_multidimensional():
+    """能力徽章多维：🔓 AI 全解锁 / 🎬 流媒体 / 📺 Netflix 高级版。
+
+    2026-11-18：节点能力分类属于构建流程（检测 → 分类 → 重命名 → 产物），
+    页面只做两网络环境的对照。
+    """
+    from app.services import unlock_check
+
+    ai_ids = unlock_check.AI_CHECK_IDS
+    stream_ids = unlock_check.STREAM_CORE_IDS
+    assert "gemini" in ai_ids and "netflix" in stream_ids
+
+    entry = {"checked_at": 1, "exit": "节点A", "results": [
+        {"id": i, "state": "unlocked", "status": 200, "region": "",
+         "latency_ms": 1, "detail": ""} for i in ai_ids + stream_ids
+    ] + [{"id": "netflix_premium", "state": "unlocked", "status": 200, "region": "",
+          "latency_ms": 1, "detail": ""}]}
+    orig = unlock_check._load_all
+    unlock_check._load_all = lambda: {"节点A": entry}
+    try:
+        badges = unlock_check.capability_badges("节点A")
+        assert unlock_check.BADGE_AI in badges
+        assert unlock_check.BADGE_STREAM in badges
+        assert unlock_check.BADGE_NF_PREMIUM in badges
+        assert unlock_check.ai_unlocked("节点A") is True
+        # 少一项解锁 → 不给对应徽章
+        entry["results"][0]["state"] = "blocked"
+        badges2 = unlock_check.capability_badges("节点A")
+        assert unlock_check.BADGE_AI not in badges2
+        # 未测过的节点没有任何徽章
+        assert unlock_check.capability_badges("从未测过") == ""
+    finally:
+        unlock_check._load_all = orig
+
+
+def test_node_rename_accepts_multi_badge():
+    """重命名支持多徽章串（🔓🎬），并兼容旧的布尔返回。"""
+    from app.services import node_rename
+
+    alloc = {}
+    out = node_rename.normalize_name("美国01 Hyper", source="机场A", alloc=alloc,
+                                     badge="🔓🎬")
+    assert out == "🇺🇸 [机场A] 美国 🔓🎬 01"
+
+    mapping = node_rename.rename_batch(["美国02 Hyper"], source="机场A",
+                                       badge_lookup=lambda n: "🎬")
+    assert mapping["美国02 Hyper"] == "🇺🇸 [机场A] 美国 🎬 01"
+
+    # 旧的布尔语义：True → 单个 AI 徽章
+    legacy = node_rename.rename_batch(["美国03 Hyper"], source="机场A",
+                                       badge_lookup=lambda n: True)
+    assert legacy["美国03 Hyper"] == "🇺🇸 [机场A] 美国 🔓 01"
+
+
+def test_build_uses_capability_badges(client, monkeypatch):
+    """构建期用多维能力徽章重命名（检测 → 分类 → 重命名 → 产物）。"""
+    import base64
+    import yaml
+    from conftest import auth_headers, setup_admin
+    from test_api import make_policy
+    from app.services import unlock_check
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    snap_text = (
+        "proxies:\n"
+        "  - name: 'US 01'\n"
+        "    type: ss\n    server: 192.0.2.10\n    port: 8388\n"
+        "    cipher: aes-128-gcm\n    password: 'x'\n"
+    )
+    r = client.post("/api/v1/sources/import-file", headers=h, json={
+        "name": "原始机场",
+        "content_b64": base64.b64encode(snap_text.encode()).decode(),
+        "mode": "inline"})
+    assert r.status_code == 201, r.text
+
+    # 造缓存：AI 全解锁 + 流媒体全解锁 + Netflix 高级版
+    results = [{"id": i, "state": "unlocked", "status": 200, "region": "",
+                "latency_ms": 1, "detail": ""}
+               for i in unlock_check.AI_CHECK_IDS + unlock_check.STREAM_CHECK_IDS]
+    unlock_check._save_cache("US 01", {"checked_at": 1, "exit": "US 01",
+                                      "results": results, "ip": {}}, merge=False)
+    client.put("/api/v1/settings", headers=h, json={"values": {
+        "node_name_unlock_badge": "1"}})
+
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    # 节点可能在顶层 proxies（inline）或 provider 快照（provider 模式）：
+    # 两种下发路径都要带上能力徽章
+    found = False
+    for name in build["results"]:
+        content = client.get(
+            f"/api/v1/builds/{build['id']}/artifact/{name}").json()["content"]
+        if "🇺🇸 [原始机场] 美国 🔓🎬📺 01" in content:
+            found = True
+            break
+    assert found, "产物里应出现带多维能力徽章的节点名"

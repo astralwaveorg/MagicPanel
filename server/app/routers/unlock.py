@@ -69,3 +69,28 @@ def batch_detect(body: BatchBody, user=RequireCapabilities("probe")):
 @router.get("/batch-status")
 def batch_status(user=CurrentUser):
     return unlock_check.batch_state()
+
+
+@router.get("/capability-coverage")
+def capability_coverage(user=CurrentUser):
+    """解锁能力缓存覆盖率：构建页据此提示「产物里哪些节点还没有能力标记」。"""
+    try:
+        return unlock_check.coverage()
+    except Exception as exc:
+        raise HTTPException(500, f"统计解锁能力覆盖率失败：{exc}")
+
+
+@router.get("/node-capabilities")
+def node_capabilities(user=CurrentUser):
+    """各节点的能力徽章（构建产物里节点名的徽章来源）。"""
+    try:
+        nodes = unlock_check.detectable_nodes()
+    except Exception as exc:
+        raise HTTPException(500, f"读取节点列表失败：{exc}")
+    out = []
+    for name in nodes:
+        badges = unlock_check.capability_badges(name)
+        out.append({"name": name, "badges": badges,
+                    "tested": bool(badges) or bool(unlock_check._states_of(name))})
+    return {"items": out, "total": len(out),
+            "with_badges": sum(1 for i in out if i["badges"])}

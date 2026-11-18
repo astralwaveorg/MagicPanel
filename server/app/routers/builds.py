@@ -335,7 +335,9 @@ def create_build(operator: str, note: str = "",
     badge_lookup = None
     if unlock_badge:
         from ..services import unlock_check as _unlock_check
-        badge_lookup = _unlock_check.ai_unlocked
+        # 多维能力徽章（🔓 AI / 🎬 流媒体 / 📺 Netflix 高级版）：
+        # 分类来自构建前的解锁检测缓存，检测 → 分类 → 重命名 → 产物
+        badge_lookup = _unlock_check.capability_badges
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
         if vid not in resolved_by_variant:
@@ -412,7 +414,37 @@ def create_build(operator: str, note: str = "",
         security.audit(conn, operator, "创建构建", "build", build_id,
                        {"status": overall, "note": note,
                         "artifacts": len(results)})
+    # 构建完成后补测缺失节点的解锁能力：下一轮构建才能把能力徽章写进产物。
+    # 后台线程执行（每个节点要起一次测速核心，绝不能占住构建请求）。
+    if unlock_badge:
+        _schedule_unlock_backfill(operator)
     return build_id, overall
+
+
+def _schedule_unlock_backfill(operator: str) -> None:
+    """构建后自动补测缺失节点的解锁能力（幂等、后台、单例）。"""
+    import threading as _threading
+
+    from ..services import unlock_check
+
+    state = unlock_check.batch_state()
+    if state.get("running"):
+        return          # 已有补测在跑：不重复排队
+    try:
+        missing = unlock_check.coverage().get("missing", 0)
+    except Exception:
+        return
+    if missing <= 0:
+        return
+
+    def worker():
+        try:
+            unlock_check.run_batch(qty=min(missing, 20), operator=operator or "构建后补测")
+        except Exception as exc:
+            import logging
+            logging.getLogger("magicpanel.builds").warning("构建后补测异常：%s", exc)
+
+    _threading.Thread(target=worker, daemon=True, name="unlock-backfill").start()
 
 
 @router.post("/builds", status_code=201)

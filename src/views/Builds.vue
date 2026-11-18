@@ -11,6 +11,11 @@
                       content="只创建当前策略的不可变快照，不发布；发布在下面的表格里操作"
                       placement="bottom-end">
             <el-button :loading="building" @click="createBuild">创建构建</el-button>
+            <span v-if="capabilityCoverage && capabilityCoverage.missing"
+                  class="mp-toolbar-hint">
+              节点能力数据 {{ capabilityCoverage.covered }}/{{ capabilityCoverage.total }}
+              （还缺 {{ capabilityCoverage.missing }} 个，构建后自动补测；补测完成再构建一次即可把能力标记写进产物）
+            </span>
           </el-tooltip>
         </div>
       </div>
@@ -369,7 +374,10 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  loadCapabilityCoverage()
+})
 
 function onSelectionChange(selection) {
   selected.value = selection
@@ -423,6 +431,9 @@ async function createBuild() {
     } else {
       ElMessage.warning(`构建 #${build.id} 存在未通过的校验，请查看详情`)
     }
+    // 节点能力徽章在构建流程里写进产物名：构建后会自动补测缺失节点，
+    // 补测完成再构建一次，产物里的节点名才带上最新的能力标记
+    await loadCapabilityCoverage()
     openDetail(build)
   } catch (e) {
     error.value = e.message
@@ -430,6 +441,14 @@ async function createBuild() {
   } finally {
     building.value = false
   }
+}
+
+// 节点能力覆盖率：用于提示「补测完成后重新构建可让产物带上能力标记」
+const capabilityCoverage = ref(null)
+async function loadCapabilityCoverage() {
+  try {
+    capabilityCoverage.value = await api('/api/v1/unlock/capability-coverage')
+  } catch { capabilityCoverage.value = null }
 }
 
 function openDetail(build) {

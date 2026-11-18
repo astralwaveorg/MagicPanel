@@ -49,6 +49,11 @@ CHECKS = [
     {"id": "netflix", "name": "Netflix", "icon": "N", "category": "stream",
      "url": "https://www.netflix.com/title/81280792",
      "unlock": {200}, "blocked": {403}, "unsupported": {404}},
+    # Netflix 高级版目录：能访问说明该出口在高级版 IP 名单里（📺 徽章）。
+    # 标准版与高级版是两套目录，只测 title 页区分不出来。
+    {"id": "netflix_premium", "name": "Netflix 高级版", "icon": "N", "category": "stream",
+     "url": "https://www.netflix.com/regions",
+     "unlock": {200}, "blocked": {403}, "unsupported": {404}},
     {"id": "disney", "name": "Disney+", "icon": "D", "category": "stream",
      "url": "https://www.disneyplus.com/", "unlock": {200, 302, 301},
      "blocked": {403}, "unsupported": {404, 429}},
@@ -282,11 +287,33 @@ def exit_ip(proxy: str | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- 节点解锁能力
-# 「节点重命名一致性」的数据源（2026-11-18）：AI 类检测全部解锁的节点
-# 才会在重命名时获得 🔓 徽章（node_rename.UNLOCK_BADGE）。徽章单向变化：
-# 未测与被拒都不加，名字不会因解锁状态抖动而来回变。
+# 「节点重命名一致性」的数据源（2026-11-18）：能力分类决定节点名上的徽章。
+# 徽章单向变化：未测与被拒都不加，名字不会因解锁状态抖动而来回变。
+
+# ---- 能力分类（构建期重命名用）------------------------------------
+# 节点的「解锁能力」是多维的，不是一个是非题：
+#   🔓  AI 六项全部解锁
+#   🎬  流媒体解锁（Netflix 标准版 / Disney+ / Spotify / YouTube Premium）
+#   📺  Netflix 高级版目录可达
+# 徽章只加不减（未测/被拒都不加），名字不会因检测结果抖动而变化。
 
 AI_CHECK_IDS = [c["id"] for c in CHECKS if c["category"] == "ai"]
+STREAM_CHECK_IDS = [c["id"] for c in CHECKS if c["category"] == "stream"]
+
+BADGE_AI = "🔓"
+BADGE_STREAM = "🎬"
+BADGE_NF_PREMIUM = "📺"
+
+# 流媒体主项：这几项解锁才算「流媒体可用」（Netflix 高级版单独算 📺）
+STREAM_CORE_IDS = [i for i in STREAM_CHECK_IDS
+                   if i not in ("netflix_premium",)]
+
+
+def _states_of(node_name: str) -> dict[str, str]:
+    entry = _load_all().get(node_name)
+    if not entry or not entry.get("results"):
+        return {}
+    return {r["id"]: r["state"] for r in entry["results"]}
 
 
 def ai_unlocked(node_name: str) -> bool:
@@ -294,19 +321,51 @@ def ai_unlocked(node_name: str) -> bool:
 
     未检测过 / 检测不全 → False（不加徽章，保守不冒充）。
     """
-    entry = _load_all().get(node_name)
-    if not entry or not entry.get("results"):
-        return False
-    states = {r["id"]: r["state"] for r in entry["results"]}
+    states = _states_of(node_name)
     tested = [states.get(i) for i in AI_CHECK_IDS]
     if not tested or any(s != "unlocked" for s in tested):
         return False
     return True
 
 
-def badge_lookup() -> callable:
-    """给 node_rename.rename_batch 用的徽章判定函数。"""
-    return ai_unlocked
+def capability_badges(node_name: str) -> str:
+    """该节点的能力徽章串（可为空串）。
+
+    * 🔓  AI 六项全解锁
+    * 🎬  流媒体主项全解锁
+    * 📺  Netflix 高级版目录可达
+    """
+    states = _states_of(node_name)
+    if not states:
+        return ""
+    badges = ""
+    ai = [states.get(i) for i in AI_CHECK_IDS]
+    if ai and all(s == "unlocked" for s in ai):
+        badges += BADGE_AI
+    stream = [states.get(i) for i in STREAM_CORE_IDS]
+    if stream and all(s == "unlocked" for s in stream):
+        badges += BADGE_STREAM
+    if states.get("netflix_premium") == "unlocked":
+        badges += BADGE_NF_PREMIUM
+    return badges
+
+
+def capability_lookup() -> callable:
+    """给 node_rename.rename_batch 用的徽章判定函数（返回徽章串）。"""
+    return capability_badges
+
+
+def coverage() -> dict:
+    """解锁能力缓存覆盖率（构建流程与页面提示用）。
+
+    covered = 有检测结果的节点数；total = 候选节点总数。
+    """
+    nodes = detectable_nodes()
+    cache = _load_all()
+    covered = [n for n in nodes if _states_of(n)]
+    return {"total": len(nodes), "covered": len(covered),
+            "missing": len(nodes) - len(covered),
+            "ratio": round(len(covered) / len(nodes), 4) if nodes else 0.0}
 
 
 def _db_row_factory(conn):
@@ -375,8 +434,10 @@ def run_batch(qty: int = 3, ids: list[str] | None = None,
                 break
             _batch_state["current"] = node
             try:
-                run_checks(node, ids=AI_CHECK_IDS, operator=operator or "batch")
-                if ai_unlocked(node):
+                # 检测全部服务项：AI + 流媒体 + Netflix 高级版，
+                # 徽章分类才有完整数据（只测 AI 只能给出 🔓）
+                run_checks(node, ids=None, operator=operator or "batch")
+                if capability_badges(node):
                     unlocked += 1
             except Exception as exc:
                 logger.warning("节点解锁批量检测失败 %s：%s", node, exc)

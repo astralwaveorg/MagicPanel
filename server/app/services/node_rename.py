@@ -20,8 +20,12 @@
 """
 import re
 
-# 解锁徽章：AI 类检测全部解锁时的标记（由调用方按缓存判定后传入）
+# 解锁能力徽章（由调用方按检测缓存判定后传入，可组合）：
+#   🔓 AI 六项全解锁     🎬 流媒体主项全解锁     📺 Netflix 高级版目录可达
+# 徽章单向变化：未测与被拒都不加，节点名不会因检测结果抖动而来回变。
 UNLOCK_BADGE = "🔓"
+STREAM_BADGE = "🎬"
+NETFLIX_PREMIUM_BADGE = "📺"
 
 # 占位/信息节点：对分流毫无意义（server 都不是真实节点），构建与分发时直接丢弃
 INFO_NODE_PATTERN = re.compile(
@@ -93,13 +97,13 @@ def detect_region(name: str) -> tuple[str, str] | None:
 
 
 def normalize_name(name: str, source: str = "", alloc: dict | None = None,
-                   badge: bool = False) -> str | None:
+                   badge: str = "") -> str | None:
     """规范化单个节点名。
 
     返回 None 表示这是占位/信息节点，应从产物与分发中丢弃。
     alloc 是 (旗帜, 地区, 家宽) → 下一个序号 的分配表，调用方对同一批次
     传入同一个 dict，序号才会按出现顺序稳定递增。
-    badge=True 时给名字加解锁徽章位（调用方已按缓存判定该节点 AI 全解锁）。
+    badge 是能力徽章串（可为空，如 "🔓🎬"）：调用方按解锁检测缓存判定。
     """
     name = (name or "").strip()
     if not name:
@@ -136,7 +140,10 @@ def normalize_name(name: str, source: str = "", alloc: dict | None = None,
         bracket = " [" + "·".join(tags) + "]"
     label = f"{flag}{bracket} {region_name}"
     if badge:
-        label += f" {UNLOCK_BADGE}"
+        # 兼容旧的布尔语义：True 表示「有 AI 徽章」
+        badge_text = UNLOCK_BADGE if badge is True else str(badge)
+        if badge_text:
+            label += f" {badge_text}"
     label += f" {seq:02d}"
     return label
 
@@ -147,14 +154,18 @@ def rename_batch(names: list[str], source: str = "",
 
     None 表示占位节点应丢弃。批内序号按列表出现顺序分配；
     重复出现的原名只分配一次（首个生效），保证同名节点映射一致。
-    badge_lookup(原始名) → bool：解锁徽章判定（调用方按 unlock 缓存判）。
+    badge_lookup(原始名) → 徽章串（可为空）：能力徽章判定（调用方按 unlock 缓存判）。
+    兼容旧的布尔返回：True 视为单独的 AI 徽章。
     """
     alloc: dict = {}
     result: dict[str, str | None] = {}
     for name in names:
         if name in result:
             continue
-        badge = bool(badge_lookup(name)) if badge_lookup else False
+        badge = ""
+        if badge_lookup:
+            raw = badge_lookup(name)
+            badge = UNLOCK_BADGE if raw is True else (str(raw) if raw else "")
         result[name] = normalize_name(name, source=source, alloc=alloc, badge=badge)
     return result
 
