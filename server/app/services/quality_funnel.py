@@ -205,7 +205,14 @@ def load_results() -> dict:
 
 
 def save_results(results: list[NodeQuality], operator: str = "系统") -> None:
-    """合并写入结果文件（原子替换），并保留一份时间戳快照。"""
+    """合并写入结果文件（原子替换），并保留一份时间戳快照。
+
+    probed 节点同时写一份汇总进 unlock_cache.json（键=emit_name）：
+    构建期的能力徽章判定（unlock_check.capability_badges）读的是那份缓存，
+    两个缓存不打通时徽章永远出不来（2026-11-19 实证）。
+    """
+    from . import unlock_check
+
     data = load_results()
     nodes = data.get("nodes", {})
     for quality in results:
@@ -213,6 +220,17 @@ def save_results(results: list[NodeQuality], operator: str = "系统") -> None:
     payload = {"updated_at": int(time.time()), "operator": operator,
                "nodes": nodes}
     _atomic_write(RESULT_PATH, json.dumps(payload, ensure_ascii=False, indent=1))
+    # 同步 unlock 缓存：probed 节点的 19 项结果按 unlock_check 的缓存结构写入
+    for quality in results:
+        if quality.stage != "probed" or not quality.probes:
+            continue
+        results_list = [
+            {"platform": pid, **{k: v for k, v in (item or {}).items()
+                                 if k != "platform"}}
+            for pid, item in quality.probes.items()]
+        entry = {"checked_at": quality.checked_at, "exit": quality.name,
+                 "results": results_list, "ip": {}}
+        unlock_check._save_cache(quality.name, entry, merge=False)
     snapshot = RESULT_PATH.parent / f"snapshot-{int(time.time())}.json"
     _atomic_write(snapshot, json.dumps(payload, ensure_ascii=False, indent=1))
     # 快照只留最近 20 份

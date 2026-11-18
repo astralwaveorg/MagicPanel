@@ -545,13 +545,21 @@ def _collect_probe_proxies() -> list[dict]:
     from .. import security
 
     from . import node_rename
+    from . import source_nodes as source_node_service
+
+    # 目录映射：探测与缓存统一用 emit_name（构建产物里呈现的名字）。
+    # 原来候选用原始名，而 render 时节点名已是 emit_name——两套名字导致
+    # 能力徽章与性能摘要的查询全部 miss（2026-11-19 实证）。
+    catalog_rows = db.all_(conn, "SELECT * FROM node_catalog")
+    catalog = [dict(r) for r in catalog_rows]
 
     out: list[dict] = []
     seen: set[str] = set()
     conn = db.connect()
     conn.row_factory = sqlite3.Row
     try:
-        for r in conn.execute("SELECT snapshot_enc FROM sources WHERE snapshot_enc IS NOT NULL"):
+        for r in conn.execute("SELECT id AS source_id, snapshot_enc FROM sources "
+                              "WHERE snapshot_enc IS NOT NULL"):
             try:
                 raw = security.decrypt_text(r["snapshot_enc"]) or ""
                 proxies = source_nodes.extract(raw.encode("utf-8", "replace"))
@@ -567,8 +575,18 @@ def _collect_probe_proxies() -> list[dict]:
                 # 浪费一轮门禁时间
                 if node_rename.is_info_node(name) or node_rename.is_prompt_node(name):
                     continue
-                seen.add(name)
-                out.append(p)
+                entry = dict(p)
+                entry["source_id"] = int(r["source_id"])
+                # 探测与缓存统一用 emit_name（构建产物里呈现的名字）：
+                # 原来候选用原始名，render 时节点名已是 emit_name——两套名字
+                # 导致徽章与性能摘要查询全部 miss（2026-11-19 实证）
+                try:
+                    entry = source_node_service.map_emit_names(
+                        [entry], source_id=int(r["source_id"]), catalog=catalog)[0]
+                except Exception:
+                    pass        # 目录没收录：用原始名探测
+                seen.add(str(entry["name"]))
+                out.append(entry)
         for r in conn.execute("SELECT * FROM local_nodes WHERE enabled=1 ORDER BY id"):
             try:
                 node = {"name": r["name"], "node_type": r["node_type"] or "",
