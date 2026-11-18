@@ -345,6 +345,10 @@ const current = ref(null)
 const state = ref(null)
 const fields = ref([])
 const groups = ref({})
+// 组 id → 中文标签：直接复用 schema.groups 的键值映射。
+// 模板曾引用未定义的 groupLabels，整页加载时抛 TypeError 弹错误横幅
+// （2026-11-19 全页截图巡检发现）
+const groupLabels = computed(() => groups.value)
 const presets = ref([])
 const doc = reactive({})
 const raw = ref('')
