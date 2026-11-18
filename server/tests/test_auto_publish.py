@@ -5,6 +5,8 @@
 把明明写着「核心校验通过」的设备产物当成没校验——
 自动构建于是每小时建一次、永远发不到生产环境。
 """
+import time
+
 from app.services import scheduler
 from conftest import auth_headers, setup_admin
 from test_api import make_policy
@@ -184,3 +186,42 @@ def test_scheduler_survives_probe_schedule_lock_failure(client, monkeypatch):
     assert any("探测任务调度失败" in e for e in summary["errors"]), summary["errors"]
     # 后面的环节照常执行（构建检查仍有结论）
     assert "build" in summary or summary.get("build_error")
+
+
+def test_quality_funnel_single_instance(client, monkeypatch):
+    """漏斗防重入：上一轮还在跑时，新 tick 不再排队（否则并发起多个核心实例）。"""
+    from app import db
+    from app.services import scheduler
+
+    # 开启漏斗
+    with db.tx() as conn:
+        db.set_setting(conn, "probe_funnel_enabled", "1")
+
+    started = []
+    monkeypatch.setattr(scheduler, "_collect_probe_proxies", lambda: [
+        {"name": "节点A", "type": "ss", "server": "192.0.2.1", "port": 8388}])
+
+    # 模拟 worker 卡住：run_funnel 不返回
+    def slow_funnel(proxies, operator="", only_missing=True):
+        started.append(1)
+        time.sleep(0.5)
+        return {"results": [], "stats": {}}
+
+    import time as _time
+    from app.services import quality_funnel as _qf
+    monkeypatch.setattr(_qf, "run_funnel", slow_funnel)
+
+    summary1 = {}
+    scheduler._run_quality_funnel(summary1)
+    assert "funnel" in summary1, "第一轮应触发"
+    assert started, "worker 应已启动"
+
+    # worker 还在跑（sleep 中），第二个 tick 不应再触发
+    summary2 = {}
+    scheduler._run_quality_funnel(summary2)
+    assert "funnel" not in summary2, "上一轮未结束时不该再排队"
+
+    _time.sleep(0.6)
+    summary3 = {}
+    scheduler._run_quality_funnel(summary3)
+    assert "funnel" in summary3, "上一轮结束后应可再次触发"

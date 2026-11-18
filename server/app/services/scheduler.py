@@ -489,19 +489,25 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
     summary["published"] = env
 
 
+# 漏斗单例标记：调度线程每 30 秒 tick 一次，漏斗一轮要跑几分钟，
+# 没有这个标记会并发起多个核心实例（端口冲突 + 带宽打满导致误判）
+_funnel_lock = threading.Lock()
+_funnel_running = {"on": False}
+_funnel_batch = 30            # 每轮最多新增探测的节点数（分多轮跑完全量）
+
+
 def _run_quality_funnel(summary: dict) -> None:
     """周期性质量漏斗（2026-11-19）：延迟 → 吞吐 → 解锁矩阵。
 
     开关 ``probe_funnel_enabled``（默认关）。跑在后台线程：
     一次要起核心、逐节点切换探测，绝不能占住调度线程。
+    每轮最多新增 _funnel_batch 个节点（增量），全量分多轮完成。
     """
-    import threading as _threading
-
     with db.connect() as conn:
         if not _enabled(conn, "probe_funnel_enabled", "0"):
             return
-        if _enabled(conn, "probe_funnel_running", "0"):
-            return          # 上一轮还在跑：不重复排队
+    if _funnel_running["on"]:
+        return          # 上一轮还在跑：不重复排队（内存级单例）
     from . import quality_funnel
 
     proxies = _collect_probe_proxies()
@@ -511,16 +517,25 @@ def _run_quality_funnel(summary: dict) -> None:
 
     def worker():
         try:
-            result = quality_funnel.run_funnel(proxies, operator=AUTO_OPERATOR)
+            result = quality_funnel.run_funnel(
+                proxies[:_funnel_batch], operator=AUTO_OPERATOR)
             stats = result.get("stats", {})
             logger.info("质量漏斗：待测 %s，探测 %s，达标 %s，耗时 %ss",
                         stats.get("pending"), stats.get("probed"),
                         stats.get("qualified"), stats.get("elapsed_sec"))
         except Exception as exc:
             logger.warning("质量漏斗异常：%s", exc)
+        finally:
+            _funnel_running["on"] = False
 
-    _threading.Thread(target=worker, daemon=True, name="quality-funnel").start()
-    summary["funnel"] = f"已触发（{len(proxies)} 个候选节点）"
+    if not _funnel_lock.acquire(blocking=False):
+        return
+    try:
+        _funnel_running["on"] = True
+        threading.Thread(target=worker, daemon=True, name="quality-funnel").start()
+        summary["funnel"] = f"已触发（本轮最多 {_funnel_batch} 个节点）"
+    finally:
+        _funnel_lock.release()
 
 
 def _collect_probe_proxies() -> list[dict]:
