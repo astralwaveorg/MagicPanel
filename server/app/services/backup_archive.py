@@ -158,7 +158,8 @@ def _scan_tree(root: Path, folder: str, result: dict) -> None:
             result[relative] = _fingerprint(path)
 
 
-def _inventory(root: Path, tables: dict, include_runtime: bool = False) -> dict:
+def _inventory(root: Path, tables: dict, include_runtime: bool = False,
+               include_history: bool = False) -> dict:
     """归档文件清单。
 
     include_runtime=False（默认，2026-11-18）：不含 mihomo 核心与 geo 数据——
@@ -166,13 +167,17 @@ def _inventory(root: Path, tables: dict, include_runtime: bool = False) -> dict:
     会让归档从 ~70MB 涨到 150MB+，超过 WebDAV/网盘的请求体上限（HTTP 413）。
     恢复后核心需重新安装（设置页一键装），geo 数据由构建重新获取。
     """
-    from . import backups as _backups
     result = {}
-    kept = _backups._kept_build_ids(tables)
+    # 默认只打「当前生效」的构建产物（生产中/测试中）：客户端订阅指向的就是
+    # 它们，恢复后必须可用。历史构建的产物由留存清理负责（本来就随时会被删），
+    # 打进备份只会让归档体积翻十倍并超过网盘上传上限（2026-11-18 实证）。
+    # include_history=True 时连历史构建一起打包（体积大，需网盘允许）。
     for build in tables["builds"]:
-        if int(build["id"]) not in kept:
-            continue    # 保留窗口外的构建产物不进归档（与备份完整性口径一致）
-        if build["status"] in {"BUILT", "TESTING", "PRODUCTION", "OFFLINE"} and build["verify_status"] != "building":
+        if build["verify_status"] == "building":
+            continue
+        if build["status"] in ("PRODUCTION", "TESTING"):
+            _scan_tree(root, f"builds/{build['id']}", result)
+        elif include_history and build["status"] in ("BUILT", "OFFLINE"):
             _scan_tree(root, f"builds/{build['id']}", result)
     for folder in ("avatars", "deps/rule-repo"):
         _scan_tree(root, folder, result)
@@ -278,7 +283,8 @@ def _manifest_mac(manifest: dict, master: bytes) -> str:
     return hmac.new(key, _canonical(manifest), hashlib.sha256).hexdigest()
 
 
-def create_archive(conn, destination: Path, include_runtime: bool = False) -> dict:
+def create_archive(conn, destination: Path, include_runtime: bool = False,
+                   include_history: bool = False) -> dict:
     from . import backups
     if conn.in_transaction:
         raise ValueError("archive_requires_idle_connection")
@@ -296,17 +302,21 @@ def create_archive(conn, destination: Path, include_runtime: bool = False) -> di
         with closing(sqlite3.connect(snapshot)) as copy:
             conn.backup(copy)
         snapshot.chmod(0o600)
+        # VACUUM：消除空闲页，归档体积下降约 20%（2026-11-18）
+        with closing(sqlite3.connect(snapshot)) as copy:
+            copy.execute("VACUUM")
         with closing(sqlite3.connect(snapshot)) as copy:
             copy.row_factory = sqlite3.Row
             copy.execute("BEGIN")
             tables = {table: backups._rows(copy, table) for table in backup_tables.registered_tables(copy)}
-            required = backups._required_files(tables)
+            required = backups._required_files(tables, include_history=include_history)
             versions = dict(copy.execute("SELECT key,value FROM schema_version ORDER BY key"))
         files = []
         size, digest = _hash_file(snapshot)
         files.append({"path": "magicpanel.db", "size": size, "sha256": digest, "mode": 0o600})
         with repo_manager.operation("复制备份仓库"):
-            inventory = _inventory(root, tables, include_runtime=include_runtime)
+            inventory = _inventory(root, tables, include_runtime=include_runtime,
+                                  include_history=include_history)
             if required.keys() - inventory.keys():
                 raise ValueError("backup_missing_resource")
             for relative, fingerprint in sorted(inventory.items()):
@@ -314,11 +324,12 @@ def create_archive(conn, destination: Path, include_runtime: bool = False) -> di
                 if relative in required and any(record[key] != required[relative][key] for key in ("size", "sha256")):
                     raise ValueError("backup_missing_resource")
                 files.append(record)
-            if inventory != _inventory(root, tables, include_runtime=include_runtime):
+            if inventory != _inventory(root, tables, include_runtime=include_runtime,
+                                       include_history=include_history):
                 raise ValueError("archive_resource_changed")
         if sum(item["size"] for item in files) > MAX_TOTAL_BYTES:
             raise ValueError("archive_limit_exceeded")
-        _validate_database(work, master, versions)
+        _validate_database(work, master, versions, include_history=include_history)
         manifest = {"format": "MagicPanel/private-archive", "version": 1,
                     "schema_versions": versions, "files": files}
         encoded = _canonical({"manifest": manifest, "mac": _manifest_mac(manifest, master)})
@@ -445,7 +456,8 @@ def _validate_encrypted_material(conn, fernet: Fernet) -> None:
             _validate_ciphertext(row[1], codec, fernet)
 
 
-def _validate_database(destination: Path, master: bytes, versions: dict) -> None:
+def _validate_database(destination: Path, master: bytes, versions: dict,
+                        include_history: bool = False) -> None:
     from . import backups, resource_store
     path = destination / "magicpanel.db"
     conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
@@ -459,7 +471,7 @@ def _validate_database(destination: Path, master: bytes, versions: dict) -> None
             raise ValueError("backup_invalid")
         if dict(conn.execute("SELECT key,value FROM schema_version")) != versions:
             raise ValueError("archive_schema_mismatch")
-        payload = backups.export_logical(conn)
+        payload = backups.export_logical(conn, include_history=include_history)
         backups.validate_logical(conn, payload)
         fernet = Fernet(base64.urlsafe_b64encode(master))
         _validate_encrypted_material(conn, fernet)

@@ -131,6 +131,7 @@ SETTINGS_DEFAULTS = {
     "unlock_batch_size": "3",           # 每批检测节点数
     "unlock_batch_cursor": "0",         # 内部：批量检测轮转游标
     "backup_include_runtime": "0",      # 备份是否含 mihomo 核心与 geo 数据（默认关：归档会 150MB+ 超上传上限）
+    "backup_include_history_builds": "0",  # 备份是否含历史构建产物（默认关：体积大且历史产物随时会被留存清理）
     # 自主维护：依赖文件库（单仓库）
     "deps_enabled": "0",
     "deps_url": "git@github.com:astralwaveorg/magic-sets.git",

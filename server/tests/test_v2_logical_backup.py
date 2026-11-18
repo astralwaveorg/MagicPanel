@@ -21,7 +21,7 @@ def seeded(client):
 def export(conn):
     from app.services import backups
     conn.execute("BEGIN")
-    return backups.export_logical(conn)
+    return backups.export_logical(conn, include_history=True)
 
 
 def test_backup_contains_variants_and_keeps_order(client):
@@ -186,7 +186,7 @@ def test_services_require_caller_transaction_and_do_not_commit(client):
     seeded(client)
     with db.connect() as conn:
         with pytest.raises(ValueError, match="backup_transaction_required"):
-            backups.export_logical(conn)
+            backups.export_logical(conn, include_history=True)
         payload = export(conn)
         conn.rollback()
         with pytest.raises(ValueError, match="backup_transaction_required"):
@@ -241,6 +241,17 @@ def test_build_files_are_bound_to_target_database_directory(client, tmp_path):
     file.write_bytes(original)
     broken = deepcopy(payload)
     broken["files"] = []
+    # 生效版本的产物必须在备份里：manifest 被清空要报错
+    # （2026-11-18 口径调整后，无生效版本时 required 为空，不报错）
+    with db.tx() as conn:
+        conn.execute("UPDATE builds SET status='PRODUCTION', verify_status='success' "
+                     "WHERE id=?", (built.json()["id"],))
+    with db.connect() as conn:
+        conn.execute("BEGIN")
+        active_payload = backups.export_logical(conn, include_history=True)
+    assert active_payload["files"], "生效版本的产物应进入备份清单"
+    broken = deepcopy(active_payload)
+    broken["files"] = []
     with db.tx(immediate=True) as conn:
         with pytest.raises(ValueError, match="backup_missing_resource"):
             backups.restore_logical(conn, broken)
@@ -279,7 +290,7 @@ def test_export_reads_one_database_snapshot_during_concurrent_write(client):
                     other.execute("UPDATE sources SET name='concurrent' WHERE id=?", (source["id"],))
 
         conn.set_trace_callback(concurrent_change)
-        payload = backups.export_logical(conn)
+        payload = backups.export_logical(conn, include_history=True)
     assert changed
     assert payload["tables"]["sources"][0]["name"] == "source-fixture"
     with db.connect() as conn:
@@ -392,7 +403,7 @@ def test_export_refuses_build_file_that_changed_since_build(client):
     with db.connect() as conn:
         conn.execute("BEGIN")
         with pytest.raises(ValueError, match="backup_missing_resource"):
-            backups.export_logical(conn)
+            backups.export_logical(conn, include_history=True)
 
 
 def legacy_database(tmp_path, *, original_schema=True, missing_markers=False):

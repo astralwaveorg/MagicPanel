@@ -43,7 +43,7 @@ def archive_fixture(client, tmp_path):
         before = ordering(conn)
     archive = tmp_path / "fixture.mpbackup"
     with db.connect() as conn:
-        report = backups.create_archive(conn, archive, include_runtime=True)
+        report = backups.create_archive(conn, archive, include_runtime=True, include_history=True)
     return archive, ref, before, material, report
 
 
@@ -118,7 +118,7 @@ def test_archive_rejects_busy_connection_existing_target_and_missing_key(client,
     archive, _, _, _, _ = archive_fixture(client, tmp_path)
     with db.tx(immediate=True) as conn:
         with pytest.raises(ValueError, match="archive_requires_idle_connection"):
-            backups.create_archive(conn, tmp_path / "busy.mpbackup")
+            backups.create_archive(conn, tmp_path / "busy.mpbackup", include_history=True)
     destination = tmp_path / "exists"
     destination.mkdir()
     (destination / "keep").write_text("kept")
@@ -246,7 +246,7 @@ def test_archive_rejects_limits_and_changed_resources(client, tmp_path, monkeypa
     monkeypatch.setattr(backup_archive, "_copy_file", copy_and_change)
     with db.connect() as conn:
         with pytest.raises(ValueError, match="archive_resource_changed"):
-            backups.create_archive(conn, tmp_path / "changed.mpbackup")
+            backups.create_archive(conn, tmp_path / "changed.mpbackup", include_history=True)
     assert not (tmp_path / "changed.mpbackup").exists()
     assert not list(tmp_path.glob(".mp-archive-*"))
 
@@ -259,7 +259,7 @@ def test_archive_checks_private_blob_before_emitting_backup(client, tmp_path):
         conn.execute("UPDATE private_blobs SET ciphertext_sha256=?", ("0" * 64,))
     with db.connect() as conn:
         with pytest.raises(ValueError, match="private_blob_corrupt"):
-            backups.create_archive(conn, tmp_path / "invalid-resource.mpbackup")
+            backups.create_archive(conn, tmp_path / "invalid-resource.mpbackup", include_history=True)
     assert not (tmp_path / "invalid-resource.mpbackup").exists()
 
 
@@ -352,7 +352,7 @@ def test_review_archive_rejects_corrupt_raw_encrypted_setting(client, tmp_path):
         db.set_setting(conn, "deps_private_key_enc", "corrupt-fixture-token")
     with db.connect() as conn:
         with pytest.raises(ValueError, match="^backup_invalid$"):
-            backups.create_archive(conn, tmp_path / "corrupt-setting.mpbackup")
+            backups.create_archive(conn, tmp_path / "corrupt-setting.mpbackup", include_history=True)
     assert not (tmp_path / "corrupt-setting.mpbackup").exists()
 
 
@@ -365,7 +365,7 @@ def test_review_archive_accepts_plain_note_with_ciphertext_prefix(client, tmp_pa
         "type": "MATCH", "target": "DIRECT", "note": "enc:v1: this is plain fixture text"})
     assert response.status_code == 201, response.text
     with db.connect() as conn:
-        result = backups.create_archive(conn, tmp_path / "note.mpbackup", include_runtime=True)
+        result = backups.create_archive(conn, tmp_path / "note.mpbackup", include_runtime=True, include_history=True)
     assert result["encrypted"] is True
     result = backups.restore_archive(tmp_path / "note.mpbackup", tmp_path / "note-restored",
                                      key_path=config.SECRET_KEY_PATH)
@@ -400,7 +400,7 @@ def test_registered_raw_settings_validate_exact_fernet_codec(client, tmp_path, f
     if flow == "archive":
         def run():
             with db.connect() as conn:
-                return backups.create_archive(conn, tmp_path / "checked.mpbackup", include_runtime=True)
+                return backups.create_archive(conn, tmp_path / "checked.mpbackup", include_runtime=True, include_history=True)
         error = ValueError
     else:
         snapshot = tmp_path / "checked-legacy.db"
@@ -440,7 +440,7 @@ def test_registered_payload_setting_preserves_legacy_plaintext_only(client, tmp_
     if flow == "archive":
         def run():
             with db.connect() as conn:
-                return backups.create_archive(conn, tmp_path / "payload.mpbackup", include_runtime=True)
+                return backups.create_archive(conn, tmp_path / "payload.mpbackup", include_runtime=True, include_history=True)
         error = ValueError
     else:
         snapshot = tmp_path / "payload-legacy.db"

@@ -48,29 +48,34 @@ def _json_object(value) -> dict:
     return result
 
 
-def _kept_build_ids(tables: dict) -> set[int]:
-    """备份视角的产物保留窗口（与 retention._kept_build_ids 同口径）。
+def _kept_build_ids(tables: dict, include_history: bool = False) -> set[int]:
+    """备份要求的产物集合。
 
-    留存清理会删掉窗口外构建的产物目录（历史行保留归档），备份不再
-    要求这些文件：恢复后窗口外构建的产物缺失，再次发布会被
-    releases._check_artifacts 拦住，安全。
+    默认：当前生效的构建（生产中 / 测试中）——客户端订阅指向的就是它们，
+    恢复后必须可用。
+    include_history=True：再加上保留窗口内的历史构建（体积大，需网盘允许）。
+
+    历史构建的产物由留存清理负责（随时会被删），默认不进备份也不要求
+    （2026-11-18 修复：原口径对全部历史构建要求产物，且归档打进所有历史
+    产物，导致 152MB 上传被 WebDAV 拒收 HTTP 413）。
     """
-    published_keep = int(config.PUBLISHED_BUILD_KEEP)
-    built_keep = int(config.BUILD_ARTIFACT_KEEP)
-    published = sorted((b for b in tables["builds"] if b["status"] != "BUILT"),
+    keep = {int(b["id"]) for b in tables["builds"]
+            if b["status"] in ("PRODUCTION", "TESTING")}
+    if include_history:
+        published_keep = int(config.PUBLISHED_BUILD_KEEP)
+        built_keep = int(config.BUILD_ARTIFACT_KEEP)
+        published = sorted((b for b in tables["builds"] if b["status"] != "BUILT"),
+                           key=lambda b: int(b["id"]), reverse=True)
+        keep |= {int(b["id"]) for b in published[:published_keep]}
+        built = sorted((b for b in tables["builds"] if b["status"] == "BUILT"),
                        key=lambda b: int(b["id"]), reverse=True)
-    keep = {int(b["id"]) for b in published[:published_keep]}
-    keep |= {int(b["id"]) for b in tables["builds"]
-             if b["status"] in ("PRODUCTION", "TESTING")}
-    built = sorted((b for b in tables["builds"] if b["status"] == "BUILT"),
-                   key=lambda b: int(b["id"]), reverse=True)
-    keep |= {int(b["id"]) for b in built[:built_keep]}
+        keep |= {int(b["id"]) for b in built[:built_keep]}
     return keep
 
 
-def _required_files(tables: dict) -> dict[str, dict]:
+def _required_files(tables: dict, include_history: bool = False) -> dict[str, dict]:
     required = {}
-    kept = _kept_build_ids(tables)
+    kept = _kept_build_ids(tables, include_history=include_history)
     for build in tables["builds"]:
         if int(build["id"]) not in kept:
             # 保留窗口外：产物文件已被留存清理，备份不要求
@@ -127,6 +132,16 @@ def _file_record(root: Path, relative: str) -> dict:
 
 
 def _validate_files(conn, payload: dict, tables: dict, *, legacy: bool) -> None:
+    """校验备份里带的产物文件。
+
+    口径（2026-11-18 调整）：
+    * manifest 里列出的每个文件都必须存在且 size/sha256 匹配——这是完整性底线；
+    * 「当前生效版本」的构建产物必须出现在 manifest 里（恢复后客户端要能用）；
+    * 历史构建产物可有可无（默认备份不含它们，见 _required_files）。
+
+    原来要求 manifest 与 required **双向相等**：备份只含生效产物时，
+    历史产物在 required 里而 manifest 里没有 → 必然 backup_missing_resource。
+    """
     required = _required_files(tables)
     manifest = payload.get("files", [] if legacy else None)
     if not isinstance(manifest, list):
@@ -145,20 +160,29 @@ def _validate_files(conn, payload: dict, tables: dict, *, legacy: bool) -> None:
     if legacy and "files" not in payload:
         # v1 无 manifest：只能用构建当时记录的 size/hash 验证原目录。
         records = dict(required)
-    if records != required:
-        raise ValueError("backup_missing_resource")
-    if required:
+    # 生效版本的产物必须在备份里
+    for path, expected in required.items():
+        if path not in records:
+            raise ValueError("backup_missing_resource")
+        if records[path] != expected:
+            raise ValueError("backup_missing_resource")
+    # manifest 自带的历史产物也要逐一核对（存在且 hash 匹配）
+    if records:
         root = _data_dir(conn)
         for relative, expected in records.items():
             if _file_record(root, relative) != expected:
                 raise ValueError("backup_missing_resource")
 
 
-def export_logical(conn) -> dict:
-    """调用方须持有一致性读事务；此服务不提交、不写审计。"""
+def export_logical(conn, include_history: bool = False) -> dict:
+    """调用方须持有一致性读事务；此服务不提交、不写审计。
+
+    include_history：是否把历史构建的产物也列入（默认只含生效版本产物，
+    逻辑备份同样是上传物，体积必须可控——2026-11-18 WebDAV 413 实证）。
+    """
     _require_transaction(conn)
     tables = {table: _rows(conn, table) for table in backup_tables.registered_tables(conn)}
-    required = _required_files(tables)
+    required = _required_files(tables, include_history=include_history)
     files = [_file_record(_data_dir(conn), path) for path in sorted(required)]
     if any(record != required[record["path"]] for record in files):
         raise ValueError("backup_missing_resource")
@@ -474,9 +498,11 @@ def restore_legacy_database(conn, source) -> dict:
     return restore_logical(conn, payload, _backfill_catalog=False)
 
 
-def create_archive(conn, destination: Path, include_runtime: bool = False) -> dict:
+def create_archive(conn, destination: Path, include_runtime: bool = False,
+                   include_history: bool = False) -> dict:
     from .backup_archive import create_archive as create
-    return create(conn, destination, include_runtime=include_runtime)
+    return create(conn, destination, include_runtime=include_runtime,
+                  include_history=include_history)
 
 
 def restore_archive(archive: Path, destination: Path, *, key_path: Path) -> dict:
