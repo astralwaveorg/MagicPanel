@@ -163,7 +163,7 @@ def test_capability_badges_multidimensional():
         assert unlock_check.BADGE_STREAM in badges
         assert unlock_check.BADGE_NF_PREMIUM in badges
         assert unlock_check.ai_unlocked("节点A") is True
-        # 少一项解锁 → 不给对应徽章
+        # 明确区域拒绝 → 不给对应徽章
         entry["results"][0]["state"] = "blocked"
         badges2 = unlock_check.capability_badges("节点A")
         assert unlock_check.BADGE_AI not in badges2
@@ -266,3 +266,30 @@ def test_detectable_nodes_reads_source_snapshots(client):
     nodes = unlock_check.detectable_nodes()
     assert "机场节点A" in nodes, nodes[:5]
     assert "机场节点B" in nodes
+
+
+def test_cloudflare_challenge_does_not_block_ai_badge(client):
+    """人机校验（403 + Cloudflare）不算区域拒绝：确认解锁项过半仍给 🔓。
+
+    2026-11-18 线上实测：Claude / Perplexity 对无头请求一律 403 + 人机校验，
+    若要求"六项全部 unlocked"，🔓 永远不会出现。
+    """
+    from app.services import unlock_check
+
+    states = {i: "unlocked" for i in unlock_check.AI_CHECK_IDS}
+    states["claude"] = "error"        # 人机校验：无法判定
+    states["perplexity"] = "error"
+    entry = {"checked_at": 1, "exit": "节点B", "results": [
+        {"id": i, "state": s, "status": 200 if s == "unlocked" else 403,
+         "region": "", "latency_ms": 1, "detail": ""}
+        for i, s in states.items()]}
+    orig = unlock_check._load_all
+    unlock_check._load_all = lambda: {"节点B": entry}
+    try:
+        assert unlock_check.ai_unlocked("节点B") is True
+        # 其中一项明确被区域拒绝 → 不给
+        states["gemini"] = "blocked"
+        entry["results"][0]["state"] = "blocked"
+        assert unlock_check.ai_unlocked("节点B") is False
+    finally:
+        unlock_check._load_all = orig

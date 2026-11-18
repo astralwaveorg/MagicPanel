@@ -318,16 +318,35 @@ def _states_of(node_name: str) -> dict[str, str]:
     return {r["id"]: r["state"] for r in entry["results"]}
 
 
-def ai_unlocked(node_name: str) -> bool:
-    """该节点最近一次缓存检测结果里，AI 类是否全部解锁。
+# 维度判定口径（2026-11-18）：
+# Claude / Perplexity 等站点对无头请求返回 403 + Cloudflare 人机校验，
+# 这是**检测手段的局限**，不是节点被区域拒绝。若要求"全部 unlocked"，
+# 🔓 徽章永远不会出现（实测每个节点都有 2 项 error）。
+# 口径改为：维度内**没有一项被明确区域拒绝**，且**确认解锁的项过半**。
+# 人机校验项算"无法判定"，不计入通过，也不算拒绝。
 
-    未检测过 / 检测不全 → False（不加徽章，保守不冒充）。
+AI_CONFIRM_MIN = 4          # AI 维度共 6 项，至少 4 项确认解锁
+STREAM_CONFIRM_MIN = 5      # 流媒体核心共 8 项，至少 5 项确认解锁
+
+
+def _dimension_ok(states: dict, ids: list[str], confirm_min: int) -> bool:
+    """维度内无明确拒绝，且确认解锁项达到下限。"""
+    values = [states.get(i) for i in ids]
+    if any(v == "blocked" for v in values):
+        return False
+    confirmed = sum(1 for v in values if v == "unlocked")
+    return confirmed >= confirm_min
+
+
+def ai_unlocked(node_name: str) -> bool:
+    """该节点最近一次缓存检测结果里，AI 类是否可用。
+
+    未检测过 → False（不加徽章，保守不冒充）。
     """
     states = _states_of(node_name)
-    tested = [states.get(i) for i in AI_CHECK_IDS]
-    if not tested or any(s != "unlocked" for s in tested):
+    if not states:
         return False
-    return True
+    return _dimension_ok(states, AI_CHECK_IDS, AI_CONFIRM_MIN)
 
 
 def capability_badges(node_name: str) -> str:
@@ -341,11 +360,9 @@ def capability_badges(node_name: str) -> str:
     if not states:
         return ""
     badges = ""
-    ai = [states.get(i) for i in AI_CHECK_IDS]
-    if ai and all(s == "unlocked" for s in ai):
+    if _dimension_ok(states, AI_CHECK_IDS, AI_CONFIRM_MIN):
         badges += BADGE_AI
-    stream = [states.get(i) for i in STREAM_CORE_IDS]
-    if stream and all(s == "unlocked" for s in stream):
+    if _dimension_ok(states, STREAM_CORE_IDS, STREAM_CONFIRM_MIN):
         badges += BADGE_STREAM
     if states.get("netflix_premium") == "unlocked":
         badges += BADGE_NF_PREMIUM
