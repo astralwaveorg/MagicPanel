@@ -116,6 +116,10 @@ def mark_stale_builds_failed(conn) -> int:
 def prune_probe_tables(conn) -> int:
     """清理 probe 三张表：入队任务（2026-11-18 起 active 才产出）历史行
     与结果行此前永不清理，单调膨胀。保留最近 200 条任务及其明细。"""
+    tables = {r["name"] for r in db.all_(conn,
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {"probe_jobs", "probe_items", "probe_results"} <= tables:
+        return 0     # 探测迁移未跑：没有表就没有东西要清
     keep_ids = [r["id"] for r in db.all_(
         conn, "SELECT id FROM probe_jobs ORDER BY created_at DESC, id DESC LIMIT 200")]
     removed = 0
@@ -144,17 +148,23 @@ def prune_resource_revisions(conn) -> int:
     被引用的行永远保留：resource_latest / build_resources 有 FK 指向
     resource_revisions，删掉当前指针指向的行会让留存清理整个事务回滚。
     """
+    # 表可能还不存在（v2 探测迁移未跑或旧库）：跳过而不是让整轮清理失败
+    tables = {r["name"] for r in db.all_(conn,
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+    if "resource_revisions" not in tables:
+        return 0
     total = db.one(conn, "SELECT COUNT(*) c FROM resource_revisions")["c"]
     if total <= 10:
         return 0
     keep = [r["id"] for r in db.all_(
         conn, "SELECT id FROM resource_revisions ORDER BY created_at DESC, id LIMIT 10")]
     # 引用表 FK 指向 resource_revisions(id)：被引用的行永远保留
-    for r in db.all_(conn,
-                     "SELECT DISTINCT resource_id AS rid FROM resource_latest "
-                     "UNION SELECT DISTINCT resource_id AS rid FROM build_resources"):
-        if r["rid"] and r["rid"] not in keep:
-            keep.append(r["rid"])
+    if {"resource_latest", "build_resources"} <= tables:
+        for r in db.all_(conn,
+                         "SELECT DISTINCT resource_id AS rid FROM resource_latest "
+                         "UNION SELECT DISTINCT resource_id AS rid FROM build_resources"):
+            if r["rid"] and r["rid"] not in keep:
+                keep.append(r["rid"])
     marks = ",".join("?" for _ in keep)
     cur = conn.execute(
         f"DELETE FROM resource_revisions WHERE id NOT IN ({marks})", keep)
