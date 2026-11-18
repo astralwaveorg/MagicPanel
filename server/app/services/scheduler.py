@@ -547,16 +547,14 @@ def _collect_probe_proxies() -> list[dict]:
     from . import node_rename
     from . import source_nodes as source_node_service
 
-    # 目录映射：探测与缓存统一用 emit_name（构建产物里呈现的名字）。
-    # 原来候选用原始名，而 render 时节点名已是 emit_name——两套名字导致
-    # 能力徽章与性能摘要的查询全部 miss（2026-11-19 实证）。
-    catalog_rows = db.all_(conn, "SELECT * FROM node_catalog")
-    catalog = [dict(r) for r in catalog_rows]
-
     out: list[dict] = []
     seen: set[str] = set()
     conn = db.connect()
     conn.row_factory = sqlite3.Row
+    # 目录映射：探测与缓存统一用 emit_name（构建产物里呈现的名字）。
+    # 原来候选用原始名，而 render 时节点名已是 emit_name——两套名字导致
+    # 能力徽章与性能摘要的查询全部 miss（2026-11-19 实证）。
+    catalog = [dict(r) for r in db.all_(conn, "SELECT * FROM node_catalog")]
     try:
         for r in conn.execute("SELECT id AS source_id, snapshot_enc FROM sources "
                               "WHERE snapshot_enc IS NOT NULL"):
