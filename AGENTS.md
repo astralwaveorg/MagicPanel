@@ -31,8 +31,13 @@ telegram-ip 移到 ai-cn 之后（sort 25-27，早于一切 AI/通讯集合）�
 **2026-11-17 magic-sets 审计与节点规范化、网络体检**：magic-sets 已按产物顺序
 做「首个命中」仿真瘦身（23 条死条目删除、zoom.us 归位、补 Element/Matrix/IP 查询站，
 script/ 与 rewrite/ 目录已删——Stash 专属片段零引用）。构建与 provider feed 分发端
-统一节点名称规范化（`services/node_rename.py`，旗帜+地区+序号+来源标签，占位节点
-丢弃，本地节点不动），系统设置可关（`node_name_normalize`，默认开）。新增「网络体检」
+统一节点名称规范化（`services/node_rename.py`，2026-11-18 起格式为
+「旗帜 [机场·标签] 国名 🔓徽章 序号」——机场提前使同机场节点在客户端排序时
+聚拢；🔓 徽章仅当该节点 AI 六项检测全解锁时加（`node_name_unlock_badge`
+开关默认关），单向变化防名字抖动；占位节点丢弃，本地节点不动），系统设置
+可关（`node_name_normalize`，默认开）。批量解锁检测见「网络体检」页
+（`POST /api/v1/unlock/batch-detect` 后台批，调度器 `unlock_batch_auto`
+可自动轮转，默认关）。新增「网络体检」
 页（/admin/unlock）：面板出口/指定节点解锁检测（AI/流媒体 18 项），门户公开
 /api/v1/portal/unlock。当前 NAS 生产构建 #293。
 

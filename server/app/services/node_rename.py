@@ -1,16 +1,27 @@
 """节点名称规范化（Sub-Store 风格）：机场订阅的节点名千奇百怪——
 有中英混杂、有超长宣传语、有「剩余流量」这类占位节点。构建与分发时统一
-成「旗帜 地区 序号 [标签·来源]」的确定性格式，客户端里看起来整齐划一。
+成「旗帜 [机场·标签] 国名 徽章 序号」的确定性格式，客户端里看起来整齐划一。
+
+    🇺🇸 [神龙机场·IEPL] 美国 🔓 01     ← 开启解锁徽章且该节点 AI 全解锁
+    🇺🇸 [神龙机场] 美国 01            ← 常态
+
+机场提前：客户端按名字排序时同一机场的节点自然聚拢，方便对照管理。
 
 设计约束：
 * 确定性：同一个名字在同一个来源批次里永远得到同一个结果（序号按出现顺序分配），
   客户端拉两次 feed 得到一致的名称，不会随机抖动。
 * 地区关键词保留：策略组的过滤正则靠 🇺🇸/美国/Japan 这类 token 匹配节点，
-  规范化后的名字必须仍然包含「旗帜 + 中文地区名」，否则地区组会失配。
+  规范化后的名字必须仍然包含「旗帜 + 中文国名」，否则地区组会失配。
+* 徽章单向变化（2026-11-18）：解锁徽章只有「AI 全部解锁」时才加，未测与
+  被拒都不加——名字只会从无徽章变有徽章，不会来回抖动；解锁状态易变，
+  编进名字的必须是单向的、稳定的信息，否则客户端节点身份跟着抖。
 * 测速结果不受影响：测速以原始节点名为键，规范化只发生在产物/分发出口，
   原始名 → 新名的映射不会回写数据库。
 """
 import re
+
+# 解锁徽章：AI 类检测全部解锁时的标记（由调用方按缓存判定后传入）
+UNLOCK_BADGE = "🔓"
 
 # 占位/信息节点：对分流毫无意义（server 都不是真实节点），构建与分发时直接丢弃
 INFO_NODE_PATTERN = re.compile(
@@ -81,12 +92,14 @@ def detect_region(name: str) -> tuple[str, str] | None:
     return None
 
 
-def normalize_name(name: str, source: str = "", alloc: dict | None = None) -> str | None:
+def normalize_name(name: str, source: str = "", alloc: dict | None = None,
+                   badge: bool = False) -> str | None:
     """规范化单个节点名。
 
     返回 None 表示这是占位/信息节点，应从产物与分发中丢弃。
     alloc 是 (旗帜, 地区, 家宽) → 下一个序号 的分配表，调用方对同一批次
     传入同一个 dict，序号才会按出现顺序稳定递增。
+    badge=True 时给名字加解锁徽章位（调用方已按缓存判定该节点 AI 全解锁）。
     """
     name = (name or "").strip()
     if not name:
@@ -113,35 +126,45 @@ def normalize_name(name: str, source: str = "", alloc: dict | None = None) -> st
         alloc = {}
     seq = alloc.get(key, 0) + 1
     alloc[key] = seq
-    label = f"{flag} {region_name} {seq:02d}"
-    if multiplier:
-        tags.insert(0, multiplier)
-    if source:
-        tags.append(source)
-    if tags:
-        label += " [" + "·".join(tags) + "]"
+    # 机场·标签 提前：同一机场的节点在客户端按名排序时聚在一起
+    bracket = ""
+    if source or tags:
+        if multiplier:
+            tags.insert(0, multiplier)
+        if source:
+            tags.append(source)
+        bracket = " [" + "·".join(tags) + "]"
+    label = f"{flag}{bracket} {region_name}"
+    if badge:
+        label += f" {UNLOCK_BADGE}"
+    label += f" {seq:02d}"
     return label
 
 
-def rename_batch(names: list[str], source: str = "") -> dict[str, str | None]:
+def rename_batch(names: list[str], source: str = "",
+                 badge_lookup=None) -> dict[str, str | None]:
     """对一批节点名做规范化，返回 {原名: 新名或 None}。
 
     None 表示占位节点应丢弃。批内序号按列表出现顺序分配；
     重复出现的原名只分配一次（首个生效），保证同名节点映射一致。
+    badge_lookup(原始名) → bool：解锁徽章判定（调用方按 unlock 缓存判）。
     """
     alloc: dict = {}
     result: dict[str, str | None] = {}
     for name in names:
         if name in result:
             continue
-        result[name] = normalize_name(name, source=source, alloc=alloc)
+        badge = bool(badge_lookup(name)) if badge_lookup else False
+        result[name] = normalize_name(name, source=source, alloc=alloc, badge=badge)
     return result
 
 
-def normalize_snapshot(snapshot_text: str, source: str = "") -> str:
+def normalize_snapshot(snapshot_text: str, source: str = "",
+                       badge_lookup=None) -> str:
     """规范化 provider 快照 YAML：重命名节点并丢弃占位节点。
 
     仅当开关开启时由分发端调用；内容不可解析时原样返回，不阻断分发。
+    badge_lookup 见 rename_batch。
     """
     import yaml
 
@@ -154,6 +177,7 @@ def normalize_snapshot(snapshot_text: str, source: str = "") -> str:
     mapping = rename_batch(
         [str(p.get("name") or "") for p in data["proxies"] if isinstance(p, dict)],
         source=source,
+        badge_lookup=badge_lookup,
     )
     kept = []
     for p in data["proxies"]:

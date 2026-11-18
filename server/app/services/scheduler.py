@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from .. import config, db, security
 from ..routers import builds
-from . import probe_schedule, releases, repo_sync, retention, tester, updater
+from . import probe_schedule, releases, repo_sync, retention, tester, unlock_check, updater
 from .capabilities import require_capability
 
 logger = logging.getLogger("magicpanel.scheduler")
@@ -489,6 +489,41 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
     summary["published"] = env
 
 
+def _run_unlock_batch(summary: dict) -> None:
+    """自动轮转的节点解锁批量检测（2026-11-18，「自动管理」）。
+
+    开关 unlock_batch_auto（默认关）开着时，每轮 tick 触发一小批
+    （unlock_batch_size，默认 3 个）节点的 AI 解锁检测——放 daemon 线程：
+    每节点要起测速核心（10-20 秒），绝不能占调度线程，否则整轮被拖住。
+    结果写 unlock 缓存，重命名引擎据此给 AI 全解锁的节点加 🔓。
+    """
+    import threading as _threading
+
+    with db.connect() as conn:
+        if not _enabled(conn, "unlock_batch_auto", "0"):
+            return
+        try:
+            qty = max(1, min(50, int(_setting(conn, "unlock_batch_size", "3") or 3)))
+        except ValueError:
+            qty = 3
+    state = unlock_check.batch_state()
+    if state.get("running"):
+        summary["unlock_batch"] = "上一批仍在运行，跳过"
+        return
+
+    def worker():
+        try:
+            result = unlock_check.run_batch(qty=qty, operator=AUTO_OPERATOR)
+            if result.get("unlocked") is not None:
+                logger.info("解锁批量检测：完成 %s，AI 全解锁 %s",
+                            result.get("done"), result.get("unlocked"))
+        except Exception as exc:
+            logger.warning("解锁批量检测异常：%s", exc)
+
+    _threading.Thread(target=worker, daemon=True, name="unlock-batch-auto").start()
+    summary["unlock_batch"] = f"已触发一批（{qty} 个节点）"
+
+
 def _clear_publish_backoff(conn) -> None:
     db.set_setting(conn, "auto_build_fail_count", "0")
     db.set_setting(conn, "auto_build_backoff_until", "")
@@ -631,6 +666,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
                 _run_source_test(summary, now, force=force)
             _run_auto_build(summary, now, force=force, actor_user_id=actor_user_id)
             _run_retention(summary)
+            _run_unlock_batch(summary)
         summary["finished_at"] = db.now()
         _state["last_tick_at"] = summary["finished_at"]
         _state["last_result"] = summary

@@ -11,14 +11,18 @@
 """
 import json
 import re
+import threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+import logging
+
+logger = logging.getLogger("magicpanel.unlock_check")
 from pathlib import Path
 
 import httpx
 
-from .. import config
+from .. import config, db
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
@@ -275,3 +279,112 @@ def exit_ip(proxy: str | None = None) -> dict:
     except Exception as exc:
         return {"ip": "", "country": "", "org": "", "city": "",
                 "error": type(exc).__name__}
+
+
+# ---------------------------------------------------------------- 节点解锁能力
+# 「节点重命名一致性」的数据源（2026-11-18）：AI 类检测全部解锁的节点
+# 才会在重命名时获得 🔓 徽章（node_rename.UNLOCK_BADGE）。徽章单向变化：
+# 未测与被拒都不加，名字不会因解锁状态抖动而来回变。
+
+AI_CHECK_IDS = [c["id"] for c in CHECKS if c["category"] == "ai"]
+
+
+def ai_unlocked(node_name: str) -> bool:
+    """该节点最近一次缓存检测结果里，AI 类是否全部解锁。
+
+    未检测过 / 检测不全 → False（不加徽章，保守不冒充）。
+    """
+    entry = _load_all().get(node_name)
+    if not entry or not entry.get("results"):
+        return False
+    states = {r["id"]: r["state"] for r in entry["results"]}
+    tested = [states.get(i) for i in AI_CHECK_IDS]
+    if not tested or any(s != "unlocked" for s in tested):
+        return False
+    return True
+
+
+def badge_lookup() -> callable:
+    """给 node_rename.rename_batch 用的徽章判定函数。"""
+    return ai_unlocked
+
+
+def _db_row_factory(conn):
+    import sqlite3
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def detectable_nodes() -> list[str]:
+    """可检测的节点原始名：来源快照里的全部节点（含被测速过滤的）+ 本地节点。
+
+    与 _exit_proxy 的出口解析同一个口径（按原始名找）。
+    """
+    from .. import security
+    from . import source_nodes
+
+    names: list[str] = []
+    with _db_row_factory(db.connect()) as conn:
+        for r in conn.execute("SELECT snapshot_enc FROM sources WHERE snapshot_enc IS NOT NULL"):
+            try:
+                proxies = source_nodes.extract(security.decrypt_text(r["snapshot_enc"]))
+            except Exception:
+                continue
+            for p in proxies:
+                if isinstance(p, dict) and p.get("name"):
+                    names.append(str(p["name"]))
+        for r in conn.execute("SELECT name FROM local_nodes ORDER BY id"):
+            names.append(r["name"])
+    return sorted(set(names))
+
+
+# 批量检测进度（内存态；检测结果落 unlock_cache.json）
+_batch_state: dict = {
+    "running": False, "done": 0, "total": 0, "current": "",
+    "started_at": "", "finished_at": "", "trigger": "", "error": "",
+    "unlocked": 0,
+}
+_batch_lock = threading.Lock()
+
+
+def batch_state() -> dict:
+    return dict(_batch_state)
+
+
+def run_batch(qty: int = 3, ids: list[str] | None = None,
+              operator: str = "") -> dict:
+    """对队列中的下一批节点做 AI 解锁检测（阻塞调用，放进后台线程跑）。
+
+    节点队列 = detectable_nodes() 排序后按 cursor 轮转，游标存 settings；
+    每个节点独立起核心检测 AI 类，结果写 unlock_cache.json（exit_id=原始名）。
+    """
+    if not _batch_lock.acquire(blocking=False):
+        return {"skipped": "已有批量检测在进行中"}
+    _batch_state.update(running=True, done=0, error="", trigger=operator or "manual")
+    try:
+        all_nodes = ids if ids else detectable_nodes()
+        cursor = int(db.get_setting(db.connect(), "unlock_batch_cursor", "0") or 0)
+        queue = all_nodes[cursor % len(all_nodes):] + all_nodes[:cursor % len(all_nodes)]             if all_nodes else []
+        batch = queue[:max(1, qty)]
+        _batch_state["total"] = len(batch)
+        unlocked = 0
+        import time as _time
+        _batch_state["started_at"] = db.now()
+        for node in batch:
+            if not _batch_state["running"]:
+                break
+            _batch_state["current"] = node
+            try:
+                run_checks(node, ids=AI_CHECK_IDS, operator=operator or "batch")
+                if ai_unlocked(node):
+                    unlocked += 1
+            except Exception as exc:
+                logger.warning("节点解锁批量检测失败 %s：%s", node, exc)
+            _batch_state["done"] += 1
+            cursor += 1
+        db.set_setting(db.connect(), "unlock_batch_cursor", str(cursor % max(1, len(all_nodes))))
+        _batch_state.update(running=False, finished_at=db.now(), current="",
+                            unlocked=unlocked)
+        return {"ok": True, "done": _batch_state["done"], "unlocked": unlocked}
+    finally:
+        _batch_lock.release()

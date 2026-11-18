@@ -20,12 +20,15 @@ EDITABLE_SETTINGS = {
     "base_url", "session_ttl_hours", "profile_update_interval", "core_proxy",
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
-    "auto_build_interval_hours", "auto_publish_enabled", "auto_publish_env", "node_name_normalize",
+    "auto_build_interval_hours", "auto_publish_enabled", "auto_publish_env",
+    "node_name_normalize", "node_name_unlock_badge", "unlock_batch_auto",
+    "unlock_batch_size",
 }
 BOOL_SETTINGS = {
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
-    "auto_publish_enabled", "node_name_normalize",
+    "auto_publish_enabled", "node_name_normalize", "node_name_unlock_badge",
+    "unlock_batch_auto",
 }
 
 
@@ -346,6 +349,13 @@ def put_settings(body: SettingsBody, user=CurrentUser):
                 raise HTTPException(400, "登录会话有效期必须是整数小时")
             if not 1 <= hours <= 8760:
                 raise HTTPException(400, "登录会话有效期需在 1–8760 小时之间")
+        if key == "unlock_batch_size":
+            try:
+                size = int(value)
+            except ValueError:
+                raise HTTPException(400, "批量检测每批节点数必须是整数")
+            if not 1 <= size <= 50:
+                raise HTTPException(400, "批量检测每批节点数需在 1–50 之间")
         if key == "profile_update_interval":
             try:
                 hours = int(value)

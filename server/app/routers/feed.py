@@ -259,7 +259,12 @@ def provider_resource(token: str, name: str, request: Request):
                     pass  # 快照异常时回退为完整内容，不阻断分发
         # 节点名称规范化（构建端与分发端同一套规则，见 services/node_rename）
         if db.get_setting(conn, "node_name_normalize", "1") == "1":
-            text = node_rename.normalize_snapshot(text, source=source["name"])
+            badge_lookup = None
+            if db.get_setting(conn, "node_name_unlock_badge", "0") == "1":
+                from ..services import unlock_check as _unlock
+                badge_lookup = _unlock.ai_unlocked
+            text = node_rename.normalize_snapshot(text, source=source["name"],
+                                                  badge_lookup=badge_lookup)
         etag_src = (source["sha256"] or "") + (
             ":filtered" if source["filter_unavailable"] else "")
         if source["filter_unavailable"]:

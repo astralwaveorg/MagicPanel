@@ -55,6 +55,21 @@
           <el-button size="small" type="success" :loading="browserRunning"
                      @click="runBrowserChecks">在你的网络里逐项检测</el-button>
         </div>
+        <div class="unlock-local">
+          <h3>节点解锁批量检测</h3>
+          <p class="mp-form-hint">
+            对全部节点逐个检测 AI 六项（Gemini/ChatGPT/Claude/Grok/Perplexity/Copilot），
+            AI 全部解锁的节点会在重命名时带 🔓 徽章（需在设置里开启
+            「解锁徽章」）。每节点约 15-20 秒，按批后台进行。
+          </p>
+          <p v-if="batch && batch.total" class="mp-form-hint">
+            {{ batch.running ? `进行中 ${batch.done}/${batch.total}：${batch.current}` :
+               `上次完成 ${batch.done}/${batch.total}，AI 全解锁 ${batch.unlocked} 个` }}
+          </p>
+          <el-button size="small" type="success" :loading="batchStarting"
+                     :disabled="batch && batch.running"
+                     @click="startBatch">检测下一批（3 个）</el-button>
+        </div>
       </div>
     </div>
 
@@ -82,12 +97,43 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
 import { fmtTime } from '../format'
 import { copyText } from '../utils/clipboard'
 import { BROWSER_CHECKS, probeAll, probeExitIp } from '../utils/browserChecks'
+
+// 节点解锁批量检测：进度轮询（发起后每 2 秒查一次直到完成）
+const batch = ref(null)
+const batchStarting = ref(false)
+let batchTimer = null
+
+async function refreshBatch() {
+  try {
+    batch.value = await api('/api/v1/unlock/batch-status')
+    if (batch.value?.running) {
+      if (!batchTimer) batchTimer = setInterval(refreshBatch, 2000)
+    } else if (batchTimer) {
+      clearInterval(batchTimer)
+      batchTimer = null
+    }
+  } catch { /* 静默：进度非关键信息 */ }
+}
+
+async function startBatch() {
+  if (batchStarting.value) return
+  batchStarting.value = true
+  try {
+    await api('/api/v1/unlock/batch-detect', { method: 'POST', body: { qty: 3 } })
+    ElMessage.success('批量检测已启动，后台进行中')
+    refreshBatch()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    batchStarting.value = false
+  }
+}
 
 const exit = ref('panel')
 const nodeOptions = ref([])
@@ -264,7 +310,10 @@ onMounted(async () => {
     ElMessage.error(`最近检测结果加载失败：${e.message}`)
   }
   loadNodes()
+  refreshBatch()
 })
+
+onUnmounted(() => { if (batchTimer) clearInterval(batchTimer) })
 </script>
 
 <style scoped>

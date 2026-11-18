@@ -326,10 +326,16 @@ def create_build(operator: str, note: str = "",
     overall = "success"
     with db.connect() as _conn:
         normalize_nodes = db.get_setting(_conn, "node_name_normalize", "1") == "1"
+        # 解锁徽章开关（默认关）：开着时「AI 全解锁」的节点名带 🔓
+        unlock_badge = db.get_setting(_conn, "node_name_unlock_badge", "0") == "1"
     # 同一方案的 resolve 只做一次：plan 按 variant 展开（T + D 个产物/方案），
     # 原来每个产物都全量解析一遍引用图（2026-11-18 构建性能）
     resolved_by_variant: dict[int, dict] = {}
     from ..services.node_refs import resolve_snapshot
+    badge_lookup = None
+    if unlock_badge:
+        from ..services import unlock_check as _unlock_check
+        badge_lookup = _unlock_check.ai_unlocked
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
         if vid not in resolved_by_variant:
@@ -353,7 +359,8 @@ def create_build(operator: str, note: str = "",
                 text = render.render_target(snapshot, target, warnings,
                                             device=device, variant=variant,
                                             normalize_nodes=normalize_nodes,
-                                            resolved=resolved)
+                                            resolved=resolved,
+                                            badge_lookup=badge_lookup)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")

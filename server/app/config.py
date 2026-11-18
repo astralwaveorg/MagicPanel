@@ -126,6 +126,10 @@ SETTINGS_DEFAULTS = {
     "auto_build_fail_count": "0",       # 内部：发布连续失败次数（指数退避）
     "auto_build_backoff_until": "",     # 内部：发布退避截止时间（ISO）
     "auto_fetch_snippets": "1",         # 抓取远程拓展模块（原漏播种，设置页看不到开关却默认开启）
+    "node_name_unlock_badge": "0",      # 节点名加解锁徽章 🔓（AI 全解锁才加，单向变化）
+    "unlock_batch_auto": "0",           # 调度器自动轮转批量检测节点解锁（每 tick 一小批）
+    "unlock_batch_size": "3",           # 每批检测节点数
+    "unlock_batch_cursor": "0",         # 内部：批量检测轮转游标
     # 自主维护：依赖文件库（单仓库）
     "deps_enabled": "0",
     "deps_url": "git@github.com:astralwaveorg/magic-sets.git",
