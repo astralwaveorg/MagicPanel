@@ -224,9 +224,10 @@ def save_results(results: list[NodeQuality], operator: str = "系统") -> None:
     for quality in results:
         if quality.stage != "probed" or not quality.probes:
             continue
+        # unlock_check._states_of 按结果项的 "id" 键索引平台，键名必须一致
         results_list = [
-            {"platform": pid, **{k: v for k, v in (item or {}).items()
-                                 if k != "platform"}}
+            {"id": pid, **{k: v for k, v in (item or {}).items()
+                           if k not in ("id", "platform")}}
             for pid, item in quality.probes.items()]
         entry = {"checked_at": quality.checked_at, "exit": quality.name,
                  "results": results_list, "ip": {}}
