@@ -200,3 +200,74 @@ def test_webdav_password_is_encrypted_at_rest(client):
             assert raw.startswith("enc:")
             # 能正常解开用于连接
             assert security.decrypt_payload(raw) == "super-secret"
+
+
+def test_required_files_excludes_out_of_window_builds(client):
+    """窗口外构建的产物缺失不阻断备份（2026-11-18 线上事故回归）。
+
+    根因：retention 曾把 rmtree 放进 DB 事务，事务回滚留下"行在文件不在"；
+    备份的 _required_files 却对全部历史构建要求产物文件 → backup_missing_resource
+    永远失败。修复后：只对保留窗口内（生效中 + 近 PUBLISHED/BUILT_KEEP 个）
+    构建要求产物文件。
+    """
+    from app import config, db
+    from app.services import backups
+    from conftest import auth_headers, setup_admin
+    from test_api import make_policy
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    bid = build["id"]
+
+    # 造够多的已发布构建，把"缺产物"的那些挤到 PUBLISHED_BUILD_KEEP 窗口之外
+    # （线上真实场景：42 个构建里 9 个老构建产物已被留存清理）
+    keep_window = int(config.PUBLISHED_BUILD_KEEP)
+    with db.tx() as conn:
+        results = db.one(conn, "SELECT results FROM builds WHERE id=?", (bid,))["results"]
+        for i in range(keep_window + 5):
+            conn.execute(
+                "INSERT INTO builds(id, created_at, created_by, status, verify_status, "
+                "policy_sha, snapshot, results, note, status_updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (1000 + i, "2020-01-01T00:00:00", "legacy", "OFFLINE", "success",
+                 "olddummy", "{}", results, f"历史构建{i}", "2020-01-01T00:00:00"))
+        # 最老的一个（id 最小 = 1000）被挤出窗口
+        conn.execute("UPDATE builds SET id=999 WHERE id=1000")
+        conn.execute("UPDATE builds SET id=1001 WHERE id=1001")
+
+    with db.connect() as rconn:
+        tables = {"builds": db.all_(rconn, "SELECT * FROM builds")}
+    required = backups._required_files(tables)
+    kept = backups._kept_build_ids(tables)
+    assert 999 not in kept, "最老的已发布构建应在窗口外"
+    assert not any(p.startswith("builds/999/") for p in required), sorted(required)[:3]
+    # 窗口内的构建仍要求产物
+    assert any(p.startswith(f"builds/{bid}/") for p in required), sorted(required)[:3]
+
+
+def test_archive_rejects_missing_artifact_inside_window(client):
+    """窗口内（刚构建的）产物缺失必须仍然拦截：完整性不放松。"""
+    import shutil
+    import tempfile
+    from pathlib import Path
+    from app import config, db
+    from app.services import backup_archive
+    from conftest import auth_headers, setup_admin
+    from test_api import make_policy
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    bid = build["id"]
+    shutil.rmtree(config.BUILDS_DIR / str(bid), ignore_errors=True)
+    with tempfile.TemporaryDirectory() as td:
+        archive = Path(td) / f"magicpanel-{bid}.mpbackup"
+        try:
+            backup_archive.create_archive(db.connect(), archive)
+            raised = False
+        except ValueError as exc:
+            raised = str(exc) == "backup_missing_resource"
+        assert raised, "窗口内产物缺失必须仍然拦截"

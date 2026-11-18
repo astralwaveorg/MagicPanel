@@ -2360,7 +2360,7 @@ def test_retention_prunes_old_artifacts_and_audit(client):
                              (db.now(), "t", "a", "o", "1", ""))
 
     result = retention.run_once()
-    assert result["artifacts"] >= 1
+    assert result["build_dirs"] >= 1
     assert not old_dir.exists()
     with db.connect() as conn:
         kept = db.one(conn, "SELECT COUNT(*) AS c FROM audit")["c"]
@@ -2477,7 +2477,7 @@ def test_retention_prunes_builds_with_release_rows(client, monkeypatch):
         assert db.one(conn, "SELECT COUNT(*) AS c FROM releases")["c"] >= 1
 
     result = retention.run_once()
-    assert "artifacts" in result
+    assert "build_dirs" in result
     assert "builds" in result
 
     with db.connect() as conn:

@@ -48,9 +48,35 @@ def _json_object(value) -> dict:
     return result
 
 
+def _kept_build_ids(tables: dict) -> set[int]:
+    """备份视角的产物保留窗口（与 retention._kept_build_ids 同口径）。
+
+    留存清理会删掉窗口外构建的产物目录（历史行保留归档），备份不再
+    要求这些文件：恢复后窗口外构建的产物缺失，再次发布会被
+    releases._check_artifacts 拦住，安全。
+    """
+    published_keep = int(config.PUBLISHED_BUILD_KEEP)
+    built_keep = int(config.BUILD_ARTIFACT_KEEP)
+    published = sorted((b for b in tables["builds"] if b["status"] != "BUILT"),
+                       key=lambda b: int(b["id"]), reverse=True)
+    keep = {int(b["id"]) for b in published[:published_keep]}
+    keep |= {int(b["id"]) for b in tables["builds"]
+             if b["status"] in ("PRODUCTION", "TESTING")}
+    built = sorted((b for b in tables["builds"] if b["status"] == "BUILT"),
+                   key=lambda b: int(b["id"]), reverse=True)
+    keep |= {int(b["id"]) for b in built[:built_keep]}
+    return keep
+
+
 def _required_files(tables: dict) -> dict[str, dict]:
     required = {}
+    kept = _kept_build_ids(tables)
     for build in tables["builds"]:
+        if int(build["id"]) not in kept:
+            # 保留窗口外：产物文件已被留存清理，备份不要求
+            # （2026-11-18 修复：原来对所有历史构建要求产物文件，
+            # 老构建产物被清理后备份永远 backup_missing_resource）
+            continue
         results = _json_object(build["results"])
         for name, item in results.items():
             if not isinstance(item, dict):

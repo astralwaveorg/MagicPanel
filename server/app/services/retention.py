@@ -38,40 +38,51 @@ def _kept_build_ids(conn) -> set[int]:
     return keep
 
 
-def prune_build_artifacts(conn) -> tuple[int, int]:
-    """删除不再需要的构建产物目录与构建记录。
+def prune_build_artifacts(conn) -> tuple[int, list[int]]:
+    """回收不再需要的构建：数据库记录在事务内删，磁盘目录在事务外删。
 
     留存策略按状态机区分：
     * 生产中 / 测试中：永不清理；
-    * 曾发布过（已下线）：保留最近 PUBLISHED_BUILD_KEEP 个，更早的**彻底清理**
-      （记录、产物与发布历史一起删），避免面板里的历史构建无限堆积；
+    * 曾发布过（已下线）：保留最近 PUBLISHED_BUILD_KEEP 个，更早的**彻底清理**；
     * 从未发布过：保留最近 BUILD_ARTIFACT_KEEP 个，超出的直接删除。
 
-    返回 (删除的产物目录数, 删除的构建记录数)。
+    返回 (keep 集合, 事务内已删除记录的构建 id 列表)。
+
+    磁盘删除必须放在事务之外（run_once 负责）：rmtree 不可回滚——
+    原来放在事务里，DB 删除一旦失败回滚，就留下"行在文件不在"的
+    不一致，备份完整性校验从此永远 backup_missing_resource
+    （2026-11-18 线上实证：#190/#273/#274/#276-#282 九个构建）。
     """
     keep = _kept_build_ids(conn)
-    removed = 0
-    if config.BUILDS_DIR.exists():
-        for path in config.BUILDS_DIR.iterdir():
-            if not path.is_dir() or not path.name.isdigit():
-                continue
-            if int(path.name) in keep:
-                continue
-            try:
-                shutil.rmtree(path)
-                removed += 1
-            except OSError as exc:
-                logger.warning("删除构建产物目录失败 %s：%s", path, exc)
-    # 数据库里的旧构建记录同样回收。
-    # releases.build_id 有外键，必须先删对应的发布历史，
-    # 否则删除构建记录会触发外键约束失败，整轮清理回滚。
     purge = [int(r["id"]) for r in db.all_(conn, "SELECT id FROM builds ORDER BY id")
              if int(r["id"]) not in keep]
     if purge:
         marks = ",".join("?" for _ in purge)
+        # releases.build_id 有外键，必须先删对应的发布历史
         conn.execute(f"DELETE FROM releases WHERE build_id IN ({marks})", purge)
         conn.execute(f"DELETE FROM builds WHERE id IN ({marks})", purge)
-    return removed, len(purge)
+    return keep, purge
+
+
+def purge_build_dirs(keep: set[int], purged_ids: list[int]) -> int:
+    """删除留存窗口外的构建产物目录（调用方在 DB 事务提交之后调用）。
+
+    目录删除失败只告警：目录残留不影响数据库一致性，下一轮会重试。
+    """
+    removed = 0
+    if not config.BUILDS_DIR.exists():
+        return 0
+    for path in config.BUILDS_DIR.iterdir():
+        if not path.is_dir() or not path.name.isdigit():
+            continue
+        if int(path.name) in keep:
+            continue
+        try:
+            shutil.rmtree(path)
+            removed += 1
+        except OSError as exc:
+            logger.warning("删除构建产物目录失败 %s：%s", path, exc)
+    return removed
 
 
 def prune_audit_log(conn) -> int:
@@ -177,16 +188,20 @@ def run_once() -> dict:
     from .. import config as _config
     with db.tx() as conn:
         stale = mark_stale_builds_failed(conn)
-        artifacts, builds = prune_build_artifacts(conn)
+        keep, purged_ids = prune_build_artifacts(conn)
         audits = prune_audit_log(conn)
         sessions = prune_sessions(conn)
         probe = prune_probe_tables(conn)
         revisions = prune_resource_revisions(conn)
+    # 磁盘目录清理在事务外：rmtree 不可回滚，DB 失败不能丢文件
+    build_dirs = purge_build_dirs(keep, purged_ids)
     tmp_dirs = prune_probe_tmp_dirs(_config.DATA_DIR)
-    if artifacts or audits or sessions or stale or builds or probe or revisions or tmp_dirs:
-        logger.info("留存清理：构建产物 %s，构建记录 %s，审计 %s，会话 %s，僵尸构建 %s，"
+    if (build_dirs or audits or sessions or stale or purged_ids
+            or probe or revisions or tmp_dirs):
+        logger.info("留存清理：构建目录 %s，构建记录 %s，审计 %s，会话 %s，僵尸构建 %s，"
                     "probe %s，资源版本 %s，临时目录 %s",
-                    artifacts, builds, audits, sessions, stale, probe, revisions, tmp_dirs)
-    return {"artifacts": artifacts, "builds": builds, "audit": audits,
+                    build_dirs, len(purged_ids), audits, sessions, stale,
+                    probe, revisions, tmp_dirs)
+    return {"build_dirs": build_dirs, "builds": len(purged_ids), "audit": audits,
             "sessions": sessions, "stale_builds": stale,
             "probe": probe, "resource_revisions": revisions, "tmp_dirs": tmp_dirs}
