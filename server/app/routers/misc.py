@@ -23,12 +23,16 @@ EDITABLE_SETTINGS = {
     "auto_build_interval_hours", "auto_publish_enabled", "auto_publish_env",
     "node_name_normalize", "node_name_unlock_badge", "unlock_batch_auto",
     "unlock_batch_size", "backup_include_runtime", "backup_include_history_builds",
+    "probe_funnel_enabled", "probe_max_delay_ms", "probe_min_speed_bps",
+    "probe_speed_bytes", "probe_timeout_ms", "probe_concurrency",
+    "probe_round_limit", "probe_retry",
 }
 BOOL_SETTINGS = {
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
     "auto_publish_enabled", "node_name_normalize", "node_name_unlock_badge",
     "unlock_batch_auto", "backup_include_runtime", "backup_include_history_builds",
+    "probe_funnel_enabled",
 }
 
 

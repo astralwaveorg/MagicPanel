@@ -346,7 +346,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                   variant: dict | None = None,
                   normalize_nodes: bool = True,
                   resolved: dict | None = None,
-                  badge_lookup=None) -> str:
+                  badge_lookup=None, perf_lookup=None) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
@@ -488,7 +488,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         for src in inline_sources:
             rename_map.update(node_rename.rename_batch(
                 inline_names[src["name"]], source=src["name"],
-                badge_lookup=badge_lookup))
+                badge_lookup=badge_lookup, perf_lookup=perf_lookup))
         fixed_by_source: dict[str, list[str]] = {}
         sources_by_id = {s.get('source_id'): s for s in snapshot['sources']}
         for node in fixed_nodes:
@@ -496,7 +496,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             fixed_by_source.setdefault(src["name"] if src else "", []).append(node["name"])
         for sname, names in fixed_by_source.items():
             rename_map.update(node_rename.rename_batch(names, source=sname,
-                                                       badge_lookup=badge_lookup))
+                                                       badge_lookup=badge_lookup,
+                                                       perf_lookup=perf_lookup))
         dropped = {old for old, new in rename_map.items() if new is None}
         keep = {old: new for old, new in rename_map.items() if new is not None}
         inline_nodes = [n for n in inline_nodes if n["name"] not in dropped]

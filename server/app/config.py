@@ -130,6 +130,14 @@ SETTINGS_DEFAULTS = {
     "unlock_batch_auto": "0",           # 调度器自动轮转批量检测节点解锁（每 tick 一小批）
     "unlock_batch_size": "3",           # 每批检测节点数
     "unlock_batch_cursor": "0",         # 内部：批量检测轮转游标
+    "probe_funnel_enabled": "0",        # 周期性质量漏斗（延迟→吞吐→解锁，默认关）
+    "probe_max_delay_ms": "600",        # 一级门禁：延迟上限（毫秒）
+    "probe_min_speed_bps": "2097152",   # 二级门禁：吞吐下限（2MB/s）
+    "probe_speed_bytes": "5242880",     # 测速文件大小（5MB）
+    "probe_timeout_ms": "8000",         # 单请求超时
+    "probe_concurrency": "4",           # 探测并发
+    "probe_round_limit": "200",         # 单轮最多探测节点数
+    "probe_retry": "1",                 # 重试次数（仅超时/5xx）
     "backup_include_runtime": "0",      # 备份是否含 mihomo 核心与 geo 数据（默认关：归档会 150MB+ 超上传上限）
     "backup_include_history_builds": "0",  # 备份是否含历史构建产物（默认关：体积大且历史产物随时会被留存清理）
     # 自主维护：依赖文件库（单仓库）

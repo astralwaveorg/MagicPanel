@@ -97,13 +97,15 @@ def detect_region(name: str) -> tuple[str, str] | None:
 
 
 def normalize_name(name: str, source: str = "", alloc: dict | None = None,
-                   badge: str = "") -> str | None:
+                   badge: str = "", speed_bps: int = 0, delay_ms: int = -1) -> str | None:
     """规范化单个节点名。
 
     返回 None 表示这是占位/信息节点，应从产物与分发中丢弃。
     alloc 是 (旗帜, 地区, 家宽) → 下一个序号 的分配表，调用方对同一批次
     传入同一个 dict，序号才会按出现顺序稳定递增。
     badge 是能力徽章串（可为空，如 "🔓🎬"）：调用方按解锁检测缓存判定。
+    speed_bps / delay_ms 是质量漏斗的结果（0 / -1 表示没有数据）：
+    有数据时在名字末尾追加「120M/45ms」这样的摘要。
     """
     name = (name or "").strip()
     if not name:
@@ -145,11 +147,19 @@ def normalize_name(name: str, source: str = "", alloc: dict | None = None,
         if badge_text:
             label += f" {badge_text}"
     label += f" {seq:02d}"
+    # 质量摘要：吞吐(MB/s) / 延迟(ms)，都没有就不加这一段
+    perf = ""
+    if speed_bps and speed_bps > 0:
+        perf = f"{int(speed_bps / 1024 / 1024)}M"
+    if delay_ms is not None and delay_ms >= 0:
+        perf = f"{perf}/{delay_ms}ms" if perf else f"{delay_ms}ms"
+    if perf:
+        label += f" {perf}"
     return label
 
 
 def rename_batch(names: list[str], source: str = "",
-                 badge_lookup=None) -> dict[str, str | None]:
+                 badge_lookup=None, perf_lookup=None) -> dict[str, str | None]:
     """对一批节点名做规范化，返回 {原名: 新名或 None}。
 
     None 表示占位节点应丢弃。批内序号按列表出现顺序分配；
@@ -166,7 +176,14 @@ def rename_batch(names: list[str], source: str = "",
         if badge_lookup:
             raw = badge_lookup(name)
             badge = UNLOCK_BADGE if raw is True else (str(raw) if raw else "")
-        result[name] = normalize_name(name, source=source, alloc=alloc, badge=badge)
+        speed_bps = 0
+        delay_ms = -1
+        if perf_lookup:
+            perf = perf_lookup(name) or {}
+            speed_bps = int(perf.get("speed_bps") or 0)
+            delay_ms = int(perf.get("delay_ms", -1))
+        result[name] = normalize_name(name, source=source, alloc=alloc, badge=badge,
+                                       speed_bps=speed_bps, delay_ms=delay_ms)
     return result
 
 

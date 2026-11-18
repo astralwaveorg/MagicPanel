@@ -489,6 +489,84 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
     summary["published"] = env
 
 
+def _run_quality_funnel(summary: dict) -> None:
+    """周期性质量漏斗（2026-11-19）：延迟 → 吞吐 → 解锁矩阵。
+
+    开关 ``probe_funnel_enabled``（默认关）。跑在后台线程：
+    一次要起核心、逐节点切换探测，绝不能占住调度线程。
+    """
+    import threading as _threading
+
+    with db.connect() as conn:
+        if not _enabled(conn, "probe_funnel_enabled", "0"):
+            return
+        if _enabled(conn, "probe_funnel_running", "0"):
+            return          # 上一轮还在跑：不重复排队
+    from . import quality_funnel
+
+    proxies = _collect_probe_proxies()
+    if not proxies:
+        summary["funnel"] = "没有可探测的节点"
+        return
+
+    def worker():
+        try:
+            result = quality_funnel.run_funnel(proxies, operator=AUTO_OPERATOR)
+            stats = result.get("stats", {})
+            logger.info("质量漏斗：待测 %s，探测 %s，达标 %s，耗时 %ss",
+                        stats.get("pending"), stats.get("probed"),
+                        stats.get("qualified"), stats.get("elapsed_sec"))
+        except Exception as exc:
+            logger.warning("质量漏斗异常：%s", exc)
+
+    _threading.Thread(target=worker, daemon=True, name="quality-funnel").start()
+    summary["funnel"] = f"已触发（{len(proxies)} 个候选节点）"
+
+
+def _collect_probe_proxies() -> list[dict]:
+    """收集候选节点（Mihomo 节点字典）：来源快照 + 本地节点。"""
+    import sqlite3
+    from . import local_nodes, source_nodes
+    from .. import security
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    conn = db.connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        for r in conn.execute("SELECT snapshot_enc FROM sources WHERE snapshot_enc IS NOT NULL"):
+            try:
+                raw = security.decrypt_text(r["snapshot_enc"]) or ""
+                proxies = source_nodes.extract(raw.encode("utf-8", "replace"))
+            except Exception:
+                continue
+            for p in proxies:
+                if not isinstance(p, dict) or not p.get("name"):
+                    continue
+                name = str(p["name"])
+                if name in seen:
+                    continue
+                seen.add(name)
+                out.append(p)
+        for r in conn.execute("SELECT * FROM local_nodes WHERE enabled=1 ORDER BY id"):
+            try:
+                node = {"name": r["name"], "node_type": r["node_type"] or "",
+                        "protocol": r["protocol"], "server": r["server"], "port": r["port"],
+                        "params": json.loads(security.decrypt_text(r["params_enc"]) or "{}"),
+                        "extra_yaml": security.decrypt_text(r["extra_yaml_enc"])
+                        if r["extra_yaml_enc"] else None}
+                proxy = local_nodes.render_proxy(node, "mihomo")
+            except Exception:
+                continue
+            name = str(proxy.get("name") or "")
+            if name and name not in seen:
+                seen.add(name)
+                out.append(proxy)
+    finally:
+        conn.close()
+    return out
+
+
 def _run_unlock_batch(summary: dict) -> None:
     """自动轮转的节点解锁批量检测（2026-11-18，「自动管理」）。
 
@@ -674,6 +752,7 @@ def run_once(force: bool = False, trigger: str = "scheduled",
             _run_auto_build(summary, now, force=force, actor_user_id=actor_user_id)
             _run_retention(summary)
             _run_unlock_batch(summary)
+            _run_quality_funnel(summary)
         summary["finished_at"] = db.now()
         _state["last_tick_at"] = summary["finished_at"]
         _state["last_result"] = summary

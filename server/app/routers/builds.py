@@ -338,6 +338,15 @@ def create_build(operator: str, note: str = "",
         # 多维能力徽章（🔓 AI / 🎬 流媒体 / 📺 Netflix 高级版）：
         # 分类来自构建前的解锁检测缓存，检测 → 分类 → 重命名 → 产物
         badge_lookup = _unlock_check.capability_badges
+    # 质量摘要（吞吐/延迟）：来自漏斗结果文件，缺数据就不写进名字
+    perf_lookup = None
+    try:
+        from ..services import quality_funnel as _funnel
+        _quality = _funnel.load_results().get("nodes", {})
+        if _quality:
+            perf_lookup = lambda name: _quality.get(name) or {}
+    except Exception:
+        perf_lookup = None
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
         if vid not in resolved_by_variant:
@@ -362,7 +371,8 @@ def create_build(operator: str, note: str = "",
                                             device=device, variant=variant,
                                             normalize_nodes=normalize_nodes,
                                             resolved=resolved,
-                                            badge_lookup=badge_lookup)
+                                            badge_lookup=badge_lookup,
+                                            perf_lookup=perf_lookup)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
