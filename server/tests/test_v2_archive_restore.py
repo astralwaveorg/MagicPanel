@@ -43,7 +43,7 @@ def archive_fixture(client, tmp_path):
         before = ordering(conn)
     archive = tmp_path / "fixture.mpbackup"
     with db.connect() as conn:
-        report = backups.create_archive(conn, archive)
+        report = backups.create_archive(conn, archive, include_runtime=True)
     return archive, ref, before, material, report
 
 
@@ -365,7 +365,7 @@ def test_review_archive_accepts_plain_note_with_ciphertext_prefix(client, tmp_pa
         "type": "MATCH", "target": "DIRECT", "note": "enc:v1: this is plain fixture text"})
     assert response.status_code == 201, response.text
     with db.connect() as conn:
-        result = backups.create_archive(conn, tmp_path / "note.mpbackup")
+        result = backups.create_archive(conn, tmp_path / "note.mpbackup", include_runtime=True)
     assert result["encrypted"] is True
     result = backups.restore_archive(tmp_path / "note.mpbackup", tmp_path / "note-restored",
                                      key_path=config.SECRET_KEY_PATH)
@@ -400,7 +400,7 @@ def test_registered_raw_settings_validate_exact_fernet_codec(client, tmp_path, f
     if flow == "archive":
         def run():
             with db.connect() as conn:
-                return backups.create_archive(conn, tmp_path / "checked.mpbackup")
+                return backups.create_archive(conn, tmp_path / "checked.mpbackup", include_runtime=True)
         error = ValueError
     else:
         snapshot = tmp_path / "checked-legacy.db"
@@ -440,7 +440,7 @@ def test_registered_payload_setting_preserves_legacy_plaintext_only(client, tmp_
     if flow == "archive":
         def run():
             with db.connect() as conn:
-                return backups.create_archive(conn, tmp_path / "payload.mpbackup")
+                return backups.create_archive(conn, tmp_path / "payload.mpbackup", include_runtime=True)
         error = ValueError
     else:
         snapshot = tmp_path / "payload-legacy.db"

@@ -474,9 +474,9 @@ def restore_legacy_database(conn, source) -> dict:
     return restore_logical(conn, payload, _backfill_catalog=False)
 
 
-def create_archive(conn, destination: Path) -> dict:
+def create_archive(conn, destination: Path, include_runtime: bool = False) -> dict:
     from .backup_archive import create_archive as create
-    return create(conn, destination)
+    return create(conn, destination, include_runtime=include_runtime)
 
 
 def restore_archive(archive: Path, destination: Path, *, key_path: Path) -> dict:

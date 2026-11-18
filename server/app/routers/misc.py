@@ -22,13 +22,13 @@ EDITABLE_SETTINGS = {
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
     "auto_build_interval_hours", "auto_publish_enabled", "auto_publish_env",
     "node_name_normalize", "node_name_unlock_badge", "unlock_batch_auto",
-    "unlock_batch_size",
+    "unlock_batch_size", "backup_include_runtime",
 }
 BOOL_SETTINGS = {
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
     "auto_publish_enabled", "node_name_normalize", "node_name_unlock_badge",
-    "unlock_batch_auto",
+    "unlock_batch_auto", "backup_include_runtime",
 }
 
 

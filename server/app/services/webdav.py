@@ -210,7 +210,10 @@ def run_backup(conn, operator: str = "系统", trigger: str = "auto") -> dict:
     try:
         tmpdir.chmod(0o700)
         archive = tmpdir / f"{PREFIX}{stamp}{ARCHIVE_SUFFIX}"
-        report = backups.create_archive(conn, archive)
+        # 运行时资源（mihomo 核心 + geo 数据）默认不进归档：可重新下载，
+        # 带着它们会让归档 150MB+ 超 WebDAV 请求体上限（HTTP 413，2026-11-18 实证）
+        include_runtime = _setting(conn, "backup_include_runtime", "0") == "1"
+        report = backups.create_archive(conn, archive, include_runtime=include_runtime)
         metadata = tmpdir / f"{PREFIX}{stamp}{META_SUFFIX}"
         from .backup_archive import _open_private
         with _open_private(metadata) as handle:

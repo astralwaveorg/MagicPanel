@@ -271,3 +271,31 @@ def test_archive_rejects_missing_artifact_inside_window(client):
         except ValueError as exc:
             raised = str(exc) == "backup_missing_resource"
         assert raised, "窗口内产物缺失必须仍然拦截"
+
+
+def test_archive_excludes_runtime_assets_by_default(client):
+    """默认归档不含 mihomo 核心与 geo 数据（2026-11-18 HTTP 413 修复）。
+
+    运行时资源可重新下载；带着它们归档 150MB+，超过 WebDAV 请求体上限。
+    include_runtime=True 时仍可包含（恢复契约与旧备份保持兼容）。
+    """
+    import tempfile
+    from pathlib import Path
+    from app import db
+    from app.services import backups
+    from conftest import auth_headers, setup_admin
+    from test_api import make_policy
+
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    make_policy(client, csrf)
+    with db.connect() as conn:
+        with tempfile.TemporaryDirectory() as td:
+            slim = Path(td) / "slim.mpbackup"
+            backups.create_archive(conn, slim)
+            slim_text = slim.read_bytes()
+            with tempfile.TemporaryDirectory() as td2:
+                full = Path(td2) / "full.mpbackup"
+                backups.create_archive(conn, full, include_runtime=True)
+                full_size = full.stat().st_size
+    assert full_size >= len(slim_text), "含运行时资源的归档不应更小"

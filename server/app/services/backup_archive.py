@@ -158,24 +158,36 @@ def _scan_tree(root: Path, folder: str, result: dict) -> None:
             result[relative] = _fingerprint(path)
 
 
-def _inventory(root: Path, tables: dict) -> dict:
+def _inventory(root: Path, tables: dict, include_runtime: bool = False) -> dict:
+    """归档文件清单。
+
+    include_runtime=False（默认，2026-11-18）：不含 mihomo 核心与 geo 数据——
+    它们是可重新下载的运行时资源，不是恢复运行必需的配置数据。带着它们
+    会让归档从 ~70MB 涨到 150MB+，超过 WebDAV/网盘的请求体上限（HTTP 413）。
+    恢复后核心需重新安装（设置页一键装），geo 数据由构建重新获取。
+    """
+    from . import backups as _backups
     result = {}
+    kept = _backups._kept_build_ids(tables)
     for build in tables["builds"]:
+        if int(build["id"]) not in kept:
+            continue    # 保留窗口外的构建产物不进归档（与备份完整性口径一致）
         if build["status"] in {"BUILT", "TESTING", "PRODUCTION", "OFFLINE"} and build["verify_status"] != "building":
             _scan_tree(root, f"builds/{build['id']}", result)
     for folder in ("avatars", "deps/rule-repo"):
         _scan_tree(root, folder, result)
-    core = root / "bin/mihomo"
-    if core.exists() or core.is_symlink():
-        _check_parents(core)
-        result["bin/mihomo"] = _fingerprint(core)
-    geo = root / "core-work"
-    if geo.exists() or geo.is_symlink():
-        if geo.is_symlink() or not geo.is_dir():
-            raise ValueError("archive_unsafe_file")
-        for item in geo.iterdir():
-            if item.suffix.lower() in {".dat", ".mmdb"}:
-                result[item.relative_to(root).as_posix()] = _fingerprint(item)
+    if include_runtime:
+        core = root / "bin/mihomo"
+        if core.exists() or core.is_symlink():
+            _check_parents(core)
+            result["bin/mihomo"] = _fingerprint(core)
+        geo = root / "core-work"
+        if geo.exists() or geo.is_symlink():
+            if geo.is_symlink() or not geo.is_dir():
+                raise ValueError("archive_unsafe_file")
+            for item in geo.iterdir():
+                if item.suffix.lower() in {".dat", ".mmdb"}:
+                    result[item.relative_to(root).as_posix()] = _fingerprint(item)
     if len(result) + 1 > MAX_FILES:
         raise ValueError("archive_limit_exceeded")
     if any(info[2] > MAX_FILE_BYTES for info in result.values()) or sum(info[2] for info in result.values()) > MAX_TOTAL_BYTES:
@@ -266,7 +278,7 @@ def _manifest_mac(manifest: dict, master: bytes) -> str:
     return hmac.new(key, _canonical(manifest), hashlib.sha256).hexdigest()
 
 
-def create_archive(conn, destination: Path) -> dict:
+def create_archive(conn, destination: Path, include_runtime: bool = False) -> dict:
     from . import backups
     if conn.in_transaction:
         raise ValueError("archive_requires_idle_connection")
@@ -294,7 +306,7 @@ def create_archive(conn, destination: Path) -> dict:
         size, digest = _hash_file(snapshot)
         files.append({"path": "magicpanel.db", "size": size, "sha256": digest, "mode": 0o600})
         with repo_manager.operation("复制备份仓库"):
-            inventory = _inventory(root, tables)
+            inventory = _inventory(root, tables, include_runtime=include_runtime)
             if required.keys() - inventory.keys():
                 raise ValueError("backup_missing_resource")
             for relative, fingerprint in sorted(inventory.items()):
@@ -302,7 +314,7 @@ def create_archive(conn, destination: Path) -> dict:
                 if relative in required and any(record[key] != required[relative][key] for key in ("size", "sha256")):
                     raise ValueError("backup_missing_resource")
                 files.append(record)
-            if inventory != _inventory(root, tables):
+            if inventory != _inventory(root, tables, include_runtime=include_runtime):
                 raise ValueError("archive_resource_changed")
         if sum(item["size"] for item in files) > MAX_TOTAL_BYTES:
             raise ValueError("archive_limit_exceeded")
