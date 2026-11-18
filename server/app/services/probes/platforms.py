@@ -140,6 +140,8 @@ class NetflixDetector(Detector):
     category = "streaming"
     title_url = "https://www.netflix.com/title/81280792"
     regions_url = "https://www.netflix.com/regions"
+    # Netflix 握手慢（TLS + 地理跳转），给更长超时
+    timeout = 14.0
     url = title_url
 
     region_markers = (
@@ -231,6 +233,7 @@ class DisneyPlusDetector(_WebDetector):
     platform_id = "disney"
     display_name = "Disney+"
     category = "streaming"
+    body_limit = 1_200_000
     url = "https://www.disneyplus.com/"
 
     markers = Markers(
@@ -262,6 +265,7 @@ class MaxDetector(_WebDetector):
     platform_id = "hbo"
     display_name = "HBO Max"
     category = "streaming"
+    body_limit = 1_200_000
     url = "https://play.max.com/"
 
     markers = Markers(
@@ -306,6 +310,8 @@ class YouTubePremiumDetector(_WebDetector):
     platform_id = "youtube_premium"
     display_name = "YouTube Premium"
     category = "streaming"
+    # countryCode 在页面尾部（~1MB 处），60KB 默认上限取不到
+    body_limit = 2_000_000
     url = "https://www.youtube.com/premium"
 
     markers = Markers(
@@ -373,6 +379,7 @@ class TikTokDetector(_WebDetector):
     platform_id = "tiktok"
     display_name = "TikTok"
     category = "streaming"
+    body_limit = 1_200_000
     url = "https://www.tiktok.com/"
 
     markers = Markers(
@@ -429,6 +436,7 @@ class SpotifyDetector(_WebDetector):
     platform_id = "spotify"
     display_name = "Spotify"
     category = "streaming"
+    body_limit = 1_200_000
     url = "https://www.spotify.com/"
 
     markers = Markers(

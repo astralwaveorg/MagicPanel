@@ -76,6 +76,10 @@ GENERIC_REGION_PATTERNS = (
 )
 
 
+# 平台级失败去噪表：同一平台只警告一次（199 节点 × 33 平台会刷屏）
+_failed_platforms: dict[str, bool] = {}
+
+
 @dataclass
 class ProbeResult:
     """单个平台对一个节点的探测结论。"""
@@ -221,6 +225,12 @@ class Detector(ABC):
     # 需要跟随重定向的平台在 fetch() 里显式传 follow_redirects；
     # 默认跟随（与浏览器一致），否则 301/302 会让所有平台都判成 error。
     follow_redirects: bool = True
+    # 正文读取上限：默认 60KB 足够判状态与地区特征；
+    # 需要从页面尾部取字段的平台（如 YouTube 的 countryCode 在 ~1MB 处）
+    # 单独调大——33 平台 × 199 节点全量拉大正文会浪费几个 GB 带宽
+    body_limit: int = MAX_BODY_CHARS
+    # 该平台自己的超时（秒）；None 表示用框架统一值
+    timeout: float | None = None
 
     # ---------------------------------------------------------------- 工具方法
 
@@ -235,7 +245,8 @@ class Detector(ABC):
         kwargs["follow_redirects"] = self.follow_redirects if follow_redirects is None else follow_redirects
         resp = client.get(target, **kwargs)
         text = resp.text or ""
-        return ProbeResponse(status=resp.status_code, text=text[:MAX_BODY_CHARS],
+        limit = int(getattr(self, "body_limit", MAX_BODY_CHARS) or MAX_BODY_CHARS)
+        return ProbeResponse(status=resp.status_code, text=text[:limit],
                              url=str(resp.url), headers=dict(resp.headers))
 
     def extract_region(self, text: str,
@@ -324,8 +335,10 @@ def _run_detector(detector: Detector, client_factory: Callable[[float], httpx.Cl
     started = time.monotonic()
     last: ProbeResult | None = None
     for attempt in range(max(0, retry) + 1):
+        # 平台自带的超时优先（Netflix 握手慢，需要比统一值更久）
+        eff_timeout = float(getattr(detector, "timeout", None) or timeout)
         try:
-            client = client_factory(timeout)
+            client = client_factory(eff_timeout)
         except Exception as exc:  # 客户端都建不出来，后面就不用试了
             logger.warning("探测器 %s 客户端创建失败：%s", detector.platform_id, exc)
             return ProbeResult(platform=detector.platform_id, state=STATE_ERROR,
@@ -343,7 +356,13 @@ def _run_detector(detector: Detector, client_factory: Callable[[float], httpx.Cl
                                  status=None, detail=f"请求超时（{type(exc).__name__}）")
         except Exception as exc:
             # 失败隔离：一个平台炸了不影响其它平台。
-            logger.warning("探测器 %s 执行失败：%s", detector.platform_id, exc)
+            # 同一平台重复失败只警告一次（199 节点 × 33 平台会刷屏）
+            key = detector.platform_id
+            if _failed_platforms.get(key):
+                logger.debug("探测器 %s 再次执行失败：%s", key, exc)
+            else:
+                _failed_platforms[key] = True
+                logger.warning("探测器 %s 执行失败：%s", key, exc)
             result = ProbeResult(platform=detector.platform_id, state=STATE_ERROR,
                                  status=None, detail=f"{type(exc).__name__}: {exc}")
 
