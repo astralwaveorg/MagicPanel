@@ -232,3 +232,18 @@ def test_batch_detect_api_and_settings_gate(client, monkeypatch):
     content2 = client.get(
         f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
     assert "🇺🇸 [原始机场] 美国 🔓 01" in content2, content2
+
+
+def test_prompt_node_detection():
+    """提示型节点（名字就是一个网址）要被识别出来，不是可用出口。
+
+    2026-11-19 线上实测遇到「📢大陆加速:shenlong66.com」——它是机场的
+    占位提示，不是节点，留在产物里会占位也会被漏斗反复探测。
+    """
+    from app.services import node_rename
+
+    assert node_rename.is_prompt_node("📢大陆加速:shenlong66.com") is True
+    assert node_rename.is_prompt_node("example.com") is True
+    assert node_rename.is_prompt_node("🇭🇰 香港01 Hyper") is False
+    assert node_rename.is_prompt_node("🇺🇸 美国NTT 01 (机房)") is False
+    assert node_rename.is_prompt_node("") is False

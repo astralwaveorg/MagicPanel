@@ -32,6 +32,14 @@ INFO_NODE_PATTERN = re.compile(
     r"剩余流量|套餐到期|到期时间|距离下次|重置剩余|订阅提醒|官网|官方网站|"
     r"expire|traffic|valid until|subscription", re.IGNORECASE)
 
+# 提示型节点：名字就是一个网址（机场的"加速页/公告页"占位），
+# 2026-11-19 实测遇到「📢大陆加速:shenlong66.com」——它不是可用的出口，
+# 留在产物里会占位、也会被漏斗反复探测。
+# 提示型节点的名字通常以网址结尾（前缀可有 emoji、冒号、中文说明）
+INFO_DOMAIN_PATTERN = re.compile(
+    r"[a-z0-9\-]{2,}\.(?:com|net|org|top|xyz|cc|cn|io|co|me|info)$",
+    re.IGNORECASE)
+
 # 地区识别表：按顺序首个命中的生效。英文与缩写都用词边界，避免
 # "IEPL" 里的 PL、"RUSsia" 里的 US 这类误伤。
 _REGIONS = (
@@ -78,6 +86,12 @@ _CARRIER_PATTERN = re.compile(r"(移动|移動|cmcc|china mobile|联通|聯通|u
 def is_info_node(name: str) -> bool:
     """「剩余流量」「套餐到期」这类占位节点，不进产物。"""
     return bool(INFO_NODE_PATTERN.search(name or ""))
+
+
+def is_prompt_node(name: str) -> bool:
+    """提示型节点：名字就是一个网址（机场的加速页/公告页占位）。"""
+    text = (name or "").strip()
+    return bool(text) and bool(INFO_DOMAIN_PATTERN.search(text))
 
 
 def _extract_multiplier(name: str) -> str | None:

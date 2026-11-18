@@ -550,7 +550,7 @@ def _collect_probe_proxies() -> list[dict]:
                     continue
                 # 占位节点（剩余流量/到期时间…）不是真节点，探测它们只会
                 # 浪费一轮门禁时间
-                if node_rename.is_info_node(name):
+                if node_rename.is_info_node(name) or node_rename.is_prompt_node(name):
                     continue
                 seen.add(name)
                 out.append(p)

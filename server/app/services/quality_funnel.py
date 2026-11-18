@@ -100,7 +100,7 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
         if not name:
             continue
         # 占位节点（剩余流量/到期时间…）不是真节点，跳过
-        if node_rename.is_info_node(name):
+        if node_rename.is_info_node(name) or node_rename.is_prompt_node(name):
             continue
         if only_missing:
             old = previous.get(name)
