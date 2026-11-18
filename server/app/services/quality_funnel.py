@@ -92,10 +92,15 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
     previous = load_results().get("nodes", {})
     detectors = registry.detectors_for()
 
+    from . import node_rename
+
     pending = []
     for proxy in proxies:
         name = str(proxy.get("name") or "")
         if not name:
+            continue
+        # 占位节点（剩余流量/到期时间…）不是真节点，跳过
+        if node_rename.is_info_node(name):
             continue
         if only_missing:
             old = previous.get(name)

@@ -100,7 +100,7 @@ class NodeEngine:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env=tester.direct_env(), text=True, errors="replace",
         )
-        threading.Thread(target=self._drain, args=(self._log_lines,),
+        threading.Thread(target=self._drain, args=(self.proc, self._log_lines),
                          daemon=True).start()
         self.controller = httpx.Client(trust_env=False, timeout=10.0)
         base = f"http://127.0.0.1:{self.controller_port}"

@@ -529,6 +529,8 @@ def _collect_probe_proxies() -> list[dict]:
     from . import local_nodes, source_nodes
     from .. import security
 
+    from . import node_rename
+
     out: list[dict] = []
     seen: set[str] = set()
     conn = db.connect()
@@ -545,6 +547,10 @@ def _collect_probe_proxies() -> list[dict]:
                     continue
                 name = str(p["name"])
                 if name in seen:
+                    continue
+                # 占位节点（剩余流量/到期时间…）不是真节点，探测它们只会
+                # 浪费一轮门禁时间
+                if node_rename.is_info_node(name):
                     continue
                 seen.add(name)
                 out.append(p)
