@@ -286,12 +286,26 @@ def match(pattern: str, name: str) -> bool:
 
 
 def map_emit_names(nodes: list[dict], *, source_id: int, catalog: list[dict], suffix: str = '') -> list[dict]:
-    """纯映射：输出已含后缀的稳定 emit_name，不再次追加 override。"""
+    """纯映射：输出已含后缀的稳定 emit_name，不再次追加 override。
+
+    同一原始名在目录里出现多条（历史遗留的重复目录行）时，取 ordinal
+    最小的一条并告警——构建不能因为一条脏数据整体失败
+    （2026-11-19 线上实证：夜煞云目录里同一占位节点两条未退役记录，
+    全部产物渲染失败 reference_ambiguous，生产发布被卡）。
+    """
+    import logging
+    logger = logging.getLogger("magicpanel.source_nodes")
     entries = [entry for entry in catalog if entry.get('source_id') == source_id and not entry.get('retired')]
     out = []
     for node in nodes:
         matches = [entry for entry in entries if entry['raw_name'] == node['name']]
-        if len(matches) != 1:
-            raise ValueError('reference_ambiguous' if matches else 'catalog_material_invalid')
+        if not matches:
+            raise ValueError('catalog_material_invalid')
+        if len(matches) > 1:
+            matches.sort(key=lambda e: int(e.get('ordinal') or 0))
+            logger.warning(
+                "来源 %s 的节点 %r 在目录里有 %d 条未退役记录，取 ordinal=%s；"
+                "请清理重复目录行", source_id, node['name'], len(matches),
+                matches[0].get('ordinal'))
         out.append({**node,'name':matches[0]['emit_name']})
     return out

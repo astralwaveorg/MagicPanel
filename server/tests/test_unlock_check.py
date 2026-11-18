@@ -293,3 +293,37 @@ def test_cloudflare_challenge_does_not_block_ai_badge(client):
         assert unlock_check.ai_unlocked("节点B") is False
     finally:
         unlock_check._load_all = orig
+
+
+def test_map_emit_names_tolerates_duplicate_catalog_rows():
+    """目录里同一原始名多条未退役记录时取 ordinal 最小，不再炸全部产物。
+
+    2026-11-19 线上实证：夜煞云目录同一占位节点两条记录（ordinal 120/218），
+    map_emit_names 抛 reference_ambiguous → 全部产物渲染失败 → 生产发布被卡。
+    """
+    from app.services import source_nodes
+
+    catalog = [
+        {"source_id": 9, "raw_name": "占位节点", "emit_name": "占位-120",
+         "ordinal": 120, "retired": False},
+        {"source_id": 9, "raw_name": "占位节点", "emit_name": "占位-218",
+         "ordinal": 218, "retired": False},
+        {"source_id": 9, "raw_name": "正常节点", "emit_name": "正常",
+         "ordinal": 130, "retired": False},
+    ]
+    out = source_nodes.map_emit_names(
+        [{"name": "占位节点"}, {"name": "正常节点"}],
+        source_id=9, catalog=catalog)
+    assert out[0]["name"] == "占位-120"
+    assert out[1]["name"] == "正常"
+
+
+def test_map_emit_names_still_rejects_missing():
+    """原始名在目录里不存在仍然要报错（不能静默放行）。"""
+    from app.services import source_nodes
+    import pytest
+
+    catalog = [{"source_id": 9, "raw_name": "别的", "emit_name": "x",
+                "ordinal": 1, "retired": False}]
+    with pytest.raises(ValueError, match="catalog_material_invalid"):
+        source_nodes.map_emit_names([{"name": "不存在"}], source_id=9, catalog=catalog)
