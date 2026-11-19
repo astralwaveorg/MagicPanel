@@ -57,3 +57,41 @@ def test_google_requires_complete_fresh_higher_tier_exhaustion():
     assert select_google_tier([us, sg], old, evaluation_at=at())['tier'] is None
     fresh = [dict(old[0], valid_until='2027-01-05T04:00:00+00:00')]
     assert select_google_tier([us, sg], fresh, evaluation_at=at())['tier'] == 'SG'
+
+
+def test_google_prefers_usable_self_hosted_us_over_faster_airport():
+    from app.services.routing_planner import select_google_tier
+    from v2_helpers import at
+
+    base = {"country": "US", "google_state": "observed-ok"}
+    selfhosted = dict(base, origin_kind="local", node_uid="self", latency_ms=400)
+    provider = dict(base, origin_kind="source", node_uid="provider", latency_ms=100)
+    assert select_google_tier([provider, selfhosted], [], evaluation_at=at())["candidate_uids"] == ["self", "provider"]
+    assert select_google_tier(
+        [provider, {**selfhosted, "google_state": "unknown"}], [], evaluation_at=at()
+    )["candidate_uids"] == ["provider"]
+
+
+def test_service_candidates_do_not_confuse_reachability_or_region_with_unlock():
+    from app.services.routing_planner import service_candidates
+
+    netflix = {"state": "unlocked", "status": 200, "region": "JP",
+               "extra": {"catalog": "licensed_sample"}}
+    ai = {"state": "unlocked", "status": 200}
+    base = {"checked_at": 100, "qualified": True, "delay_ms": 100,
+            "country": "JP", "origin_kind": "local", "probes": {"netflix": netflix, "claude": ai}}
+    rows = [
+        dict(base, name="日本自建"),
+        dict(base, name="美国自建", country="US", delay_ms=80,
+             probes={"netflix": dict(netflix, region="US"), "claude": ai}),
+        dict(base, name="日本订阅", origin_kind="source", delay_ms=20,
+             probes={"netflix": dict(netflix, extra={"catalog": "originals_sample"}), "claude": ai}),
+        dict(base, name="旧记录", checked_at=9),
+        dict(base, name="校验页", probes={
+            "netflix": dict(netflix, status=403),
+            "claude": dict(ai, status=403, extra={"reason": "challenge"})}),
+        dict(base, name="网页有响应", probes={"claude": dict(ai, state="reachable")}),
+    ]
+    assert [n["name"] for n in service_candidates(rows, "netflix", earliest=10)] == ["日本自建"]
+    assert [n["name"] for n in service_candidates(rows, "claude", earliest=10)] == ["美国自建", "日本自建", "日本订阅"]
+    assert service_candidates(rows, "perplexity", earliest=10) == []

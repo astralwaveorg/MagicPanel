@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">规则来源</h2>
     <p class="mp-page-desc">
-      管理构建时引用的规则集。面板抓取成功后保存内容，再按规则来源的设置分发给设备。
+      管理构建使用的规则集。同步后，设备可按设置更新。
     </p>
 
     <div class="mp-toolbar">
@@ -193,7 +193,7 @@
         <el-form-item v-else-if="form.kind === 'repo'" label="仓库路径">
           <el-input v-model="form.repo_path" class="mono" placeholder="rule/集合名.yaml" />
           <div class="mp-form-hint">
-            内容由「自主维护」仓库里的这个文件决定：在自主维护页改完并提交，同步后这里跟着更新。
+            在「自主维护」修改并提交，规则会在下次同步后更新。
           </div>
         </el-form-item>
         <el-form-item v-else label="规则内容（YAML payload 或每行一条）">
@@ -225,7 +225,7 @@
               <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
             </el-form-item>
             <div v-if="form.kind === 'inline'" class="mp-form-hint">
-              内联内容由面板维护：保存后在下一次构建生效，客户端按上面的间隔重新拉取。
+              保存后在下次构建生效。设备按设定间隔更新。
             </div>
             <div v-else-if="form.kind === 'repo'" class="mp-form-hint">
               维护仓库：内容由「自主维护」仓库里的文件决定，改完在那边提交并同步。

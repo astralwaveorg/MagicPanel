@@ -4,30 +4,33 @@
       <div class="mp-page-head-row">
         <h2 class="mp-page-title">构建发布</h2>
         <div class="mp-btn-grid mp-page-head-actions">
-          <el-tooltip content="按自动任务设置更新来源、构建并发布到选定环境" placement="bottom-end">
-            <el-button :loading="triggering" @click="runAutoNow" type="primary">运行发布流程</el-button>
+          <el-tooltip content="按自动任务设置更新来源、构建和发布" placement="bottom-end">
+            <el-button :loading="triggering" @click="runAutoNow" type="primary">运行自动任务</el-button>
           </el-tooltip>
           <el-tooltip v-if="tab === 'builds'"
                       content="校验当前配置并生成构建，不发布"
                       placement="bottom-end">
-            <el-button :loading="building" @click="createBuild">创建构建</el-button>
+            <el-button :loading="building" @click="createBuild()">创建构建</el-button>
+          </el-tooltip>
+          <el-tooltip v-if="tab === 'builds'" content="生成一份按地区编号的配置，不发布">
+            <el-button :disabled="building" @click="createBuild(true)">预览统一节点名</el-button>
           </el-tooltip>
         </div>
       </div>
       <p class="mp-page-desc">
-        先构建并校验，再选择发布到测试或生产。设备下次更新订阅时获取新配置。
+        校验通过后可发布。设备下次更新订阅时使用新配置。
       </p>
     </div>
 
     <el-tabs v-model="tab" class="mp-builds-tabs">
-      <el-tab-pane label="手动构建发布" name="builds">
+      <el-tab-pane label="构建记录" name="builds">
         <div class="mp-card">
           <div class="mp-toolbar" style="margin-bottom:0">
             <div class="left" style="flex-direction:column;align-items:flex-start;gap:8px">
               <div class="release-list">
                 <div class="release-line">
                   <span class="release-dot">🟢</span>
-                  <span class="release-label">当前生产版本：</span>
+                  <span class="release-label">生产版本</span>
                   <template v-if="releaseState.production">
                     <span class="mono">构建 #{{ releaseState.production.id }}</span>
                     <span class="release-time">
@@ -39,14 +42,14 @@
                     <span v-if="releaseState.production.publish_reason" class="release-reason">
                       {{ releaseState.production.publish_reason }}
                     </span>
-                    <el-button size="small" text @click="openDetail(releaseState.production)" type="info">查看详情</el-button>
+                    <el-button size="small" text @click="openDetail(releaseState.production)" type="info">详情</el-button>
                   </template>
                   <span v-else class="release-empty">暂无生效版本</span>
                 </div>
 
                 <div class="release-line">
                   <span class="release-dot">🟡</span>
-                  <span class="release-label">当前测试版本：</span>
+                  <span class="release-label">测试版本</span>
                   <template v-if="releaseState.testing">
                     <span class="mono">构建 #{{ releaseState.testing.id }}</span>
                     <span class="release-time">
@@ -58,7 +61,7 @@
                     <span v-if="releaseState.testing.publish_reason" class="release-reason">
                       {{ releaseState.testing.publish_reason }}
                     </span>
-                    <el-button size="small" text @click="openDetail(releaseState.testing)" type="info">查看详情</el-button>
+                    <el-button size="small" text @click="openDetail(releaseState.testing)" type="info">详情</el-button>
                   </template>
                   <span v-else class="release-empty">暂无生效版本</span>
                 </div>
@@ -77,7 +80,7 @@
         <EmptyState
           v-if="!error && !rows.length"
           reason="还没有构建。"
-          next="点击“创建构建”，把当前策略编译为各目标的完整配置。"
+          next="点「创建构建」生成配置。"
         />
         <div v-else class="mp-card">
           <div class="mp-table-wrap">
@@ -104,7 +107,7 @@
                 <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
               </el-table-column>
               <el-table-column v-if="!isMobile" prop="created_by" label="创建人" width="100" />
-              <el-table-column v-if="!isMobile" label="策略摘要" min-width="135">
+              <el-table-column v-if="!isMobile" label="策略指纹" min-width="135">
                 <template #default="{ row }"><span class="mono">{{ shortSha(row.policy_sha) }}</span></template>
               </el-table-column>
               <el-table-column prop="note" label="备注" :min-width="isMobile ? 160 : 200">
@@ -123,17 +126,17 @@
                   <div class="op-grid">
                     <el-button size="small" @click="openDetail(row)" type="info" plain>详情</el-button>
                     <template v-if="row.status === 'BUILT'">
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success" plain>发布至测试环境</el-button>
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishBoth(row)" type="success" plain>一键发布</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success" plain>发布测试</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishBoth(row)" type="success" plain>直接发布</el-button>
                       <el-button size="small" :loading="busyId === row.id" @click="remove(row)" type="danger" plain>删除</el-button>
                     </template>
                     <template v-else-if="row.status === 'TESTING'">
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToProd(row)" type="success" plain>发布至生产环境</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToProd(row)" type="success" plain>发布生产</el-button>
                       <el-button size="small" :loading="busyId === row.id" @click="offlineBuild(row)" type="warning" plain>下线</el-button>
                     </template>
                     <template v-else-if="row.status === 'OFFLINE'">
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success">重新发布至测试环境</el-button>
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="rollbackToProd(row)" type="warning" plain>回滚至生产环境</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success">发布测试</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="rollbackToProd(row)" type="warning" plain>回滚生产</el-button>
                     </template>
                   </div>
                 </template>
@@ -166,7 +169,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="自动运行配置" name="auto">
+      <el-tab-pane label="自动任务" name="auto">
         <AutoBuildPanel />
       </el-tab-pane>
     </el-tabs>
@@ -176,7 +179,7 @@
       <template v-else>
         <p style="font-size:13px;color:var(--mp-text-secondary);margin-top:0">
           {{ fmtTime(detail.created_at) }} · {{ detail.created_by }} ·
-          策略摘要 <span class="mono">{{ shortSha(detail.policy_sha) }}</span>
+          策略指纹 <span class="mono">{{ shortSha(detail.policy_sha) }}</span>
           {{ detail.note ? ` · ${detail.note}` : '' }}
         </p>
         <el-alert v-if="detail.verify_status !== 'success'" type="error" :closable="false"
@@ -185,12 +188,12 @@
         <div v-if="detail.status === 'BUILT' || detail.status === 'OFFLINE'" class="mp-drawer-actions">
           <el-button :disabled="detail.verify_status !== 'success' || !!busyId"
                      :loading="busyId === detail.id"
-                     @click="publishToTest(detail)" type="success" plain>发布至测试环境</el-button>
+                     @click="publishToTest(detail)" type="success" plain>发布测试</el-button>
           <el-button :disabled="detail.verify_status !== 'success' || !!busyId"
                      :loading="busyId === detail.id"
-                     @click="publishBoth(detail)" type="success" plain>一键发布</el-button>
+                     @click="publishBoth(detail)" type="success" plain>直接发布</el-button>
           <span class="mp-form-hint">
-            一键发布：在同一事务内先发布到测试环境、再发布到生产环境，发布历史只记一条
+            直接发布到生产，跳过测试环境的试用。
           </span>
         </div>
         <div v-for="(result, name) in detail.results" :key="name" class="mp-card mp-artifact">
@@ -413,10 +416,13 @@ function currentBuildText(build) {
   return build ? `构建 #${build.id}` : '无'
 }
 
-async function createBuild() {
+async function createBuild(previewRegionalNames = false) {
   building.value = true
   try {
-    const build = await api('/api/v1/builds', { method: 'POST', body: { note: '' } })
+    const build = await api('/api/v1/builds', { method: 'POST', body: {
+      note: previewRegionalNames ? '预览统一节点名' : '',
+      preview_regional_names: previewRegionalNames,
+    } })
     await load()
     if (build.verify_status === 'success') {
       ElMessage.success(`构建 #${build.id} 校验通过`)
@@ -473,13 +479,13 @@ async function openDiff(name) {
 
 async function publishToTest(row) {
   if (!await confirmBox(
-    `确定将构建 #${row.id} 发布至测试环境吗？发布后，当前测试版本（${currentBuildText(releaseState.value.testing)}）将被转为已下线。`,
-    '发布至测试环境', { type: 'warning', confirmButtonText: '发布' },
+    `将构建 #${row.id} 发布测试？它会替换当前测试版本（${currentBuildText(releaseState.value.testing)}）。`,
+    '发布测试', { type: 'warning', confirmButtonText: '发布' },
   )) return
   busyId.value = row.id
   try {
     await api(`/api/v1/builds/${row.id}/publish-to-test`, { method: 'POST', body: { reason: '' } })
-    ElMessage.success(`构建 #${row.id} 已发布至测试环境`)
+    ElMessage.success(`构建 #${row.id} 已发布到测试`)
     detailVisible.value = false
     await load()
   } catch (e) {
@@ -491,9 +497,9 @@ async function publishToTest(row) {
 
 async function publishBoth(row) {
   if (!await confirmBox(
-    `⚠️ 确定将构建 #${row.id} 直接发布至生产吗？这将会影响所有线上设备。`
-    + `当前生产版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
-    '一键发布', { type: 'warning', confirmButtonText: '发布' },
+    `将构建 #${row.id} 直接发布生产？`
+    + `它会替换当前生产版本（${currentBuildText(releaseState.value.production)}）。生产设备下次更新订阅时会收到新配置。`,
+    '直接发布', { type: 'warning', confirmButtonText: '发布' },
   )) return
   busyId.value = row.id
   try {
@@ -510,8 +516,8 @@ async function publishBoth(row) {
 
 async function publishToProd(row) {
   if (!await confirmBox(
-    `⚠️ 确定将构建 #${row.id} 设为生产版本吗？这将会影响所有线上设备。当前生产版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
-    '发布至生产环境', { type: 'warning', confirmButtonText: '发布' },
+    `将构建 #${row.id} 发布生产？它会替换当前生产版本（${currentBuildText(releaseState.value.production)}）。生产设备下次更新订阅时会收到新配置。`,
+    '发布生产', { type: 'warning', confirmButtonText: '发布' },
   )) return
   busyId.value = row.id
   try {
@@ -527,8 +533,8 @@ async function publishToProd(row) {
 
 async function rollbackToProd(row) {
   if (!await confirmBox(
-    `确定将构建 #${row.id} 回滚为生产版本吗？这将会影响所有线上设备。当前生产版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
-    '回滚生产版本', { type: 'warning', confirmButtonText: '回滚' },
+    `将生产回滚到构建 #${row.id}？它会替换当前生产版本（${currentBuildText(releaseState.value.production)}）。生产设备下次更新订阅时会收到新配置。`,
+    '回滚生产', { type: 'warning', confirmButtonText: '回滚' },
   )) return
   busyId.value = row.id
   try {
@@ -544,7 +550,7 @@ async function rollbackToProd(row) {
 
 async function offlineBuild(row) {
   if (!await confirmBox(
-    `确定将构建 #${row.id} 下线吗？下线后测试环境将没有生效版本，客户端会在下次拉取时收到 503。`,
+    `下线构建 #${row.id}？测试环境将没有可用配置，测试设备暂时无法更新订阅。`,
     '下线构建', { type: 'warning', confirmButtonText: '下线' },
   )) return
   busyId.value = row.id

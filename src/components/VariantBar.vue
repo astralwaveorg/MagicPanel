@@ -16,8 +16,7 @@
     <el-dialog :close-on-click-modal="false" v-model="manageDialog" title="分流方案管理" width="min(680px, 94vw)"
                @open="loadVariants">
       <p class="mp-dialog-desc">
-        每个方案是一套完整、独立的策略组与分流规则；构建时每个方案各出一套产物，
-        门户下载时可按设备选择方案。默认方案是历史行为，不可删除或改名。
+        各方案独立配置策略组和规则。设备可在订阅中心选择方案。默认方案不能改名或删除。
       </p>
 
       <div class="vb-create">

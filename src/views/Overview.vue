@@ -21,7 +21,7 @@
         </template>
         <div v-else class="stat-empty">
           尚未发布
-          <span>在「构建发布」生成配置并发布后，设备才能更新订阅</span>
+          <span>发布配置后，设备才能更新订阅</span>
         </div>
       </div>
 
@@ -36,7 +36,7 @@
         </template>
         <div v-else class="stat-empty">
           暂无基础连通样本
-          <span>由服务器通过节点发起，只反映服务器的连通情况</span>
+          <span>反映服务器经节点访问的结果</span>
         </div>
       </div>
 
@@ -89,7 +89,7 @@
         </div>
         <div v-else class="stat-sub">尚未发起路径检测。点「发起检测」验证一次。</div>
         <div v-if="direct.path_evidence" class="stat-sub">路径结论：{{ direct.path_evidence.conclusion }}</div>
-        <div v-else class="stat-sub">出口地区无法说明测速是否经过透明代理。点「发起检测」查看两条路径的结果。</div>
+        <div v-else class="stat-sub">点「发起检测」对比两条路径。仅凭出口地区无法判断是否经过透明代理。</div>
         <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击重试。</div>
       </div>
 

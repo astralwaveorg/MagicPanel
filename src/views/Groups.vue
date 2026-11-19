@@ -183,12 +183,10 @@
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item :label="form.type === 'relay'
-          ? '包含策略（转发链，按顺序排列，至少两个：策略组、本地节点或 DIRECT / REJECT）'
-          : '包含策略（按顺序组成，可用策略组、本地节点或 DIRECT / REJECT）'">
+        <el-form-item :label="form.type === 'relay' ? '转发成员' : '策略成员'">
           <MultiSelectClear :has-value="form.proxies.length" @clear="form.proxies = []">
             <el-select v-model="form.proxies" multiple filterable allow-create default-first-option
-                       style="width:100%" placeholder="选择或输入">
+                       collapse-tags aria-label="策略成员" style="width:100%" placeholder="搜索并添加成员">
               <el-option v-for="g in otherGroups" :key="g" :label="g" :value="g" />
               <el-option v-for="n in enabledLocalNodes" :key="n.display_name"
                          :label="n.display_name" :value="n.display_name" />
@@ -196,52 +194,48 @@
               <el-option value="REJECT" label="REJECT（拒绝）" />
             </el-select>
           </MultiSelectClear>
+          <SortableSelection v-model="form.proxies" label="策略成员顺序" />
           <div class="mp-form-hint">
-            这里的顺序就是产物里的成员顺序。本地节点可以放中间；
-            下面「本地节点」一栏则是整组追加（排最前或最后）。
+            {{ form.type === 'relay' ? '至少选两个成员，流量按此顺序转发。' : '拖动或用箭头调整成员顺序。' }}
           </div>
         </el-form-item>
         <el-form-item label="适用引擎平台">
           <ScopeSelect v-model="form.targets" all-label="包含所有引擎平台"
                        :options="targetNames" />
           <div class="mp-form-hint">
-            只在选中的引擎平台里出现该策略组；指向它的规则会随之生效。
-            选「包含所有引擎平台」表示所有平台都出现。
+            仅在所选平台下发这个组及引用它的规则。
           </div>
         </el-form-item>
         <el-form-item label="适用设备">
           <ScopeSelect v-model="form.devices" all-label="包含所有设备"
                        :options="deviceNames" />
           <div class="mp-form-hint">
-            选了设备后，这个策略组只出现在这些设备的产物里，其他设备不受影响；
-            选「包含所有设备」则所有设备都有。
+            只向选中的设备下发这个组。
           </div>
         </el-form-item>
-        <el-form-item label="本地节点（单节点，可多选）">
-          <MultiSelectClear :has-value="form.local_nodes.length" @clear="form.local_nodes = []">
-            <el-select v-model="form.local_nodes" multiple filterable style="width:100%">
-              <el-option v-for="n in localNodes" :key="n.id" :value="n.id"
+        <el-form-item label="本地节点">
+          <MultiSelectClear :has-value="selectedLocal.length" @clear="selectedLocal = []">
+            <el-select v-model="selectedLocal" multiple filterable collapse-tags
+                       aria-label="本地节点" placeholder="搜索并添加本地节点" style="width:100%">
+              <el-option v-for="n in localNodes" :key="n.id" :value="n.display_name"
                          :disabled="!n.enabled"
                          :label="`${n.display_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
             </el-select>
           </MultiSelectClear>
-          <div v-if="form.local_nodes.length" class="mp-form-hint">
-            <el-checkbox v-model="form.local_first" style="margin-right:14px">
-              本地节点排在最前
-            </el-checkbox>
-            <span>
-              开启后本地节点排在组内其它节点之前，适合自建机房节点优先、机场节点兜底的组。
-            </span>
+          <SortableSelection v-model="selectedLocal" label="本地节点顺序" />
+          <div v-if="selectedLocal.length" class="mp-form-hint">
+            <el-button link type="primary" @click="pinLocalFirst">本地节点置顶</el-button>
+            <span>此处调整会同步到策略成员。</span>
           </div>
         </el-form-item>
         <template v-if="form.type !== 'relay'">
-          <el-form-item label="节点来源（从来源中取节点，可多选）">
-            <ScopeSelect v-model="form.use_sources" all-label="包含所有来源（含以后新增的）"
+          <el-form-item label="节点来源">
+            <ScopeSelect v-model="form.use_sources" all-label="包含所有来源"
                          :options="sourceNames" />
+            <SortableSelection v-if="!hasAllScope(form.use_sources) && form.use_sources.length < sourceNames.length"
+                               v-model="form.use_sources" label="节点来源顺序" />
             <div class="mp-form-hint">
-              选了「包含所有来源（含以后新增的）」，以后新增的节点来源会自动进来，
-              不用回来改这里；不选则这个组不取任何来源的节点
-              （成员只由「包含策略」和「本地节点」决定）。
+              「包含所有来源」会纳入新增来源。来源排序适用于订阅下发，内联节点按名称排列。
             </div>
           </el-form-item>
           <el-form-item label="节点筛选（正则，可选）">
@@ -389,6 +383,7 @@ const { refDialog, openRefDialog, onRefConfirm } = useRefDialog()
 import Pager from '../components/Pager.vue'
 import MultiSelectClear from '../components/MultiSelectClear.vue'
 import ScopeSelect from '../components/ScopeSelect.vue'
+import SortableSelection from '../components/SortableSelection.vue'
 import ErrorState from '../components/ErrorState.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import VariantBar from '../components/VariantBar.vue'
@@ -500,6 +495,26 @@ const enabledLocalNodes = computed(() =>
   (localNodes.value || []).filter((n) => n.enabled),
 )
 
+const localNames = computed(() => new Set(localNodes.value.map((node) => node.display_name)))
+const selectedLocal = computed({
+  get: () => form.proxies.filter((name) => localNames.value.has(name)),
+  set(next) {
+    // 保持其他成员的位置。新增本地节点追加；调序只替换原有本地节点的位置。
+    const chosen = new Set(next)
+    const ordered = [...chosen]
+    const rest = form.proxies.filter((name) => !localNames.value.has(name) || chosen.has(name))
+    let index = 0
+    form.proxies = [
+      ...rest.map((name) => localNames.value.has(name) ? ordered[index++] : name),
+      ...ordered.slice(index),
+    ]
+  },
+})
+
+function pinLocalFirst() {
+  form.proxies = [...selectedLocal.value, ...form.proxies.filter((name) => !localNames.value.has(name))]
+}
+
 function localNodeList(ids) {
   return (ids || [])
     .map((id) => localNodes.value.find((node) => node.id === id)?.display_name)
@@ -567,11 +582,12 @@ onBeforeUnmount(sorter.destroy)
 
 function openEdit(row) {
   editing.value = row || null
+  const local = localNodeList(row?.local_nodes)
+  const proxies = row?.proxies || []
+  const ordered = row?.local_first ? [...local, ...proxies] : [...proxies, ...local]
   Object.assign(form, emptyForm(), row ? {
     name: row.name, type: row.type, hidden: row.hidden, filter: row.filter,
-    use_sources: [...row.use_sources], local_nodes: [...(row.local_nodes || [])],
-    local_first: !!row.local_first,
-    proxies: [...row.proxies],
+    use_sources: [...row.use_sources], proxies: [...new Set(ordered)],
     url: row.url, interval: row.interval, timeout: row.timeout,
     tolerance: row.tolerance, lazy: row.lazy, strategy: row.strategy || '',
     targets: [...(row.targets || [])],

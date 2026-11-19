@@ -4,6 +4,7 @@ from datetime import timedelta
 from .fingerprints import digest
 
 GOOGLE_TIERS = ('US', 'SG', 'JP')
+AI_SERVICES = ("chatgpt", "claude", "perplexity", "grok", "copilot")
 
 
 def rank_ai(rows: list[dict]) -> list[str]:
@@ -31,8 +32,9 @@ def select_google_tier(rows: list[dict], exhaustion: list[dict], *, evaluation_a
         candidates = [row for row in rows if row.get('country') == country and
                       row.get('google_state') == 'observed-ok']
         if candidates:
-            ordered = sorted(candidates, key=lambda row: (int(row.get('latency_ms', 10**9)),
-                                                          str(row['node_uid'])))
+            ordered = sorted(candidates, key=lambda row: (
+                not (country == 'US' and row.get('origin_kind') == 'local'),
+                int(row.get('latency_ms', 10**9)), str(row['node_uid'])))
             return {'tier': country, 'candidate_uids': [row['node_uid'] for row in ordered],
                     'state': 'usable', 'reason': f'{country}_available'}
         if not any(_proof_valid(proof, country, scope_sha, evaluation_at)
@@ -44,6 +46,32 @@ def select_google_tier(rows: list[dict], exhaustion: list[dict], *, evaluation_a
                 'reason': 'google_all_tiers_exhausted'}
     return {'tier': None, 'candidate_uids': [], 'state': 'needs_review',
             'reason': 'higher_tier_not_exhausted'}
+
+
+def service_candidates(rows: list[dict], service: str, *, earliest: int,
+                       netflix_region: str = "JP") -> list[dict]:
+    """只为该业务选已确认且未过期的达标节点。网页响应、人机校验不入池。"""
+    if service != "netflix" and service not in AI_SERVICES:
+        return []
+    candidates = []
+    for row in rows:
+        if not row.get("qualified") or not row.get("checked_at", 0) >= earliest:
+            continue
+        result = (row.get("probes") or {}).get(service) or {}
+        if result.get("state") != "unlocked":
+            continue
+        extra = result.get("extra") or {}
+        if result.get("status") in (401, 403, 429, 451) or extra.get("reason") in {
+                "challenge", "rate_limit", "unexplained_denial", "ip_block", "region", "upstream"}:
+            continue
+        if service == "netflix":
+            if result.get("region") != netflix_region or extra.get("catalog") != "licensed_sample":
+                continue
+        preferred = (service != "netflix" and row.get("origin_kind") == "local"
+                     and row.get("country") in ("US", "JP"))
+        candidates.append((not preferred, result.get("latency_ms") or row.get("delay_ms") or 10**9, row))
+    return [row for _, _, row in sorted(candidates, key=lambda item: (
+        item[0], item[1], item[2].get("name", "")))]
 
 
 def recovery_plan(snapshot: dict, *, evaluation_at) -> dict:

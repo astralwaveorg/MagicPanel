@@ -62,3 +62,52 @@ def test_target_scoped_groups_isolate_private_local_nodes():
         assert "private-secret" not in own and "private-group" not in own
         assert "private-secret" in friend and "private-group" in friend
         assert "unreferenced-secret" not in own + friend
+
+
+def test_regional_inline_names_keep_membership_order_and_dialer():
+    from app.compiler import render
+    from app.services import node_rename
+
+    snapshot = _snapshot()
+    snapshot["sources"] = [
+        {"source_id": i, "name": f"来源{i}", "enabled": True, "mode": "inline" if i == 1 else "provider",
+         "nodes": [{"name": "HK 002", "type": "ss", "server": f"hk{i}.example.invalid", "port": 443},
+                   *([{"name": "JP 003", "type": "vless", "server": "jp.example.invalid",
+                       "port": 443, "network": "xhttp", "xhttp-opts": {"path": "/sample"},
+                       "dialer-proxy": "HK 002"}] if i == 1 else [])]}
+        for i in (1, 2)
+    ]
+    snapshot["node_catalog"] = [
+        {"source_id": i, "display_name": name, "raw_name": name, "emit_name": name,
+         "node_uid": f"{i}-{name}", "origin_kind": "source"}
+        for i, name in ((1, "HK 002"), (1, "JP 003"), (2, "HK 002"))
+    ]
+    snapshot["local_nodes"] = [
+        {"id": 9, "name": "DaWang-US-Xr1", "protocol": "socks5", "server": "us.example.invalid",
+         "port": 1080, "enabled": True},
+    ]
+    snapshot["node_catalog"].append(
+        {"source_id": None, "display_name": "DaWang-US-Xr1", "emit_name": "DaWang-US-Xr1",
+         "raw_name": "DaWang-US-Xr1", "node_uid": "local-test", "origin_kind": "local", "local_node_id": 9})
+    snapshot["groups"] = [
+        {"name": "选择", "type": "select", "use_sources": ["*"], "filter": "来源1", "local_nodes": [9],
+         "targets": ["*"], "devices": ["*"]}
+    ]
+    result = yaml.safe_load(render.render_target(
+        snapshot, {"name": "router", "engine": "mihomo"},
+        regional_plan=node_rename.regional_names(snapshot["node_catalog"]),
+    ))
+    proxies = {p["name"]: p for p in result["proxies"]}
+    assert proxies["🇭🇰 香港 01"]["server"] == "hk1.example.invalid"
+    assert proxies["🇭🇰 香港 02"]["server"] == "hk2.example.invalid"
+    assert proxies["🇯🇵 日本"]["dialer-proxy"] == "🇭🇰 香港 01"
+    assert proxies["🇯🇵 日本"]["xhttp-opts"] == {"path": "/sample"}
+    assert result["proxy-groups"][0]["proxies"] == ["🇺🇸 美国", "🇭🇰 香港 01", "🇯🇵 日本"]
+    assert "proxy-providers" not in result
+    assert node_rename.regional_region("🇨🇳 台湾03 Aliyun1.8x-神龙") == ("🇹🇼", "台湾")
+    assert node_rename.regional_region("HK002") == ("🇭🇰", "香港")
+    assert node_rename.regional_region("无地区 03") == ("🌐", "地区待确认")
+    assert result["rules"] == yaml.safe_load(
+        render.render_target({**snapshot, "sources": []}, {"name": "router", "engine": "mihomo"}))["rules"]
+    retired = dict(snapshot["node_catalog"][0], retired=True)
+    assert node_rename.regional_names([retired, *snapshot["node_catalog"][1:]])[(2, "HK 002")] == "🇭🇰 香港 02"

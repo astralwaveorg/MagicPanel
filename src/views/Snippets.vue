@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">拓展模块</h2>
     <p class="mp-page-desc">
-      添加脚本、复写等配置。构建时按引擎合并，平台扩展最后应用。
+      添加脚本、复写等配置。平台扩展可覆盖同名设置。
     </p>
 
     <div class="mp-toolbar">
@@ -76,7 +76,7 @@
     <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑模块' : '添加模块'"
                width="min(640px, 94vw)">
       <el-form :model="form" label-position="top">
-        <el-form-item v-if="form.source === 'inline'" label="常用预设（选好后点“填入”，内容可继续修改）">
+        <el-form-item v-if="form.source === 'inline'" label="常用预设（填入后可编辑）">
           <div style="display:flex;gap:8px;width:100%">
             <el-select v-model="presetKey" placeholder="选择一个预设" style="flex:1" filterable>
               <el-option-group v-for="(items, cat) in PRESETS_BY_CATEGORY" :key="cat"

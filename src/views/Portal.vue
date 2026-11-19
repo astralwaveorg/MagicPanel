@@ -147,7 +147,7 @@
                       class="pt-btn"
                       :href="urlFor(d)"
                       :download="downloadName(d)"
-                      title="把当前方案的配置文件下载到本地"
+                      title="下载方案配置"
                     >下载</a>
                     <a
                       v-if="urlFor(d)"
@@ -288,7 +288,7 @@
             连通性自检
           </a>
           <span>·</span>
-          <span>拿到此链接即可下载配置，请妥善保管。</span>
+          <span>有此链接即可下载配置，请勿公开。</span>
         </footer>
 
         <div v-if="appliedQuery && !hasAnyResult" class="pt-noresult">

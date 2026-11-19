@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 import shutil
+import time
 from tempfile import NamedTemporaryFile
 
 from fastapi import APIRouter, HTTPException
@@ -17,14 +18,14 @@ from ..compiler import render, validate
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
 from ..services import runtime_profiles
-from ..services import publish_gate, releases, node_catalog
+from ..services import publish_gate, releases, node_catalog, node_rename
 from ..services import source_nodes as source_node_service
 from ..services import tester
 
 router = APIRouter(prefix="/api/v1", tags=["builds"])
 
 
-def collect_snapshot(conn) -> dict:
+def collect_snapshot(conn, *, regional: bool = False) -> dict:
     sources = []
     for r in db.all_(conn, "SELECT * FROM sources ORDER BY id"):
         mode = r["mode"] if "mode" in r.keys() else config.SOURCE_MODE_PROVIDER
@@ -33,7 +34,7 @@ def collect_snapshot(conn) -> dict:
                 "suffix": (r["suffix"] if "suffix" in r.keys() else ""),
                 "interval": r["interval"],
                 "client_interval": r["client_interval"], "mode": mode}
-        if mode == config.SOURCE_MODE_INLINE and r["enabled"] and r["snapshot_enc"]:
+        if (regional or mode == config.SOURCE_MODE_INLINE) and r["enabled"] and r["snapshot_enc"]:
             # 内联来源：节点定义随快照进入构建快照。机场换节点后策略指纹会变，
             # 自动构建才会把新节点重新下发（内联模式下客户端不再自己拉 provider）。
             item["nodes"] = source_node_service.parse(
@@ -219,6 +220,7 @@ def _delete_build(conn, build, operator: str) -> int:
 
 class BuildBody(BaseModel):
     note: str = Field(default="", max_length=256)
+    preview_regional_names: bool = False
 
 
 class BatchIds(BaseModel):
@@ -230,7 +232,10 @@ class BuildError(Exception):
 
 
 def current_policy(conn) -> tuple[dict, str]:
-    snapshot = collect_snapshot(conn)
+    regional = db.get_setting(conn, "build_regional_node_names", "0") == "1"
+    snapshot = collect_snapshot(conn, regional=regional)
+    if regional:
+        snapshot["regional_catalog"] = node_rename.regional_catalog(conn)
     policy_sha = security.sha256_text(
         json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
     )
@@ -239,7 +244,8 @@ def current_policy(conn) -> tuple[dict, str]:
 
 def create_build(operator: str, note: str = "",
                  snapshot: dict | None = None,
-                 policy_sha: str | None = None) -> tuple[int, str]:
+                 policy_sha: str | None = None, *,
+                 preview_regional_names: bool = False) -> tuple[int, str]:
     """创建构建，返回 (build_id, verify_status)。
 
     定时任务与手动创建共用；没有引擎平台时抛 BuildError。
@@ -248,7 +254,15 @@ def create_build(operator: str, note: str = "",
     避免慢校验长期占用 SQLite 写锁（设备拉取配置会被阻塞）。
     """
     with db.connect() as conn:
-        snapshot = collect_snapshot(conn) if snapshot is None else snapshot
+        if preview_regional_names:
+            # 预览用独立策略摘要，自动构建不会复用这个预览产物。
+            snapshot = {**collect_snapshot(conn, regional=True),
+                        "regional_catalog": node_rename.regional_catalog(conn),
+                        "regional_preview": True}
+            policy_sha = None
+        elif snapshot is None:
+            snapshot, current_sha = current_policy(conn)
+            policy_sha = policy_sha or current_sha
     if not snapshot["targets"]:
         raise BuildError("尚未配置任何引擎平台，请先在“引擎平台”中添加")
     if policy_sha is None:
@@ -326,16 +340,23 @@ def create_build(operator: str, note: str = "",
 
     results: dict = {}
     overall = "success"
+    from ..services import quality_funnel
     with db.connect() as _conn:
         normalize_nodes = db.get_setting(_conn, "node_name_normalize", "1") == "1"
         unlock_badge = db.get_setting(_conn, "node_name_unlock_badge", "0") == "1"
         quality_groups = db.get_setting(_conn, "probe_build_groups", "0") == "1"
+        service_evidence_cutoff = (int(time.time()) - quality_funnel._settings(_conn)["refresh_seconds"]
+                                   if quality_groups else None)
     # 同一方案的 resolve 只做一次：plan 按 variant 展开（T + D 个产物/方案），
     # 原来每个产物都全量解析一遍引用图（2026-11-18 构建性能）
     resolved_by_variant: dict[int, dict] = {}
     from ..services.node_refs import resolve_snapshot
-    from ..services import quality_funnel
     quality_reader = quality_funnel.result_reader()
+    regional_plan = None
+    if "regional_catalog" in snapshot:
+        reserved = set(config.BUILTIN_TARGETS) | {config.GUARD_PROXY}
+        reserved.update(g["name"] for g in snapshot["groups"])
+        regional_plan = node_rename.regional_names(snapshot["regional_catalog"], reserved)
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
         if vid not in resolved_by_variant:
@@ -362,7 +383,9 @@ def create_build(operator: str, note: str = "",
                                             resolved=resolved,
                                             quality_reader=quality_reader,
                                             quality_badges=unlock_badge,
-                                            quality_groups=quality_groups)
+                                            quality_groups=quality_groups,
+                                            regional_plan=regional_plan,
+                                            service_evidence_cutoff=service_evidence_cutoff)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
@@ -422,7 +445,8 @@ def create_build(operator: str, note: str = "",
 @router.post("/builds", status_code=201)
 def create_build_api(body: BuildBody, user=CurrentUser):
     try:
-        build_id, _ = create_build(user["username"], body.note)
+        build_id, _ = create_build(user["username"], body.note,
+                                   preview_regional_names=body.preview_regional_names)
     except BuildError as exc:
         raise HTTPException(400, str(exc))
     with db.connect() as conn:

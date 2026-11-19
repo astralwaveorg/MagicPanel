@@ -1,19 +1,36 @@
 """网络解锁检测接口：面板出口 / 指定节点两种模式 + 节点批量检测。"""
 from collections import Counter
+import time
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from ..deps import CurrentUser, RequireCapabilities
-from ..services import unlock_check
+from ..services import unlock_check, node_rename
 
 router = APIRouter(prefix="/api/v1/unlock", tags=["unlock"])
+
+
+def _regional_labels(conn, candidates):
+    from .. import config
+    rows = node_rename.regional_catalog(conn)
+    present = {(row["source_id"], row["emit_name"]) for row in rows if not row["retired"]}
+    # 旧目录里个别本地节点还未登记；显示时仍统一命名。
+    for node in candidates:
+        key = node.get("source_id"), node["name"]
+        if key not in present:
+            rows.append({"source_id": key[0], "emit_name": key[1], "display_name": key[1]})
+            present.add(key)
+    reserved = set(config.BUILTIN_TARGETS) | {config.GUARD_PROXY}
+    reserved.update(row["name"] for row in conn.execute("SELECT name FROM proxy_groups"))
+    names = node_rename.regional_names(rows, reserved)
+    return {node["name"]: names[(node.get("source_id"), node["name"])] for node in candidates}
 
 
 @router.get("/quality")
 def quality(user=CurrentUser):
     from .. import db
-    from ..services import quality_funnel, scheduler
+    from ..services import node_catalog, quality_funnel, routing_planner, scheduler
     from ..services.probes.registry import ALL_DETECTORS
 
     candidates = scheduler._collect_probe_proxies()
@@ -26,8 +43,22 @@ def quality(user=CurrentUser):
         scheduler_on = db.get_setting(conn, "scheduler_enabled", "1") == "1"
         config = quality_funnel._settings(conn)
         build_groups = db.get_setting(conn, "probe_build_groups", "0")
-        name_template = db.get_setting(conn, "probe_node_name_template", "{name} · {original}")
-    return {"items": rows, "counts": dict(Counter(r["stage"] for r in rows)),
+        labels = _regional_labels(conn, candidates)
+        catalog = node_catalog.list_active_nodes(conn)
+    origins = {r["emit_name"]: r for r in catalog if r["enabled"] and r["origin_kind"] == "local"}
+    annotated = []
+    for row in rows:
+        origin = origins.get(row["name"])
+        region = node_rename.detect_region(origin["raw_name"]) if origin else None
+        annotated.append({**row, "origin_kind": "local" if origin else "source",
+                          "country": {"🇺🇸": "US", "🇯🇵": "JP"}.get(region[0]) if region else None})
+    earliest = int(time.time()) - config["refresh_seconds"]
+    services = {}
+    for service in ("netflix", *routing_planner.AI_SERVICES):
+        pool = routing_planner.service_candidates(annotated, service, earliest=earliest)
+        services[service] = {"count": len(pool), "nodes": [labels[item["name"]] for item in pool[:8]]}
+    return {"items": [{**row, "name": labels[row["name"]]} for row in rows], "counts": dict(Counter(r["stage"] for r in rows)),
+            "routing_candidates": services,
             "task": scheduler.quality_task_status(), "auto": auto, "scheduler_on": scheduler_on,
             "thresholds": {"delay_ms": config["max_delay_ms"], "speed_bps": config["min_speed_bps"]},
             "settings": {
@@ -42,7 +73,6 @@ def quality(user=CurrentUser):
                 "probe_refresh_hours": config["refresh_seconds"] // 3600,
                 "probe_platform_ids": config["platform_ids"],
                 "probe_build_groups": build_groups,
-                "probe_node_name_template": name_template,
             },
             "platforms": {pid: item.display_name for pid, item in ALL_DETECTORS.items()}}
 
@@ -69,8 +99,8 @@ def quality_export(user=RequireCapabilities("reveal")):
         raise HTTPException(409, "正在检测节点，请完成后再导出")
     try:
         with db.connect() as conn:
-            template = db.get_setting(conn, "probe_node_name_template", node_classes.DEFAULT_NAME_TEMPLATE)
-        text = node_classes.export_pools(results, candidates, tester.validate_config, template=template)
+            names = _regional_labels(conn, candidates)
+        text = node_classes.export_pools(results, candidates, tester.validate_config, names=names)
     except node_classes.ClassifyError as exc:
         raise HTTPException(409, str(exc)) from None
     finally:

@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">分流策略</h2>
     <p class="mp-page-desc">
-      规则从上往下匹配，以第一条命中为准。MATCH 必须放在最后。更改顺序后，需重新构建并发布。
+      规则按顺序匹配，第一条命中即生效。MATCH 放最后。调整后请重新构建并发布。
     </p>
 
     <VariantBar page="rules" v-model="variantId" @changed="onVariantsChanged" />
@@ -162,24 +162,21 @@
             <el-option value="REJECT-DROP" label="REJECT-DROP（静默丢弃）" />
           </el-select>
           <div class="mp-form-hint">
-            下拉里列出的就是本方案的策略组（与「策略组」页当前所选方案一致）：
-            规则只作用于本方案，跨方案引用会被拒绝；同名组在不同方案里是两个独立的组。
+            可选当前方案中的策略组。同名组不跨方案共用。
           </div>
         </el-form-item>
         <el-form-item label="适用引擎平台">
           <ScopeSelect v-model="form.targets" all-label="包含所有引擎平台"
                        :options="targetNames" />
           <div class="mp-form-hint">
-            只在选中的引擎平台里生效；选「包含所有引擎平台」表示所有平台都生效。
-            若该规则指向的策略组不适用于同一平台，规则会被自动剔除。
+            只向所选平台下发。目标策略组不适用的平台也会跳过这条规则。
           </div>
         </el-form-item>
         <el-form-item label="适用设备">
           <ScopeSelect v-model="form.devices" all-label="包含所有设备"
                        :options="deviceNames" />
           <div class="mp-form-hint">
-            选了设备后，这条规则只出现在这些设备的产物里，其他设备不受影响；
-            选「包含所有设备」则所有设备都有。
+            只向选中的设备下发这条规则。
           </div>
         </el-form-item>
         <el-form-item label="备注（可选）">

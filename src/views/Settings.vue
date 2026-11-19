@@ -23,7 +23,7 @@
         </el-form-item>
         <el-form-item>
           <div class="mp-switch-row">
-            <span class="mp-switch-label">构建时规范化节点名称</span>
+            <span class="mp-switch-label">兼容旧订阅的节点名称</span>
             <el-switch v-model="settings.node_name_normalize" />
           </div>
           <p class="mp-form-hint">
@@ -33,11 +33,20 @@
         </el-form-item>
         <el-form-item>
           <div class="mp-switch-row">
+            <span class="mp-switch-label">统一节点名</span>
+            <el-switch v-model="settings.build_regional_node_names" />
+          </div>
+          <p class="mp-form-hint">
+            所有节点按地区命名，同地区有多个节点时加序号。开启后，新构建会将订阅节点一并写入配置。设备更新后可能需要重新选节点。
+          </p>
+        </el-form-item>
+        <el-form-item>
+          <div class="mp-switch-row">
             <span class="mp-switch-label">节点名显示解锁徽章</span>
             <el-switch v-model="settings.node_name_unlock_badge" />
           </div>
           <p class="mp-form-hint">
-            下次构建时，在机场节点名称中标出已经确认的能力。检测过期或结论变化后，标记也会更新。
+            使用旧命名格式时，在节点名标出已确认的能力。按地区编号时，能力请在「网络体检」查看。
           </p>
         </el-form-item>
         <el-button :loading="savingSettings" @click="saveSettings" type="primary">保存设置</el-button>
@@ -47,9 +56,7 @@
     <div class="mp-card">
       <h3>WebDAV 远程备份</h3>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        把数据库快照与主密钥备份到远端 WebDAV（NAS、坚果云、Nextcloud 等）。
-        容器内的本地备份与数据在同一块磁盘上，磁盘故障会一起丢；
-        远端副本是跨故障的最后一道保险。备份可自动定时执行，也可随时手动触发。
+        把数据库和主密钥备份到 WebDAV，避免本地磁盘故障时一同丢失。支持定时或手动备份。
       </p>
       <el-form label-position="top" style="max-width:560px">
         <div class="mp-switch-row">
@@ -291,7 +298,7 @@ import StatusDot from '../components/StatusDot.vue'
 
 const settings = reactive({
   base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '',
-  node_name_normalize: true, node_name_unlock_badge: false,
+  node_name_normalize: true, node_name_unlock_badge: false, build_regional_node_names: false,
 })
 // 整页加载失败时给 ErrorState + 重试，而不是留一片空白表单
 const loadError = ref('')
@@ -340,6 +347,7 @@ async function load() {
       core_proxy: s.core_proxy || '',
       node_name_normalize: s.node_name_normalize !== '0',
       node_name_unlock_badge: s.node_name_unlock_badge === '1',
+      build_regional_node_names: s.build_regional_node_names === '1',
     })
     users.value = u
     portalEnabled.value = p.enabled
@@ -428,6 +436,7 @@ async function saveSettings() {
       core_proxy: settings.core_proxy,
       node_name_normalize: settings.node_name_normalize ? '1' : '0',
       node_name_unlock_badge: settings.node_name_unlock_badge ? '1' : '0',
+      build_regional_node_names: settings.build_regional_node_names ? '1' : '0',
     } } })
     ElMessage.success('已保存')
   } catch (e) {

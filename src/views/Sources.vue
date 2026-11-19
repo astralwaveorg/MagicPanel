@@ -283,8 +283,7 @@
             <el-form-item label="名称">
               <el-input v-model="localForm.name" placeholder="例如：香港-01" />
               <div class="mp-form-hint">
-                产物里的节点标识由服务端统一生成，可在左侧列表查看；
-                要把某个本地节点放进策略组，在策略组的「包含策略」里直接选它。
+                节点名称见左侧列表。可在策略组的「包含策略」中选用。
               </div>
             </el-form-item>
           </el-col>
@@ -406,18 +405,16 @@
           </div>
           <el-button link type="primary" size="small" @click="addHeader">添加请求头</el-button>
           <div class="mp-form-hint">
-            有些机场要带特定 Cookie 或 UA 才给订阅内容。值是访问凭据，
-            加密存储、列表不展示；已设置的值留空即保持原值。
+            按订阅要求填写 Cookie 或 UA。凭据加密保存，留空不修改已有值。
           </div>
         </el-form-item>
         <el-form-item label="过滤正则（可选，过滤套餐提示等无效节点）">
           <el-input v-model="form.filter" class="mono" placeholder="(?i)^(?!.*(?:剩余|到期|官网)).+$" />
         </el-form-item>
-        <el-form-item label="节点名后缀（可选）">
-          <el-input v-model="form.suffix" class="mono" placeholder="例如 -神龙" />
+        <el-form-item v-if="form.mode === 'provider' || editing?.suffix" label="旧版节点名后缀">
+          <el-input v-model="form.suffix" class="mono" placeholder="可留空" />
           <div class="mp-form-hint">
-            不同机场可能有同名节点，客户端按名字去重会互相覆盖。
-            填了后缀，客户端会给这个来源的节点名统一加上它。
+            用于兼容旧配置。内联节点按地区编号时，产物不显示后缀。
           </div>
         </el-form-item>
         <el-form-item label="下发方式">
@@ -529,8 +526,7 @@
           </el-upload>
           <div v-if="fileForm.fileName" class="mp-form-hint">已选：{{ fileForm.fileName }}</div>
           <div class="mp-form-hint">
-            支持 Clash YAML 与 base64 节点列表：机场导出的订阅文件直接传上来即可。
-            文件来源没有在线地址，内容更新靠重新上传。
+            支持 Clash YAML 和 base64 节点列表。更新文件来源时请重新上传。
           </div>
         </el-form-item>
         <el-form-item label="下发方式">

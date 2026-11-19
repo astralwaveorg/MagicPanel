@@ -98,7 +98,7 @@
             <el-button size="small" :disabled="!canFormat" @click="formatDraft">格式化</el-button>
           </div>
           <p v-if="fileLang === 'yaml' && !canFormat && !current.binary" class="mp-form-hint">
-            文件含注释，格式化会丢失注释，已禁用；语法校验仍然可用。
+            文件含注释，只能校验，不能格式化。
           </p>
           <CodeEditor
             v-if="!current.binary"
@@ -188,7 +188,7 @@
             <el-option value="none" label="公开仓库（无需鉴权）" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="settings.auth === 'ssh'" label="SSH 私钥（只写，不回显）">
+        <el-form-item v-if="settings.auth === 'ssh'" label="SSH 私钥（保存后隐藏）">
           <el-input v-model="settings.private_key" type="textarea" :rows="4"
                     placeholder="留空表示不修改" />
           <div class="mp-form-hint">
@@ -215,7 +215,7 @@
         <el-form-item label="自动导入仓库新增的 rule/*.yaml">
           <el-switch v-model="settings.auto_create_rule_sources" />
         </el-form-item>
-        <el-form-item label="排除路径清单（逗号分隔的 glob）">
+        <el-form-item label="隐藏路径（用逗号分隔）">
           <el-input v-model="settings.exclude_paths" placeholder=".git,.github,.env,*.bak,.*" />
           <div class="mp-form-hint">
             排除的路径在页面里完全不显示；点开头路径（<code>.*</code>）默认都排除。

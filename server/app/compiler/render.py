@@ -20,7 +20,7 @@ from .. import config
 from ..services import base_config as base_config_service
 from ..services import config_resolution, runtime_profiles
 from ..services import local_nodes as local_node_service
-from ..services import node_rename
+from ..services import node_rename, routing_planner
 from ..services import source_nodes as source_node_service
 
 HEALTH_CHECK = {
@@ -87,7 +87,8 @@ def _provider_entry(src: dict, engine: str) -> dict:
 
 def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
                  all_sources: list[str] | None = None,
-                 inline_names: dict[str, list[str]] | None = None) -> dict:
+                 inline_names: dict[str, list[str]] | None = None,
+                 filter_names: dict[str, str] | None = None) -> dict:
     entry = {"name": group["name"], "type": group["type"]}
     # 本地单节点可以排在最前（"优先美国"这类组用得上：机房节点先试，
     # 机场节点兜底）。local_nodes 本身是有序的 id 列表，顺序即优先级。
@@ -117,12 +118,13 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
         # 显式成员不受影响。组内没有 provider 时不再下发这个正则：
         # 已经在这里筛过一遍，再让客户端筛一次没有意义。
         pattern = group.get("filter")
+        filter_name = (filter_names or {})
         if pattern:
             inline_members = [n for n in inline_members
-                              if source_node_service.match(pattern, n)]
+                              if source_node_service.match(pattern, filter_name.get(n, n))]
         # 按名称排序：来源内是机场给的顺序，多个来源拼起来不好找，
         # 组里挑节点时按名字翻更顺手
-        inline_members.sort()
+        inline_members.sort(key=lambda n: filter_name.get(n, n))
         # 位置与 provider 模式一致：客户端把 provider 节点排在 proxies 之后
         proxies = list(dict.fromkeys(proxies + inline_members))
     if group["type"] in ("url-test", "fallback", "load-balance") \
@@ -347,7 +349,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                   normalize_nodes: bool = True,
                   resolved: dict | None = None,
                   badge_lookup=None, perf_lookup=None, quality_reader=None,
-                  quality_badges=False, quality_groups=False) -> str:
+                  quality_badges=False, quality_groups=False, regional_plan=None,
+                  service_evidence_cutoff=None) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
@@ -432,6 +435,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                              if n['node_uid'] in selected_uids and n.get('origin_kind') == 'source']
     materials = {n['node_uid']:n for n in snapshot.get('node_materials',[])}
     fixed_nodes = []
+    node_sources: dict[int, dict] = {}
+    original_names: dict[tuple[int, str], str] = {}
     for node in selected_source_nodes:
         source = next((s for s in snapshot['sources'] if s.get('source_id') == node['source_id']),None)
         if not source or not source.get('enabled') or node['raw_name'] in (source.get('excluded_nodes') or []):
@@ -439,13 +444,17 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         material = materials.get(node['node_uid'])
         if not material or material['revision'] != node['revision']:
             raise ValueError('catalog_material_invalid')
-        if any(s.get('source_id') == node['source_id'] and s.get('mode') != config.SOURCE_MODE_INLINE for s in sources):
+        if regional_plan is None and any(s.get('source_id') == node['source_id']
+                                         and s.get('mode') != config.SOURCE_MODE_INLINE for s in sources):
             raise ValueError('typed_provider_dynamic_conflict')
-        fixed_nodes.append(dict(material['proxy'],name=node['emit_name']))
+        entry = dict(material['proxy'], name=node['emit_name'])
+        fixed_nodes.append(entry)
+        node_sources[id(entry)] = source
+        original_names[(source['source_id'], node['raw_name'])] = node['emit_name']
     inline_sources = [s for s in sources
-                      if s.get("mode") == config.SOURCE_MODE_INLINE]
-    provider_sources = [s for s in sources
-                        if s.get("mode") != config.SOURCE_MODE_INLINE]
+                      if regional_plan is not None or s.get("mode") == config.SOURCE_MODE_INLINE]
+    provider_sources = ([] if regional_plan is not None else
+                        [s for s in sources if s.get("mode") != config.SOURCE_MODE_INLINE])
 
     # 内联来源的节点写进顶层 proxies：Clash/Stash 的 GLOBAL 组只收顶层 proxies
     # 与策略组，provider 里的节点永远进不去，内联后才能被直接选中。
@@ -472,6 +481,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             else:
                 entry["name"] = raw + (src.get("suffix") or "")
             inline_nodes.append(entry)
+            node_sources[id(entry)] = src
+            original_names[(src.get('source_id'), raw)] = entry["name"]
             names.append(entry["name"])
         inline_names[src["name"]] = names
         if not names and warnings is not None:
@@ -486,13 +497,90 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         perf_lookup = quality.get
         badge_lookup = (lambda name: quality.get(name, {}).get("badges", "")) if quality_badges else None
     final_name = {}
+    filter_names = {}
 
     # 节点名称规范化（Sub-Store 风格）：机场来源的节点统一成
     # 「旗帜 地区 序号 [标签·来源]」的确定性格式。只作用于来源节点——
     # 本地节点是用户亲自维护的，命名保持权威不动（约束 17）。
     # 节点本体与组成员引用共用同一张映射表，客户端看到的组员名与节点名
     # 永远一致；地区关键词（旗帜 + 中文地区名）被保留，策略组过滤正则不失配。
-    if normalize_nodes:
+    local_final = {}
+    if regional_plan is not None:
+        by_source = {}
+        dropped = set()
+        for node in local_proxies:
+            old = node["name"]
+            label = regional_plan.get((None, old))
+            if not label:
+                raise ValueError("本地节点缺少目录记录，请重新保存该节点后再构建。")
+            local_final[old] = label
+        old_labels = {}
+        for src in inline_sources:
+            for old, label in node_rename.rename_batch(
+                    inline_names[src["name"]], source=src["name"],
+                    badge_lookup=badge_lookup, perf_lookup=perf_lookup).items():
+                old_labels[(src.get("source_id"), old)] = label or old
+        raw_by_key = {(sid, emit): raw for (sid, raw), emit in original_names.items()}
+        for node in inline_nodes + fixed_nodes:
+            source_id = node_sources[id(node)].get("source_id")
+            old = node["name"]
+            raw = raw_by_key.get((source_id, old), old)
+            if node_rename.is_info_node(raw) or node_rename.is_prompt_node(raw):
+                dropped.add((source_id, old))
+                continue
+            label = regional_plan.get((source_id, old))
+            if not label:
+                raise ValueError("节点名称未能对应目录。请刷新节点来源后重新构建。")
+            by_source[(source_id, old)] = label
+            filter_names[label] = old_labels.get((source_id, old), old)
+        bare_refs: dict[str, set[str]] = {}
+        for (_, old), new in by_source.items():
+            bare_refs.setdefault(old, set()).add(new)
+        final_name = {old: next(iter(values)) for old, values in bare_refs.items() if len(values) == 1}
+        def retained(node):
+            return (node_sources[id(node)].get("source_id"), node["name"]) not in dropped
+
+        inline_nodes = [n for n in inline_nodes if retained(n)]
+        fixed_nodes = [n for n in fixed_nodes if retained(n)]
+        final_name.update(local_final)
+        for node in local_proxies:
+            node["name"] = local_final[node["name"]]
+            if isinstance(node.get("dialer-proxy"), str):
+                node["dialer-proxy"] = final_name.get(node["dialer-proxy"], node["dialer-proxy"])
+        for node in inline_nodes + fixed_nodes:
+            source_id = node_sources[id(node)].get("source_id")
+            dialer = node.get("dialer-proxy")
+            if isinstance(dialer, str):
+                old = original_names.get((source_id, dialer), dialer)
+                mapped = by_source.get((source_id, old), final_name.get(dialer))
+                if mapped is not None:
+                    node["dialer-proxy"] = mapped
+                elif dialer in bare_refs:
+                    raise ValueError("跨来源的前置代理名称重复，无法确认引用。")
+            node["name"] = by_source[(source_id, node["name"])]
+        for src in inline_sources:
+            names = inline_names[src["name"]]
+            inline_names[src["name"]] = [
+                by_source[(src.get("source_id"), old)] for old in names
+                if (src.get("source_id"), old) not in dropped]
+        dropped_refs = {old for _, old in dropped if old not in final_name}
+        catalog_by_uid = {n["node_uid"]: n for n in selected_source_nodes}
+        for group in groups:
+            if group.get("members_format") == "typed-v2":
+                overrides = {}
+                for ref in group.get("members_v2", []):
+                    row = catalog_by_uid.get(ref["ref"]) if ref["kind"] == "node" else None
+                    if row:
+                        old = row["emit_name"]
+                        overrides[old] = by_source.get((row["source_id"], old))
+            else:
+                overrides = {}
+                if any(len(bare_refs.get(p, ())) > 1 for p in group.get("proxies", [])):
+                    raise ValueError("策略组引用了多个来源的同名节点，请重新选择节点。")
+            group["proxies"] = [
+                overrides.get(p, final_name.get(p, p)) for p in group.get("proxies", [])
+                if p not in dropped_refs and overrides.get(p, p) is not None]
+    elif normalize_nodes:
         rename_map: dict[str, str | None] = {}
         for src in inline_sources:
             rename_map.update(node_rename.rename_batch(
@@ -545,9 +633,10 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 for node_id in (group.get("local_nodes") or [])
                 if node_id in local_enabled
             ]
+            names = [local_final.get(name, name) for name in names]
             cfg["proxy-groups"].append(
                 _group_entry(group, engine, names,
-                             [s["name"] for s in sources], inline_names))
+                             [s["name"] for s in sources], inline_names, filter_names))
 
     if quality_groups and engine == "mihomo" and quality:
         usable = {entry["name"] for entry in cfg["proxies"]}
@@ -557,6 +646,15 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             members = list(dict.fromkeys(final_name.get(name, name) for name, item in quality.items()
                                          if item.get("qualified") and badge in item.get("badges", "")
                                          and final_name.get(name, name) in usable))
+            if members and label not in usable and all(g["name"] != label for g in target_groups):
+                target_groups.append({"name": label, "type": "select", "proxies": members})
+        if service_evidence_cutoff is not None:
+            label = "Netflix 日本 · 非自制剧样本"
+            candidates = routing_planner.service_candidates(
+                list(quality.values()), "netflix", earliest=service_evidence_cutoff)
+            members = list(dict.fromkeys(
+                final_name.get(item["name"], item["name"]) for item in candidates
+                if final_name.get(item["name"], item["name"]) in usable))
             if members and label not in usable and all(g["name"] != label for g in target_groups):
                 target_groups.append({"name": label, "type": "select", "proxies": members})
 

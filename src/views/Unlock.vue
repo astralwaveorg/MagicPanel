@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">网络体检</h2>
-    <p class="mp-page-desc">当前网络检查网页响应，服务器网络还会检查访问限制和分流出口。</p>
+    <p class="mp-page-desc">当前网络测网页响应；服务器网络还查访问限制和出口。</p>
 
     <div class="mp-card">
       <div class="unlock-toolbar">
@@ -69,7 +69,7 @@
       </div>
     </div>
 
-    <p class="mp-form-hint unlock-help">点服务名打开网页，核实登录或播放。</p>
+    <p class="mp-form-hint unlock-help">点服务名，打开网页验证登录或播放。</p>
 
     <NodeQualityCard />
   </div>

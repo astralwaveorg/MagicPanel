@@ -110,6 +110,102 @@ def detect_region(name: str) -> tuple[str, str] | None:
     return None
 
 
+_REGIONAL_CODES = dict(zip(
+    "TW HK JP SG KR US CA GB DE FR NL TR RU AU IN BR AR MY TH VN PH ID IT ES SE CH NO FI PL EU".split(),
+    [(flag, name) for _, flag, name in _REGIONS],
+))
+_REGIONAL_CODES.update({
+    "UK": ("🇬🇧", "英国"), "CN": ("🇨🇳", "中国大陆"), "MO": ("🇲🇴", "澳门"),
+    "NZ": ("🇳🇿", "新西兰"), "AE": ("🇦🇪", "阿联酋"), "ZA": ("🇿🇦", "南非"),
+    "MX": ("🇲🇽", "墨西哥"), "PT": ("🇵🇹", "葡萄牙"), "CZ": ("🇨🇿", "捷克"),
+    "AT": ("🇦🇹", "奥地利"), "BE": ("🇧🇪", "比利时"), "IE": ("🇮🇪", "爱尔兰"),
+    "IL": ("🇮🇱", "以色列"), "CL": ("🇨🇱", "智利"), "UA": ("🇺🇦", "乌克兰"),
+})
+_EXTRA_REGIONS = (
+    (r"中国大陆|中國大陸|mainland china|中国内地", "CN"),
+    (r"澳門|澳门|macau|macao", "MO"),
+    (r"新西兰|紐西蘭|new zealand", "NZ"),
+    (r"阿联酋|dubai|迪拜", "AE"),
+    (r"南非|south africa", "ZA"),
+    (r"墨西哥|mexico", "MX"),
+    (r"葡萄牙|portugal", "PT"),
+    (r"捷克|czech", "CZ"),
+    (r"奥地利|austria", "AT"),
+    (r"比利时|belgium", "BE"),
+    (r"爱尔兰|ireland", "IE"),
+    (r"以色列|israel", "IL"),
+    (r"智利|chile", "CL"),
+    (r"乌克兰|ukraine", "UA"),
+)
+_EXPLICIT_ALIAS = re.compile("|".join(f"(?P<{code}>{pattern})" for pattern, code in _EXTRA_REGIONS), re.I)
+_CODE_TOKEN = re.compile(
+    r"(?<![a-z0-9])(" + "|".join(_REGIONAL_CODES) + r")(?=$|[^a-z]|\d)", re.I)
+_FLAG_REGION = {flag: (flag, cn) for flag, cn in _REGIONAL_CODES.values()}
+_FLAG_REGION["🇪🇺"] = ("🌍", "欧洲")
+
+
+def regional_region(name: str) -> tuple[str, str]:
+    """优先识别明确地区，再识别缩写；相互冲突的简称留待确认。"""
+    from unicodedata import normalize
+    name = normalize("NFKC", name or "")
+    # 原始节点经常把台湾的旗帜写成 🇨🇳，明确地名比旗帜可靠。
+    if match := _EXPLICIT_ALIAS.search(name):
+        return _REGIONAL_CODES[match.lastgroup]
+    for pattern, flag, cn in _REGION_COMPILED:
+        if any((len(match) > 2 and match != flag) or
+               any("\u4e00" <= c <= "\u9fff" for c in match)
+               for match in pattern.findall(name)):
+            return flag, cn
+    for flag in re.findall(r"[🇦-🇿]{2}", name):
+        if flag in _FLAG_REGION:
+            return _FLAG_REGION[flag]
+        code = "".join(chr(ord(c) - ord("🇦") + ord("A")) for c in flag)
+        return flag, code
+    hinted = {_REGIONAL_CODES[m.upper()] for m in _CODE_TOKEN.findall(name)}
+    if len(hinted) == 1:
+        return next(iter(hinted))
+    return "🌐", "地区待确认"
+
+
+def regional_catalog(conn) -> list[dict]:
+    """一次读取全目录；本地节点用当前产物标识，编号保留初次登记的地区。"""
+    from . import local_nodes
+    current_locals = {row["id"]: local_nodes.display_name(row["name"], row["node_type"] or "")
+                      for row in conn.execute("SELECT id, name, node_type FROM local_nodes")}
+    rows = [dict(row) for row in conn.execute(
+        "SELECT source_id, local_node_id, emit_name, raw_name, display_name, retired "
+        "FROM node_catalog ORDER BY ordinal")]
+    for row in rows:
+        if row["local_node_id"] in current_locals:
+            row["emit_name"] = current_locals[row["local_node_id"]]
+    return rows
+
+
+def regional_names(catalog, reserved=()) -> dict[tuple[int | None, str], str]:
+    """同地区跨来源去重；退役记录保留编号，单个节点只显示地区。"""
+    from collections import Counter
+    used = set(reserved)
+    entries = [(entry, regional_region(entry["display_name"])) for entry in catalog
+               if entry["source_id"] is None or
+               not any(check(entry.get("raw_name", entry["display_name"]))
+                       for check in (is_info_node, is_prompt_node))]
+    totals = Counter(region for _, region in entries)
+    counters: dict[tuple[str, str], int] = {}
+    names = {}
+    for entry, region in entries:
+        base = " ".join(region)
+        seq = counters.get(region, 0)
+        label = base if totals[region] == 1 and base not in used else ""
+        while not label or label in used:
+            seq += 1
+            label = f"{base} {seq:02d}"
+        counters[region] = seq
+        used.add(label)
+        if not entry.get("retired"):
+            names.setdefault((entry["source_id"], entry["emit_name"]), label)
+    return names
+
+
 def normalize_name(name: str, source: str = "", alloc: dict | None = None,
                    badge: str = "", speed_bps: int = 0, delay_ms: int = -1) -> str | None:
     """规范化单个节点名。

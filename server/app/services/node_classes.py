@@ -101,7 +101,7 @@ def write_yaml(path: Path, proxies: list[dict], header: str = "") -> None:
 
 
 def classify(results: dict, proxies_by_name: dict[str, dict], *,
-             template: str = DEFAULT_NAME_TEMPLATE) -> dict[str, list[dict]]:
+             template: str = DEFAULT_NAME_TEMPLATE, names: dict[str, str] | None = None) -> dict[str, list[dict]]:
     """按质量结果与能力标签分组。
 
     results：``{节点名: {delay_ms, speed_bps, stage, badges, region, probes}}``
@@ -122,20 +122,25 @@ def classify(results: dict, proxies_by_name: dict[str, dict], *,
         if item.get("stage") not in {"probed", "latency_failed", "speed_failed"}:
             continue
         entry = {k: v for k, v in proxy.items() if k != "source_id"}
-        label = node_rename.normalize_name(str(name), badge=item.get("badges") or "",
-                                           speed_bps=item.get("speed_bps", 0),
-                                           delay_ms=item.get("delay_ms", -1))
-        original = _safe_name(str(name), set())
-        speed = item.get("speed_bps") or 0
-        delay = item.get("delay_ms", -1)
-        performance = " / ".join(([f"{speed / 1_000_000:.1f} MB/s"] if speed > 0 else [])
-                                 + ([f"{delay} ms"] if delay >= 0 else []))
-        display = template.format(name=label or original, original=original[:27],
-                                  badges=item.get("badges", ""), region=item.get("region", ""),
-                                  performance=performance)
-        if template == DEFAULT_NAME_TEMPLATE and (not label or label == original):
-            display = f"{original} {performance}".strip()
-        entry["name"] = _safe_name(display or original, used)
+        if names is not None:
+            entry["name"] = names[name]
+            if isinstance(entry.get("dialer-proxy"), str):
+                entry["dialer-proxy"] = names.get(entry["dialer-proxy"], entry["dialer-proxy"])
+        else:
+            label = node_rename.normalize_name(str(name), badge=item.get("badges") or "",
+                                               speed_bps=item.get("speed_bps", 0),
+                                               delay_ms=item.get("delay_ms", -1))
+            original = _safe_name(str(name), set())
+            speed = item.get("speed_bps") or 0
+            delay = item.get("delay_ms", -1)
+            performance = " / ".join(([f"{speed / 1_000_000:.1f} MB/s"] if speed > 0 else [])
+                                     + ([f"{delay} ms"] if delay >= 0 else []))
+            display = template.format(name=label or original, original=original[:27],
+                                      badges=item.get("badges", ""), region=item.get("region", ""),
+                                      performance=performance)
+            if template == DEFAULT_NAME_TEMPLATE and (not label or label == original):
+                display = f"{original} {performance}".strip()
+            entry["name"] = _safe_name(display or original, used)
         qualified = item.get("stage") == "probed"
         if qualified:
             groups["qualified"].append(entry)
@@ -160,9 +165,9 @@ def classify(results: dict, proxies_by_name: dict[str, dict], *,
 
 
 def export_pools(results: dict, candidates: list[dict], validate_config, *,
-                 template: str = DEFAULT_NAME_TEMPLATE) -> str:
+                 template: str = DEFAULT_NAME_TEMPLATE, names: dict[str, str] | None = None) -> str:
     """导出只含达标节点的配置。失败时不覆盖上一份通过校验的文件。"""
-    groups = classify(results, {p["name"]: p for p in candidates}, template=template)
+    groups = classify(results, {p["name"]: p for p in candidates}, template=template, names=names)
     qualified = groups["qualified"]
     if not qualified:
         raise ClassifyError("没有可导出的达标节点")

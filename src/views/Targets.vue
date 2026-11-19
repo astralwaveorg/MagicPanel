@@ -112,7 +112,7 @@
                     :placeholder="enginePlaceholder" />
         </el-form-item>
         <el-form-item label="客户端更新间隔">
-          <span class="mp-toolbar-hint">统一取“设置 → 客户端更新间隔”，对所有目标生效。</span>
+          <span class="mp-toolbar-hint">更新间隔在「系统设置」统一修改。</span>
         </el-form-item>
       </el-form>
       <template #footer>

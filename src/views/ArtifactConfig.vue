@@ -77,7 +77,7 @@
           <el-alert v-if="isBuiltin" type="warning" :closable="false" show-icon
                     style="margin-bottom:12px">
             <strong>引擎默认配置是所有客户端的基础</strong>：修改将影响该引擎下的全部客户端，
-            并被下层引擎平台配置与设备独立配置继承。保存时仅记录改动项，支持随时「恢复默认」。
+            并被下层引擎平台配置与设备独立配置继承。只保存改动项，可恢复默认。
           </el-alert>
           <el-alert v-else-if="!changedCount" type="info" :closable="false" show-icon
                     style="margin-bottom:12px">
@@ -92,7 +92,7 @@
           <div class="mp-effective-toolbar">
             <el-button v-if="!readonly" size="small" @click="openAddParam" type="primary">新增参数</el-button>
             <span class="mp-toolbar-hint">
-              点「值」或「编辑」在弹窗里改（按值类型给编辑器）；覆盖键会带继承值删除线对比。保存时仅记录改动项。
+              点「值」或「编辑」修改。划线的是继承值。
             </span>
             <span class="mp-legend">
               <span class="mp-legend-item is-added">本层新增</span>
@@ -191,7 +191,7 @@
               <el-form-item label="其他顶层配置（YAML）">
                 <CodeEditor v-model="raw" language="yaml" height="300px" />
                 <div class="mp-form-hint">
-                  编辑的是最终生效值，保存时只把与上层不同的部分记到当前层级。
+                  这里显示生效值。保存时只记录本层的改动。
                   字典逐层合并，列表整体替换。
                   不能包含 proxies / proxy-providers / proxy-groups / rule-providers / rules。
                 </div>

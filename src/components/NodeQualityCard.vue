@@ -4,6 +4,18 @@
     <p class="mp-form-hint">
       从服务器测速。延迟低于 {{ thresholds.delay_ms }} ms、下载达到 {{ speedText(thresholds.speed_bps) }} 的节点才检测 AI 和流媒体。
     </p>
+    <el-collapse v-if="quality.routing_candidates">
+      <el-collapse-item title="分流候选" name="routing-candidates">
+        <p class="mp-form-hint">只列有近期通过记录的节点。这里的结果不会自动改变分流。</p>
+        <dl class="quality-details">
+          <template v-for="(pool, id) in quality.routing_candidates" :key="id">
+            <dt>{{ id === 'netflix' ? 'Netflix 日本 · 非自制剧样本' : (quality.platforms?.[id] || id) }}</dt>
+            <dd v-if="pool.count">{{ pool.nodes.join('、') }}<span v-if="pool.count > pool.nodes.length"> 等 {{ pool.count }} 条</span></dd>
+            <dd v-else>暂无确认通过的节点</dd>
+          </template>
+        </dl>
+      </el-collapse-item>
+    </el-collapse>
     <div class="quality-actions">
       <el-button size="small" type="success" :loading="busy" :disabled="loading || quality.task?.running" @click="run">
         测下一批
@@ -72,10 +84,6 @@
           <el-select v-model="draft.probe_platform_ids" multiple filterable clearable collapse-tags placeholder="留空检测全部平台">
             <el-option v-for="(name, id) in quality.platforms" :key="id" :label="name" :value="id" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="导出节点名模板">
-          <el-input v-model="draft.probe_node_name_template" maxlength="100" />
-          <p class="mp-form-hint">{name} 规范名称、{original} 原名、{region} 地区、{badges} 徽章、{performance} 速度与延迟</p>
         </el-form-item>
         <el-form-item label="在 Mihomo 构建中加入质量分组">
           <el-switch v-model="draft.probe_build_groups" active-value="1" inactive-value="0" />
