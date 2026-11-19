@@ -226,3 +226,16 @@ def test_prime_video_site_precedes_amazon_without_reordering_other_rules():
                       amazon, {**prime_set, "target": "Prime Video"}]
     assert render([amazon_cn, explicit, amazon, prime_set]) == [
         amazon_cn, explicit, amazon, {**prime_set, "target": "Prime Video"}]
+
+
+def test_explicit_inline_sources_follow_group_order():
+    from app.compiler.render import _group_entry
+
+    group = {"name": "候选", "type": "select", "proxies": ["本地01", "DIRECT", "本地02"],
+             "use_sources": ["第二个来源", "第一个来源"]}
+    nodes = {"第一个来源": ["A"], "第二个来源": ["C", "B"]}
+    rendered = _group_entry(group, "mihomo", inline_names=nodes)
+    assert rendered["proxies"] == ["本地01", "DIRECT", "本地02", "B", "C", "A"]
+    rendered = _group_entry({**group, "use_sources": ["*"]}, "mihomo",
+                            all_sources=list(nodes), inline_names=nodes)
+    assert rendered["proxies"] == ["本地01", "DIRECT", "本地02", "A", "B", "C"]

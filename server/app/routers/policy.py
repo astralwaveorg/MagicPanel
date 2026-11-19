@@ -221,7 +221,6 @@ def create_group(body: GroupBody, user=CurrentUser):
                       (body.name, body.variant_id)):
                 raise HTTPException(409, "同名策略组已存在")
             _check_group_refs(conn, body)
-            body.use_sources = _collapse_if_complete(conn, body.use_sources, "sources")
             body.targets = _collapse_if_complete(conn, body.targets, "targets")
             body.devices = _collapse_if_complete(conn, body.devices, "devices")
             if body.type == "relay":
@@ -277,7 +276,6 @@ def update_group(gid: int, body: GroupBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名策略组已存在")
         _check_group_refs(conn, body)
-        body.use_sources = _collapse_if_complete(conn, body.use_sources, "sources")
         body.targets = _collapse_if_complete(conn, body.targets, "targets")
         body.devices = _collapse_if_complete(conn, body.devices, "devices")
         if body.type == "relay":

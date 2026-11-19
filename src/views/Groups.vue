@@ -232,10 +232,10 @@
           <el-form-item label="节点来源">
             <ScopeSelect v-model="form.use_sources" all-label="包含所有来源"
                          :options="sourceNames" />
-            <SortableSelection v-if="!hasAllScope(form.use_sources) && form.use_sources.length < sourceNames.length"
+            <SortableSelection v-if="!hasAllScope(form.use_sources) && form.use_sources.length > 1"
                                v-model="form.use_sources" label="节点来源顺序" />
             <div class="mp-form-hint">
-              选「包含所有来源」后，新增来源会自动加入。此处顺序只影响按订阅下发的来源。
+              逐项选择可调整来源顺序；「包含所有来源」会自动加入将来新增的来源。
             </div>
           </el-form-item>
           <el-form-item label="节点筛选（正则，可选）">
@@ -301,13 +301,12 @@
 
     <el-dialog :close-on-click-modal="false" v-model="batchDialog" title="批量修改策略组" width="min(620px, 94vw)">
       <p class="mp-dialog-desc">
-        将选中的 {{ selected.length }} 个策略组按下面的设置统一修改。
-        只勾选的项会生效：勾上但没选内容 = 清空该项；不勾 = 保持原样。
-        relay 组不支持"节点来源"，这类组会自动跳过该字段。
+        一次修改 {{ selected.length }} 个策略组。只修改勾选的项目，留空则清空。
+        转发组会跳过「节点来源」。
       </p>
       <el-form :model="batch" label-position="top">
         <el-form-item>
-          <el-checkbox v-model="batch.useProxies">修改包含策略</el-checkbox>
+          <el-checkbox v-model="batch.useProxies">修改策略成员</el-checkbox>
         </el-form-item>
         <MultiSelectClear v-if="batch.useProxies"
                           :has-value="batch.proxies.length" @clear="batch.proxies = []">
@@ -318,6 +317,8 @@
             <el-option value="REJECT" label="REJECT（拒绝）" />
           </el-select>
         </MultiSelectClear>
+        <SortableSelection v-if="batch.useProxies && batch.proxies.length > 1"
+                           v-model="batch.proxies" label="策略成员顺序" />
 
         <el-form-item>
           <el-checkbox v-model="batch.useTargets">修改适用引擎平台</el-checkbox>
@@ -337,12 +338,16 @@
                        :label="`${n.display_name}（${n.protocol}）${n.enabled ? '' : ' · 已停用'}`" />
           </el-select>
         </MultiSelectClear>
+        <SortableSelection v-if="batch.useLocalNodes && batch.local_nodes.length > 1"
+                           v-model="batch.local_nodes" :labels="localLabels" label="本地节点顺序" />
 
         <el-form-item>
           <el-checkbox v-model="batch.useSources">修改节点来源</el-checkbox>
         </el-form-item>
         <ScopeSelect v-if="batch.useSources" v-model="batch.use_sources"
                      all-label="包含所有来源（含以后新增的）" :options="sourceNames" />
+        <SortableSelection v-if="batch.useSources && !hasAllScope(batch.use_sources) && batch.use_sources.length > 1"
+                           v-model="batch.use_sources" label="节点来源顺序" />
 
         <el-form-item>
           <el-checkbox v-model="batch.useFilter">修改过滤正则</el-checkbox>
@@ -496,6 +501,7 @@ const enabledLocalNodes = computed(() =>
 )
 
 const localNames = computed(() => new Set(localNodes.value.map((node) => node.display_name)))
+const localLabels = computed(() => Object.fromEntries(localNodes.value.map((node) => [node.id, node.display_name])))
 const selectedLocal = computed({
   get: () => form.proxies.filter((name) => localNames.value.has(name)),
   set(next) {
@@ -602,8 +608,7 @@ async function save() {
   try {
     // 分配策略只对 load-balance 有意义，其余类型必须清空，否则后端直接拒绝
     const body = { ...form, strategy: form.type === 'load-balance' ? form.strategy : '' }
-    // 逐项选满 = 包含所有：存成 ["*"]，以后新增的来源/平台/设备自动包含
-    body.use_sources = collapseIfComplete(body.use_sources, sources.value.map((s) => s.name))
+    // 平台和设备按范围处理。节点来源的显式列表有顺序，不能折叠成全部。
     body.targets = collapseIfComplete(body.targets, targets.value.map((t) => t.name))
     body.devices = collapseIfComplete(body.devices, devices.value.map((d) => d.name))
     if (editing.value) {

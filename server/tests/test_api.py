@@ -8,6 +8,8 @@ from conftest import auth_headers, setup_admin
 
 def test_scope_all_sentinel_means_everything(client):
     """「包含所有」哨兵：节点来源、引擎平台、设备都按"全部"处理。"""
+    import yaml
+
     csrf = setup_admin(client)
     h = auth_headers(csrf)
     make_policy(client, csrf)
@@ -16,12 +18,22 @@ def test_scope_all_sentinel_means_everything(client):
         "name": "后加机场", "url": "https://later.example.com/sub?token=xyz789"})
     assert r.status_code == 201, r.text
 
-    # 选满全部来源 → 归一为"包含所有"
+    # 选满全部来源仍保留手排顺序，更新后亦然。
     r = client.post("/api/v1/groups", headers=h, json={
         "name": "全选组", "type": "url-test",
         "use_sources": ["测试机场", "后加机场"], "filter": "x"})
     assert r.status_code == 201, r.text
-    assert r.json()["use_sources"] == ["*"]
+    assert r.json()["use_sources"] == ["测试机场", "后加机场"]
+    group_id = r.json()["id"]
+    pinned = ["后加机场", "测试机场"]
+    r = client.put(f"/api/v1/groups/{group_id}", headers=h, json={
+        "name": "全选组", "type": "url-test", "use_sources": pinned, "filter": "x"})
+    assert r.status_code == 200, r.text
+    assert r.json()["use_sources"] == pinned
+
+    r = client.post("/api/v1/sources", headers=h, json={
+        "name": "将来新增", "url": "https://future.example.com/sub"})
+    assert r.status_code == 201, r.text
 
     # 不传适用范围 = 默认包含所有
     r = client.post("/api/v1/groups", headers=h, json={
@@ -38,7 +50,9 @@ def test_scope_all_sentinel_means_everything(client):
     # 「包含所有」的组在产物里带上全部来源（含后来新增的）
     assert "测试机场" in artifact
     assert "后加机场" in artifact
-    assert "全选组" in artifact
+    groups = {g["name"]: g for g in yaml.safe_load(artifact)["proxy-groups"]}
+    assert groups["全选组"]["use"] == pinned
+    assert "将来新增" in groups["默认组"]["use"]
 
     # 显式传空数组 = 不适用任何平台/设备
     r = client.post("/api/v1/groups", headers=h, json={

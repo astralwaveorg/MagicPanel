@@ -100,16 +100,19 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
         merged = list(group.get("proxies") or []) + list(local_names or [])
     proxies = list(dict.fromkeys(merged))
     use = list(group.get("use_sources") or [])
-    if config.ALL_SCOPE in use:
+    all_scope = config.ALL_SCOPE in use
+    if all_scope:
         # 「包含所有」：用全部启用的来源，以后新增的来源自动进来
         use = [name for name in (all_sources or []) if name not in use]
     # 内联来源的节点必须展开成显式成员：provider 里的节点客户端自己才知道，
     # 内联后没有 provider 可用，只写 use 会让组变成空的。
     inline_members: list[str] = []
     provider_use: list[str] = []
+    filter_name = filter_names or {}
     for name in use:
         if inline_names and name in inline_names:
-            inline_members.extend(inline_names[name])
+            names = inline_names[name]
+            inline_members.extend(names if all_scope else sorted(names, key=lambda n: filter_name.get(n, n)))
         else:
             provider_use.append(name)
     use = provider_use
@@ -118,13 +121,12 @@ def _group_entry(group: dict, engine: str, local_names: list[str] | None = None,
         # 显式成员不受影响。组内没有 provider 时不再下发这个正则：
         # 已经在这里筛过一遍，再让客户端筛一次没有意义。
         pattern = group.get("filter")
-        filter_name = (filter_names or {})
         if pattern:
             inline_members = [n for n in inline_members
                               if source_node_service.match(pattern, filter_name.get(n, n))]
-        # 按名称排序：来源内是机场给的顺序，多个来源拼起来不好找，
-        # 组里挑节点时按名字翻更顺手
-        inline_members.sort(key=lambda n: filter_name.get(n, n))
+        # 只有「包含所有」沿用跨来源的名称排序；逐项选择则以来源顺序为先。
+        if all_scope:
+            inline_members.sort(key=lambda n: filter_name.get(n, n))
         # 位置与 provider 模式一致：客户端把 provider 节点排在 proxies 之后
         proxies = list(dict.fromkeys(proxies + inline_members))
     if group["type"] in ("url-test", "fallback", "load-balance") \
