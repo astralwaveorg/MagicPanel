@@ -90,12 +90,14 @@ def test_regional_inline_names_keep_membership_order_and_dialer():
         {"source_id": None, "display_name": "🇺🇸 美国NTT 01", "emit_name": "🇺🇸 美国NTT 01 (机房)",
          "raw_name": "🇺🇸 美国NTT 01", "node_uid": "local-test", "origin_kind": "local", "local_node_id": 9})
     snapshot["groups"] = [
-        {"name": "选择", "type": "select", "use_sources": ["*"], "filter": "来源1", "local_nodes": [9],
+        {"name": "选择", "type": "select", "use_sources": ["*"],
+         "filter": r"^.+ \[来源1\] (香港|日本) 01$", "local_nodes": [9],
          "targets": ["*"], "devices": ["*"]}
     ]
     result = yaml.safe_load(render.render_target(
         snapshot, {"name": "router", "engine": "mihomo"},
         regional_plan=node_rename.regional_names(snapshot["node_catalog"]),
+        quality_reader=lambda nodes: {p["name"]: {"delay_ms": 130} for p in nodes},
     ))
     proxies = {p["name"]: p for p in result["proxies"]}
     assert proxies["🇭🇰 香港 01"]["server"] == "hk1.example.invalid"

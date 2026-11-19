@@ -514,11 +514,11 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             if not label:
                 raise ValueError("本地节点缺少目录记录，请重新保存该节点后再构建。")
             local_final[old] = label
+        # 用固定的兼容名称筛选；新测速结果不能改动现有策略组成员。
         old_labels = {}
         for src in inline_sources:
             for old, label in node_rename.rename_batch(
-                    inline_names[src["name"]], source=src["name"],
-                    badge_lookup=badge_lookup, perf_lookup=perf_lookup).items():
+                    inline_names[src["name"]], source=src["name"]).items():
                 old_labels[(src.get("source_id"), old)] = label or old
         raw_by_key = {(sid, emit): raw for (sid, raw), emit in original_names.items()}
         for node in inline_nodes + fixed_nodes:
