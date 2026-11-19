@@ -83,12 +83,12 @@ def test_regional_inline_names_keep_membership_order_and_dialer():
         for i, name in ((1, "HK 002"), (1, "JP 003"), (2, "HK 002"))
     ]
     snapshot["local_nodes"] = [
-        {"id": 9, "name": "DaWang-US-Xr1", "protocol": "socks5", "server": "us.example.invalid",
+        {"id": 9, "name": "🇺🇸 美国NTT 01", "node_type": "机房", "protocol": "socks5", "server": "us.example.invalid",
          "port": 1080, "enabled": True},
     ]
     snapshot["node_catalog"].append(
-        {"source_id": None, "display_name": "DaWang-US-Xr1", "emit_name": "DaWang-US-Xr1",
-         "raw_name": "DaWang-US-Xr1", "node_uid": "local-test", "origin_kind": "local", "local_node_id": 9})
+        {"source_id": None, "display_name": "🇺🇸 美国NTT 01", "emit_name": "🇺🇸 美国NTT 01 (机房)",
+         "raw_name": "🇺🇸 美国NTT 01", "node_uid": "local-test", "origin_kind": "local", "local_node_id": 9})
     snapshot["groups"] = [
         {"name": "选择", "type": "select", "use_sources": ["*"], "filter": "来源1", "local_nodes": [9],
          "targets": ["*"], "devices": ["*"]}
@@ -102,9 +102,10 @@ def test_regional_inline_names_keep_membership_order_and_dialer():
     assert proxies["🇭🇰 香港 02"]["server"] == "hk2.example.invalid"
     assert proxies["🇯🇵 日本"]["dialer-proxy"] == "🇭🇰 香港 01"
     assert proxies["🇯🇵 日本"]["xhttp-opts"] == {"path": "/sample"}
-    assert result["proxy-groups"][0]["proxies"] == ["🇺🇸 美国", "🇭🇰 香港 01", "🇯🇵 日本"]
+    assert result["proxy-groups"][0]["proxies"] == ["🇺🇸 美国NTT 01", "🇭🇰 香港 01", "🇯🇵 日本"]
     assert "proxy-providers" not in result
     assert node_rename.regional_region("🇨🇳 台湾03 Aliyun1.8x-神龙") == ("🇹🇼", "台湾")
+    assert node_rename.regional_region("DaWang-US-Xr1") == ("🇺🇸", "美国")
     assert node_rename.regional_region("HK002") == ("🇭🇰", "香港")
     assert node_rename.regional_region("无地区 03") == ("🌐", "地区待确认")
     assert result["rules"] == yaml.safe_load(
@@ -140,9 +141,9 @@ def test_service_aliases_copy_only_scoped_nodes_with_matching_revisions():
             quality_reader=lambda nodes: {n["name"]: {"revision": "matching"} for n in nodes}))
         proxies = {p["name"]: p for p in cfg["proxies"]}
         for service in ("Claude", "Netflix"):
-            label = f"🇯🇵 日本 01 - {service}"
-            assert proxies[label] == {**proxies["🇯🇵 日本 01"], "name": label}
+            label = f"JP first - {service}"
+            assert proxies[label] == {**proxies["JP first"], "name": label}
             assert {"name": f"已验证 · {service}", "type": "select", "proxies": [label]} in cfg["proxy-groups"]
-        assert cfg["proxy-groups"][0]["proxies"] == ["🇯🇵 日本 01", "🇯🇵 日本 02"]
-        assert "🇯🇵 日本 02 - Gemini" not in proxies
-        assert "🇺🇸 美国 - TikTok" not in proxies
+        assert cfg["proxy-groups"][0]["proxies"] == ["JP first", "JP second"]
+        assert "JP second - Gemini" not in proxies
+        assert "US private - TikTok" not in proxies

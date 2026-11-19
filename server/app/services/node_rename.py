@@ -168,30 +168,39 @@ def regional_region(name: str) -> tuple[str, str]:
 
 
 def regional_catalog(conn) -> list[dict]:
-    """一次读取全目录；本地节点用当前产物标识，编号保留初次登记的地区。"""
+    """订阅保留目录顺序，本地节点使用用户当前保存的名字。"""
     from . import local_nodes
-    current_locals = {row["id"]: local_nodes.display_name(row["name"], row["node_type"] or "")
-                      for row in conn.execute("SELECT id, name, node_type FROM local_nodes")}
+    local = {row["id"]: {"source_id": None, "local_node_id": row["id"],
+                         "emit_name": local_nodes.display_name(row["name"], row["node_type"] or ""),
+                         "display_name": row["name"]}
+             for row in conn.execute("SELECT id, name, node_type FROM local_nodes ORDER BY id")}
     rows = [dict(row) for row in conn.execute(
-        "SELECT source_id, local_node_id, emit_name, raw_name, display_name, retired "
-        "FROM node_catalog ORDER BY ordinal")]
-    for row in rows:
-        if row["local_node_id"] in current_locals:
-            row["emit_name"] = current_locals[row["local_node_id"]]
-    return rows
+        "SELECT source_id, emit_name, raw_name, display_name, retired "
+        "FROM node_catalog WHERE origin_kind='source' ORDER BY ordinal")]
+    return [*local.values(), *rows]
 
 
 def regional_names(catalog, reserved=()) -> dict[tuple[int | None, str], str]:
-    """同地区跨来源去重；退役记录保留编号，单个节点只显示地区。"""
+    """本地节点优先保留自定义名；订阅节点跨来源按地区编号。"""
     from collections import Counter
     used = set(reserved)
+    locals_ = [r for r in catalog if r["source_id"] is None and not r.get("retired")]
+    local_totals = Counter(r["display_name"] for r in locals_)
+    names = {}
+    for entry in locals_:
+        original = entry["emit_name"]
+        custom = entry["display_name"]
+        label = custom if local_totals[custom] == 1 and custom not in used else original
+        if label in used:
+            raise ValueError("本地节点名称与策略组冲突，请修改本地节点名。")
+        names[(None, original)] = label
+        used.add(label)
     entries = [(entry, regional_region(entry["display_name"])) for entry in catalog
-               if entry["source_id"] is None or
+               if entry["source_id"] is not None and
                not any(check(entry.get("raw_name", entry["display_name"]))
                        for check in (is_info_node, is_prompt_node))]
     totals = Counter(region for _, region in entries)
     counters: dict[tuple[str, str], int] = {}
-    names = {}
     for entry, region in entries:
         base = " ".join(region)
         seq = counters.get(region, 0)

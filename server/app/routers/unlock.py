@@ -15,7 +15,7 @@ def _regional_labels(conn, candidates):
     from .. import config
     rows = node_rename.regional_catalog(conn)
     present = {(row["source_id"], row["emit_name"]) for row in rows if not row["retired"]}
-    # 旧目录里个别本地节点还未登记；显示时仍统一命名。
+    # 旧目录缺记录时，用原有节点身份补齐显示映射。
     for node in candidates:
         key = node.get("source_id"), node["name"]
         if key not in present:

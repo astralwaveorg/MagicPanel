@@ -37,7 +37,7 @@
             <el-switch v-model="settings.build_regional_node_names" />
           </div>
           <p class="mp-form-hint">
-            所有节点按地区命名，同地区有多个节点时加序号。开启后，新构建会将订阅节点一并写入配置。设备更新后可能需要重新选节点。
+            订阅节点按地区命名，同地区有多个节点时加序号。本地节点保留自定义名称。启用后，设备更新配置时可能需要重新选择订阅节点。
           </p>
         </el-form-item>
         <el-form-item>
