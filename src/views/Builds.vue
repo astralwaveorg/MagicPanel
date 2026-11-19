@@ -216,6 +216,16 @@
             <template v-if="result.device"> · 设备 {{ result.device }}</template> ·
             {{ sizeText(result.size) }} · 摘要 <span class="mono">{{ shortSha(result.sha256) }}</span>
           </div>
+          <div v-if="result.google_review" style="font-size:12.5px;color:var(--mp-text-secondary);margin-top:4px">
+            Google 选路：
+            <template v-if="result.google_review.state === 'scope_incomplete'">候选范围无法确认</template>
+            <template v-else-if="result.google_review.state === 'usable'">
+              {{ { US: '美国', SG: '新加坡', JP: '日本' }[result.google_review.tier] }}线路已通过业务检测
+            </template>
+            <template v-else-if="result.google_review.state === 'all_failed'">三档候选均未通过业务检测</template>
+            <template v-else>业务检测证据不足</template>
+            · 沿用现有策略
+          </div>
           <template v-if="result.errors?.length">
             <div style="color:var(--mp-danger);font-size:12.5px;margin-top:6px">
               错误：{{ result.errors.length }} 项校验未通过

@@ -18,7 +18,7 @@ from ..compiler import render, validate
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import base_config as base_config_service
 from ..services import runtime_profiles
-from ..services import publish_gate, releases, node_catalog, node_rename
+from ..services import google_evidence, publish_gate, releases, node_catalog, node_rename
 from ..services import source_nodes as source_node_service
 from ..services import tester
 
@@ -382,10 +382,14 @@ def create_build(operator: str, note: str = "",
     from ..services.node_refs import resolve_snapshot
     quality_reader = quality_funnel.result_reader()
     regional_plan = None
+    google_time = datetime.now(timezone.utc)
+    google_samples = []
     if "regional_catalog" in snapshot:
         reserved = set(config.BUILTIN_TARGETS) | {config.GUARD_PROXY}
         reserved.update(g["name"] for g in snapshot["groups"])
         regional_plan = node_rename.regional_names(snapshot["regional_catalog"], reserved)
+        with db.connect() as conn:
+            google_samples = google_evidence.observations(conn, now=google_time)
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
         if vid not in resolved_by_variant:
@@ -401,6 +405,15 @@ def create_build(operator: str, note: str = "",
         text = ""
         verification = "未通过"
         core_checked = False
+        review = {}
+
+        def review_google(cfg):
+            report = google_evidence.artifact_report(
+                cfg, snapshot.get("node_catalog", []), regional_plan, google_samples,
+                evaluation_at=google_time)
+            if report is not None:
+                review["google_review"] = report
+
         if not policy_errors:
             try:
                 resolved = resolved_by_variant[vid]
@@ -412,7 +425,8 @@ def create_build(operator: str, note: str = "",
                                             resolved=resolved,
                                             quality_reader=quality_reader,
                                             quality_badges=unlock_badge,
-                                            regional_plan=regional_plan)
+                                            regional_plan=regional_plan,
+                                            google_review=review_google)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
@@ -443,6 +457,7 @@ def create_build(operator: str, note: str = "",
             finally:
                 tmp.unlink(missing_ok=True)
         results[artifact_name] = {
+            **(review if not errors else {}),
             "ok": not errors,
             "engine": target["engine"],
             "platform": target["platform"],

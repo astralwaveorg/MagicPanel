@@ -178,3 +178,34 @@ def test_service_groups_split_media_in_place_and_require_jp_netflix_evidence():
     assert groups[-2]["proxies"] == ["日本 01 - Netflix"]
     assert groups[-1]["proxies"] == ["🎞️ 国际影音"]
     assert "日本 02 - Claude" not in {p["name"] for p in cfg["proxies"]}
+
+
+def test_ai_service_rules_preserve_google_direct_and_explicit_overrides():
+    from app.compiler import render
+
+    rules = [
+        {"type": "RULE-SET", "value": "ai-cn", "target": "DIRECT"},
+        {"type": "RULE-SET", "value": "google", "target": "🔍 谷歌服务"},
+        {"type": "DOMAIN-SUFFIX", "value": "grok.com", "target": "DIRECT"},
+        {"type": "RULE-SET", "value": "global-ai", "target": "🧠 人工智能"},
+        {"type": "RULE-SET", "value": "openai", "target": "🧠 人工智能"},
+        {"type": "MATCH", "value": "", "target": "🚀 默认代理"},
+    ]
+    cfg = {"proxies": [{"name": name, "type": "ss"} for name in ("美国 NTT 01", "日本 01")],
+           "proxy-groups": [{"name": "🧠 人工智能"}]}
+    evidence = {
+        "self": {"revision": "now", "preferred_ai": True,
+                 "services": ["chatgpt", "perplexity", "grok"], "latencies": {"chatgpt": 400}},
+        "other": {"revision": "now", "services": ["chatgpt"], "latencies": {"chatgpt": 100}},
+    }
+    result = render._apply_service_groups(
+        cfg, rules, evidence, {n: {"revision": "now"} for n in evidence},
+        {"self": "美国 NTT 01", "other": "日本 01"})
+    assert result[:3] == rules[:3]
+    assert [(r["value"], r["target"]) for r in result[3:]] == [
+        ("openai", "ChatGPT"), ("perplexity.ai", "Perplexity"),
+        ("global-ai", "🧠 人工智能"), ("", "🚀 默认代理"),
+    ]
+    groups = {g["name"]: g for g in cfg["proxy-groups"]}
+    assert groups["ChatGPT"]["proxies"] == ["美国 NTT 01 - ChatGPT", "日本 01 - ChatGPT"]
+    assert "Grok" not in groups

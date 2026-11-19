@@ -1,5 +1,6 @@
 """纯恢复/排序 planner；不做 DB、网络或时钟副作用。"""
-from datetime import timedelta
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 
 from .fingerprints import digest
 
@@ -18,6 +19,9 @@ SERVICE_RULES = {
     "perplexity": ("perplexity", "🧠 人工智能"),
     "tiktok": ("tiktok", "🎵 TikTok"),
 }
+# 只有存在通用海外 AI 目标且没有用户显式规则时才补这几个站点。
+AI_DOMAIN_RULES = {"perplexity": "perplexity.ai", "grok": "grok.com",
+                   "copilot": "copilot.microsoft.com"}
 MEDIA_NAMES = {
     "netflix": "Netflix", "primevideo": "Prime Video", "spotify": "Spotify",
     "twitch": "Twitch", "bbc": "BBC", "bilibili_intl": "Bilibili 海外版",
@@ -33,13 +37,81 @@ def rank_ai(rows: list[dict]) -> list[str]:
     return [row['node_uid'] for row in ordered]
 
 
-def _proof_valid(proof: dict, country: str, scope_sha: str, now) -> bool:
+def _time(value):
     try:
-        return (proof.get('country') == country and proof.get('scope_sha') == scope_sha and
-                proof.get('complete') is True and proof.get('state') == 'all_failed' and
-                proof.get('valid_until') > now.isoformat())
-    except TypeError:
-        return False
+        dt = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    return dt if dt.tzinfo and dt.utcoffset() is not None else None
+
+
+def qualify_google_manifest(members: dict, samples: list[dict], *, evaluation_at,
+                            min_failure_gap_seconds: int = 30) -> dict:
+    """按设备产物的完整冻集合验证证据；同一节点的单次故障不能证明档位耗尽。"""
+    scope_sha = digest({tier: members.get(tier, {}) for tier in GOOGLE_TIERS})
+    allowed = defaultdict(list)
+    for row in samples:
+        country, uid = row.get("country"), row.get("node_uid")
+        node = members.get(country, {}).get(uid)
+        if country not in GOOGLE_TIERS or not node or row.get("revision") != node["revision"]:
+            continue
+        checked, expires = _time(row.get("measured_at")), _time(row.get("valid_until"))
+        if not checked or not expires or not checked <= evaluation_at < expires:
+            continue
+        if row.get("egress_verified") is not True or row.get("control_ok") is not True:
+            continue
+        allowed[country, uid].append((checked, expires, row))
+    rows, exhausted, coverage = [], [], {}
+    for country in GOOGLE_TIERS:
+        by_uid = members.get(country, {})
+        counts = Counter()
+        deadlines = []
+        for uid, node in by_uid.items():
+            grouped = defaultdict(list)
+            for seen, valid, sample in allowed[country, uid]:
+                grouped[seen].append((valid, sample))
+            observations = []
+            for seen, batch in sorted(grouped.items()):
+                states = {sample.get("state") for _, sample in batch}
+                state_at_time = next(iter(states)) if len(states) == 1 else "unknown"
+                observations.append((seen, min(valid for valid, _ in batch), state_at_time,
+                                     min(row.get("latency_ms", 10**9) for _, row in batch)))
+            state = "missing"
+            latency = 10**9
+            if observations:
+                # 同一时间的冲突证据视为未知；最新未知会撤掉旧结论。
+                checked, expires, latest, latency = observations[-1]
+                state = "unknown"
+                if latest == "observed-ok":
+                    state = "observed-ok"
+                elif latest == "confirmed-blocked":
+                    previous_failure = None
+                    for seen, valid, previous, _ in reversed(observations[:-1]):
+                        if previous != "confirmed-blocked":
+                            break
+                        if (checked - seen).total_seconds() >= min_failure_gap_seconds:
+                            previous_failure = valid
+                            break
+                    if previous_failure is not None:
+                        state = "confirmed-blocked"
+                        deadlines.append(min(previous_failure, expires))
+            counts[state] += 1
+            rows.append({"country": country, "scope_sha": scope_sha, "node_uid": uid,
+                         "google_state": state, "origin_kind": node.get("origin_kind"),
+                         "latency_ms": latency})
+        coverage[country] = {"total": len(by_uid), **dict(counts)}
+        if by_uid and counts["confirmed-blocked"] == len(by_uid):
+            exhausted.append({"country": country, "scope_sha": scope_sha, "complete": True,
+                              "state": "all_failed", "valid_until": min(deadlines).isoformat()})
+    return {**select_google_tier(rows, exhausted, evaluation_at=evaluation_at),
+            "scope_sha": scope_sha, "coverage": coverage, "exhaustion": exhausted}
+
+
+def _proof_valid(proof: dict, country: str, scope_sha: str, now) -> bool:
+    expires = _time(proof.get("valid_until"))
+    return (proof.get("country") == country and proof.get("scope_sha") == scope_sha
+            and proof.get("complete") is True and proof.get("state") == "all_failed"
+            and expires is not None and expires > now)
 
 
 def select_google_tier(rows: list[dict], exhaustion: list[dict], *, evaluation_at) -> dict:

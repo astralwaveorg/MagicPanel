@@ -113,3 +113,41 @@ def test_service_aliases_require_current_positive_evidence():
     assert not verified_service_ids({**row, "qualified": False}, earliest=90, latest=110)
     row["probes"]["netflix"]["extra"]["catalog"] = "originals_sample"
     assert verified_service_ids(row, earliest=90, latest=110) == ["tiktok"]
+
+
+def test_google_artifact_report_requires_two_failures_for_each_current_us_node():
+    from datetime import datetime, timedelta, timezone
+    from app.services.google_evidence import GOOGLE_GROUP, TIER_GROUPS, artifact_report
+
+    now = datetime(2026, 11, 19, tzinfo=timezone.utc)
+    catalog = [dict(source_id=1, emit_name=n, node_uid=n, revision="r2", origin_kind="source")
+               for n in ("usa", "usb", "sg", "jp")]
+    names = {(1, n["emit_name"]): n["emit_name"] for n in catalog}
+    cfg = {"proxies": [{"name": n["emit_name"]} for n in catalog], "proxy-groups": [
+        {"name": GOOGLE_GROUP, "proxies": list(TIER_GROUPS.values())},
+        {"name": TIER_GROUPS["US"], "proxies": ["us-private", "usb"]},
+        {"name": "us-private", "proxies": ["usa"]},
+        {"name": TIER_GROUPS["SG"], "proxies": ["sg"]},
+        {"name": TIER_GROUPS["JP"], "proxies": ["jp"]},
+    ]}
+
+    def sample(uid, country, state, seconds, **override):
+        return {**dict(node_uid=uid, country=country, state=state, revision="r2",
+                       measured_at=(now - timedelta(seconds=seconds)).isoformat(),
+                       valid_until=(now + timedelta(hours=1)).isoformat(),
+                       egress_verified=True, control_ok=True), **override}
+
+    def report(proofs):
+        return artifact_report(cfg, catalog, names, proofs, evaluation_at=now)
+
+    failed = "confirmed-blocked"
+    proofs = [sample("usa", "US", failed, 90), sample("usa", "US", failed, 50),
+              sample("usb", "US", failed, 80, revision="r1"), sample("usb", "US", failed, 40),
+              sample("sg", "SG", "observed-ok", 40)]
+    assert report(proofs)["state"] == "needs_review"
+    proofs.append(sample("usb", "US", failed, 80))
+    assert report(proofs)["tier"] == "SG"
+    assert report(proofs + [sample("usb", "US", "unknown", 40)])["tier"] is None
+    assert report(proofs + [sample("usa", "US", "observed-ok", 5)])["tier"] == "US"
+    cfg["proxy-groups"][1]["use"] = ["unlisted"]
+    assert report(proofs)["state"] == "scope_incomplete"

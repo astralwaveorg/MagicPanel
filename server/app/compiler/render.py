@@ -344,7 +344,7 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
 
 
 def _apply_service_groups(cfg, rules, evidence, quality, final_name):
-    """只引用有权分发的节点。现有服务规则原位换组，保留直连和首个命中。"""
+    """只引用有权分发的节点，并在通用规则前应用已验证的 AI 专项规则。"""
     materials = {p["name"]: p for p in cfg["proxies"] if p["name"] != config.GUARD_PROXY}
     groups = cfg.setdefault("proxy-groups", [])
     by_name = {g["name"]: g for g in groups}
@@ -368,6 +368,21 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
         if members:
             aliases[pid] = members
 
+    def ordered_nodes(pid):
+        names = [name for name in aliases.get(pid, {})
+                 if pid != "netflix" or eligible[name].get("regions", {}).get(pid) == "JP"]
+        names.sort(key=lambda name: (
+            pid in routing_planner.AI_SERVICES and not eligible[name].get("preferred_ai"),
+            eligible[name].get("latencies", {}).get(pid, 10**9), final_name[name]))
+        return [aliases[pid][name] for name in names]
+
+    def add_service_group(label, nodes, fallback=()):
+        group = {"name": label, "type": "select", "proxies": nodes or list(fallback)}
+        if len(nodes) > 1:
+            group.update(type="fallback", url=config.HEALTH_CHECK_URL, interval=600)
+        groups.append(group)
+        used.add(label)
+
     routed = set()
     updated = []
     for rule in rules:
@@ -377,12 +392,7 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
             updated.append(rule)
             continue
         pid, previous = service
-        eligible_names = [name for name in aliases.get(pid, {})
-                          if pid != "netflix" or eligible[name].get("regions", {}).get(pid) == "JP"]
-        eligible_names.sort(key=lambda name: (
-            pid in routing_planner.AI_SERVICES and not eligible[name].get("preferred_ai"),
-            eligible[name].get("latencies", {}).get(pid, 10**9), final_name[name]))
-        nodes = [aliases[pid][name] for name in eligible_names]
+        nodes = ordered_nodes(pid)
         # 已有独立分流只有确认通过才调整。通用影音可以先拆开，仍沿用原线路。
         if not nodes and pid not in routing_planner.MEDIA_NAMES:
             updated.append(rule)
@@ -404,13 +414,41 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
             continue
         fallbacks = [ref for ref in by_name[previous].get("proxies", [])
                      if ref in used and ref not in config.BUILTIN_TARGETS and ref != config.GUARD_PROXY]
-        group = {"name": label, "type": "select", "proxies": nodes or [previous, *fallbacks]}
-        if len(nodes) > 1:
-            group.update(type="fallback", url=config.HEALTH_CHECK_URL, interval=600)
-        groups.append(group)
-        used.add(label)
+        add_service_group(label, nodes, [previous, *fallbacks])
         routed.add(pid)
         updated.append({**rule, "target": label})
+
+    # 只在现有通用 AI 集合前细分。保留所有在它之前的直连、Google 与用户自定义规则。
+    anchor = next((i for i, rule in enumerate(updated)
+                   if rule["type"] == "RULE-SET" and rule.get("value", "").lower() in
+                   {"global-ai", "category-ai-chat-!cn"} and rule["target"] == "🧠 人工智能"), None)
+    if anchor is not None:
+        narrow = []
+        for pid, source in (("chatgpt", "openai"), ("perplexity", "perplexity")):
+            if pid not in routed:
+                continue
+            for i in range(anchor + 1, len(updated)):
+                rule = updated[i]
+                if (rule["type"] == "RULE-SET" and rule.get("value", "").lower() == source
+                        and rule["target"] == routing_planner.SERVICE_ALIAS_NAMES[pid]):
+                    if all(row["target"] == "🧠 人工智能" for row in updated[anchor:i]):
+                        narrow.append(updated.pop(i))
+                    break
+        explicit_domains = {rule.get("value", "").lower() for rule in updated
+                            if rule["type"] in {"DOMAIN", "DOMAIN-SUFFIX"}}
+        explicit_sets = {rule.get("value", "").lower() for rule in updated if rule["type"] == "RULE-SET"}
+        for pid, domain in routing_planner.AI_DOMAIN_RULES.items():
+            if (pid in routed or pid in explicit_sets
+                    or any(host == domain or host.endswith("." + domain) or domain.endswith("." + host)
+                           for host in explicit_domains if host)):
+                continue
+            label = routing_planner.SERVICE_ALIAS_NAMES[pid]
+            if not (nodes := ordered_nodes(pid)) or label in used:
+                continue
+            add_service_group(label, nodes)
+            routed.add(pid)
+            narrow.append({"type": "DOMAIN-SUFFIX", "value": domain, "target": label})
+        updated[anchor:anchor] = narrow
     # 没有独立规则的服务仍可以手选，菜单中不重复创建已经参与分流的服务。
     for pid, members in aliases.items():
         label = f"已验证 · {routing_planner.SERVICE_ALIAS_NAMES[pid]}"
@@ -428,7 +466,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                   normalize_nodes: bool = True,
                   resolved: dict | None = None,
                   badge_lookup=None, perf_lookup=None, quality_reader=None,
-                  quality_badges=False, regional_plan=None) -> str:
+                  quality_badges=False, regional_plan=None, google_review=None) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
@@ -719,6 +757,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     if regional_plan is not None:
         rules = _apply_service_groups(cfg, rules, snapshot.get("service_aliases") or {},
                                       quality, final_name)
+        if google_review is not None and any(r["target"] == "🔍 谷歌服务" for r in rules):
+            google_review(cfg)
 
     # 本方案引用的规则来源：规则里的 RULE-SET ∪ DNS nameserver-policy 的
     # rule-set: 引用（约束 31 的三个 DNS 集合因此永不悬空）。

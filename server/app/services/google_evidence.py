@@ -1,0 +1,107 @@
+"""从已验证观测路径读入 Google 业务证据。基础连通探针不能进入选路。"""
+
+import json
+from datetime import datetime
+
+from .probe_observers import GOOGLE_PROBE_HOST_ALLOWLIST
+from .. import config
+from .routing_planner import GOOGLE_TIERS, _time, qualify_google_manifest
+
+GOOGLE_GROUP = "🔍 谷歌服务"
+TIER_GROUPS = dict(zip(GOOGLE_TIERS, ("🇺🇸 Google 美国候选", "🇸🇬 新加坡自动", "🇯🇵 日本自动")))
+
+
+def artifact_report(cfg, catalog, regional_plan, samples, *, evaluation_at):
+    """按产物中的实际组成员统计证据；诊断结果不改写客户端线路。"""
+    groups = {group["name"]: group for group in cfg.get("proxy-groups", [])}
+    if GOOGLE_GROUP not in groups:
+        return None
+    proxies = {proxy["name"] for proxy in cfg.get("proxies", [])}
+    by_name = {}
+    for row in catalog:
+        label = regional_plan.get((row.get("source_id"), row["emit_name"]))
+        if label in proxies:
+            by_name.setdefault(label, []).append(row)
+
+    def leaves(name, ancestors=()):
+        if name == config.GUARD_PROXY:
+            return set(), False
+        if name in ancestors:
+            return set(), True
+        if name in groups:
+            group = groups[name]
+            incomplete = bool(group.get("use") or group.get("include-all"))
+            names = set()
+            for child in group.get("proxies", []):
+                found, missing = leaves(child, (*ancestors, name))
+                names.update(found)
+                incomplete |= missing
+            return names, incomplete
+        if len(by_name.get(name, [])) == 1:
+            return {name}, False
+        return set(), True
+
+    top = groups[GOOGLE_GROUP]
+    incomplete = (top.get("proxies", []) != list(TIER_GROUPS.values())
+                  or bool(top.get("use") or top.get("include-all")))
+    members = {}
+    for tier, group in TIER_GROUPS.items():
+        names, missing = leaves(group)
+        incomplete |= missing
+        members[tier] = {by_name[name][0]["node_uid"]: {
+            "revision": by_name[name][0]["revision"],
+            "origin_kind": by_name[name][0]["origin_kind"],
+        } for name in names}
+    report = qualify_google_manifest(members, samples, evaluation_at=evaluation_at)
+    return {"state": "scope_incomplete" if incomplete else report["state"],
+            "tier": None if incomplete else report["tier"],
+            "coverage": report["coverage"]}
+
+
+def observations(conn, *, now: datetime) -> list[dict]:
+    rows = conn.execute("""
+        SELECT i.node_uid, i.node_revision, r.result_state, r.egress_json, r.evidence_json,
+               r.measured_at, r.valid_until, p.qualified_at, p.expires_at, p.contract_json,
+               o.config_revision
+        FROM probe_results r JOIN probe_items i ON i.id=r.item_id
+        JOIN probe_jobs j ON j.id=i.job_id AND j.observer_id=r.observer_id
+        JOIN probe_paths p ON p.observer_id=r.observer_id AND p.epoch=r.path_epoch
+        JOIN probe_observers o ON o.id=r.observer_id
+        JOIN probe_adapter_health a ON a.probe_id=r.probe_id AND a.probe_version=r.probe_version
+        WHERE i.service_key='google:critical' AND i.state='completed'
+          AND j.cancel_requested=0 AND p.state='verified' AND o.enabled=1
+          AND o.kind!='fixture' AND a.state='healthy'
+          AND r.probe_id='google-critical' AND r.probe_version='v1'
+        ORDER BY r.measured_at, r.id
+        """)
+    accepted = []
+    for r in rows:
+        try:
+            egress, evidence, contract = (json.loads(r[key]) for key in
+                                          ("egress_json", "evidence_json", "contract_json"))
+            measured, valid, qualified, expires = (_time(r[key]) for key in
+                                                     ("measured_at", "valid_until", "qualified_at", "expires_at"))
+            if (not all((measured, valid, qualified, expires)) or not qualified <= measured <= now < min(expires, valid)
+                    or contract.get("config_revision") != r["config_revision"]
+                    or "google" not in contract.get("scopes", [])
+                    or egress.get("scope") != "google" or egress.get("verified") is not True
+                    or egress.get("country") not in GOOGLE_TIERS or evidence.get("control_ok") is not True):
+                continue
+            products = evidence.get("products")
+            if not isinstance(products, dict) or set(products) != GOOGLE_PROBE_HOST_ALLOWLIST:
+                continue
+            states = list(products.values())
+            state = "unknown"
+            if r["result_state"] == "observed-ok" and all(s == "observed-ok" for s in states):
+                state = "observed-ok"
+            if r["result_state"] == "blocked" and all(s == "confirmed-blocked" for s in states):
+                state = "confirmed-blocked"
+            latency = evidence.get("latency_ms")
+            accepted.append({"node_uid": r["node_uid"], "revision": r["node_revision"],
+                             "country": egress["country"], "measured_at": measured.isoformat(),
+                             "valid_until": min(expires, valid).isoformat(), "state": state,
+                             "egress_verified": True, "control_ok": True,
+                             "latency_ms": latency if type(latency) is int and latency > 0 else 10**9})
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return accepted
