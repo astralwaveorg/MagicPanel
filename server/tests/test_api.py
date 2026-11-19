@@ -1394,6 +1394,51 @@ def test_local_node_crud_render_and_group_reference(client):
                          headers=h).status_code == 200
 
 
+def test_local_node_update_tolerates_legacy_param_keys(client):
+    """协议字段表演进后，存储参数里的遗留键不再永久卡死编辑（2026-11-20）。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    node = client.post("/api/v1/local-nodes", headers=h, json={
+        "name": "US-NTT-01", "node_type": "机房", "protocol": "vless",
+        "server": "usa.example.com", "port": 443,
+        "params": {"uuid": "example-uuid", "flow": "", "tls": True,
+                   "servername": "usa.example.com", "network": "tcp", "udp": True},
+    }).json()
+    # 模拟旧版本写入的遗留键（如 server 混进 params）
+    from app import db, security
+    with db.connect() as conn:
+        row = conn.execute("SELECT params_enc FROM local_nodes WHERE id=?",
+                           (node["id"],)).fetchone()
+        params = json.loads(security.decrypt_text(row["params_enc"]))
+        params["server"] = "legacy.example.com"
+        conn.execute("UPDATE local_nodes SET params_enc=? WHERE id=?",
+                     (security.encrypt_text(json.dumps(params)), node["id"]))
+    # 编辑按修复后前端的行为提交：只带协议白名单内的字段（遗留键不回传）
+    reveal = client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h).json()
+    schema = client.get("/api/v1/local-nodes/schema", headers=h).json()
+    vless_spec = next(p for p in schema["protocols"] if p["value"] == "vless")
+    schema_keys = {f["key"] for f in vless_spec["fields"]}
+    clean_params = {k: v for k, v in reveal["params"].items() if k in schema_keys}
+    r = client.put(f"/api/v1/local-nodes/{node['id']}", headers=h, json={
+        "name": "US-Selfbuilt-01", "node_type": "机房", "protocol": "vless",
+        "server": "usa.example.com", "port": 443,
+        "params": clean_params,
+        "extra_yaml": reveal["extra_yaml"], "enabled": True,
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["display_name"] == "US-Selfbuilt-01 (机房)"
+    stored = client.post(f"/api/v1/local-nodes/{node['id']}/reveal", headers=h).json()
+    assert "server" not in stored["params"]
+    assert stored["params"]["uuid"] == "example-uuid"
+    # 提交侧白名单保持严格：未知键仍然 400
+    strict = client.put(f"/api/v1/local-nodes/{node['id']}", headers=h, json={
+        "name": "US-Selfbuilt-01", "node_type": "机房", "protocol": "vless",
+        "server": "usa.example.com", "port": 443,
+        "params": {**clean_params, "unknown": "x"}, "enabled": True,
+    })
+    assert strict.status_code == 400
+
+
 # ---- 基础配置、引擎差异、链路修复 ----
 
 import json  # noqa: E402

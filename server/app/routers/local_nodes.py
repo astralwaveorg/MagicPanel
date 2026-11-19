@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from .. import db, security
 from ..deps import CurrentUser, RequireCapabilities
+from ..schemas.nodes import parameter_fields
 from ..services import local_nodes, node_dto, node_catalog
 from ..services import refs
 from ..services import tester
@@ -51,6 +52,19 @@ def _get_or_404(conn, node_id: int):
     if not row:
         raise HTTPException(404, "本地节点不存在")
     return row
+
+
+def _drop_unknown_params(protocol: str, params: dict, dropped: set) -> dict:
+    """协议字段表演进后，旧数据可能存有已移除的键；编辑时剔除而不是永久卡死保存。"""
+    if protocol == 'custom':
+        return params
+    cleaned = {}
+    for key, value in params.items():
+        if key in parameter_fields(protocol):
+            cleaned[key] = value
+        else:
+            dropped.add(key)
+    return cleaned
 
 
 def _prepare(body: LocalNodeBody) -> tuple[dict, str]:
@@ -132,11 +146,16 @@ def create_node(body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal'))
 @router.put("/{node_id}")
 def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal')):
     marked = local_nodes.display_name(body.name.strip(), body.node_type)
+    dropped_params: set = set()
     with db.tx() as conn:
         row = _get_or_404(conn, node_id)
         try:
             old = node_dto.reveal_configuration(row)
-            current = node_dto.configuration(row['protocol'], old['params'], old['extra_yaml']) if row['protocol'] == body.protocol else node_dto.configuration(body.protocol, {})
+            # 存储侧：协议字段表演进后的遗留键剔除，不永久卡死编辑；
+            # 提交侧：客户端参数保持严格白名单（未知键 400）。
+            stored = old['params'] if row['protocol'] == body.protocol else {}
+            stored = _drop_unknown_params(body.protocol, stored, dropped_params)
+            current = node_dto.configuration(body.protocol, stored, old['extra_yaml'])
             patch = {k: getattr(body, k) for k in node_dto.PATCH_FIELDS if k in body.model_fields_set and (k != 'extra_yaml' or body.extra_yaml)}
             if body.params:
                 public, secrets = node_dto.split_parameters(body.protocol, body.params)
@@ -168,7 +187,8 @@ def update_node(node_id: int, body: LocalNodeBody, user=RequireCapabilities('edi
              node_id),
         )
         security.audit(conn, user["username"], "更新本地节点", "local_node", node_id,
-                       {"name": body.name, "protocol": body.protocol})
+                       {"name": body.name, "protocol": body.protocol,
+                        **({"dropped_param_keys": sorted(dropped_params)} if dropped_params else {})})
         previous_emit = local_nodes.display_name(row['name'], row['node_type'])
         node_catalog.sync_local_node(conn, node_id)
         from ..services.policy_mutations import refresh_node_projection

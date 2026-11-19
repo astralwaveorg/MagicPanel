@@ -1412,13 +1412,23 @@ async function copyUrl(row) {
   }
 }
 
-function openLocalEdit(row) {
+async function openLocalEdit(row) {
   localEditing.value = row || null
   if (row) {
+    // 列表接口只回公开参数与凭据存在性；编辑前 reveal 一次回填表单（含凭据与高级 YAML）。
+    let params = { ...(row.public_params || {}) }
+    let extraYaml = ''
+    try {
+      const data = await api(`/api/v1/local-nodes/${row.id}/reveal`, { method: 'POST' })
+      params = { ...params, ...(data.params || {}) }
+      extraYaml = data.extra_yaml || ''
+    } catch {
+      // reveal 失败时仍打开对话框：公开参数可编辑，凭据留空表示保持原值。
+    }
     Object.assign(localForm, {
       name: row.name, node_type: row.node_type || '本地',
       protocol: row.protocol, server: row.server, port: row.port,
-      params: { ...row.params }, extra_yaml: row.extra_yaml, enabled: row.enabled,
+      params, extra_yaml: extraYaml, enabled: row.enabled,
     })
   } else {
     const first = localProtocols.value[0]?.value || 'ss'
@@ -1437,13 +1447,19 @@ async function saveLocal() {
   if (!localForm.server.trim()) return ElMessage.warning('请填写服务器地址')
   localSaving.value = true
   try {
+    // 只提交当前协议表单绑定的字段；回填带来的协议外遗留键不回传（后端白名单会拒绝）。
+    const schemaKeys = new Set(visibleLocalFields.value.map((f) => f.key))
+    const params = {}
+    for (const key of schemaKeys) {
+      if (localForm.params[key] !== undefined) params[key] = localForm.params[key]
+    }
     const body = {
       name: localForm.name.trim(),
       node_type: localForm.node_type || '',
       protocol: localForm.protocol,
       server: localForm.server.trim(),
       port: localForm.port,
-      params: { ...localForm.params },
+      params,
       extra_yaml: localForm.extra_yaml,
       enabled: localForm.enabled,
     }
