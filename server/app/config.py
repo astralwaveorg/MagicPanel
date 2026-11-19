@@ -131,7 +131,7 @@ SETTINGS_DEFAULTS = {
     "unlock_batch_size": "3",           # 每批检测节点数
     "unlock_batch_cursor": "0",         # 内部：批量检测轮转游标
     "probe_funnel_enabled": "0",        # 周期性质量漏斗（延迟→吞吐→解锁，默认关）
-    "probe_max_delay_ms": "600",        # 一级门禁：延迟上限（毫秒）
+    "probe_max_delay_ms": "3000",        # 一级门禁：延迟上限（毫秒）
     "probe_min_speed_bps": "2000000",   # 二级门禁：2 MB/s = 16 Mbps
     "probe_speed_bytes": "5242880",     # 测速文件大小（5MB）
     "probe_timeout_ms": "8000",         # 单请求超时

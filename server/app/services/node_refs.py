@@ -216,21 +216,49 @@ def resolve_rule_target(ref, *, variant_id, groups, nodes):
     return name
 
 
-def replace_local_refs(conn, gid, local_ids, *, local_first=None):
-    groups,nodes = context(conn)
-    group = next(g for g in groups if g['id'] == gid)
-    refs = decoded(group['members_v2'],[])
+def patch_group_refs(conn, row, *, names=None, local_ids=None, local_first=None):
+    """分别替换策略成员和本地节点，保留其他引用及其相对顺序。"""
+    group = dict(row)
+    groups, nodes = context(conn)
+    options = dict(variant_id=group['variant_id'], groups=groups, nodes=nodes)
+    refs = (decoded(group['members_v2'], []) if check_format(group) == 'typed-v2'
+            else legacy_refs(decoded(group['proxies'], []), **options,
+                             local_ids=decoded(group['local_nodes'], []),
+                             local_first=bool(group['local_first'])))
     local_uids = {n['node_uid'] for n in nodes if n['origin_kind'] == 'local'}
-    old_local = [r for r in refs if r['kind'] == 'node' and r['ref'] in local_uids]
-    non_local = [r for r in refs if not (r['kind'] == 'node' and r['ref'] in local_uids)]
-    replacements = legacy_refs([],variant_id=group['variant_id'],groups=groups,nodes=nodes,
-                               local_ids=local_ids)
-    first = group['local_first'] if local_first is None else local_first
-    if first:
-        position = 0
-    elif old_local:
-        position = next(i for i,r in enumerate(refs) if r['kind'] == 'node' and r['ref'] in local_uids)
-        position -= sum(1 for r in refs[:position] if r not in non_local)
-    else:
-        position = len(non_local)
-    return canonical_group(conn,gid,non_local[:position]+replacements+non_local[position:])
+
+    def category(ref):
+        if ref['kind'] != 'node':
+            return 'policy'
+        return 'local' if ref['ref'] in local_uids else 'source'
+
+    replacements = {}
+    if names is not None:
+        replacements['policy'] = legacy_refs(names, **options)
+    if local_ids is not None:
+        replacements['local'] = legacy_refs([], **options, local_ids=local_ids)
+
+    # 逐个填回同类的原位置，新增成员接在该类的末尾。
+    last = {category(ref): i for i, ref in enumerate(refs)}
+    offsets = dict.fromkeys(replacements, 0)
+    result = []
+    for i, ref in enumerate(refs):
+        kind = category(ref)
+        if kind not in replacements:
+            result.append(ref)
+            continue
+        offset = offsets[kind]
+        stop = len(replacements[kind]) if i == last[kind] else offset + 1
+        result.extend(replacements[kind][offset:stop])
+        offsets[kind] = stop
+    for kind, entries in replacements.items():
+        if kind not in last:
+            if kind == 'local' and (group['local_first'] if local_first is None else local_first):
+                result[:0] = entries
+            else:
+                result.extend(entries)
+    if local_first is not None:
+        local = [ref for ref in result if category(ref) == 'local']
+        rest = [ref for ref in result if category(ref) != 'local']
+        result = local + rest if local_first else rest + local
+    return result

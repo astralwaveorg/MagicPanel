@@ -414,6 +414,9 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
             fields: list[str] = []
             args: list = []
             notes: list[str] = []
+            names = None
+            selected_local = None
+            updated_refs = None
             if body.proxies is not None:
                 # 剔除不存在的成员，并剔除指向自己的引用（自引用客户端加载会失败）
                 keep = [p for p in body.proxies
@@ -422,8 +425,7 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
                 dropped = len(body.proxies) - len(keep)
                 if dropped:
                     notes.append(f"剔除了 {dropped} 个不存在或指向自己的成员引用")
-                fields.append("proxies=?")
-                args.append(json.dumps(keep, ensure_ascii=False))
+                names = keep
             if body.targets is not None:
                 keep = [t for t in body.targets if t in target_names]
                 if len(keep) != len(body.targets):
@@ -434,8 +436,17 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
                 keep = [i for i in body.local_nodes if i in local_ids]
                 if len(keep) != len(body.local_nodes):
                     notes.append("剔除了不存在或已停用的本地节点")
-                fields.append("local_nodes=?")
-                args.append(json.dumps(keep, ensure_ascii=False))
+                selected_local = keep
+            if names is not None or selected_local is not None or body.local_first is not None:
+                try:
+                    updated_refs = node_refs.patch_group_refs(conn, row, names=names,
+                        local_ids=selected_local, local_first=body.local_first)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from None
+                if row["type"] == "relay" and len(updated_refs) < 2:
+                    skipped.append({"id": gid, "name": row["name"],
+                                    "reason": "链式转发至少需要两个成员，未修改"})
+                    continue
             if body.use_sources is not None:
                 if row["type"] == "relay":
                     skipped.append({"id": gid, "name": row["name"],
@@ -456,18 +467,14 @@ def batch_update_groups(body: BatchGroupPatch, user=CurrentUser):
             if body.local_first is not None:
                 fields.append("local_first=?")
                 args.append(int(body.local_first))
-            if not fields:
+            if not fields and updated_refs is None:
                 continue
             fields.append("updated_at=?")
             conn.execute(
                 f"UPDATE proxy_groups SET {', '.join(fields)} WHERE id=?",
                 (*args, db.now(), gid))
-            if body.local_nodes is not None and body.proxies is None \
-                    and row['members_format'] == 'typed-v2':
-                _canonical_group(conn,gid,node_refs.replace_local_refs(
-                    conn,gid,keep))
-            elif body.proxies is not None or body.local_nodes is not None:
-                _canonical_group(conn,gid)
+            if updated_refs is not None:
+                _canonical_group(conn, gid, updated_refs)
             updated += 1
             if notes:
                 skipped.append({"id": gid, "name": row["name"],

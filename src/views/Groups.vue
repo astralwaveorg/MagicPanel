@@ -106,7 +106,7 @@
           <el-table-column label="客户端可见" width="100">
             <template #default="{ row }">{{ row.hidden ? '隐藏' : '显示' }}</template>
           </el-table-column>
-          <el-table-column label="包含策略" width="160">
+          <el-table-column label="策略成员" width="160">
             <template #default="{ row }">
               <!-- 列里只给一行摘要，完整清单靠悬浮提示，避免行高被撑开 -->
               <el-tooltip v-if="row.proxies && row.proxies.length" placement="top" :show-after="200">
@@ -138,13 +138,13 @@
           </el-table-column>
           <el-table-column label="本地节点" width="120">
             <template #default="{ row }">
-              <el-tooltip v-if="row.local_nodes && row.local_nodes.length" placement="top" :show-after="200">
+              <el-tooltip v-if="localMembers(row).length" placement="top" :show-after="200">
                 <template #content>
                   <div class="mp-list-tip">
-                    <div v-for="(n, i) in localNodeList(row.local_nodes)" :key="i">{{ i + 1 }}. {{ n }}</div>
+                    <div v-for="(n, i) in localMembers(row)" :key="i">{{ i + 1 }}. {{ n }}</div>
                   </div>
                 </template>
-                <span class="mp-list-brief">{{ localNodeBrief(row.local_nodes) }}</span>
+                <span class="mp-list-brief">{{ localNodeBrief(localMembers(row)) }}</span>
               </el-tooltip>
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
@@ -301,8 +301,8 @@
 
     <el-dialog :close-on-click-modal="false" v-model="batchDialog" title="批量修改策略组" width="min(620px, 94vw)">
       <p class="mp-dialog-desc">
-        一次修改 {{ selected.length }} 个策略组。只修改勾选的项目，留空则清空。
-        转发组会跳过「节点来源」。
+        已选 {{ selected.length }} 个策略组。只替换勾选的项目，留空则清空该项。
+        链式转发组不使用节点来源。
       </p>
       <el-form :model="batch" label-position="top">
         <el-form-item>
@@ -519,6 +519,12 @@ const selectedLocal = computed({
 
 function pinLocalFirst() {
   form.proxies = [...selectedLocal.value, ...form.proxies.filter((name) => !localNames.value.has(name))]
+}
+
+function localMembers(row) {
+  const names = (row.proxies || []).filter((name) => localNames.value.has(name))
+  const legacy = localNodeList(row.local_nodes)
+  return [...new Set(row.local_first ? [...legacy, ...names] : [...names, ...legacy])]
 }
 
 function localNodeList(ids) {

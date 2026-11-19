@@ -21,7 +21,7 @@ from . import probe_engine
 logger = logging.getLogger("magicpanel.quality_funnel")
 
 # ---- 默认阈值（可被 settings 覆盖）----
-DEFAULT_MAX_DELAY_MS = 600          # 一级：延迟上限
+DEFAULT_MAX_DELAY_MS = int(config.SETTINGS_DEFAULTS["probe_max_delay_ms"])          # 一级：延迟上限
 DEFAULT_MIN_SPEED_BPS = 2_000_000          # 二级：2 MB/s（16 Mbps）
 DEFAULT_SPEED_TEST_BYTES = 5 * 1024 * 1024  # 测速文件大小
 DEFAULT_PROBE_CONCURRENCY = 4       # 探测并发

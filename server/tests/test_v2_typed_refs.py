@@ -244,6 +244,52 @@ def test_batch_replace_local_nodes(client):
     group=client.get('/api/v1/groups',headers=h).json()[0]
     assert group['proxies']==['DIRECT','b (本地)'],group
 
+def test_batch_members_keep_unselected_categories_in_place(client):
+    h = auth_headers(setup_admin(client))
+    a, b, c = (node(client, h, name) for name in ('甲', '乙', '丙'))
+    child = client.post('/api/v1/groups', headers=h, json={
+        'name': '备用', 'proxies': ['DIRECT'], 'use_sources': [],
+    }).json()
+    r = client.post('/api/v1/groups', headers=h, json={
+        'name': '测试组', 'type': 'fallback', 'use_sources': [],
+        'proxies': ['DIRECT', a['display_name'], child['name'], b['display_name'], 'REJECT'],
+    })
+    assert r.status_code == 201, r.text
+    gid = r.json()['id']
+
+    def patch(expected, **changes):
+        response = client.patch('/api/v1/groups/batch', headers=h, json={'ids': [gid], **changes})
+        assert response.status_code == 200, response.text
+        assert response.json()['updated'] == 1
+        groups = client.get('/api/v1/groups/page', headers=h).json()['items']
+        assert next(g for g in groups if g['id'] == gid)['proxies'] == expected
+
+    patch(['DIRECT', b['display_name'], '备用', c['display_name'], 'REJECT'],
+          local_nodes=[b['id'], c['id']])
+    patch(['REJECT', b['display_name'], '备用', c['display_name'], 'DIRECT'],
+          proxies=['REJECT', '备用', 'DIRECT'])
+    patch([b['display_name'], c['display_name']], proxies=[])
+    patch(['DIRECT'], proxies=['DIRECT'], local_nodes=[])
+
+
+def test_batch_cannot_break_relay_chain(client):
+    h = auth_headers(setup_admin(client))
+    a, b = (node(client, h, name) for name in ('甲', '乙'))
+    r = client.post('/api/v1/groups', headers=h, json={
+        'name': '接力', 'type': 'relay', 'use_sources': [],
+        'proxies': [a['display_name'], b['display_name']],
+    })
+    assert r.status_code == 201, r.text
+    group = r.json()
+    response = client.patch('/api/v1/groups/batch', headers=h, json={
+        'ids': [group['id']], 'local_nodes': [], 'hidden': True,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()['updated'] == 0
+    assert response.json()['skipped'][0]['id'] == group['id']
+    assert client.get('/api/v1/groups', headers=h).json()[0] == group
+
+
 def test_hidden_rule_build_guard(client):
     from app.compiler.render import render_target
     from app.compiler.validate import validate_policy
