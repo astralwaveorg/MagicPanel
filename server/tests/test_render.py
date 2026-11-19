@@ -265,11 +265,36 @@ def test_ai_service_rules_preserve_google_direct_and_explicit_overrides():
     assert result[:3] == rules[:3]
     assert [(r["value"], r["target"]) for r in result[3:]] == [
         ("openai", "ChatGPT"), ("perplexity.ai", "Perplexity"),
+        ("copilot.microsoft.com", "Copilot"),
         ("global-ai", "🧠 人工智能"), ("", "🚀 默认代理"),
     ]
     groups = {g["name"]: g for g in cfg["proxy-groups"]}
-    assert groups["ChatGPT"]["proxies"] == ["美国 NTT 01 - ChatGPT", "日本 01 - ChatGPT"]
+    assert groups["ChatGPT"]["proxies"] == ["美国 NTT 01 - ChatGPT", "日本 01 - ChatGPT", "🧠 人工智能"]
     assert "Grok" not in groups
+
+
+def test_unproved_ai_can_be_selected_independently_without_changing_default_outbound():
+    from app.compiler.render import _apply_service_groups
+
+    shared = "🧠 人工智能"
+    rules = [
+        {"type": "RULE-SET", "value": "google", "target": "🔍 谷歌服务"},
+        {"type": "RULE-SET", "value": "global-ai", "target": shared},
+        {"type": "RULE-SET", "value": "openai", "target": shared},
+        {"type": "RULE-SET", "value": "cn", "target": "DIRECT"},
+    ]
+    cfg = {"proxies": [{"name": "已下发自建节点"}],
+           "proxy-groups": [{"name": shared, "type": "select", "proxies": ["已下发自建节点"]}]}
+    result = _apply_service_groups(cfg, rules, {}, {}, {},
+                                   local_ai_nodes=["已下发自建节点", "未下发的节点"])
+    assert result[0] == rules[0] and result[-1] == rules[-1]
+    assert [(r["value"], r["target"]) for r in result[1:-1]] == [
+        ("openai", "ChatGPT"), ("perplexity.ai", "Perplexity"), ("grok.com", "Grok"),
+        ("copilot.microsoft.com", "Copilot"), ("global-ai", shared)]
+    for group in cfg["proxy-groups"][1:]:
+        assert group["type"] == "select"
+        assert group["proxies"] == [shared, "已下发自建节点"]
+
 def test_prime_video_site_precedes_amazon_without_reordering_other_rules():
     from app.compiler.render import _apply_service_groups
 

@@ -345,7 +345,7 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
     return groups, rules
 
 
-def _apply_service_groups(cfg, rules, evidence, quality, final_name):
+def _apply_service_groups(cfg, rules, evidence, quality, final_name, *, local_ai_nodes=()):
     """只引用有权分发的节点，并在通用规则前应用已验证的 AI 专项规则。"""
     materials = {p["name"]: p for p in cfg["proxies"] if p["name"] != config.GUARD_PROXY}
     groups = cfg.setdefault("proxy-groups", [])
@@ -386,6 +386,12 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
         groups.append(group)
         used.add(label)
 
+    generic_ai = "🧠 人工智能"
+    ai_manual = list(dict.fromkeys(
+        [generic_ai, *[name for name in local_ai_nodes if name in materials],
+         *[ref for ref in by_name.get(generic_ai, {}).get("proxies", [])
+           if ref in used and ref not in config.BUILTIN_TARGETS and ref != config.GUARD_PROXY]]))
+
     routed = set()
     updated = []
     for rule in rules:
@@ -397,7 +403,7 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
         pid, previous = service
         nodes = ordered_nodes(pid)
         # 已有独立分流只有确认通过才调整。通用影音可以先拆开，仍沿用原线路。
-        if not nodes and pid not in routing_planner.MEDIA_NAMES:
+        if not nodes and pid not in routing_planner.MEDIA_NAMES and previous != generic_ai:
             updated.append(rule)
             continue
         # 已有 Claude/TikTok 专组，保留客户端的原组名和规则目标。
@@ -424,6 +430,8 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
         elif pid in {"hulu", "hbo"}:
             # 保留原美国组为手动选项。只把确认美国地区的节点排到它前面。
             add_service_group(label, [], [*nodes, previous, *fallbacks])
+        elif pid in routing_planner.AI_SERVICES and previous == generic_ai:
+            add_service_group(label, [], [*nodes, *ai_manual])
         else:
             add_service_group(label, nodes if pid != "netflix" else [], [previous, *fallbacks])
         routed.add(pid)
@@ -473,9 +481,10 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
                            for host in explicit_domains if host)):
                 continue
             label = routing_planner.SERVICE_ALIAS_NAMES[pid]
-            if not (nodes := ordered_nodes(pid)) or label in used:
+            if label in used:
                 continue
-            add_service_group(label, nodes)
+            nodes = ordered_nodes(pid)
+            add_service_group(label, [], [*nodes, *ai_manual])
             routed.add(pid)
             narrow.append({"type": "DOMAIN-SUFFIX", "value": domain, "target": label})
         updated[anchor:anchor] = narrow
@@ -793,8 +802,10 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                              [s["name"] for s in sources], inline_names, filter_names))
 
     if regional_plan is not None:
+        local_ai_nodes = [label for raw, label in local_final.items()
+                          if node_rename.regional_region(raw)[0] in ("🇺🇸", "🇯🇵")]
         rules = _apply_service_groups(cfg, rules, snapshot.get("service_aliases") or {},
-                                      quality, final_name)
+                                      quality, final_name, local_ai_nodes=local_ai_nodes)
         if google_review is not None and any(r["target"] == "🔍 谷歌服务" for r in rules):
             google_review(cfg)
 
