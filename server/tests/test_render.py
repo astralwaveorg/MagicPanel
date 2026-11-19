@@ -111,3 +111,38 @@ def test_regional_inline_names_keep_membership_order_and_dialer():
         render.render_target({**snapshot, "sources": []}, {"name": "router", "engine": "mihomo"}))["rules"]
     retired = dict(snapshot["node_catalog"][0], retired=True)
     assert node_rename.regional_names([retired, *snapshot["node_catalog"][1:]])[(2, "HK 002")] == "🇭🇰 香港 02"
+
+
+def test_service_aliases_copy_only_scoped_nodes_with_matching_revisions():
+    from app.compiler import render
+    from app.services import node_rename
+
+    snapshot = _snapshot()
+    snapshot["local_nodes"] = [
+        {"id": i, "name": name, "protocol": "socks5", "server": host,
+         "port": 1080, "enabled": True}
+        for i, name, host in [(1, "JP first", "a.example.invalid"),
+                              (2, "JP second", "b.example.invalid"),
+                              (3, "US private", "c.example.invalid")]]
+    snapshot["groups"] = [{"name": "选择", "type": "select", "local_nodes": [1, 2],
+                           "targets": ["*"], "devices": ["*"]}]
+    snapshot["service_aliases"] = {
+        "JP first": {"revision": "matching", "services": ["claude", "netflix"]},
+        "JP second": {"revision": "stale", "services": ["gemini"]},
+        "US private": {"revision": "matching", "services": ["tiktok"]},
+    }
+    plan = node_rename.regional_names(
+        [{"source_id": None, "emit_name": n["name"], "display_name": n["name"]}
+         for n in snapshot["local_nodes"]])
+    for engine in ("stash", "mihomo"):
+        cfg = yaml.safe_load(render.render_target(
+            snapshot, {"name": "router", "engine": engine}, regional_plan=plan,
+            quality_reader=lambda nodes: {n["name"]: {"revision": "matching"} for n in nodes}))
+        proxies = {p["name"]: p for p in cfg["proxies"]}
+        for service in ("Claude", "Netflix"):
+            label = f"🇯🇵 日本 01 - {service}"
+            assert proxies[label] == {**proxies["🇯🇵 日本 01"], "name": label}
+            assert {"name": f"已验证 · {service}", "type": "select", "proxies": [label]} in cfg["proxy-groups"]
+        assert cfg["proxy-groups"][0]["proxies"] == ["🇯🇵 日本 01", "🇯🇵 日本 02"]
+        assert "🇯🇵 日本 02 - Gemini" not in proxies
+        assert "🇺🇸 美国 - TikTok" not in proxies

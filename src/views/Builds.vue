@@ -12,7 +12,7 @@
                       placement="bottom-end">
             <el-button :loading="building" @click="createBuild()">创建构建</el-button>
           </el-tooltip>
-          <el-tooltip v-if="tab === 'builds'" content="生成一份按地区编号的配置，不发布">
+          <el-tooltip v-if="tab === 'builds'" content="生成统一节点名和已验证服务别名，不发布">
             <el-button :disabled="building" @click="createBuild(true)">预览统一节点名</el-button>
           </el-tooltip>
         </div>
@@ -422,6 +422,7 @@ async function createBuild(previewRegionalNames = false) {
     const build = await api('/api/v1/builds', { method: 'POST', body: {
       note: previewRegionalNames ? '预览统一节点名' : '',
       preview_regional_names: previewRegionalNames,
+      preview_service_aliases: previewRegionalNames,
     } })
     await load()
     if (build.verify_status === 'success') {

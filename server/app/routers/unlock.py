@@ -43,6 +43,7 @@ def quality(user=CurrentUser):
         scheduler_on = db.get_setting(conn, "scheduler_enabled", "1") == "1"
         config = quality_funnel._settings(conn)
         build_groups = db.get_setting(conn, "probe_build_groups", "0")
+        build_aliases = db.get_setting(conn, "probe_build_aliases", "0")
         labels = _regional_labels(conn, candidates)
         catalog = node_catalog.list_active_nodes(conn)
     origins = {r["emit_name"]: r for r in catalog if r["enabled"] and r["origin_kind"] == "local"}
@@ -73,6 +74,7 @@ def quality(user=CurrentUser):
                 "probe_refresh_hours": config["refresh_seconds"] // 3600,
                 "probe_platform_ids": config["platform_ids"],
                 "probe_build_groups": build_groups,
+                "probe_build_aliases": build_aliases,
             },
             "platforms": {pid: item.display_name for pid, item in ALL_DETECTORS.items()}}
 

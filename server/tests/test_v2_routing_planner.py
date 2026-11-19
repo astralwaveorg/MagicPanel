@@ -95,3 +95,21 @@ def test_service_candidates_do_not_confuse_reachability_or_region_with_unlock():
     assert [n["name"] for n in service_candidates(rows, "netflix", earliest=10)] == ["日本自建"]
     assert [n["name"] for n in service_candidates(rows, "claude", earliest=10)] == ["美国自建", "日本自建", "日本订阅"]
     assert service_candidates(rows, "perplexity", earliest=10) == []
+
+
+def test_service_aliases_require_current_positive_evidence():
+    from app.services.routing_planner import verified_service_ids
+
+    row = {"qualified": True, "checked_at": 100, "probes": {
+        "claude": {"state": "unknown", "status": 403, "extra": {"reason": "challenge"}},
+        "gemini": {"state": "reachable", "status": 200, "extra": {"reason": "page_response"}},
+        "tiktok": {"state": "unlocked", "status": 200},
+        "netflix": {"state": "unlocked", "status": 200, "region": "JP",
+                    "extra": {"catalog": "licensed_sample"}},
+    }}
+    assert verified_service_ids(row, earliest=90, latest=110) == ["netflix", "tiktok"]
+    assert not verified_service_ids(row, earliest=101, latest=110)
+    assert not verified_service_ids(row, earliest=90, latest=99)
+    assert not verified_service_ids({**row, "qualified": False}, earliest=90, latest=110)
+    row["probes"]["netflix"]["extra"]["catalog"] = "originals_sample"
+    assert verified_service_ids(row, earliest=90, latest=110) == ["tiktok"]

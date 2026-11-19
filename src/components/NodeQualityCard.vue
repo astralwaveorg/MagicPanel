@@ -89,6 +89,10 @@
           <el-switch v-model="draft.probe_build_groups" active-value="1" inactive-value="0" />
           <p class="mp-form-hint">下次构建时生效。现有分流规则不变。</p>
         </el-form-item>
+        <el-form-item label="构建时生成服务别名">
+          <el-switch v-model="draft.probe_build_aliases" active-value="1" inactive-value="0" />
+          <p class="mp-form-hint">开启「统一节点名」后生效。只为近期检测通过的服务添加别名。</p>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="settingsOpen = false">取消</el-button>

@@ -638,6 +638,31 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 _group_entry(group, engine, names,
                              [s["name"] for s in sources], inline_names, filter_names))
 
+    if regional_plan is not None and snapshot.get("service_aliases"):
+        # 只复制当前产物已经有权分发的节点，代理参数与前置链不变。
+        aliases = snapshot["service_aliases"]
+        eligible = {name: evidence for name, evidence in aliases.items()
+                    if (item := quality.get(name)) and item.get("revision") == evidence["revision"]
+                    and name in final_name}
+        materials = {p["name"]: p for p in cfg["proxies"] if p["name"] != config.GUARD_PROXY}
+        target_groups = cfg.setdefault("proxy-groups", [])
+        used = set(materials) | {g["name"] for g in target_groups}
+        used |= set(config.BUILTIN_TARGETS) | {config.GUARD_PROXY}
+        for pid, service in routing_planner.SERVICE_ALIAS_NAMES.items():
+            members = []
+            for base in sorted({final_name[name] for name, evidence in eligible.items()
+                                if pid in evidence["services"]}):
+                alias = f"{base} - {service}"
+                if base not in materials or alias in used:
+                    continue
+                cfg["proxies"].append({**materials[base], "name": alias})
+                used.add(alias)
+                members.append(alias)
+            label = f"已验证 · {service}"
+            if members and label not in used:
+                target_groups.append({"name": label, "type": "select", "proxies": members})
+                used.add(label)
+
     if quality_groups and engine == "mihomo" and quality:
         usable = {entry["name"] for entry in cfg["proxies"]}
         target_groups = cfg.setdefault("proxy-groups", [])

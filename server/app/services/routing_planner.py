@@ -48,6 +48,33 @@ def select_google_tier(rows: list[dict], exhaustion: list[dict], *, evaluation_a
             'reason': 'higher_tier_not_exhausted'}
 
 
+# 名称也是客户端可用的匹配契约。只有具备正向能力证据的平台可进入此表。
+SERVICE_ALIAS_NAMES = {
+    "claude": "Claude", "chatgpt": "ChatGPT", "gemini": "Gemini",
+    "perplexity": "Perplexity", "grok": "Grok", "copilot": "Copilot",
+    "netflix": "Netflix", "tiktok": "TikTok", "youtube_premium": "YouTube Premium",
+}
+
+
+def verified_service_ids(row: dict, *, earliest: int, latest: int) -> list[str]:
+    checked = row.get("checked_at")
+    if not row.get("qualified") or type(checked) is not int or not earliest <= checked <= latest:
+        return []
+    accepted = []
+    for pid in SERVICE_ALIAS_NAMES:
+        result = (row.get("probes") or {}).get(pid) or {}
+        extra = result.get("extra") or {}
+        status = result.get("status")
+        if (result.get("state") != "unlocked" or type(status) is not int or not 200 <= status < 300
+                or extra.get("reason") in {"challenge", "rate_limit", "unexplained_denial",
+                                           "ip_block", "region", "upstream", "page_response"}):
+            continue
+        if pid == "netflix" and (extra.get("catalog") != "licensed_sample" or not result.get("region")):
+            continue
+        accepted.append(pid)
+    return accepted
+
+
 def service_candidates(rows: list[dict], service: str, *, earliest: int,
                        netflix_region: str = "JP") -> list[dict]:
     """只为该业务选已确认且未过期的达标节点。网页响应、人机校验不入池。"""

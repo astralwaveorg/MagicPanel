@@ -27,14 +27,14 @@ EDITABLE_SETTINGS = {
     "probe_speed_bytes", "probe_timeout_ms", "probe_concurrency",
     "probe_round_limit", "probe_retry",
     "probe_speed_timeout_sec", "probe_refresh_hours", "probe_platform_ids", "probe_build_groups", "probe_quality_provider_names",
-    "probe_node_name_template",
+    "probe_node_name_template", "probe_build_aliases",
 }
 BOOL_SETTINGS = {
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
     "auto_publish_enabled", "node_name_normalize", "node_name_unlock_badge", "build_regional_node_names",
     "unlock_batch_auto", "backup_include_runtime", "backup_include_history_builds",
-    "probe_funnel_enabled", "probe_build_groups", "probe_quality_provider_names",
+    "probe_funnel_enabled", "probe_build_groups", "probe_quality_provider_names", "probe_build_aliases",
 }
 PROBE_RANGES = {
     "probe_max_delay_ms": (1, 5000), "probe_min_speed_bps": (1, 100_000_000),
@@ -407,8 +407,8 @@ def put_settings(body: SettingsBody, user=CurrentUser):
         if key == "auto_publish_env" and value not in ("production", "testing"):
             raise HTTPException(400, "自动构建发布环境仅支持 production / testing")
     with db.tx(immediate=True) as conn:
-        if ("build_regional_node_names" in body.values and
-                body.values["build_regional_node_names"] != db.get_setting(conn, "build_regional_node_names", "0")):
+        if any(key in body.values and body.values[key] != db.get_setting(conn, key, "0")
+               for key in ("build_regional_node_names", "probe_build_aliases")):
             require_capability(user, "publish_prod")
         if body.values.keys() & {"scheduler_enabled", "auto_build_enabled", "auto_publish_enabled", "auto_publish_env"}:
             effective = {key: body.values.get(key, db.get_setting(conn, key, default)) for key, default in (

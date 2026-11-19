@@ -221,6 +221,7 @@ def _delete_build(conn, build, operator: str) -> int:
 class BuildBody(BaseModel):
     note: str = Field(default="", max_length=256)
     preview_regional_names: bool = False
+    preview_service_aliases: bool = False
 
 
 class BatchIds(BaseModel):
@@ -231,11 +232,27 @@ class BuildError(Exception):
     pass
 
 
+def _alias_snapshot(conn) -> dict:
+    from ..services import quality_funnel, routing_planner
+    now = int(time.time())
+    cutoff = now - quality_funnel._settings(conn)["refresh_seconds"]
+    evidence = {}
+    for name, row in quality_funnel.load_results().get("nodes", {}).items():
+        if not isinstance(row, dict) or not row.get("revision"):
+            continue
+        services = routing_planner.verified_service_ids(row, earliest=cutoff, latest=now)
+        if services:
+            evidence[name] = {"revision": row["revision"], "services": services}
+    return evidence
+
+
 def current_policy(conn) -> tuple[dict, str]:
     regional = db.get_setting(conn, "build_regional_node_names", "0") == "1"
     snapshot = collect_snapshot(conn, regional=regional)
     if regional:
         snapshot["regional_catalog"] = node_rename.regional_catalog(conn)
+        if db.get_setting(conn, "probe_build_aliases", "0") == "1":
+            snapshot["service_aliases"] = _alias_snapshot(conn)
     policy_sha = security.sha256_text(
         json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
     )
@@ -245,7 +262,8 @@ def current_policy(conn) -> tuple[dict, str]:
 def create_build(operator: str, note: str = "",
                  snapshot: dict | None = None,
                  policy_sha: str | None = None, *,
-                 preview_regional_names: bool = False) -> tuple[int, str]:
+                 preview_regional_names: bool = False,
+                 preview_service_aliases: bool = False) -> tuple[int, str]:
     """创建构建，返回 (build_id, verify_status)。
 
     定时任务与手动创建共用；没有引擎平台时抛 BuildError。
@@ -254,11 +272,13 @@ def create_build(operator: str, note: str = "",
     避免慢校验长期占用 SQLite 写锁（设备拉取配置会被阻塞）。
     """
     with db.connect() as conn:
-        if preview_regional_names:
+        if preview_regional_names or preview_service_aliases:
             # 预览用独立策略摘要，自动构建不会复用这个预览产物。
             snapshot = {**collect_snapshot(conn, regional=True),
                         "regional_catalog": node_rename.regional_catalog(conn),
                         "regional_preview": True}
+            if preview_service_aliases:
+                snapshot["service_aliases"] = _alias_snapshot(conn)
             policy_sha = None
         elif snapshot is None:
             snapshot, current_sha = current_policy(conn)
@@ -446,7 +466,8 @@ def create_build(operator: str, note: str = "",
 def create_build_api(body: BuildBody, user=CurrentUser):
     try:
         build_id, _ = create_build(user["username"], body.note,
-                                   preview_regional_names=body.preview_regional_names)
+                                   preview_regional_names=body.preview_regional_names,
+                                   preview_service_aliases=body.preview_service_aliases)
     except BuildError as exc:
         raise HTTPException(400, str(exc))
     with db.connect() as conn:
