@@ -346,7 +346,7 @@ case "$1" in
   status) ;;
   rev-parse) printf '%s\\n' "$FIXTURE_REVISION" ;;
   ls-remote) printf '%s\\trefs/heads/main\\n' "$FIXTURE_REVISION" ;;
-  archive) tar -cf - -T /dev/null ;;
+  archive) umask 022; tar -cf - server/app/__init__.py scripts/deploy.sh ;;
   ls-files) printf 'scripts/ops/rescue.py\\n' ;;
 esac
 ''')
