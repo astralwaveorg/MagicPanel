@@ -69,7 +69,11 @@ fi
 echo "== 同步代码到 $NAS_HOST:$NAS_DIR =="
 STAGING=$(mktemp -d)
 trap 'rm -rf -- "$STAGING"' EXIT
-git archive "$REVISION" | tar -xf - -C "$STAGING"
+# 保持归档权限。Mac 的 tar 在调用方使用 umask 077 时会清除容器用户所需的权限。
+(umask 022; git archive "$REVISION" | tar -xpf - -C "$STAGING")
+BAD=$(find "$STAGING/server/app" "$STAGING/scripts" \
+  \( -type d ! -perm -005 -o -type f ! -perm -004 \) -print)
+[ -z "$BAD" ] || { echo "发布归档权限不正确：$BAD" >&2; exit 1; }
 # data 目录是线上持久化数据，排除且 --delete 不会触及
 # --delete 会删掉 NAS 侧独有的文件（1Panel 生成的 override、.env 里的代理配置等），
 # 这些文件不在仓库里，一旦被删下次构建就会拉包失败——必须排除。
