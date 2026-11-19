@@ -327,11 +327,15 @@ def test_prime_video_site_precedes_amazon_without_reordering_other_rules():
         cfg = {"proxies": [], "proxy-groups": [{"name": "🎞️ 国际影音"}]}
         return _apply_service_groups(cfg, rules, {}, {}, {})
 
+    media = [{"type": "DOMAIN-SUFFIX", "value": domain, "target": "Prime Video"}
+             for domain in ("primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net", "pv-cdn.net")]
     result = render([amazon_cn, amazon, prime_set])
-    assert result == [amazon_cn, {"type": "DOMAIN-SUFFIX", "value": "primevideo.com", "target": "Prime Video"},
-                      amazon, {**prime_set, "target": "Prime Video"}]
+    assert result == [amazon_cn, *media, amazon, {**prime_set, "target": "Prime Video"}]
     assert render([amazon_cn, explicit, amazon, prime_set]) == [
-        amazon_cn, explicit, amazon, {**prime_set, "target": "Prime Video"}]
+        amazon_cn, explicit, *media[1:], amazon, {**prime_set, "target": "Prime Video"}]
+    assert render([amazon_cn, prime_set, amazon]) == [
+        amazon_cn, {**prime_set, "target": "Prime Video"}, amazon]
+
 
 
 def test_explicit_inline_sources_follow_group_order():
