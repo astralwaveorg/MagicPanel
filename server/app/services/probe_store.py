@@ -55,7 +55,7 @@ def list_jobs(conn, *, limit: int, offset: int) -> dict:
 
 
 def claim(conn, *, worker_id: str, now, lease_seconds: int = 60,
-          observer_id: str | None = None) -> dict | None:
+          observer_id: str | None = None, job_id: str | None = None) -> dict | None:
     """领取一个到期项目。同一任务串行；失联的请求不自动重刷目标。"""
     if not worker_id or type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
         raise ValueError('probe_worker_invalid')
@@ -65,24 +65,27 @@ def claim(conn, *, worker_id: str, now, lease_seconds: int = 60,
     conn.execute("UPDATE probe_items SET state='failed',lease_owner=NULL,lease_until=NULL "
                  "WHERE state='running' AND julianday(lease_until)<=julianday(?) AND EXISTS ("
                  "SELECT 1 FROM probe_jobs j WHERE j.id=probe_items.job_id "
-                 "AND j.cancel_requested=0 AND (? IS NULL OR j.observer_id=?))",
-                 (current, observer_id, observer_id))
+                 "AND j.cancel_requested=0 AND (? IS NULL OR j.observer_id=?) "
+                 "AND (? IS NULL OR j.id=?))",
+                 (current, observer_id, observer_id, job_id, job_id))
     conn.execute("UPDATE probe_jobs SET state='incomplete',lease_owner=NULL,updated_at=? "
                  "WHERE state IN ('queued','running') AND cancel_requested=0 "
-                 "AND (? IS NULL OR observer_id=?) AND (julianday(deadline_at)<=julianday(?) OR ("
+                 "AND (? IS NULL OR observer_id=?) AND (? IS NULL OR id=?) "
+                 "AND (julianday(deadline_at)<=julianday(?) OR ("
                  "NOT EXISTS (SELECT 1 FROM probe_items i WHERE i.job_id=probe_jobs.id "
                  "AND i.state IN ('queued','running')) AND EXISTS ("
                  "SELECT 1 FROM probe_items i WHERE i.job_id=probe_jobs.id AND i.state='failed')))",
-                 (current, observer_id, observer_id, current))
+                 (current, observer_id, observer_id, job_id, job_id, current))
     item = db.one(conn, "SELECT i.*,j.observer_id FROM probe_items i "
                   "JOIN probe_jobs j ON j.id=i.job_id "
                   "WHERE j.state IN ('queued','running') AND j.cancel_requested=0 "
                   "AND julianday(j.deadline_at)>julianday(?) AND (? IS NULL OR j.observer_id=?) "
+                  "AND (? IS NULL OR j.id=?) "
                   "AND i.state='queued' AND (i.next_at IS NULL OR julianday(i.next_at)<=julianday(?)) "
                   "AND NOT EXISTS (SELECT 1 FROM probe_items active WHERE active.job_id=j.id "
                   "AND active.state='running') "
                   "ORDER BY j.created_at,j.id,i.next_at,i.id LIMIT 1",
-                  (current, observer_id, observer_id, current))
+                  (current, observer_id, observer_id, job_id, job_id, current))
     if item is None:
         return None
     until = _iso(now + timedelta(seconds=lease_seconds))

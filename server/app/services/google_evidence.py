@@ -1,9 +1,10 @@
 """从已验证观测路径读入 Google 业务证据。基础连通探针不能进入选路。"""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from .probe_observers import GOOGLE_PROBE_HOST_ALLOWLIST, verified_proof
+from .google_receipts import verify as verify_receipt
+from .probe_observers import verified_proof
 from .. import config
 from .routing_planner import GOOGLE_TIERS, _time, qualify_google_manifest
 
@@ -88,7 +89,7 @@ def observations(conn, *, now: datetime) -> list[dict]:
     rows = conn.execute("""
         SELECT i.node_uid, i.node_revision, r.result_state, r.egress_json, r.evidence_json,
                r.measured_at, r.valid_until, p.qualified_at, p.expires_at, p.contract_json,
-               o.config_revision, o.public_key, o.id AS observer_id, p.proof_json
+               o.config_revision, o.public_key, o.id AS observer_id, p.proof_json, r.path_epoch
         FROM probe_results r JOIN probe_items i ON i.id=r.item_id
         JOIN probe_jobs j ON j.id=i.job_id AND j.observer_id=r.observer_id
         JOIN probe_paths p ON p.observer_id=r.observer_id AND p.epoch=r.path_epoch
@@ -105,30 +106,29 @@ def observations(conn, *, now: datetime) -> list[dict]:
         try:
             egress, evidence, contract = (json.loads(r[key]) for key in
                                           ("egress_json", "evidence_json", "contract_json"))
-            measured, valid, qualified, expires = (_time(r[key]) for key in
+            received, valid, qualified, expires = (_time(r[key]) for key in
                                                      ("measured_at", "valid_until", "qualified_at", "expires_at"))
-            if (not all((measured, valid, qualified, expires)) or not qualified <= measured <= now < min(expires, valid)
+            receipt = evidence.get("receipt")
+            confirmed = verify_receipt(receipt, evidence.get("signature"), r["public_key"])
+            if not confirmed:
+                continue
+            measured, country, signed_state = confirmed
+            if (not all((received, valid, qualified, expires))
+                    or not qualified <= measured <= received <= now < min(expires, valid, measured + timedelta(hours=24))
+                    or (received - measured).total_seconds() > 300
                     or not verified_proof(r["observer_id"], r["public_key"], contract, json.loads(r["proof_json"]))
                     or contract.get("config_revision") != r["config_revision"]
                     or "google" not in contract.get("scopes", [])
                     or egress.get("scope") != "google" or egress.get("verified") is not True
-                    or egress.get("country") not in GOOGLE_TIERS or evidence.get("control_ok") is not True):
+                    or egress.get("country") != country or r["result_state"] != signed_state
+                    or any(receipt[key] != r[key] for key in
+                           ("observer_id", "node_uid", "node_revision", "path_epoch"))):
                 continue
-            products = evidence.get("products")
-            if not isinstance(products, dict) or set(products) != GOOGLE_PROBE_HOST_ALLOWLIST:
-                continue
-            states = list(products.values())
-            state = "unknown"
-            if r["result_state"] == "observed-ok" and all(s == "observed-ok" for s in states):
-                state = "observed-ok"
-            if r["result_state"] == "blocked" and all(s == "confirmed-blocked" for s in states):
-                state = "confirmed-blocked"
-            latency = evidence.get("latency_ms")
+            state = "confirmed-blocked" if signed_state == "blocked" else signed_state
             accepted.append({"node_uid": r["node_uid"], "revision": r["node_revision"],
-                             "country": egress["country"], "measured_at": measured.isoformat(),
+                             "country": country, "measured_at": measured.isoformat(),
                              "valid_until": min(expires, valid).isoformat(), "state": state,
-                             "egress_verified": True, "control_ok": True,
-                             "latency_ms": latency if type(latency) is int and latency > 0 else 10**9})
+                             "egress_verified": True, "control_ok": True})
         except (TypeError, ValueError, AttributeError):
             continue
     return accepted

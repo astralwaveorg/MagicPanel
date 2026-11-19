@@ -23,9 +23,10 @@ def test_qualify_requires_signed_path_and_scope(client):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     from app import db
-    from app.services import google_evidence, probe_observers as o, probe_store
-    from v2_helpers import at
+    from app.services import google_evidence, google_receipts, probe_observers as o, probe_store
+    from v2_helpers import admin, at, make_local
 
+    make_local(client, admin(client))
     contract = {'scopes': ['ranking', 'google'], 'network': 'test', 'config_revision': 1}
     key = Ed25519PrivateKey.generate()
     record = {'version': 2, 'signed_at': at(0).isoformat(), 'nonce': 'nonce-fixture-1',
@@ -50,21 +51,40 @@ def test_qualify_requires_signed_path_and_scope(client):
         with pytest.raises(o.PathNotQualified):
             o.require_path(conn, 'nas', path['epoch'], 'media', at(2))
 
-        probe_store.enqueue(conn, trigger='fixture', observer_id='nas',
-            nodes=[('scope-node', 1)], services=('google:critical',),
+        node = conn.execute("SELECT node_uid,current_revision FROM node_catalog").fetchone()
+        receipt = {"observer_id": "nas", "path_epoch": path["epoch"],
+                   "node_uid": node["node_uid"], "node_revision": node["current_revision"],
+                   "measured_at": at(2).isoformat(), "control_sha256": "c" * 64,
+                   "products": {host: {"state": "observed-ok", "country": "US",
+                                       "egress_sha256": "e" * 64, "result_sha256": "d" * 64}
+                                for host in o.GOOGLE_PROBE_HOST_ALLOWLIST}}
+        signature = key.sign(google_receipts.message(receipt)).hex()
+        queued = probe_store.enqueue(conn, trigger='fixture', observer_id='nas',
+            nodes=[(node["node_uid"], node["current_revision"])], services=('google:critical',),
             schedule_key=None, now=at(1), deadline=at(7))
-        item = probe_store.claim(conn, worker_id='fixture', now=at(2))
-        probe_store.finish(conn, item['id'], worker_id='fixture', now=at(2), result={
-            'path_epoch': path['epoch'], 'probe_id': 'google-critical', 'probe_version': 'v1',
-            'result_state': 'observed-ok', 'valid_until': at(5),
-            'egress': {'scope': 'google', 'verified': True, 'country': 'US'},
-            'evidence': {'control_ok': True, 'products': dict.fromkeys(
-                o.GOOGLE_PROBE_HOST_ALLOWLIST, 'observed-ok')},
-        })
+        result = google_receipts.ingest(conn, receipt, signature, now=at(2))
+        assert result["state"] == "observed-ok"
+        assert conn.execute("SELECT state FROM probe_jobs WHERE id=?", (queued["id"],)).fetchone()[0] == "queued"
+        with pytest.raises(ValueError, match='google_receipt_duplicate'):
+            google_receipts.ingest(conn, receipt, signature, now=at(3))
+        stale = {**receipt, "node_revision": node["current_revision"] + 1}
+        with pytest.raises(ValueError, match='google_receipt_invalid'):
+            google_receipts.ingest(conn, stale, signature, now=at(3))
+        with pytest.raises(ValueError, match='google_node_revision_stale'):
+            google_receipts.ingest(conn, stale, key.sign(google_receipts.message(stale)).hex(), now=at(3))
+
         conn.execute("INSERT INTO probe_adapter_health "
                      "(probe_id,probe_version,state,updated_at) VALUES (?,?,?,?)",
                      ('google-critical', 'v1', 'healthy', at(2).isoformat()))
-        assert len(google_evidence.observations(conn, now=at(3))) == 1
+        assert google_evidence.observations(conn, now=at(3))[0]["measured_at"] == at(2).isoformat()
+        conn.execute("UPDATE probe_results SET result_state='blocked'")
+        assert google_evidence.observations(conn, now=at(3)) == []
+        conn.execute("UPDATE probe_results SET result_state='observed-ok'")
+        ambiguous = {**receipt, "measured_at": at(3).isoformat(),
+                     "products": {**receipt["products"], "mail.google.com": {
+                         **receipt["products"]["mail.google.com"], "state": "auth-required"}}}
+        google_receipts.ingest(conn, ambiguous, key.sign(google_receipts.message(ambiguous)).hex(), now=at(3))
+        assert [r["state"] for r in google_evidence.observations(conn, now=at(4))] == ["observed-ok", "unknown"]
         conn.execute("UPDATE probe_paths SET proof_json=json_remove(proof_json,'$.signature')")
         assert google_evidence.observations(conn, now=at(3)) == []
         with pytest.raises(o.PathNotQualified):
