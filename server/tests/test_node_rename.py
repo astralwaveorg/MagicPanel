@@ -251,3 +251,17 @@ def test_prompt_node_detection():
     assert node_rename.is_prompt_node("🇭🇰 香港01 Hyper") is False
     assert node_rename.is_prompt_node("🇺🇸 美国NTT 01 (机房)") is False
     assert node_rename.is_prompt_node("") is False
+
+
+def test_network_quality_keeps_configured_local_name(client):
+    from conftest import auth_headers, setup_admin
+
+    headers = auth_headers(setup_admin(client))
+    result = client.post("/api/v1/local-nodes", headers=headers, json={
+        "name": "🇺🇸 美国NTT 01", "node_type": "机房", "protocol": "socks5",
+        "server": "192.0.2.10", "port": 1080, "params": {},
+    })
+    assert result.status_code in (200, 201), result.text
+    result = client.get("/api/v1/unlock/quality", headers=headers)
+    assert result.status_code == 200, result.text
+    assert [item["name"] for item in result.json()["items"]] == ["🇺🇸 美国NTT 01"]

@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v1/unlock", tags=["unlock"])
 def _regional_labels(conn, candidates):
     from .. import config
     rows = node_rename.regional_catalog(conn)
-    present = {(row["source_id"], row["emit_name"]) for row in rows if not row["retired"]}
+    present = {(row["source_id"], row["emit_name"]) for row in rows if not row.get("retired")}
     # 旧目录缺记录时，用原有节点身份补齐显示映射。
     for node in candidates:
         key = node.get("source_id"), node["name"]
