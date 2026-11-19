@@ -42,10 +42,11 @@ def test_nodes_feed_shape_contains_all_enabled_nodes(client):
     assert "US-01" not in body and "JP-02" in body
     doc = yaml.safe_load(body)
     names = [p["name"] for p in doc["proxies"]]
-    assert names == ["JP-02 (机房)"]
+    # 本地节点用用户自定义名（不带类型后缀），与产物一致
+    assert names == ["JP-02"]
     assert doc["proxy-groups"] == [{
         "name": "🚀 默认代理", "type": "select",
-        "proxies": ["JP-02 (机房)", "DIRECT"]}]
+        "proxies": ["JP-02", "DIRECT"]}]
     assert doc["rules"] == ["MATCH,🚀 默认代理"]
 
 

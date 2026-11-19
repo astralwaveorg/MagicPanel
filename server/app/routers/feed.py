@@ -253,11 +253,27 @@ def _render_nodes_config() -> tuple[str, int]:
     """全部节点裸配置：所有启用节点 + 一个 select 组 + MATCH 兜底。
 
     节点池与探测、构建同一来源（_collect_probe_proxies）：已统一 emit_name、
-    剔除占位与公告节点、重名去重，含启用的本地节点。方言为 Mihomo/Clash。
+    剔除占位与公告节点、重名去重，含启用的本地节点。名字套用构建同款的
+    regional 改名（机场代码/家宽/倍率/解锁服务），与产物里的名称一致。
+    方言为 Mihomo/Clash。
     """
-    from ..services import scheduler
+    from ..services import scheduler, node_rename
+    with db.connect() as conn:
+        plan = node_rename.regional_names(node_rename.regional_catalog(conn))
     proxies = scheduler._collect_probe_proxies()
-    names = [str(p["name"]) for p in proxies if p.get("name")]
+    seen = set()
+    names = []
+    for proxy in proxies:
+        name = str(proxy.get("name") or "")
+        if not name:
+            continue
+        sid = proxy.get("source_id")
+        label = plan.get((sid, name), name)
+        if label in seen:
+            continue
+        seen.add(label)
+        proxy["name"] = label
+        names.append(label)
     doc = {
         "mixed-port": 7890,
         "allow-lan": False,
