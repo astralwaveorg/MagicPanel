@@ -3,10 +3,12 @@
     <h2 class="mp-page-title">网络体检</h2>
     <p class="mp-page-desc">
       同一批服务在<b>两种网络环境</b>下的对照：
-      左列是<b>当前网络</b>（打开本页的这台设备所处网络，浏览器直连该服务，
-      判「能不能连上」）；右列是<b>服务器网络</b>（面板所在机器经路由器代理链的出口，
-      判「能不能解锁」）。左列可达不等于能解锁——解锁要看右列；
-      左列不可达而右列能解锁，说明该服务的分流规则没把你的设备送进代理链。
+      右列是<b>服务器网络</b>（面板所在机器经路由器代理链的出口，判「能不能解锁」，
+      这是权威结论）；左列是<b>当前网络</b>（打开本页的这台设备，浏览器直连该服务，
+      判「能不能连上」，仅供参考）。
+      <br />左列的局限：浏览器对跨域重定向与 <code>X-Frame-Options</code> 的
+      站点无法自动判定，可能把「其实能通」显示成不可达——用终端 curl 一下即可自证
+      （命令见下方提示）。
     </p>
 
     <div class="mp-card">
@@ -55,6 +57,11 @@
           {{ mismatchHint }}
         </div>
       </el-alert>
+      <p v-if="unknownServer.length" class="mp-form-hint" style="margin-top:8px">
+        另有 {{ unknownServer.length }} 项（{{ unknownServer.map(c => c.name).join('、') }}）
+        在服务器侧被 Cloudflare 人机校验挡住，无法判定是否解锁——这是无头检测的
+        固有限制，不计入上面的不一致。
+      </p>
     </div>
 
     <div v-for="cat in categories" :key="cat.id" class="mp-card">
@@ -198,6 +205,10 @@ function mismatchOf(id) {
   const b = browserStateOf(id)
   const s = serverStateOf(id)
   if (b === 'idle' || s === 'idle') return false
+  // 右列是「解锁判定」，左列是「网络可达」——语义不同。
+  // 右列若无法判定（Cloudflare 人机校验等），不是两边结论不一致，
+  // 只是服务器侧没测出结果，不该报成"分流问题"。
+  if (s !== 'unlocked' && s !== 'blocked' && s !== 'unsupported') return false
   const bOk = b === 'reachable'
   const sOk = s === 'unlocked'
   return bOk !== sOk
@@ -210,13 +221,23 @@ const mismatchHint = computed(() => {
     browserStateOf(c.id) === 'reachable' && serverStateOf(c.id) !== 'unlocked')
   const parts = []
   if (onlyServer.length) {
-    parts.push(`${onlyServer.map(c => c.name).join('、')}：服务器网络能解锁、你这台设备连不上——查客户端对这些域名的分流规则`)
+    const names = onlyServer.map(c => c.name).join('、')
+    parts.push(`${names}：服务器网络能解锁、这台设备的浏览器连不上。`
+      + '先在**这台设备**的终端跑一次 curl 自证——能返回状态码就说明网络是通的，'
+      + '只是浏览器的跨域策略测不出来：'
+      + `（终端执行：curl -sI -m 8 ${onlyServer[0].url || ''} | head -1）`)
   }
   if (onlyBrowser.length) {
     parts.push(`${onlyBrowser.map(c => c.name).join('、')}：你这台设备能连上、服务器出口不行——出口 IP 被该服务限权`)
   }
   return parts.join('；')
 })
+
+// 右列无法判定的服务（Cloudflare 人机校验等）：不算不一致，但要单独提示
+const unknownServer = computed(() => catalog.value.filter(c => {
+  const s = serverStateOf(c.id)
+  return s === 'error' || s === 'unsupported'
+}))
 
 const hasResults = computed(() =>
   Object.keys(serverMap.value).length > 0 || Object.keys(browserMap.value).length > 0)

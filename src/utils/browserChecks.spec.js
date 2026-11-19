@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BROWSER_CHECKS, probeAll, probeExitIp, probeOne } from './browserChecks'
+import {
+  BROWSER_CHECKS,
+  combineProbeResults,
+  probeAll,
+  probeExitIp,
+  probeOne,
+} from './browserChecks'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -17,24 +23,30 @@ describe('browserChecks 目录', () => {
   })
 })
 
+describe('组合判定 combineProbeResults', () => {
+  it('任一路有响应 → 可达', () => {
+    expect(combineProbeResults('reachable', 'failed').state).toBe('reachable')
+    expect(combineProbeResults('failed', 'reachable').state).toBe('reachable')
+    expect(combineProbeResults('failed', 'reachable').reason).toBe('responded_redirect')
+  })
+
+  it('两路都失败 → 不可达', () => {
+    const r = combineProbeResults('failed', 'unreachable')
+    expect(r.state).toBe('unreachable')
+    expect(r.reason).toBe('network_error')
+  })
+
+  it('iframe 超时 → 超时', () => {
+    expect(combineProbeResults('failed', 'timeout').state).toBe('timeout')
+  })
+})
+
 describe('probeOne', () => {
-  it('网络层成功 → reachable + 延迟', async () => {
+  it('fetch 成功 → reachable + 延迟', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({})))
     const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
     expect(r.state).toBe('reachable')
     expect(r.latency_ms).toBeGreaterThanOrEqual(0)
-  })
-
-  it('网络层失败 → unreachable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
-    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
-    expect(r.state).toBe('unreachable')
-  })
-
-  it('超时 → timeout（不再让 Promise 挂住）', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))   // 永不完成
-    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 30)
-    expect(r.state).toBe('timeout')
   })
 
   it('no-cors 模式 + 不读缓存', async () => {
@@ -45,11 +57,17 @@ describe('probeOne', () => {
     expect(arg.mode).toBe('no-cors')
     expect(arg.cache).toBe('no-store')
   })
+
+  it('fetch 失败且 iframe 无响应 → 不误判 reachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 60)
+    expect(['unreachable', 'timeout']).toContain(r.state)
+  })
 })
 
 describe('probeAll', () => {
   it('全部项都有结果且回调逐项触发', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('x') }))
+    vi.stubGlobal('fetch', vi.fn(async () => ({})))
     const seen = []
     const items = BROWSER_CHECKS.slice(0, 3)
     const results = await probeAll(items, (r) => seen.push(r.id))
@@ -64,7 +82,8 @@ describe('probeAll', () => {
       if (calls === 1) throw new TypeError('boom')
       return {}
     }))
-    const results = await probeAll(BROWSER_CHECKS.slice(0, 3))
+    // 短超时：jsdom 里 iframe 不会真的加载，不能等满默认超时
+    const results = await probeAll(BROWSER_CHECKS.slice(0, 3), null, 6, 50)
     expect(Object.keys(results).length).toBe(3)
   })
 })
@@ -80,31 +99,5 @@ describe('probeExitIp', () => {
   it('失败返回 error 而不抛', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('x') }))
     expect((await probeExitIp()).error).toBeTruthy()
-  })
-})
-
-describe('probeOne 失败分类', () => {
-  it('服务端已响应但跨域重定向不可读 → 判可达（服务是通的）', async () => {
-    const err = new TypeError('Failed to load resource: net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin')
-    vi.stubGlobal('fetch', vi.fn(async () => { throw err }))
-    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
-    expect(r.state).toBe('reachable')
-    expect(r.reason).toBe('responded_redirect')
-  })
-
-  it('真网络失败 → 不可达（network_error）', async () => {
-    const err = new TypeError('Failed to fetch')
-    vi.stubGlobal('fetch', vi.fn(async () => { throw err }))
-    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
-    expect(r.state).toBe('unreachable')
-    expect(r.reason).toBe('network_error')
-  })
-
-  it('CSP 拦截 → blocked_by_policy', async () => {
-    const err = new TypeError("Refused to connect 'https://a.example/' because it violates the following Content Security Policy directive")
-    vi.stubGlobal('fetch', vi.fn(async () => { throw err }))
-    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
-    expect(r.state).toBe('unreachable')
-    expect(r.reason).toBe('blocked_by_policy')
   })
 })

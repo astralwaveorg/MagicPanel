@@ -135,9 +135,13 @@ def create_app() -> FastAPI:
             # 拦截——请求立即失败（13ms 全部判不可达），看起来像"本地网络全不通"，
             # 实际是内容安全策略拦截（2026-11-19 线上实证修复）。
             # 只放行 https（不放 http），避免明文外发。
+            # frame-src https:：网络体检页的浏览器端探测在 fetch(no-cors)
+            # 穿不过跨域重定向时，用隐藏 iframe 走导航语义复核——iframe 需要
+            # frame-src 放行（frame-ancestors 'none' 保留，防点击劫持）
             "default-src 'self'; img-src 'self' data: blob:; "
             "style-src 'self' 'unsafe-inline'; script-src 'self'; "
-            "connect-src 'self' https:; font-src 'self' data:; frame-ancestors 'none'",
+            "connect-src 'self' https:; frame-src https:; "
+            "font-src 'self' data:; frame-ancestors 'none'",
         )
         if request.url.scheme == "https" or request.headers.get(
                 "x-forwarded-proto", "").split(",")[0].strip() == "https":

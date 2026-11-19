@@ -18,7 +18,9 @@ class RunBody(BaseModel):
 @router.get("/catalog")
 def catalog(user=CurrentUser):
     return {"checks": [
-        {"id": c["id"], "name": c["name"], "icon": c["icon"], "category": c["category"]}
+        {"id": c["id"], "name": c["name"], "icon": c["icon"], "category": c["category"],
+         # url 供前端给出「用终端 curl 自证」的地址
+         "url": c.get("frame_url") or c["url"]}
         for c in unlock_check.CHECKS
     ], "categories": unlock_check.CATEGORY_NAMES}
 
