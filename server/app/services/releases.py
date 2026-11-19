@@ -22,6 +22,7 @@ import re
 from enum import Enum
 
 from .. import config, db, security
+from .google_evidence import public_report
 
 
 class BuildStatus(str, Enum):
@@ -140,6 +141,9 @@ def build_public(row, with_results: bool = False) -> dict:
             safe['errors'] = ['构建校验未通过'] * len(item.get('errors', []))
             # 警告只含策略组、节点来源与本地节点的名称，不含凭据，可以原样返回。
             safe['warnings'] = [str(w) for w in item.get('warnings', [])]
+            google = public_report(item.get('google_review'))
+            if google is not None:
+                safe['google_review'] = google
             data['results'][name] = safe
     return data
 

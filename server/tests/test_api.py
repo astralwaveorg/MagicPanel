@@ -300,6 +300,32 @@ def test_build_release_feed_flow(client):
         f"/feed/{new_token}/config.yaml".replace("//", "/")).status_code in (200, 404)
 
 
+def test_build_detail_returns_only_public_google_counts(client):
+    import json
+    from app import db
+
+    h = auth_headers(setup_admin(client))
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-ios", "engine": "stash", "platform": "ios"})
+    build = client.post("/api/v1/builds", headers=h, json={}).json()
+    with db.tx(immediate=True) as conn:
+        row = conn.execute("SELECT results FROM builds WHERE id=?", (build["id"],)).fetchone()
+        results = json.loads(row["results"])
+        results["stash-ios"]["google_review"] = {
+            "state": "needs_review", "tier": None, "internal": "隐藏",
+            "coverage": {"US": {"total": 3, "missing": 2, "unknown": 1, "internal": "隐藏"},
+                         "SG": {"total": 0}, "JP": {"total": 0}},
+        }
+        conn.execute("UPDATE builds SET results=? WHERE id=?", (json.dumps(results), build["id"]))
+    detail = client.get(f"/api/v1/builds/{build['id']}", headers=h)
+    assert detail.status_code == 200
+    report = detail.json()["results"]["stash-ios"]["google_review"]
+    assert set(report) == {"state", "tier", "coverage"}
+    assert report["coverage"]["US"] == {
+        "total": 3, "missing": 2, "unknown": 1, "observed-ok": 0, "confirmed-blocked": 0,
+    }
+
+
 def test_build_validation_blocks_bad_policy(client):
     csrf = setup_admin(client)
     h = auth_headers(csrf)

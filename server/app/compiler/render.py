@@ -345,7 +345,7 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
     return groups, rules
 
 
-def _apply_service_groups(cfg, rules, evidence, quality, final_name, *, local_ai_nodes=()):
+def _apply_service_groups(cfg, rules, evidence, quality, final_name, *, local_ai_nodes=(), engine="mihomo"):
     """只引用有权分发的节点，并在通用规则前应用已验证的 AI 专项规则。"""
     materials = {p["name"]: p for p in cfg["proxies"] if p["name"] != config.GUARD_PROXY}
     groups = cfg.setdefault("proxy-groups", [])
@@ -409,12 +409,22 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name, *, local_ai
         # 已有 Claude/TikTok 专组，保留客户端的原组名和规则目标。
         if previous in {"🤖 Claude", "🎵 TikTok"}:
             entry = by_name[previous]
-            entry.pop("use", None)
-            entry.pop("filter", None)
-            entry["proxies"] = nodes
-            if len(nodes) > 1:
-                entry.update(type="fallback", url=config.HEALTH_CHECK_URL, interval=600)
-            routed.add(pid)
+            # 保留用户设置的组类型、来源与手选项。已验证节点在手选组内排在前面。
+            if nodes and entry.get("type") == "select":
+                choices = [ref for ref in entry.get("proxies", []) if ref != config.GUARD_PROXY]
+                ranked = nodes
+                if len(nodes) > 1:
+                    ranked_label = f"{routing_planner.SERVICE_ALIAS_NAMES[pid]} 自动"
+                    if ranked_label not in used:
+                        automatic = {"name": ranked_label, "type": "fallback", "hidden": True,
+                                     "proxies": nodes, "interval": 600}
+                        if engine != "stash":
+                            automatic["url"] = config.HEALTH_CHECK_URL
+                        groups.append(automatic)
+                        used.add(ranked_label)
+                        ranked = [ranked_label, *nodes]
+                entry["proxies"] = list(dict.fromkeys([*ranked, *choices]))
+                routed.add(pid)
             updated.append(rule)
             continue
         label = routing_planner.SERVICE_ALIAS_NAMES[pid]
@@ -805,7 +815,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         local_ai_nodes = [label for raw, label in local_final.items()
                           if node_rename.regional_region(raw)[0] in ("🇺🇸", "🇯🇵")]
         rules = _apply_service_groups(cfg, rules, snapshot.get("service_aliases") or {},
-                                      quality, final_name, local_ai_nodes=local_ai_nodes)
+                                      quality, final_name, local_ai_nodes=local_ai_nodes, engine=engine)
         if google_review is not None and any(r["target"] == "🔍 谷歌服务" for r in rules):
             google_review(cfg)
 

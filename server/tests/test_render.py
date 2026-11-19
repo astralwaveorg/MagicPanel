@@ -216,6 +216,27 @@ def test_service_groups_split_media_in_place_and_require_jp_netflix_evidence():
     assert "日本 02 - Claude" not in {p["name"] for p in cfg["proxies"]}
 
 
+def test_claude_adds_verified_choices_without_removing_manual_routes():
+    from app.compiler.render import _apply_service_groups
+
+    original = {"name": "🤖 Claude", "type": "select", "proxies": ["美国 01", "日本 01", "其他"],
+                "use": ["手动订阅"], "filter": "US"}
+    cfg = {"proxies": [{"name": n} for n in ("美国 01", "日本 01", "其他")],
+           "proxy-groups": [dict(original)]}
+    rules = [{"type": "RULE-SET", "value": "anthropic", "target": "🤖 Claude"}]
+    evidence = {name: {"services": ["claude"], "revision": 1, "preferred_ai": True,
+                       "latencies": {"claude": delay}}
+                for name, delay in (("美国 01", 40), ("日本 01", 20))}
+    assert _apply_service_groups(cfg, rules, evidence,
+                                 {name: {"revision": 1} for name in evidence},
+                                 {name: name for name in evidence}, engine="stash") == rules
+    group, automatic = cfg["proxy-groups"]
+    assert group == {**original, "proxies": ["Claude 自动", "日本 01 - Claude",
+                                             "美国 01 - Claude", *original["proxies"]]}
+    assert automatic == {"name": "Claude 自动", "type": "fallback", "hidden": True,
+                         "proxies": ["日本 01 - Claude", "美国 01 - Claude"], "interval": 600}
+
+
 def test_us_media_use_only_eligible_us_nodes_and_keep_the_previous_us_group():
     from app.compiler.render import _apply_service_groups
 

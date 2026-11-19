@@ -11,6 +11,32 @@ GOOGLE_GROUP = "🔍 谷歌服务"
 TIER_GROUPS = dict(zip(GOOGLE_TIERS, ("🇺🇸 Google 美国候选", "🇸🇬 新加坡自动", "🇯🇵 日本自动")))
 
 
+def public_report(report):
+    """构建详情只公开固定状态和计数，不暴露探测原始数据。"""
+    if not isinstance(report, dict) or report.get("state") not in (
+        "scope_incomplete", "usable", "all_failed", "needs_review",
+    ):
+        return None
+    coverage = report.get("coverage")
+    if not isinstance(coverage, dict):
+        return None
+    counters = ("total", "observed-ok", "confirmed-blocked", "unknown", "missing")
+    public = {}
+    for region in GOOGLE_TIERS:
+        counts = coverage.get(region)
+        if not isinstance(counts, dict):
+            return None
+        values = {key: counts.get(key, 0) for key in counters}
+        if (any(type(value) is not int or value < 0 for value in values.values())
+                or "total" not in counts
+                or values["total"] != sum(values[key] for key in counters[1:])):
+            return None
+        public[region] = values
+    tier = report.get("tier")
+    return {"state": report["state"], "tier": tier if tier in GOOGLE_TIERS else None,
+            "coverage": public}
+
+
 def artifact_report(cfg, catalog, regional_plan, samples, *, evaluation_at):
     """按产物中的实际组成员统计证据；诊断结果不改写客户端线路。"""
     groups = {group["name"]: group for group in cfg.get("proxy-groups", [])}
