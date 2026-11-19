@@ -1,18 +1,9 @@
-"""节点分类输出：把质量结果整理成可直接用的 Mihomo 节点列表与分类文件。
-
-产物（``data/node-classes/``）：
-* ``qualified.yaml``   —— 主可用池（一级+二级达标）的 ``proxies:``
-* ``<tag>.yaml``       —— 按能力标签分组的节点（ai / stream / netflix_premium …）
-* ``rejected.yaml``    —— 未达标池（延迟或吞吐不达标）
-* ``snapshot-<ts>.json`` —— 本轮结果快照（对比变化用）
-
-写入一律「临时文件 → 校验 → 原子替换」：校验不过就保留旧文件，绝不写坏产物。
-"""
-import json
+"""把节点质量结论导出为通过核心校验的 Mihomo 达标池。"""
 import logging
 import re
-import time
+from string import Formatter
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import yaml
 
@@ -25,6 +16,19 @@ OUTPUT_DIR = config.DATA_DIR / "node-classes"
 # Mihomo 节点名合法性：规则语法里逗号是分隔符，等号是键值分隔符
 ILLEGAL_NAME_CHARS = re.compile(r"[,#=\n\r\t]")
 MAX_NAME_LEN = 80
+DEFAULT_NAME_TEMPLATE = "{name} · {original}"
+
+
+def valid_name_template(template: str) -> bool:
+    """只接受有限占位符，模板不能读取对象字段或执行格式转换。"""
+    try:
+        fields = [(field, spec, conv) for _, field, spec, conv in Formatter().parse(template)
+                  if field is not None]
+    except ValueError:
+        return False
+    return (0 < len(template) <= 100 and bool(fields)
+            and all(field in {"name", "original", "region", "badges", "performance"} and not spec and not conv
+                    for field, spec, conv in fields))
 
 
 class ClassifyError(Exception):
@@ -59,6 +63,8 @@ def _validate_proxies(proxies: list[dict]) -> None:
         name = proxy.get("name")
         if not isinstance(name, str) or not name.strip():
             raise ClassifyError("节点缺少名称")
+        if ILLEGAL_NAME_CHARS.search(name) or len(name) > MAX_NAME_LEN:
+            raise ClassifyError("节点名称包含分隔符或过长")
         if name in names:
             raise ClassifyError(f"节点重名：{name}")
         names.add(name)
@@ -79,8 +85,9 @@ def write_yaml(path: Path, proxies: list[dict], header: str = "") -> None:
     if header:
         text = f"# {header}\n{text}"
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        tmp = Path(handle.name)
+        handle.write(text)
     # 写完再读回来校验：语法坏了就删临时文件、保留旧产物
     try:
         parsed = yaml.safe_load(tmp.read_text(encoding="utf-8"))
@@ -93,7 +100,8 @@ def write_yaml(path: Path, proxies: list[dict], header: str = "") -> None:
     tmp.replace(path)
 
 
-def classify(results: dict, proxies_by_name: dict[str, dict]) -> dict[str, list[dict]]:
+def classify(results: dict, proxies_by_name: dict[str, dict], *,
+             template: str = DEFAULT_NAME_TEMPLATE) -> dict[str, list[dict]]:
     """按质量结果与能力标签分组。
 
     results：``{节点名: {delay_ms, speed_bps, stage, badges, region, probes}}``
@@ -103,21 +111,37 @@ def classify(results: dict, proxies_by_name: dict[str, dict]) -> dict[str, list[
         "qualified": [], "rejected": [], "ai": [], "stream": [],
         "netflix_premium": [], "fast": [],
     }
+    from . import node_rename
+    if not valid_name_template(template):
+        template = DEFAULT_NAME_TEMPLATE
     used: set[str] = set()
     for name, item in sorted(results.items()):
         proxy = proxies_by_name.get(name)
         if not proxy:
             continue
-        entry = dict(proxy)
-        entry["name"] = _safe_name(str(name), used)
-        qualified = (item.get("stage") == "probed"
-                     or (int(item.get("delay_ms") or -1) >= 0
-                         and int(item.get("delay_ms") or -1) < 600
-                         and int(item.get("speed_bps") or 0) >= 2 * 1024 * 1024))
+        if item.get("stage") not in {"probed", "latency_failed", "speed_failed"}:
+            continue
+        entry = {k: v for k, v in proxy.items() if k != "source_id"}
+        label = node_rename.normalize_name(str(name), badge=item.get("badges") or "",
+                                           speed_bps=item.get("speed_bps", 0),
+                                           delay_ms=item.get("delay_ms", -1))
+        original = _safe_name(str(name), set())
+        speed = item.get("speed_bps") or 0
+        delay = item.get("delay_ms", -1)
+        performance = " / ".join(([f"{speed / 1_000_000:.1f} MB/s"] if speed > 0 else [])
+                                 + ([f"{delay} ms"] if delay >= 0 else []))
+        display = template.format(name=label or original, original=original[:27],
+                                  badges=item.get("badges", ""), region=item.get("region", ""),
+                                  performance=performance)
+        if template == DEFAULT_NAME_TEMPLATE and (not label or label == original):
+            display = f"{original} {performance}".strip()
+        entry["name"] = _safe_name(display or original, used)
+        qualified = item.get("stage") == "probed"
         if qualified:
             groups["qualified"].append(entry)
         else:
             groups["rejected"].append(entry)
+            continue
         badges = str(item.get("badges") or "")
         if "🔓" in badges:
             groups["ai"].append(entry)
@@ -125,33 +149,52 @@ def classify(results: dict, proxies_by_name: dict[str, dict]) -> dict[str, list[
             groups["stream"].append(entry)
         if "📺" in badges:
             groups["netflix_premium"].append(entry)
-        if int(item.get("speed_bps") or 0) >= 2 * 1024 * 1024:
-            groups["fast"].append(entry)
+        groups["fast"].append(entry)
+        region = str(item.get("region") or "")
+        if re.fullmatch("[A-Z]{2}", region):
+            groups.setdefault(f"region-{region}", []).append(entry)
+        for pid, probe in (item.get("probes") or {}).items():
+            if re.fullmatch("[a-z0-9_]+", pid) and probe.get("state") == "unlocked":
+                groups.setdefault(f"platform-{pid}", []).append(entry)
     return groups
 
 
-def write_outputs(results: dict, proxies_by_name: dict[str, dict]) -> dict:
-    """生成全部分类文件（原子写 + 历史快照）。"""
-    groups = classify(results, proxies_by_name)
-    written = {}
-    for tag, proxies in groups.items():
-        if not proxies:
+def export_pools(results: dict, candidates: list[dict], validate_config, *,
+                 template: str = DEFAULT_NAME_TEMPLATE) -> str:
+    """导出只含达标节点的配置。失败时不覆盖上一份通过校验的文件。"""
+    groups = classify(results, {p["name"]: p for p in candidates}, template=template)
+    qualified = groups["qualified"]
+    if not qualified:
+        raise ClassifyError("没有可导出的达标节点")
+    _validate_proxies(qualified)
+    labels = {"qualified": "达标节点", "ai": "AI 解锁", "stream": "流媒体解锁",
+              "netflix_premium": "Netflix 非自制剧样本"}
+    used = {p["name"] for p in qualified}
+    proxy_groups = []
+    for tag, entries in groups.items():
+        if not entries or tag in {"fast", "rejected"}:
             continue
-        path = OUTPUT_DIR / f"{tag}.yaml"
-        write_yaml(path, proxies,
-                   header=f"MagicPanel 节点分类 · {tag} · {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        written[tag] = len(proxies)
-    # 结果快照（对比变化用）
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    snapshot = OUTPUT_DIR / f"snapshot-{stamp}.json"
-    snapshot.write_text(json.dumps(
-        {"at": int(time.time()), "counts": written,
-         "nodes": {k: {kk: vv for kk, vv in v.items() if kk != "probes"}
-                   for k, v in results.items()}},
-        ensure_ascii=False, indent=1), encoding="utf-8")
-    for old in sorted(OUTPUT_DIR.glob("snapshot-*.json"))[:-20]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-    return written
+        label = labels.get(tag, tag.removeprefix("platform-"))
+        if label.startswith("region-"):
+            label = "地区 · " + label.removeprefix("region-")
+        else:
+            label = "质量 · " + label
+        proxy_groups.append({"name": _safe_name(label, used), "type": "select",
+                             "proxies": [p["name"] for p in entries]})
+    text = yaml.safe_dump({"proxies": qualified, "proxy-groups": proxy_groups},
+                          allow_unicode=True, sort_keys=False)
+    directory = OUTPUT_DIR
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, delete=False) as handle:
+        tmp = Path(handle.name)
+        handle.write(text)
+    try:
+        content = tmp.read_text(encoding="utf-8")
+        _validate_proxies(yaml.safe_load(content)["proxies"])
+        checked, error = validate_config(content)
+        if not checked or error:
+            raise ClassifyError("Mihomo 未通过校验，保留上次导出的文件")
+        tmp.replace(directory / "node-pools.yaml")
+    finally:
+        tmp.unlink(missing_ok=True)
+    return text

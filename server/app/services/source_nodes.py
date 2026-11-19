@@ -10,10 +10,13 @@
 """
 import base64
 import json
+import logging
 import re
 import urllib.parse
 
 import yaml
+
+logger = logging.getLogger("magicpanel.source_nodes")
 
 
 class SourceError(Exception):
@@ -68,11 +71,14 @@ def _describe_unparsable(text: str) -> str:
 
 def _decode_uri_list(text: str) -> list[str]:
     """尝试把 base64 内容解成 URI 列表；不是就返回空。"""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if lines and all(re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", line) for line in lines):
+        return lines
     compact = "".join(text.split())
     if len(compact) < 16 or not re.fullmatch(r"[A-Za-z0-9+/=_-]+", compact):
         return []
     try:
-        raw = base64.b64decode(compact + "=" * (-len(compact) % 4), validate=False)
+        raw = base64.b64decode(compact + "=" * (-len(compact) % 4), altchars=b"-_", validate=True)
     except Exception:
         return []
     try:
@@ -91,15 +97,18 @@ def _from_uris(uris: list[str]) -> list[dict]:
     for uri in uris:
         try:
             node = _uri_to_node(uri)
-        except SourceError as exc:
-            errors.append(str(exc))
+        except (SourceError, ValueError, TypeError, AttributeError):
+            scheme = uri.partition(":")[0].lower()
+            errors.append(scheme if re.fullmatch(r"[a-z][a-z0-9+.-]{0,20}", scheme) else "未知协议")
             continue
         if node:
             nodes.append(node)
     if not nodes:
         raise SourceError(
             "节点 URI 列表解析失败"
-            + (f"：{errors[0]}" if errors else ""))
+            + (f"：{', '.join(sorted(set(errors)))} 格式无效或不受支持" if errors else ""))
+    if errors:
+        logger.warning("订阅 URI 中跳过 %d 项：%s", len(errors), ", ".join(sorted(set(errors))))
     return nodes
 
 
@@ -116,25 +125,34 @@ def _flag(value: str) -> bool:
 def _uri_to_node(uri: str) -> dict:
     scheme, _, rest = uri.partition("://")
     scheme = scheme.lower()
-    if scheme not in ("ss", "trojan", "vmess", "vless"):
+    if scheme not in ("ss", "ssr", "trojan", "vmess", "vless", "hysteria2", "hy2", "tuic"):
         raise SourceError(f"暂不支持的节点协议：{scheme}")
     body, _, frag = rest.partition("#")
     name = urllib.parse.unquote(frag).strip() or "未命名节点"
     if scheme == "vmess":
-        return _vmess_to_node(body, name)
+        return _vmess_to_node(body, urllib.parse.unquote(frag).strip())
+    if scheme == "ssr":
+        return _ssr_to_node(body, urllib.parse.unquote(frag).strip())
     main, _, query = body.partition("?")
     cred, _, hostport = main.rpartition("@")
-    host, _, port_s = hostport.partition(":")
-    if not host or not port_s:
-        raise SourceError("节点地址不完整")
+    if scheme == "ss" and not hostport.count(":"):
+        material, mark, hostport = _b64_text(hostport).rpartition("@")
+        if not mark:
+            raise SourceError("SS 节点地址不完整")
+        cred = base64.urlsafe_b64encode(material.encode()).decode()
     try:
-        port = int(port_s)
+        net = urllib.parse.urlsplit(f"//{hostport}")
+        host, port = net.hostname, net.port
     except ValueError:
-        raise SourceError("节点端口不是数字")
+        raise SourceError("节点地址或端口无效") from None
+    if not host or not port or not cred:
+        raise SourceError("节点地址、端口或凭据缺失")
     if scheme == "ss":
         return _ss_to_node(cred, host, port, name, query)
     if scheme == "trojan":
         return _trojan_to_node(cred, host, port, name, query)
+    if scheme in ("hysteria2", "hy2", "tuic"):
+        return _quic_to_node(scheme, cred, host, port, name, query)
     return _vless_to_node(cred, host, port, name, query)
 
 
@@ -156,6 +174,47 @@ def _ss_to_node(cred: str, host: str, port: int, name: str, query: str) -> dict:
     plugin = _q(query, "plugin")
     if plugin:
         node["plugin"] = plugin
+    return node
+
+
+def _ssr_to_node(body: str, name: str) -> dict:
+    head, _, query = _b64_text(body).partition("/?")
+    host, port, protocol, cipher, obfs, password = head.rsplit(":", 5)
+    port = int(port)
+    if not host or not 1 <= port <= 65535:
+        raise SourceError("SSR 节点地址或端口无效")
+    remarks = _q(query, "remarks")
+    node = {"name": name or (_b64_text(remarks) if remarks else "未命名节点"),
+            "type": "ssr", "server": host.strip("[]"), "port": port, "cipher": cipher,
+            "password": _b64_text(password), "protocol": protocol, "obfs": obfs, "udp": True}
+    for source, target in (("protoparam", "protocol-param"), ("obfsparam", "obfs-param")):
+        value = _q(query, source)
+        if value:
+            node[target] = _b64_text(value)
+    return node
+
+
+def _quic_to_node(scheme: str, cred: str, host: str, port: int, name: str, query: str) -> dict:
+    node = {"name": name, "type": "tuic" if scheme == "tuic" else "hysteria2",
+            "server": host, "port": port}
+    if scheme == "tuic":
+        uuid, mark, password = cred.partition(":")
+        if not mark or not uuid or not password:
+            raise SourceError("TUIC 缺少 UUID 或密码")
+        node.update(uuid=urllib.parse.unquote(uuid), password=urllib.parse.unquote(password))
+        options = {"congestion_control": "congestion-controller", "udp_relay_mode": "udp-relay-mode"}
+    else:
+        node["password"] = urllib.parse.unquote(cred)
+        options = {"obfs": "obfs", "obfs-password": "obfs-password", "mport": "ports"}
+    for source, target in options.items():
+        if value := _q(query, source):
+            node[target] = value
+    if sni := _q(query, "sni"):
+        node["sni"] = sni
+    if _flag(_q(query, "insecure")) or _flag(_q(query, "allowInsecure")):
+        node["skip-cert-verify"] = True
+    if alpn := _q(query, "alpn"):
+        node["alpn"] = alpn.split(",")
     return node
 
 
@@ -200,6 +259,15 @@ def _vless_to_node(cred: str, host: str, port: int, name: str, query: str) -> di
     elif network == "grpc":
         node["network"] = "grpc"
         node["grpc-opts"] = {"grpc-service-name": _q(query, "serviceName")}
+    elif network in ("xhttp", "splithttp"):
+        node["network"] = "xhttp"
+        node["xhttp-opts"] = {"path": _q(query, "path", "/"),
+                              "host": _q(query, "host"), "mode": _q(query, "mode", "auto")}
+        # 带复杂 extra/downloadSettings 的链接必须由 Clash YAML 保留原样。
+        if _q(query, "extra"):
+            raise SourceError("含扩展参数的 XHTTP 节点请导出为 Clash YAML")
+    elif network not in ("", "tcp"):
+        raise SourceError("不支持此 VLESS 传输方式")
     return node
 
 

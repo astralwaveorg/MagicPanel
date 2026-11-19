@@ -5,7 +5,7 @@
       <el-tab-pane label="引擎平台" name="targets">
         <TargetsPanel />
       </el-tab-pane>
-      <el-tab-pane label="产物配置" name="artifact">
+      <el-tab-pane label="配置继承" name="artifact">
         <ArtifactPanel />
       </el-tab-pane>
     </el-tabs>

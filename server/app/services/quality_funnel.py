@@ -8,29 +8,29 @@
 
 所有阈值、并发、超时、重试都是配置项（settings 表），代码里只放默认值。
 """
+import hashlib
+import hmac
 import json
 import logging
 import time
 from dataclasses import dataclass, field
 
-from .. import config, db
+from .. import config, db, security
 from . import probe_engine
 
 logger = logging.getLogger("magicpanel.quality_funnel")
 
 # ---- 默认阈值（可被 settings 覆盖）----
 DEFAULT_MAX_DELAY_MS = 600          # 一级：延迟上限
-DEFAULT_MIN_SPEED_BPS = 2 * 1024 * 1024   # 二级：2 MB/s
+DEFAULT_MIN_SPEED_BPS = 2_000_000          # 二级：2 MB/s（16 Mbps）
 DEFAULT_SPEED_TEST_BYTES = 5 * 1024 * 1024  # 测速文件大小
-DEFAULT_SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=5242880"
-DEFAULT_PROBE_TIMEOUT = 8.0         # 单请求超时
 DEFAULT_PROBE_CONCURRENCY = 4       # 探测并发
-DEFAULT_ROUND_LIMIT = 200           # 单轮最多探测多少节点
 DEFAULT_PROBE_RETRY = 1
 
 # 结果落盘位置
 RESULT_PATH = config.DATA_DIR / "node_quality.json"
 FAILED_RECHECK_SECONDS = 6 * 3600
+RESULT_FORMAT = 2
 
 
 @dataclass
@@ -44,13 +44,13 @@ class NodeQuality:
     badges: str = ""                # 能力徽章串（🔓🎬📺）
     region: str = ""                # 识别出的地区码
     checked_at: int = 0
+    revision: str = ""
+    reason: str = ""
 
     @property
     def qualified(self) -> bool:
         """是否进入主可用池（一级 + 二级都达标）。"""
-        return self.stage in ("probed",) or (
-            self.delay_ms >= 0 and self.delay_ms < DEFAULT_MAX_DELAY_MS
-            and self.speed_bps >= DEFAULT_MIN_SPEED_BPS)
+        return self.stage == "probed"
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +58,7 @@ class NodeQuality:
             "speed_bps": round(self.speed_bps), "stage": self.stage,
             "probes": self.probes, "badges": self.badges, "region": self.region,
             "checked_at": self.checked_at,
+            "revision": self.revision, "reason": self.reason, "qualified": self.qualified,
         }
 
 
@@ -68,16 +69,54 @@ def _settings(conn) -> dict:
         except (TypeError, ValueError):
             return default
     return {
-        "max_delay_ms": num("probe_max_delay_ms", DEFAULT_MAX_DELAY_MS),
-        "min_speed_bps": num("probe_min_speed_bps", DEFAULT_MIN_SPEED_BPS),
-        "speed_bytes": max(1, min(DEFAULT_SPEED_TEST_BYTES,
+        "max_delay_ms": max(1, min(5000, num("probe_max_delay_ms", DEFAULT_MAX_DELAY_MS))),
+        "min_speed_bps": max(1, num("probe_min_speed_bps", DEFAULT_MIN_SPEED_BPS)),
+        "speed_bytes": max(65536, min(DEFAULT_SPEED_TEST_BYTES,
                                  num("probe_speed_bytes", DEFAULT_SPEED_TEST_BYTES))),
-        "speed_url": db.get_setting(conn, "probe_speed_url", DEFAULT_SPEED_TEST_URL),
-        "timeout": float(num("probe_timeout_ms", int(DEFAULT_PROBE_TIMEOUT * 1000))) / 1000,
-        "concurrency": num("probe_concurrency", DEFAULT_PROBE_CONCURRENCY),
-        "round_limit": num("probe_round_limit", DEFAULT_ROUND_LIMIT),
-        "retry": num("probe_retry", DEFAULT_PROBE_RETRY),
+        "timeout": max(1000, min(15000, num("probe_timeout_ms", 8000))) / 1000,
+        "speed_timeout": max(3, min(20, num("probe_speed_timeout_sec", 12))),
+        "concurrency": max(1, min(6, num("probe_concurrency", DEFAULT_PROBE_CONCURRENCY))),
+        "round_limit": max(1, min(10, num("probe_round_limit", 10))),
+        "retry": max(0, min(1, num("probe_retry", DEFAULT_PROBE_RETRY))),
+        "refresh_seconds": max(12, min(168, num("probe_refresh_hours", 24))) * 3600,
+        "platform_ids": [i.strip() for i in db.get_setting(conn, "probe_platform_ids", "").split(",") if i.strip()],
     }
+
+
+def _fingerprint(proxy: dict, key: bytes, cfg: dict) -> str:
+    """代理材料或判定配置变更时，不沿用旧的测量。"""
+    material = {k: v for k, v in proxy.items() if k not in ("name", "source_id")}
+    contract = {k: cfg[k] for k in ("max_delay_ms", "min_speed_bps", "speed_bytes", "platform_ids")}
+    payload = json.dumps([RESULT_FORMAT, material, contract], sort_keys=True, ensure_ascii=False, default=str)
+    return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+
+def current_results(proxies: list[dict]) -> dict:
+    return result_reader()(proxies)
+
+
+def result_reader():
+    """固定一份结果，整次构建用同一个版本。"""
+    with db.connect() as conn:
+        cfg = _settings(conn)
+    results = load_results().get("nodes", {})
+    key = (security.derive_subkey(security.load_master_material(), purpose="node-quality")
+           if results else b"")
+    return lambda proxies: _matching_results(proxies, results, cfg, key)
+
+
+def _checked_at(item: dict) -> int:
+    value = item.get("checked_at")
+    return value if type(value) is int else 0
+
+
+def _matching_results(proxies, results, cfg, key):
+    if not results:
+        return {}
+    earliest = int(time.time()) - cfg["refresh_seconds"] - FAILED_RECHECK_SECONDS
+    return {p["name"]: old for p in proxies
+            if (old := results.get(p.get("name"))) and _checked_at(old) >= earliest
+            and old.get("revision") == _fingerprint(p, key, cfg)}
 
 
 def run_funnel(proxies: list[dict], operator: str = "系统",
@@ -92,11 +131,13 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
     with db.connect() as conn:
         cfg = _settings(conn)
     previous = load_results().get("nodes", {})
-    detectors = registry.detectors_for()
+    detectors = registry.detectors_for(cfg["platform_ids"] or None)
+    key = security.derive_subkey(security.load_master_material(), purpose="node-quality")
 
     from . import node_rename
 
     pending = []
+    revisions = {}
     now = time.time()
     for proxy in proxies:
         name = str(proxy.get("name") or "")
@@ -105,13 +146,17 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
         # 占位节点（剩余流量/到期时间…）不是真节点，跳过
         if node_rename.is_info_node(name) or node_rename.is_prompt_node(name):
             continue
+        revision = revisions[name] = _fingerprint(proxy, key, cfg)
+        old = previous.get(name) or {}
+        age = now - _checked_at(old)
         if only_missing:
-            old = previous.get(name)
-            if old and (old.get("stage") == "probed" or
-                        now - (old.get("checked_at") or 0) < FAILED_RECHECK_SECONDS):
+            interval = cfg["refresh_seconds"] if old.get("stage") in ("probed", "unsupported") else FAILED_RECHECK_SECONDS
+            if old.get("revision") == revision and 0 <= age < interval:
                 continue
         pending.append(proxy)
-    limit = max(1, min(cfg["round_limit"], DEFAULT_ROUND_LIMIT))
+    pending.sort(key=lambda p: (_checked_at(previous.get(p["name"], {}))
+                                if previous.get(p["name"], {}).get("revision") == revisions[p["name"]] else 0))
+    limit = cfg["round_limit"]
     if max_nodes is not None:
         limit = min(limit, max_nodes)
     pending = pending[:limit]
@@ -123,54 +168,90 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
              "qualified": 0, "started_at": int(time.time())}
     results: list[NodeQuality] = []
     started = time.monotonic()
-    try:
-        with probe_engine.NodeEngine(pending) as engine:
-            for proxy in pending:
-                name = str(proxy.get("name"))
-                quality = NodeQuality(name=name, checked_at=int(time.time()))
-                # 一级：延迟
-                delay = engine.delay_of(name, timeout_ms=cfg["max_delay_ms"] + 2000)
-                quality.delay_ms = delay
-                if delay < 0 or delay >= cfg["max_delay_ms"]:
-                    quality.stage = "latency_failed"
-                    stats["latency_failed"] += 1
-                    results.append(quality)
-                    continue
-                # 二级：吞吐
-                if not engine.select(name):
-                    quality.stage = "latency_failed"
-                    stats["latency_failed"] += 1
-                    results.append(quality)
-                    continue
-                speed = engine.download_speed(
-                    name, cfg["speed_url"], size_bytes=cfg["speed_bytes"])
-                quality.speed_bps = speed
-                if speed < cfg["min_speed_bps"]:
-                    quality.stage = "speed_failed"
-                    stats["speed_failed"] += 1
-                    results.append(quality)
-                    continue
-                # 三级：解锁矩阵
-                probes = {}
-                for detector in detectors:
-                    item = engine.probe_via_local(detector, cfg["timeout"])
-                    probes[detector.platform_id] = item
-                quality.probes = probes
-                quality.stage = "probed"
-                quality.badges = badges_from_probes(probes)
-                quality.region = region_from_probes(probes)
-                stats["probed"] += 1
-                if quality.qualified:
-                    stats["qualified"] += 1
-                results.append(quality)
-    except probe_engine.EngineError as exc:
-        logger.warning("漏斗执行失败：%s", exc)
-        stats["error"] = str(exc)
+    candidates = []
+    for proxy in pending:
+        name = proxy["name"]
+        if proxy.get("type") in {"direct", "reject", "pass", "compatible", "dns"}:
+            results.append(NodeQuality(name, stage="unsupported", checked_at=int(time.time()),
+                                       revision=revisions[name], reason="这个条目没有独立代理出口"))
+            stats["unsupported"] = stats.get("unsupported", 0) + 1
+        else:
+            candidates.append({k: v for k, v in proxy.items() if k != "source_id"})
+
+    # 按核心返回的位置隔离坏配置，限制重复启动；普通运行故障交给调度退避。
+    while candidates:
+        try:
+            with probe_engine.NodeEngine(candidates) as engine:
+                _measure_nodes(engine, candidates, cfg, detectors, revisions, results, stats,
+                               deadline=started + 180)
+            break
+        except probe_engine.EngineError as exc:
+            rejected = [p for i, p in enumerate(candidates)
+                        if i == exc.index or p.get("type") in exc.types]
+            if not rejected:
+                logger.warning("漏斗执行失败：%s", exc)
+                stats["error"] = str(exc)
+                break
+            for p in rejected:
+                name = p["name"]
+                results.append(NodeQuality(name, stage="unsupported", checked_at=int(time.time()),
+                                           revision=revisions[name], reason="Mihomo 无法加载该节点"))
+            stats["unsupported"] = stats.get("unsupported", 0) + len(rejected)
+            candidates = [p for p in candidates if p not in rejected]
 
     stats["elapsed_sec"] = int(time.monotonic() - started)
     if results:
-        save_results(results, operator)
+        save_results(results, operator, active_names=set(revisions))
     return {"results": [r.to_dict() for r in results], "stats": stats}
+
+
+def _measure_nodes(engine, candidates, cfg, detectors, revisions, results, stats, *, deadline):
+    for proxy in candidates:
+        if time.monotonic() >= deadline:
+            stats["paused"] = "本轮已到时间预算，剩余节点留到下一轮"
+            break
+        name = str(proxy.get("name"))
+        quality = NodeQuality(name=name, checked_at=int(time.time()), revision=revisions[name])
+        # 一级：延迟
+        delay_timeout = 8000 if proxy.get("type") in {"hysteria", "hysteria2", "tuic"} else 5000
+        delay = engine.delay_of(name, timeout_ms=delay_timeout)
+        if delay < 0 and cfg["retry"]:
+            delay = engine.delay_of(name, timeout_ms=delay_timeout)
+        quality.delay_ms = delay
+        if delay < 0 or delay >= cfg["max_delay_ms"]:
+            quality.stage = "latency_failed"
+            quality.reason = "延迟超过上限" if delay >= 0 else "延迟探测无响应"
+            stats["latency_failed"] += 1
+            results.append(quality)
+            continue
+        # 二级：吞吐
+        if not engine.select(name):
+            quality.stage = "inconclusive"
+            quality.reason = "无法确认选中的节点"
+            results.append(quality)
+            continue
+        speed = engine.download_speed(
+            name, f"https://speed.cloudflare.com/__down?bytes={cfg['speed_bytes']}",
+            size_bytes=cfg["speed_bytes"], timeout=cfg["speed_timeout"])
+        quality.speed_bps = speed
+        if speed < cfg["min_speed_bps"]:
+            quality.stage = "speed_failed" if speed > 0 else "inconclusive"
+            quality.reason = "下载速度低于下限" if speed > 0 else "未完成测速下载"
+            if speed > 0:
+                stats["speed_failed"] += 1
+            results.append(quality)
+            continue
+        # 三级：解锁矩阵
+        probes = engine.probe_via_local(detectors, cfg["timeout"],
+                                       workers=cfg["concurrency"], retry=cfg["retry"])
+        quality.probes = probes
+        quality.stage = "probed"
+        quality.badges = badges_from_probes(probes)
+        quality.region = region_from_probes(probes)
+        stats["probed"] += 1
+        if quality.qualified:
+            stats["qualified"] += 1
+        results.append(quality)
 
 
 def badges_from_probes(probes: dict) -> str:
@@ -189,8 +270,8 @@ def badges_from_probes(probes: dict) -> str:
         badges += unlock_check.BADGE_AI
     if unlock_check._dimension_ok(states, stream_ids, unlock_check.STREAM_CONFIRM_MIN):
         badges += unlock_check.BADGE_STREAM
-    nf = (probes.get("netflix_premium") or {})
-    if nf.get("state") == "unlocked":
+    nf = probes.get("netflix") or {}
+    if nf.get("state") == "unlocked" and (nf.get("extra") or {}).get("licensed_sample") is True:
         badges += unlock_check.BADGE_NF_PREMIUM
     return badges
 
@@ -212,41 +293,21 @@ def load_results() -> dict:
         return {"nodes": {}}
 
 
-def save_results(results: list[NodeQuality], operator: str = "系统") -> None:
-    """合并写入结果文件（原子替换），并保留一份时间戳快照。
-
-    probed 节点同时写一份汇总进 unlock_cache.json（键=emit_name）：
-    构建期的能力徽章判定（unlock_check.capability_badges）读的是那份缓存，
-    两个缓存不打通时徽章永远出不来（2026-11-19 实证）。
-    """
-    from . import unlock_check
-
+def save_results(results: list[NodeQuality], operator: str = "系统", *, active_names=None) -> None:
+    """保留当前质量状态及历史快照；旧解锁缓存只供手动网络体检。"""
     data = load_results()
-    nodes = data.get("nodes", {})
+    nodes = {name: value for name, value in data.get("nodes", {}).items()
+             if active_names is None or name in active_names}
     for quality in results:
         nodes[quality.name] = quality.to_dict()
     payload = {"updated_at": int(time.time()), "operator": operator,
                "nodes": nodes}
-    # 同步 unlock 缓存：probed 节点的 19 项结果按 unlock_check 的缓存结构写入
-    entries = {}
-    for quality in results:
-        if quality.stage != "probed" or not quality.probes:
-            continue
-        # unlock_check._states_of 按结果项的 "id" 键索引平台，键名必须一致
-        results_list = [
-            {"id": pid, **{k: v for k, v in (item or {}).items()
-                           if k not in ("id", "platform")}}
-            for pid, item in quality.probes.items()]
-        entry = {"checked_at": quality.checked_at, "exit": quality.name,
-                 "results": results_list, "ip": {}}
-        entries[quality.name] = entry
-    unlock_check._save_cache_entries(entries, merge=False)
     _atomic_write(RESULT_PATH, json.dumps(payload, ensure_ascii=False, indent=1))
-    snapshot = RESULT_PATH.parent / f"snapshot-{int(time.time())}.json"
+    snapshot = RESULT_PATH.parent / "node-quality-history" / f"{time.time_ns()}.json"
     _atomic_write(snapshot, json.dumps(payload, ensure_ascii=False, indent=1))
     # 快照只留最近 20 份
     try:
-        for old in sorted(RESULT_PATH.parent.glob("snapshot-*.json"))[:-20]:
+        for old in sorted(snapshot.parent.glob("[0-9]*.json"))[:-20]:
             old.unlink()
     except OSError:
         pass
@@ -255,8 +316,11 @@ def save_results(results: list[NodeQuality], operator: str = "系统") -> None:
 def _atomic_write(path, text: str) -> None:
     """临时文件 → 校验 → 原子替换。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    from tempfile import NamedTemporaryFile
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        from pathlib import Path
+        tmp = Path(handle.name)
+        handle.write(text)
     try:
         if path.suffix == ".json":
             json.loads(tmp.read_text(encoding="utf-8"))

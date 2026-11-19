@@ -2,8 +2,7 @@
   <div>
     <h2 class="mp-page-title">节点来源</h2>
     <p class="mp-page-desc">
-      订阅地址加密存储，列表不展示；点击“复制 URL”获取。抓取失败保留最近成功快照。
-      测速由本地 Mihomo 逐节点拨测，仅反映服务器网络连通性，不代表客户端可用。
+      管理订阅和本地节点。抓取失败时继续使用上次成功的内容。这里的测速只检查服务器能否连通节点。
     </p>
 
     <el-alert
@@ -371,7 +370,7 @@
             <el-button link type="primary" size="small" @click="openCurlImport">
               从 curl 命令导入地址与请求头
             </el-button>
-            <span>机场订阅常要带 Cookie 与特定 UA 才给内容；粘贴一条 curl 命令即可自动填好地址与请求头。</span>
+            <span>订阅需要 Cookie 或 User-Agent 时，可粘贴 curl 命令填写地址和请求头。</span>
           </div>
         </el-form-item>
         <el-form-item v-if="isFileSource" label="节点来源">
@@ -424,7 +423,7 @@
         <el-form-item label="下发方式">
           <el-radio-group v-model="form.mode">
             <el-radio value="provider">订阅 · 客户端自己下载更新</el-radio>
-            <el-radio value="inline">内联 · 写进配置，GLOBAL 里能选到</el-radio>
+            <el-radio value="inline">内联 · 写入配置，可在 GLOBAL 中选择</el-radio>
           </el-radio-group>
           <div class="mp-form-hint">
             内联下机场换节点不会自动生效，要重新拉一次订阅。

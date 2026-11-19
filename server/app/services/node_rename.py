@@ -202,7 +202,7 @@ def rename_batch(names: list[str], source: str = "",
 
 
 def normalize_snapshot(snapshot_text: str, source: str = "",
-                       badge_lookup=None) -> str:
+                       badge_lookup=None, perf_lookup=None) -> str:
     """规范化 provider 快照 YAML：重命名节点并丢弃占位节点。
 
     仅当开关开启时由分发端调用；内容不可解析时原样返回，不阻断分发。
@@ -220,6 +220,7 @@ def normalize_snapshot(snapshot_text: str, source: str = "",
         [str(p.get("name") or "") for p in data["proxies"] if isinstance(p, dict)],
         source=source,
         badge_lookup=badge_lookup,
+        perf_lookup=perf_lookup,
     )
     kept = []
     for p in data["proxies"]:

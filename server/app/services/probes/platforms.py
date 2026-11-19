@@ -8,7 +8,7 @@
 * **拿不准就说拿不准**：人机校验、风控页、无特征 403 一律 ``unknown``，
   绝不臆断成「被地区拒绝」——猜错的代价是节点能力徽章错标。
 * **状态之外再给结构化信息**：地区码放在 ``region``，平台特有结论放在
-  ``extra``（如 Netflix 的 ``originals`` / ``full_library``）。
+  ``extra``（如 Netflix 的 ``originals`` / ``licensed_sample``）。
 * **只用正文里真实存在的特征**做判定，不臆造页面结构；页面结构变了就
   降级成 ``unknown`` 并在 ``detail`` 里说明。
 """
@@ -19,13 +19,14 @@ import httpx
 from .base import (
     STATE_BLOCKED,
     STATE_ERROR,
+    STATE_REACHABLE,
     STATE_UNKNOWN,
     STATE_UNLOCKED,
     Detector,
     Markers,
     ProbeResponse,
     ProbeResult,
-    classify,
+    classify_page,
 )
 
 # 地区码的通用提取模式：按可靠度排序（countryCode 语义最明确）。
@@ -88,147 +89,77 @@ class _WebDetector(Detector):
 
     def probe(self, client: httpx.Client) -> ProbeResult:
         resp = self.fetch(client, self.url)
-        cls = classify(resp.status, resp.text, self.markers)
+        cls = classify_page(resp, self.markers)
         region = self.extract_region(resp.text, self.region_patterns)
-        detail = cls.detail
-        if cls.state == STATE_UNLOCKED:
-            detail = self.detail_unlocked or ("可访问，但未能识别地区码" if not region else "")
-        elif cls.state == STATE_BLOCKED and self.detail_blocked:
-            detail = self.detail_blocked
-        return ProbeResult(platform=self.platform_id, state=cls.state, status=resp.status,
-                           region=region, detail=detail, extra=self.build_extra(resp))
+        extra = {**self.build_extra(resp), "reason": cls.reason}
+        if extra.get("ip_blocked") and cls.reason != "challenge":
+            cls.state, cls.detail = STATE_BLOCKED, "服务明确拦截了该出口 IP"
+            extra["reason"] = "ip_block"
+        return ProbeResult(self.platform_id, cls.state, resp.status, region=region,
+                           detail=cls.detail, extra=extra)
 
 
 # =============================================================== 流媒体 · Netflix
 
 
 class NetflixDetector(Detector):
-    """Netflix：区分「可看自制剧 / 可看全库 / 完全封锁」，并尽量取到地区码。
-
-    两个入口（社区解锁检测的通用做法）：
-
-    * ``https://www.netflix.com/title/81280792`` —— 目录里的一条内容页。
-      页面内嵌 JSON 里有 ``"isAvailable"``（这条内容在当前出口能不能看）
-      与 ``"isOriginal"``（这条是不是 Netflix 自制剧）。
-    * ``https://www.netflix.com/regions`` —— Netflix 服务覆盖的国家清单。
-
-    判定规则（每条都写清理由）：
-
-    1. 标题页 200 且 ``"isAvailable":true`` → 该出口在服务范围内（unlocked）。
-       再看 ``"isOriginal"``：
-       * ``false`` 说明这条是**授权片库**内容 → 该出口拿到的是完整片库，
-         ``full_library=true``；
-       * ``true``（或该字段缺失）只能证明自制剧可用，片库完整性从这一个
-         入口证明不了 → ``originals=true``、``full_library=false``，
-         状态仍是 unlocked，detail 写明「仅自制剧可用」。
-    2. 标题页 200 但 ``"isAvailable":false`` → 这条内容在当前出口不可用，
-       是 Netflix 按地区裁剪目录的结果 → blocked。
-    3. 标题页 404（内容不在当前目录）而 ``/regions`` 可访问且带国家清单 →
-       该地区有 Netflix 服务、目录被裁剪 → 「仅自制剧」→ unlocked + originals。
-    4. 标题页 403 → Netflix 对拒绝的出口返回 403；带地区特征时 blocked，
-       带 Cloudflare 特征时 unknown（人机校验不是地区问题）。
-    5. 标题页 200 却读不出 ``isAvailable`` → unknown（页面结构变了，
-       不能冒充解锁）。
-
-    地区码：只从标题页的上下文 JSON 取（``"countryCode"`` 优先）。
-    ``/regions`` 是「服务覆盖国家清单」，不是出口所在国家，直接取第一个
-    国家会得到无关国家，所以不拿它当地区码来源。
-    """
+    """分别检查自制剧和外部版权样本。样本通过也不等同于播放成功。"""
 
     platform_id = "netflix"
     display_name = "Netflix"
     category = "streaming"
     title_url = "https://www.netflix.com/title/81280792"
-    regions_url = "https://www.netflix.com/regions"
-    # Netflix 握手慢（TLS + 地理跳转），给更长超时
-    timeout = 14.0
+    original_url = "https://www.netflix.com/title/80057281"
     url = title_url
-
-    region_markers = (
-        "not available in your country",
-        "not available in your region",
-        "not available",
-        "该国家或地区不可用",
-    )
+    timeout = 14.0
+    markers = Markers(region_markers=(r"you seem to be using a vpn or proxy",))
 
     def probe(self, client: httpx.Client) -> ProbeResult:
         title = self.fetch(client, self.title_url)
-        regions = self.fetch(client, self.regions_url)
-
-        available = _json_flag(title.text, "isAvailable")
-        original = _json_flag(title.text, "isOriginal")
-        served = bool(re.search(r'"country"\s*:\s*"[A-Za-z]{2}"', regions.text or ""))
-        region = self.extract_region(title.text)
-
-        extra = {
-            "originals": False,
-            "full_library": False,
-            "title_available": available,
-            "title_is_original": original,
-            "regions_reachable": regions.status == 200,
-        }
-
-        cls = classify(title.status, title.text, Markers(
-            blocked_status=(403,),
-            unsupported_status=(404,),
-            region_markers=self.region_markers,
-            block_requires_marker=False,
-        ))
-
-        if cls.state == STATE_UNKNOWN:
-            return ProbeResult(self.platform_id, STATE_UNKNOWN, title.status, region=region,
-                               detail=cls.detail, extra=extra)
-
-        if title.status == 200:
-            if available is True:
-                full = original is False
-                extra["originals"] = True
-                extra["full_library"] = full
-                detail = ("Netflix 全库可用" if full
-                          else "Netflix 仅自制剧可用（完整片库未能确认）")
-                return ProbeResult(self.platform_id, STATE_UNLOCKED, title.status,
-                                   region=region, detail=detail, extra=extra)
-            if available is False:
-                extra["catalog"] = "trimmed"
-                return ProbeResult(self.platform_id, STATE_BLOCKED, title.status, region=region,
-                                   detail="Netflix 目录中不含该内容（地区限制）", extra=extra)
-            return ProbeResult(self.platform_id, STATE_UNKNOWN, title.status, region=region,
-                               detail="Netflix 标题页未给出 isAvailable 标志，无法判定目录可用性",
-                               extra=extra)
-
-        if title.status == 404:
-            if regions.status == 200 and served:
-                extra["originals"] = True
-                extra["catalog"] = "trimmed"
-                return ProbeResult(self.platform_id, STATE_UNLOCKED, title.status, region=region,
-                                   detail="Netflix 仅自制剧可用（该地区目录已裁剪）", extra=extra)
-            return ProbeResult(self.platform_id, STATE_BLOCKED, title.status, region=region,
-                               detail="Netflix 不可用（标题页与服务国家清单均未通过）", extra=extra)
-
-        if title.status == 403:
-            return ProbeResult(self.platform_id, STATE_BLOCKED, title.status, region=region,
-                               detail="Netflix 完全封锁：" + (cls.detail or "HTTP 403"), extra=extra)
-
-        return ProbeResult(self.platform_id, STATE_ERROR, title.status, region=region,
-                           detail=f"Netflix 返回 HTTP {title.status}", extra=extra)
+        title_status = classify_page(title, self.markers)
+        if title_status.reason in {"challenge", "rate_limit", "upstream"}:
+            return ProbeResult(self.platform_id, title_status.state, title.status,
+                               detail=title_status.detail, extra={"reason": title_status.reason})
+        original = self.fetch(client, self.original_url)
+        original_status = classify_page(original, self.markers)
+        region = self.extract_region(original.text) or self.extract_region(title.text)
+        has_original = (original_status.state == STATE_REACHABLE
+                        and _json_flag(original.text, "isAvailable") is True
+                        and _json_flag(original.text, "isOriginal") is True)
+        has_licensed = (title_status.state == STATE_REACHABLE
+                        and _json_flag(title.text, "isAvailable") is True
+                        and _json_flag(title.text, "isOriginal") is False)
+        limited = (title_status.state == STATE_BLOCKED or
+                   (title_status.state == STATE_REACHABLE
+                    and _json_flag(title.text, "isAvailable") is False))
+        extra = {"originals": has_original, "licensed_sample": has_licensed,
+                 "catalog": "unconfirmed", "playback": "unverified"}
+        if has_original and has_licensed:
+            extra["catalog"] = "licensed_sample"
+            return ProbeResult(self.platform_id, STATE_UNLOCKED, title.status, region,
+                               "自制剧和非自制剧样本均可见，未验证播放", extra=extra)
+        if has_original:
+            extra["catalog"] = "originals_sample"
+            return ProbeResult(self.platform_id, STATE_UNLOCKED, original.status, region,
+                               "自制剧样本可见；非自制剧样本受限" if limited
+                               else "自制剧样本可见；非自制剧未确认", extra=extra)
+        if title_status.state == original_status.state == STATE_BLOCKED:
+            extra.update(catalog="blocked", reason="region")
+            return ProbeResult(self.platform_id, STATE_BLOCKED, original.status, region,
+                               "两个样本均返回限制", extra=extra)
+        if original_status.reason in {"challenge", "rate_limit", "upstream"}:
+            extra["reason"] = original_status.reason
+            return ProbeResult(self.platform_id, original_status.state, original.status, region,
+                               original_status.detail, extra=extra)
+        return ProbeResult(self.platform_id, STATE_UNKNOWN, title.status, region,
+                           "未取得足够的目录证据", extra=extra)
 
 
 # =============================================================== 流媒体 · Disney+
 
 
 class DisneyPlusDetector(_WebDetector):
-    """Disney+：能否访问 + 国家 / 地区码。
-
-    判定规则：
-
-    1. 200 → unlocked；地区码优先取 ``"countryCode"``，其次 ``"country"``，
-       取不到留空并在 detail 里说明。
-    2. 403 且正文含地区限制措辞 → blocked。
-    3. 其它 403 → blocked：Disney+ 对未上线地区返回的就是 403
-       （与「有地区特征」相比少了证据，但这是该站稳定的封锁响应）。
-    4. 429 → error（限流，不是地区问题）。
-    5. 404 → unsupported。
-    """
+    """Disney+：读取网页证据和地区码；不推断播放权限。"""
 
     platform_id = "disney"
     display_name = "Disney+"
@@ -250,17 +181,7 @@ class DisneyPlusDetector(_WebDetector):
 
 
 class MaxDetector(_WebDetector):
-    """HBO Max（现 Max）：是否被地区限制 / 风控拦截，能否访问主站。
-
-    判定规则：
-
-    1. 200 → unlocked（主站可达）；地区码取正文里的 ``"countryCode"`` / ``"region"``。
-    2. 403 且正文含地区限制措辞 → blocked（明确的地区限制）。
-    3. 403 且正文含 Cloudflare / 风控特征 → unknown（风控拦截，不是地区问题）。
-    4. 403 且两者都没有 → unknown：Max 的 403 既可能是地区限制也可能是 WAF
-       拦截，无头请求分不出来，如实说「无法判定」。
-    5. 404 → unsupported。
-    """
+    """HBO Max：分别记录主站响应、地区限制与风控。"""
 
     platform_id = "hbo"
     display_name = "HBO Max"
@@ -291,21 +212,7 @@ class MaxDetector(_WebDetector):
 
 
 class YouTubePremiumDetector(_WebDetector):
-    """YouTube Premium：出口地区 + 该地区是否开通 Premium。
-
-    判定规则：
-
-    1. 200 且正文含 ``"countryCode":"XX"`` → unlocked，region=XX。
-    2. 200 但没有 countryCode → unlocked，region 留空，detail 说明「未能识别地区码」。
-    3. 正文出现「Premium 在当地不可用」的措辞
-       （``premium is not available in your country`` /
-       ``isn't available in your country``）→ blocked。
-    4. 403 → blocked（YouTube Premium 对未开通地区直接拒绝）。
-    5. 「该地区是否开通 Premium」：Premium 页会带一份「可开通 Premium 的国家清单」，
-       若出口国家的 countryCode 在正文里出现两次以上（一次是当前国家上下文、
-       一次在清单里）→ 认定已开通；找不到证据就填 ``premium_region_confirmed=false``，
-       detail 写明「Premium 是否在该地区上架未能确认」，不臆断。
-    """
+    """YouTube Premium：只用明确的地区可用字段，账号权益另计。"""
 
     platform_id = "youtube_premium"
     display_name = "YouTube Premium"
@@ -327,54 +234,32 @@ class YouTubePremiumDetector(_WebDetector):
 
     def probe(self, client: httpx.Client) -> ProbeResult:
         resp = self.fetch(client, self.url)
-        cls = classify(resp.status, resp.text, self.markers)
+        cls = classify_page(resp, self.markers)
         region = self.extract_region(resp.text)
-        confirmed = self._premium_confirmed(resp.text, region)
-        extra = {"premium_region_confirmed": confirmed}
+        confirmed = cls.state == STATE_REACHABLE and self._premium_confirmed(resp.text, region)
+        extra = {"premium_region_confirmed": confirmed, "playback": "unverified", "reason": cls.reason}
         detail = cls.detail
-        if cls.state == STATE_UNLOCKED:
+        if cls.state == STATE_REACHABLE:
             if region and confirmed:
-                detail = f"YouTube Premium 在 {region} 可用"
+                detail = f"页面显示 {region} 支持 Premium；未验证账号权益或免广告"
             elif region:
                 detail = (f"出口地区 {region}；Premium 是否在该地区上架未能确认"
-                          "（页面未给出可开通国家清单证据）")
+                          "（页面未给出明确的地区支持标记）")
             else:
                 detail = "可访问，但未能识别地区码"
-        return ProbeResult(self.platform_id, cls.state, resp.status, region=region,
-                           detail=detail, extra=extra)
+        return ProbeResult(self.platform_id, STATE_UNLOCKED if confirmed else cls.state,
+                           resp.status, region=region, detail=detail, extra=extra)
 
     @staticmethod
     def _premium_confirmed(body: str, region: str) -> bool:
-        """出口国家是否出现在「可开通 Premium 的国家清单」里。
-
-        判据：同一 countryCode 在正文出现两次以上（上下文一次 + 清单一次）。
-        这是启发式判断，拿不准时返回 False 让 detail 说明「未能确认」。
-        """
-        if not region:
-            return False
-        count = len(re.findall(rf'"countryCode"\s*:\s*"{region}"', body or "", re.IGNORECASE))
-        if count >= 2:
-            return True
-        return bool(re.search(r'"isPremiumAvailable(?:Country)?"\s*:\s*true', body or "",
-                              re.IGNORECASE))
+        return bool(region and _json_flag(body, "isPremiumAvailableCountry") is True)
 
 
 # =============================================================== 流媒体 · TikTok
 
 
 class TikTokDetector(_WebDetector):
-    """TikTok：能否访问、出口地区、直播 / 创作者限制的可见信号。
-
-    判定规则：
-
-    1. 200 → unlocked；地区码取正文里的 ``"region"`` / ``"countryCode"``。
-    2. 403 → blocked（TikTok 对受限地区的典型响应）；403 带 Cloudflare 特征
-       → unknown。
-    3. 直播 / 创作者限制：无头请求拿不到真实直播间与创作者后台，
-       只能从正文提示语里读出**是否存在限制提示**
-       （``livestream is not available`` / ``直播间不可用`` 等），
-       读不到就填 ``unknown`` 并在 detail 里说明原因，不臆断。
-    """
+    """TikTok：记录访问、出口地区和可识别的限制。"""
 
     platform_id = "tiktok"
     display_name = "TikTok"
@@ -408,11 +293,11 @@ class TikTokDetector(_WebDetector):
 
     def probe(self, client: httpx.Client) -> ProbeResult:
         resp = self.fetch(client, self.url)
-        cls = classify(resp.status, resp.text, self.markers)
+        cls = classify_page(resp, self.markers)
         region = self.extract_region(resp.text)
-        extra = self.build_extra(resp)
+        extra = {**self.build_extra(resp), "reason": cls.reason, "playback": "unverified"}
         detail = cls.detail
-        if cls.state == STATE_UNLOCKED:
+        if cls.state == STATE_REACHABLE:
             detail = "可访问；直播与创作者限制未能确认" if not region else "可访问"
         return ProbeResult(self.platform_id, cls.state, resp.status, region=region,
                            detail=detail, extra=extra)
@@ -422,16 +307,7 @@ class TikTokDetector(_WebDetector):
 
 
 class SpotifyDetector(_WebDetector):
-    """Spotify：区域限制状态 + 账号与出口 IP 的一致性。
-
-    判定规则：
-
-    1. 200 → unlocked；地区码取正文里的 ``"country"`` / ``"countryCode"``。
-    2. 正文出现 ``not available in your country`` 一类措辞 → blocked。
-    3. 403 → blocked（Spotify 对未上线地区返回 403）。
-    4. 「账号与出口 IP 不匹配」是登录态提示，无头请求拿不到，
-       固定填 ``account_ip_match="unknown"``，detail 里说明需要登录态复核。
-    """
+    """Spotify：检查地区限制和页面明确返回的账号提示。"""
 
     platform_id = "spotify"
     display_name = "Spotify"
@@ -491,11 +367,11 @@ class AmazonPrimeVideoDetector(_WebDetector):
 
     def probe(self, client: httpx.Client) -> ProbeResult:
         resp = self.fetch(client, self.url)
-        cls = classify(resp.status, resp.text, self.markers)
+        cls = classify_page(resp, self.markers)
         region = self.extract_region(resp.text)
-        extra = self.build_extra(resp)
+        extra = {**self.build_extra(resp), "reason": cls.reason, "playback": "unverified"}
         detail = cls.detail
-        if cls.state == STATE_UNLOCKED:
+        if cls.state == STATE_REACHABLE:
             detail = ("主站可达" + (f"，区域 {region}" if region else "，未能识别区域归属"))
             detail += "；片源完整性未判定"
         return ProbeResult(self.platform_id, cls.state, resp.status, region=region,
@@ -506,36 +382,25 @@ class AmazonPrimeVideoDetector(_WebDetector):
 
 
 class RedditDetector(_WebDetector):
-    """Reddit：可访问 / IP 封锁 / 验证码风控 / 异常。
-
-    判定规则：
-
-    1. 200 且无风控特征 → unlocked。
-    2. 403 且正文含 Reddit 的 IP 封锁文案（``whoa there`` /
-       ``you've been blocked`` / ``blocked by network security``）→ blocked（IP 被封）。
-    3. 200 / 403 但正文含验证码特征（``captcha`` / ``verify you are human`` /
-       ``are you a robot``）→ unknown（风控，不是地区问题）。
-    4. 429 → error（限流）。
-    5. 其它状态码按 classify 的口径归到 error / unknown。
-    """
+    """Reddit：区分网页响应、已知出口拦截与人机校验。"""
 
     platform_id = "reddit"
     display_name = "Reddit"
     category = "social_other"
     url = "https://www.reddit.com/"
 
+    ip_markers = ("blocked by network security", "your network has been blocked",
+                  "you\'ve been blocked", "you have been blocked")
     markers = Markers(
         blocked_status=(403,),
         unsupported_status=(404,),
-        region_markers=("whoa there", "you've been blocked", "you have been blocked",
-                        "blocked by network security", "your network has been blocked"),
         challenge_markers=("captcha", "verify you are human", "are you a robot",
                            "press and hold"),
         block_requires_marker=False,
     )
 
     def build_extra(self, resp: ProbeResponse) -> dict:
-        blocked = _has(resp.text, self.markers.region_markers)
+        blocked = resp.status == 403 and _has(resp.text, self.ip_markers)
         captcha = _has(resp.text, self.markers.challenge_markers)
         return {
             "ip_blocked": bool(blocked),
@@ -778,17 +643,7 @@ class TVBAnywhereDetector(_WebDetector):
 # =============================================================== 国际 AI 平台
 
 class ChatGPTDetector(_WebDetector):
-    """ChatGPT（chatgpt.com）：区分四种情形。
-
-    1. 网络不通（超时 / 连接失败）→ error，由框架统一处理。
-    2. 正常可用 → 200 → unlocked。
-    3. 地区不支持 → 正文含 ``unsupported_country`` /
-       ``not available in your country`` /
-       ``country, region, or territory not supported`` → blocked。
-    4. WAF 风控拦截 → 403 且含 Cloudflare 特征，或 403 且没有任何地区特征
-       → unknown（**不是** blocked）：数据中心 IP 被 Cloudflare 拦是常态，
-       与地区拒绝在无头请求下无法区分。
-    """
+    """ChatGPT：区分网页响应、地区限制、风控及连接错误。"""
 
     platform_id = "chatgpt"
     display_name = "ChatGPT"
@@ -801,11 +656,7 @@ class ChatGPTDetector(_WebDetector):
 
 
 class ClaudeDetector(_WebDetector):
-    """Claude（claude.ai）：与 ChatGPT 同口径的四种情形。
-
-    Claude 对无头请求几乎一律返回 403 + Cloudflare 挑战页，
-    因此这里的 403 基本都判 unknown，只有正文明确说「本地区不可用」才判 blocked。
-    """
+    """Claude：区分网页响应、地区限制、风控及连接错误。"""
 
     platform_id = "claude"
     display_name = "Claude"

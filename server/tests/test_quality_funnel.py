@@ -38,7 +38,7 @@ def test_badges_from_probes():
         probes[pid] = {"state": "unlocked"}
     for pid in unlock_check.STREAM_CORE_IDS:
         probes[pid] = {"state": "unlocked"}
-    probes["netflix_premium"] = {"state": "unlocked"}
+    probes["netflix"] = {"state": "unlocked", "extra": {"licensed_sample": True}}
     badges = quality_funnel.badges_from_probes(probes)
     assert "🔓" in badges and "🎬" in badges and "📺" in badges
 
@@ -90,10 +90,9 @@ def test_classify_splits_qualified_and_rejected():
     }
     groups = node_classes.classify(results, {"节点A": _proxy("节点A"),
                                              "节点B": _proxy("节点B")})
-    assert [p["name"] for p in groups["qualified"]] == ["节点A"]
-    assert [p["name"] for p in groups["rejected"]] == ["节点B"]
-    assert [p["name"] for p in groups["ai"]] == ["节点A"]
-    assert [p["name"] for p in groups["stream"]] == ["节点A"]
+    assert [p["name"] for p in groups["qualified"]] == ["节点A 10.5 MB/s / 50 ms"]
+    assert [p["name"] for p in groups["rejected"]] == ["节点B 1.0 MB/s / 100 ms"]
+    assert groups["ai"] == groups["stream"] == groups["qualified"]
 
 
 def test_write_yaml_is_atomic_and_validates(tmp_path):
@@ -135,14 +134,18 @@ def test_batch_selects_uncached_nodes_before_applying_limit(client, monkeypatch)
     from app.services import quality_funnel
 
     now = int(time.time())
-    previous = {
-        **{f"完成{i}": {"stage": "probed"} for i in range(10)},
-        "刚失败": {"stage": "speed_failed", "checked_at": now},
-    }
+    from app import db, security
+    with db.connect() as conn:
+        cfg = quality_funnel._settings(conn)
+    key = security.derive_subkey(security.load_master_material(), purpose="node-quality")
+    names = [f"完成{i}" for i in range(10)] + ["刚失败"]
+    previous = {name: {"stage": "probed" if name != "刚失败" else "speed_failed",
+                       "checked_at": now, "revision": quality_funnel._fingerprint(_proxy(name), key, cfg)}
+                for name in names}
     monkeypatch.setattr(quality_funnel, "load_results", lambda: {"nodes": previous})
     saved = []
     monkeypatch.setattr(quality_funnel, "save_results",
-                        lambda results, operator: saved.extend(r.name for r in results))
+                        lambda results, operator, **kwargs: saved.extend(r.name for r in results))
 
     class Engine:
         def __init__(self, proxies):
@@ -161,6 +164,11 @@ def test_batch_selects_uncached_nodes_before_applying_limit(client, monkeypatch)
     quality_funnel.run_funnel([_proxy(n) for n in [*previous, "未测", "下批"]],
                               max_nodes=1)
     assert saved == ["未测"]
+    assert "完成0" in quality_funnel.current_results([_proxy("完成0")])
+    changed = {**_proxy("完成0"), "port": 9443}
+    assert not quality_funnel.current_results([changed])
+    previous["完成0"]["checked_at"] -= 48 * 3600
+    assert not quality_funnel.current_results([_proxy("完成0")])
 
 
 def test_engine_start_failure_removes_workdir(tmp_path, monkeypatch):
@@ -205,6 +213,7 @@ def test_download_speed_uses_selected_proxy(monkeypatch):
 
     engine = probe_engine.NodeEngine([_proxy("节点")])
     engine.controller = object()
+    engine._current = "节点"
 
     def factory(**kwargs):
         assert kwargs == {"trust_env": False, "proxy": engine.proxy_url()}
@@ -214,3 +223,30 @@ def test_download_speed_uses_selected_proxy(monkeypatch):
     original_client = httpx.Client
     monkeypatch.setattr(probe_engine.httpx, "Client", factory)
     assert engine.download_speed("节点", "https://example.test/", size_bytes=4) > 0
+    assert engine.download_speed("节点", "https://example.test/", size_bytes=9) == 0
+    assert engine.download_speed("另一节点", "https://example.test/", size_bytes=4) == 0
+
+
+def test_export_only_replaces_verified_pool(tmp_path, monkeypatch):
+    import yaml
+    monkeypatch.setattr(node_classes, "OUTPUT_DIR", tmp_path)
+    candidates = [_proxy("甲"), _proxy("乙"), _proxy("丙")]
+    results = {"甲": {"stage": "probed", "delay_ms": 100, "speed_bps": 2_000_000,
+                     "region": "JP", "probes": {"netflix": {"state": "unlocked"}}},
+               "乙": {"stage": "speed_failed"}, "丙": {"stage": "inconclusive"}}
+
+    def validate(text):
+        doc = yaml.safe_load(text)
+        assert [p["name"] for p in doc["proxies"]] == ["甲 JP"]
+        assert all(g["proxies"] == ["甲 JP"] for g in doc["proxy-groups"])
+        return True, ""
+
+    text = node_classes.export_pools(results, candidates, validate, template="{original} {region}")
+    path = tmp_path / "node-pools.yaml"
+    assert path.read_text() == text
+    assert path.stat().st_mode & 0o077 == 0
+    with pytest.raises(node_classes.ClassifyError):
+        node_classes.export_pools(results, candidates, lambda text: (True, "校验失败"))
+    assert path.read_text() == text
+    assert list(tmp_path.iterdir()) == [path]
+    assert not node_classes.valid_name_template("{name.__class__}")

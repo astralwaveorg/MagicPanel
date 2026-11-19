@@ -2,7 +2,7 @@
   <div class="mp-auth-page">
     <div class="mp-auth-card">
       <h2 style="margin:0 0 4px">MagicPanel</h2>
-      <p style="color:var(--mp-text-secondary);font-size:13px;margin:0 0 20px">代理订阅配置管理</p>
+      <p style="color:var(--mp-text-secondary);font-size:13px;margin:0 0 20px">登录管理后台</p>
       <el-form :model="form" label-position="top" @submit.prevent>
         <el-form-item label="用户名">
           <el-input v-model="form.username" autocomplete="username" autofocus @keyup.enter="submit" />

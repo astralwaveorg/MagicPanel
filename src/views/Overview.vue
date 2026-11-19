@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">系统概览</h2>
     <p class="mp-page-desc">
-      发布、节点、设备与连接状态一屏汇总。
+      查看当前发布版本、节点来源和设备更新状态。
     </p>
 
     <ErrorState v-if="error" :error="error" @retry="load" />
@@ -21,7 +21,7 @@
         </template>
         <div v-else class="stat-empty">
           尚未发布
-          <span>在「构建发布」创建构建并发布后，设备才能拉取配置</span>
+          <span>在「构建发布」生成配置并发布后，设备才能更新订阅</span>
         </div>
       </div>
 
@@ -36,7 +36,7 @@
         </template>
         <div v-else class="stat-empty">
           暂无基础连通样本
-          <span>样本来自本服务器经节点测速，反映服务器侧连通性</span>
+          <span>由服务器通过节点发起，只反映服务器的连通情况</span>
         </div>
       </div>
 
@@ -89,7 +89,7 @@
         </div>
         <div v-else class="stat-sub">尚未发起路径检测。点「发起检测」验证一次。</div>
         <div v-if="direct.path_evidence" class="stat-sub">路径结论：{{ direct.path_evidence.conclusion }}</div>
-        <div v-else class="stat-sub">出口归属地不能证明测速已绕过透明代理。点「发起检测」用境内、境外双回显对比。</div>
+        <div v-else class="stat-sub">出口地区无法说明测速是否经过透明代理。点「发起检测」查看两条路径的结果。</div>
         <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击重试。</div>
       </div>
 
@@ -157,9 +157,9 @@
           <el-table-column label="节点数" width="90" align="left">
             <template #default="{ row }">{{ row.node_count ?? '—' }}</template>
           </el-table-column>
-          <el-table-column label="可用" width="90" align="left">
+          <el-table-column label="连通 / 已测" width="110" align="left">
             <template #default="{ row }">
-              <span v-if="row.tested_at" class="mono">
+              <span v-if="row.tested_ok + row.tested_failed > 0" class="mono">
                 {{ row.tested_ok }}/{{ row.tested_ok + row.tested_failed }}
               </span>
               <span v-else>—</span>
@@ -173,7 +173,7 @@
     </div>
 
     <div v-if="testedSources.length" class="mp-card">
-      <h3>各来源可用率</h3>
+      <h3>已测节点连通率</h3>
       <div class="avail-list">
         <div v-for="s in testedSources" :key="s.name" class="avail-row">
           <span class="avail-name">{{ s.name }}</span>
@@ -238,7 +238,7 @@ async function observeNow() {
 }
 
 const testedSources = computed(() =>
-  (data.value.sources || []).filter((s) => s.tested_at))
+  (data.value.sources || []).filter((s) => (s.tested_ok || 0) + (s.tested_failed || 0) > 0))
 
 // 总体可用率：与「节点来源」页口径一致，按来源汇总
 const totalOk = computed(() =>

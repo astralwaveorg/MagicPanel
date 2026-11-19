@@ -132,12 +132,18 @@ SETTINGS_DEFAULTS = {
     "unlock_batch_cursor": "0",         # 内部：批量检测轮转游标
     "probe_funnel_enabled": "0",        # 周期性质量漏斗（延迟→吞吐→解锁，默认关）
     "probe_max_delay_ms": "600",        # 一级门禁：延迟上限（毫秒）
-    "probe_min_speed_bps": "2097152",   # 二级门禁：吞吐下限（2MB/s）
+    "probe_min_speed_bps": "2000000",   # 二级门禁：2 MB/s = 16 Mbps
     "probe_speed_bytes": "5242880",     # 测速文件大小（5MB）
     "probe_timeout_ms": "8000",         # 单请求超时
     "probe_concurrency": "4",           # 探测并发
-    "probe_round_limit": "200",         # 单轮最多探测节点数
+    "probe_round_limit": "10",          # 单轮最多探测节点数
     "probe_retry": "1",                 # 重试次数（仅超时/5xx）
+    "probe_speed_timeout_sec": "12",   # 每个节点的下载总时限
+    "probe_refresh_hours": "24",        # 已达标节点的复测间隔
+    "probe_platform_ids": "",           # 留空检测全部平台
+    "probe_node_name_template": "{name} · {original}",  # 达标池导出名称模板
+    "probe_quality_provider_names": "0",  # 为动态 provider 启用质量名称，立即生效
+    "probe_build_groups": "0",          # 构建 Mihomo 质量分类组（默认不改变现有订阅）
     "backup_include_runtime": "0",      # 备份是否含 mihomo 核心与 geo 数据（默认关：归档会 150MB+ 超上传上限）
     "backup_include_history_builds": "0",  # 备份是否含历史构建产物（默认关：体积大且历史产物随时会被留存清理）
     # 自主维护：依赖文件库（单仓库）

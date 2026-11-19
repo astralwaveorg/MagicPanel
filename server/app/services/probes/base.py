@@ -15,7 +15,8 @@
 状态                    含义（判定必须要有证据，不许臆断）
 ======================  ====================================================
 ``unlocked``            有明确证据表明该出口可用；
-``blocked``             有明确证据表明该出口被服务按地区 / 账号拒绝；
+``reachable``           网页有响应，尚未确认服务能力；
+``blocked``             有明确证据表明服务限制访问；
 ``unknown``             证据不足（人机校验、风控页、无特征 403），
                         **既不能**当成解锁，**也不能**当成拒绝；
 ``error``               网络层失败（超时、连接错误、5xx、429 限流）；
@@ -30,7 +31,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Sequence
 
 import httpx
@@ -52,10 +53,11 @@ MAX_BODY_CHARS = 60000
 STATE_UNLOCKED = "unlocked"
 STATE_BLOCKED = "blocked"
 STATE_UNKNOWN = "unknown"
+STATE_REACHABLE = "reachable"
 STATE_ERROR = "error"
 STATE_UNSUPPORTED = "unsupported"
 VALID_STATES = frozenset({STATE_UNLOCKED, STATE_BLOCKED, STATE_UNKNOWN,
-                           STATE_ERROR, STATE_UNSUPPORTED})
+                           STATE_ERROR, STATE_UNSUPPORTED, STATE_REACHABLE})
 
 # 人机校验 / 风控挑战特征：命中即判 unknown（不能据此说节点被地区拒绝）
 CF_CHALLENGE_PATTERN = re.compile(
@@ -112,6 +114,7 @@ class Classification:
     state: str
     detail: str = ""
     matched: str = ""
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -211,6 +214,29 @@ def classify(status: int | None, body: str, markers: Markers | None = None) -> C
     return Classification(STATE_ERROR, f"HTTP {status}")
 
 
+def classify_page(resp: ProbeResponse, markers: Markers) -> Classification:
+    """网页响应、地区拒绝与真实能力分别记录。"""
+    status, body = resp.status, resp.text
+    challenge = _first_match(body, markers.challenge_markers + (CF_CHALLENGE_PATTERN.pattern,))
+    if resp.headers.get("cf-mitigated", "").lower() == "challenge" or challenge:
+        return Classification(STATE_UNKNOWN, "触发人机校验或风控", challenge, "challenge")
+    if status == 429 or 500 <= status < 600:
+        return Classification(STATE_ERROR, f"HTTP {status}", reason="rate_limit" if status == 429 else "upstream")
+    # 大页面常包含本地化字典或帮助文案。明确拒绝应来自错误响应或短错误页。
+    if status >= 400 or len(body) < 2500:
+        region = _first_match(body, markers.region_markers + GENERIC_REGION_PATTERNS)
+        if region:
+            return Classification(STATE_BLOCKED, "服务返回地区限制", region, "region")
+    if status in (401, 403, 451):
+        return Classification(STATE_UNKNOWN, f"HTTP {status}，原因未确认", reason="unexplained_denial")
+    if status in markers.unsupported_status:
+        return Classification(STATE_UNKNOWN, f"HTTP {status}，未确认服务状态", reason="not_found")
+    cls = classify(status, body, replace(markers, region_markers=(), block_requires_marker=True))
+    if cls.state == STATE_UNLOCKED:
+        return Classification(STATE_REACHABLE, "网页有响应，未验证实际使用", reason="page_response")
+    return cls
+
+
 class Detector(ABC):
     """探测器基类：一个平台一个子类。
 
@@ -243,11 +269,16 @@ class Detector(ABC):
             kwargs["timeout"] = timeout
         # 默认跟随重定向（与浏览器一致），否则 301/302 会让所有平台都判成 error。
         kwargs["follow_redirects"] = self.follow_redirects if follow_redirects is None else follow_redirects
-        resp = client.get(target, **kwargs)
-        text = resp.text or ""
         limit = int(getattr(self, "body_limit", MAX_BODY_CHARS) or MAX_BODY_CHARS)
-        return ProbeResponse(status=resp.status_code, text=text[:limit],
-                             url=str(resp.url), headers=dict(resp.headers))
+        with client.stream("GET", target, **kwargs) as resp:
+            raw = bytearray()
+            for chunk in resp.iter_bytes(chunk_size=min(limit, 16384)):
+                raw.extend(chunk[:limit - len(raw)])
+                if len(raw) >= limit:
+                    break
+            return ProbeResponse(status=resp.status_code,
+                                 text=raw.decode(resp.encoding or "utf-8", errors="replace"),
+                                 url=str(resp.url), headers=dict(resp.headers))
 
     def extract_region(self, text: str,
                        patterns: Sequence[str] | None = None) -> str:
@@ -302,7 +333,7 @@ def _should_retry(result: ProbeResult) -> bool:
     if result.state != STATE_ERROR:
         return False
     if result.status is None:
-        return True          # 超时 / 连接失败
+        return result.extra.get("reason") != "detector_error"
     return result.status >= 500
 
 
@@ -335,8 +366,7 @@ def _run_detector(detector: Detector, client_factory: Callable[[float], httpx.Cl
     started = time.monotonic()
     last: ProbeResult | None = None
     for attempt in range(max(0, retry) + 1):
-        # 平台自带的超时优先（Netflix 握手慢，需要比统一值更久）
-        eff_timeout = float(getattr(detector, "timeout", None) or timeout)
+        eff_timeout = min(float(getattr(detector, "timeout", None) or timeout), timeout)
         try:
             client = client_factory(eff_timeout)
         except Exception as exc:  # 客户端都建不出来，后面就不用试了
@@ -354,17 +384,22 @@ def _run_detector(detector: Detector, client_factory: Callable[[float], httpx.Cl
         except httpx.TimeoutException as exc:
             result = ProbeResult(platform=detector.platform_id, state=STATE_ERROR,
                                  status=None, detail=f"请求超时（{type(exc).__name__}）")
+        except httpx.TransportError as exc:
+            result = ProbeResult(platform=detector.platform_id, state=STATE_ERROR,
+                                 status=None, detail=f"连接失败（{type(exc).__name__}）",
+                                 extra={"reason": "network"})
         except Exception as exc:
             # 失败隔离：一个平台炸了不影响其它平台。
             # 同一平台重复失败只警告一次（199 节点 × 33 平台会刷屏）
             key = detector.platform_id
             if _failed_platforms.get(key):
-                logger.debug("探测器 %s 再次执行失败：%s", key, exc)
+                logger.debug("探测器 %s 再次执行失败：%s", key, type(exc).__name__)
             else:
                 _failed_platforms[key] = True
-                logger.warning("探测器 %s 执行失败：%s", key, exc)
+                logger.warning("探测器 %s 执行失败：%s", key, type(exc).__name__)
             result = ProbeResult(platform=detector.platform_id, state=STATE_ERROR,
-                                 status=None, detail=f"{type(exc).__name__}: {exc}")
+                                 status=None, detail=f"探测器执行失败（{type(exc).__name__}）",
+                                 extra={"reason": "detector_error"})
 
         result = _normalize_result(result, detector.platform_id)
 

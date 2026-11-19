@@ -10,7 +10,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path, { method = 'GET', body, headers = {}, signal } = {}) {
+export async function api(path, { method = 'GET', body, headers = {}, signal, responseType } = {}) {
   const opts = { method, headers: { ...headers }, credentials: 'same-origin', signal }
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json'
@@ -29,6 +29,7 @@ export async function api(path, { method = 'GET', body, headers = {}, signal } =
   }
   const text = await resp.text()
   if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
+  if (resp.ok && responseType === 'text') return text
   let data = null
   try { data = text ? JSON.parse(text) : null } catch { data = { detail: text || '响应格式错误' } }
   if (!resp.ok) {

@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">设备管理</h2>
     <p class="mp-page-desc">
-      每台设备一个固定订阅地址。令牌泄露后可轮换令牌，旧地址立即失效；已下发的节点凭据需联系机场重置。
+      每台设备都有自己的订阅地址。地址泄露后可更换令牌，旧地址立即失效。已下载的节点凭据需联系提供方重置。
     </p>
 
     <div class="mp-toolbar">
@@ -92,7 +92,7 @@
       <el-form :model="form" label-position="top">
         <el-form-item label="文件名">
           <el-input v-model="form.name" placeholder="例如：Stash-Macmini" />
-          <div class="mp-form-hint">作为下载配置的文件名（.yaml）与设备唯一标识；重名会导致订阅地址冲突。</div>
+          <div class="mp-form-hint">用于订阅地址和配置文件名（.yaml）。同名设备无法添加。</div>
         </el-form-item>
         <el-form-item label="引擎平台">
           <el-select v-model="form.target_id" style="width:100%" @change="onTargetChange">
@@ -111,7 +111,7 @@
         </el-form-item>
         <el-form-item label="设备名">
           <el-input v-model="form.note" placeholder="例如：客厅 Mac mini" />
-          <div class="mp-form-hint">用于界面展示；留空时默认使用文件名。</div>
+          <div class="mp-form-hint">留空时显示配置文件名。</div>
         </el-form-item>
         <el-form-item label="设备独立配置">
           <div class="mp-form-hint">

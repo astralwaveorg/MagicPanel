@@ -16,7 +16,6 @@
 切换后的探活：切换请求返回后立刻发一次轻量请求确认新节点真的接管了，
 否则可能把上一个节点的残留结果算到新节点头上（端口跳跃型节点尤甚）。
 """
-import json
 import logging
 import shutil
 import subprocess
@@ -34,12 +33,17 @@ from .. import config
 logger = logging.getLogger("magicpanel.probe_engine")
 
 # 切换后确认节点接管用的探活目标（轻量、全球可达）
-PROBE_LIVENESS_URL = "http://cp.cloudflare.com/generate_204"
+PROBE_LIVENESS_URL = "https://www.gstatic.com/generate_204"
 PROBE_LIVENESS_TIMEOUT = 8.0
 
 
 class EngineError(Exception):
     """探测引擎无法工作（核心起不来、配置不被接受等）。"""
+
+    def __init__(self, message, *, index=None, types=()):
+        super().__init__(message)
+        self.index = index
+        self.types = types
 
 
 class NodeEngine:
@@ -61,7 +65,7 @@ class NodeEngine:
             raise EngineError("没有可探测的节点")
         self.group_name = group_name
         self.controller_port = controller_port or _free_port()
-        self.mixed_port = mixed_port or _free_port()
+        self.mixed_port = mixed_port or _free_port(exclude=self.controller_port)
         self.workdir: Path | None = None
         self.proc: subprocess.Popen | None = None
         self.controller: httpx.Client | None = None
@@ -97,8 +101,9 @@ class NodeEngine:
             "dns": {"enable": False},
         }
         config_path = self.workdir / "config.yaml"
-        config_path.write_text(yaml.safe_dump(cfg, allow_unicode=True),
-                               encoding="utf-8")
+        with config_path.open("x", encoding="utf-8") as handle:
+            config_path.chmod(0o600)
+            handle.write(yaml.safe_dump(cfg, allow_unicode=True))
         from . import tester
         self.proc = subprocess.Popen(
             [str(tester.core_path()), "-d", str(self.workdir), "-f", str(config_path)],
@@ -112,7 +117,8 @@ class NodeEngine:
         deadline = time.monotonic() + 15
         while True:
             if self.proc.poll() is not None:
-                raise EngineError("探测核心启动失败：" + "".join(self._log_lines)[-300:])
+                index, types, _ = tester._start_failure(tuple(self._log_lines))
+                raise EngineError("探测核心无法加载配置", index=index, types=types)
             try:
                 if self.controller.get(f"{base}/version", timeout=1.0).status_code == 200:
                     break
@@ -123,16 +129,19 @@ class NodeEngine:
             time.sleep(0.2)
         # 等节点全部注册进 /proxies：抢跑时切换会 404
         expected = {p["name"] for p in self.proxies}
+        have = set()
         ready_deadline = time.monotonic() + 10
         while expected and time.monotonic() < ready_deadline:
             try:
                 listing = self.controller.get(f"{base}/proxies", timeout=2.0).json()
                 have = set((listing.get("proxies") or {}).keys())
-            except (httpx.HTTPError, ValueError):
+            except (httpx.HTTPError, ValueError, AttributeError):
                 have = set()
             if expected <= have:
                 break
             time.sleep(0.2)
+        if expected and not expected <= have:
+            raise EngineError("探测核心未加载全部节点")
         self._base = base
 
     def close(self) -> None:
@@ -169,8 +178,7 @@ class NodeEngine:
     def select(self, name: str) -> bool:
         """把探测出口切到指定节点。返回是否切换成功。
 
-        切换后做一次探活：端口跳跃型节点在切换后可能还没就绪，
-        此时立刻探测会拿到旧节点的残留结果。
+        控制器读回选中节点后再发请求。
         """
         if self.controller is None:
             raise EngineError("探测核心未启动")
@@ -187,22 +195,20 @@ class NodeEngine:
             logger.warning("切换节点被拒 %s：HTTP %s", name, resp.status_code)
             return False
         self._current = ""
-        if not self._liveness():
+        if not self._selected(name):
             return False
         self._current = name
         return True
 
-    def _liveness(self) -> bool:
-        """探活：确认新节点真的接管了本地入站。"""
+    def _selected(self, name: str) -> bool:
+        """确认控制器读回的选中节点与本次请求一致。"""
         for _ in range(2):
             try:
                 resp = self.controller.get(
-                    f"{self._base}/proxies/{self.group_name}/delay",
-                    params={"timeout": 3000, "url": PROBE_LIVENESS_URL},
-                    timeout=6.0)
-                if resp.status_code == 200:
+                    f"{self._base}/proxies/{self.group_name}", timeout=2.0)
+                if resp.status_code == 200 and resp.json().get("now") == name:
                     return True
-            except httpx.HTTPError:
+            except (httpx.HTTPError, ValueError, AttributeError):
                 pass
             time.sleep(0.4)
         return False
@@ -223,8 +229,10 @@ class NodeEngine:
                 params={"timeout": timeout_ms, "url": PROBE_LIVENESS_URL},
                 timeout=timeout_ms / 1000 + 3)
             if resp.status_code == 200:
-                return int(resp.json().get("delay", 0))
-        except (httpx.HTTPError, ValueError):
+                delay = resp.json().get("delay")
+                if type(delay) is int and delay > 0:
+                    return delay
+        except (httpx.HTTPError, ValueError, AttributeError):
             pass
         return -1
 
@@ -235,7 +243,7 @@ class NodeEngine:
         经本地 mixed-port 下载固定大小文件，量字节数与耗时。
         用 ``Accept-Encoding: identity`` 避免压缩后的字节数失真。
         """
-        if self.controller is None:
+        if self.controller is None or name != self._current:
             return 0.0
         headers = {"Accept-Encoding": "identity"}
         started = time.monotonic()
@@ -243,7 +251,7 @@ class NodeEngine:
         try:
             with httpx.Client(trust_env=False, proxy=self.proxy_url()) as client, client.stream(
                     "GET", url, headers=headers, timeout=timeout) as resp:
-                if resp.status_code >= 400:
+                if resp.status_code != 200 or resp.headers.get("content-encoding", "identity").lower() != "identity":
                     return 0.0
                 for chunk in resp.iter_raw():
                     if time.monotonic() - started >= timeout:
@@ -254,26 +262,21 @@ class NodeEngine:
         except httpx.HTTPError:
             return 0.0
         elapsed = max(time.monotonic() - started, 0.001)
-        return total / elapsed
+        return total / elapsed if total == size_bytes else 0.0
 
-    def probe_via_local(self, detector, timeout: float) -> dict:
-        """用指定探测器跑一次探测（请求经本地 mixed-port → 被测节点）。"""
+    def probe_via_local(self, detectors, timeout: float, *, workers: int, retry: int) -> dict:
+        """同一个节点的探测结束后才允许切换出口。"""
         from .probes import base as probe_base
 
-        def factory(_timeout: float) -> httpx.Client:
-            return httpx.Client(trust_env=False, timeout=timeout,
-                                follow_redirects=getattr(detector, "follow_redirects", True),
-                                proxy=self.proxy_url(),
-                                headers={"User-Agent": probe_base.USER_AGENT})
-
         results = probe_base.detect_platforms(
-            [detector.platform_id], client_factory=factory, timeout=timeout,
-            max_workers=1)
-        return results[0].to_dict() if results else {}
+            detectors=detectors, client_factory=probe_base.make_client_factory(self.proxy_url()),
+            timeout=timeout, retry=retry, max_workers=workers)
+        return {r.platform: r.to_dict() for r in results}
 
 
-def _free_port() -> int:
+def _free_port(exclude: int = 0) -> int:
     import socket
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        port = s.getsockname()[1]
+        return port if port != exclude else _free_port(exclude)

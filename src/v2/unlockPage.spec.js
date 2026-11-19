@@ -16,11 +16,17 @@ const CATALOG = {
 const EMPTY_LAST = {}
 const RUN_RESULT = {
   checked_at: Math.floor(Date.now() / 1000), exit: 'panel',
-  results: [{ id: 'gemini', status: 200, state: 'unlocked', region: 'US', latency_ms: 500 },
+  results: [{ id: 'gemini', status: 200, state: 'unlocked', region: 'US', latency_ms: 500,
+              extra: { route: { ip: '192.0.2.2', domain: 'gemini.google.com', source: 'domain_trace' } } },
             { id: 'netflix', status: 403, state: 'blocked', region: '', latency_ms: 600 }],
   ip: { ip: '192.220.75.184', country: 'US', org: 'NTT', city: 'LA' },
 }
-const COVERAGE = { total: 30, covered: 12, missing: 18, ratio: 0.4 }
+const QUALITY = {
+  items: [{ name: '测试线路', stage: 'probed', delay_ms: 200, speed_bps: 3000000 }],
+  counts: { probed: 1 },
+  task: { running: false },
+  auto: false,
+}
 
 function stubFetch(responses) {
   vi.stubGlobal('fetch', async path => {
@@ -33,8 +39,7 @@ test('页面挂载后渲染两网络环境对照表与分类（非空白）', as
   stubFetch({
     '/api/v1/unlock/catalog': CATALOG,
     '/api/v1/unlock/last?exit=panel': EMPTY_LAST,
-    '/api/v1/unlock/capability-coverage': COVERAGE,
-    '/api/v1/unlock/batch-status': { running: false, done: 0, total: 0 },
+    '/api/v1/unlock/quality': QUALITY,
   })
   wrapper = mount(Unlock, { global: { plugins: [ElementPlus] } })
   await flushPromises()
@@ -51,17 +56,16 @@ test('页面挂载后渲染两网络环境对照表与分类（非空白）', as
   expect(wrapper.text()).toContain('检测当前网络')
   // 未测状态可见
   expect(wrapper.text()).toContain('未测')
-  // 节点能力区块说明能力在构建期测
-  expect(wrapper.text()).toContain('节点能力')
-  expect(wrapper.text()).toContain('12 / 30')
+  expect(wrapper.text()).toContain('节点质量')
+  expect(wrapper.text()).toContain('测试线路')
+  expect(wrapper.text()).toContain('导出达标节点')
 })
 
 test('检测服务器网络后展示解锁结论与出口信息', async () => {
   stubFetch({
     '/api/v1/unlock/catalog': CATALOG,
     '/api/v1/unlock/last?exit=panel': EMPTY_LAST,
-    '/api/v1/unlock/capability-coverage': COVERAGE,
-    '/api/v1/unlock/batch-status': { running: false, done: 0, total: 0 },
+    '/api/v1/unlock/quality': QUALITY,
   })
   const realFetch = globalThis.fetch
   wrapper = mount(Unlock, { global: { plugins: [ElementPlus] } })
@@ -79,8 +83,9 @@ test('检测服务器网络后展示解锁结论与出口信息', async () => {
   await runBtn.trigger('click')
   await flushPromises()
   expect(postPaths).toEqual(['/api/v1/unlock/run'])
-  expect(wrapper.text()).toContain('通过')
+  expect(wrapper.text()).toContain('已确认')
   expect(wrapper.text()).toContain('192.220.*.*')
+  expect(wrapper.text()).toContain('域名出口：192.0.2.2')
   expect(wrapper.text()).toContain('访问受限')
   expect(wrapper.text()).not.toContain('一致')
 })
@@ -89,7 +94,7 @@ test('浏览器被拦、服务器通过时只提示核实，不判分流异常',
   const responses = {
     '/api/v1/unlock/catalog': CATALOG,
     '/api/v1/unlock/last?exit=panel': RUN_RESULT,
-    '/api/v1/unlock/capability-coverage': COVERAGE,
+    '/api/v1/unlock/quality': QUALITY,
   }
   vi.stubGlobal('fetch', async path => {
     if (path === 'https://ipinfo.io/json') {

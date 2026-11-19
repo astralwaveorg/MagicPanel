@@ -1,7 +1,7 @@
 <template>
   <div class="mp-auth-page">
     <div class="mp-auth-card">
-      <h2 style="margin:0 0 20px">初始化 MagicPanel</h2>
+      <h2 style="margin:0 0 20px">创建管理员账号</h2>
       <el-form :model="form" label-position="top" @submit.prevent>
         <el-form-item label="用户名">
           <el-input v-model="form.username" autocomplete="username" placeholder="字母、数字、_ . -" @keyup.enter="submit" />
@@ -17,7 +17,7 @@
                     @keyup.enter="submit" />
         </el-form-item>
         <el-button style="width:100%" :loading="loading" @click="submit" type="primary">
-          创建并进入
+          创建账号
         </el-button>
       </el-form>
     </div>

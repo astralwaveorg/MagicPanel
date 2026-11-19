@@ -42,7 +42,7 @@
     <!-- 未配置时的引导 -->
     <el-alert v-if="!status.configured" type="info" :closable="false" show-icon
               title="还没有配置依赖仓库"
-              description="填好仓库地址与鉴权密钥后克隆，仓库里的 rule/*.yaml 会自动成为规则来源。推送后面板立即提供新内容，客户端按自己的更新间隔重新下载。" />
+              description="克隆仓库后，可把 rule/*.yaml 导入规则来源。推送后，客户端下次更新规则时获取新内容。" />
 
     <ErrorState v-if="error" :error="error" @retry="load" />
 
@@ -212,7 +212,7 @@
         <el-form-item label="保存并提交后自动推送">
           <el-switch v-model="settings.auto_push" />
         </el-form-item>
-        <el-form-item label="仓库新增 rule/*.yaml 时自动建规则来源">
+        <el-form-item label="自动导入仓库新增的 rule/*.yaml">
           <el-switch v-model="settings.auto_create_rule_sources" />
         </el-form-item>
         <el-form-item label="排除路径清单（逗号分隔的 glob）">

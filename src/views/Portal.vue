@@ -5,7 +5,7 @@
       <div class="pt-gate-card" :class="{ shake: shaking }">
         <img class="pt-gate-logo" src="/logo.svg" alt="MagicPanel">
         <div class="pt-logo">MagicPanel</div>
-        <p class="pt-gate-desc">输入 PIN（4 位；历史 6 位仍可用）查看订阅与资源</p>
+        <p class="pt-gate-desc">输入访问 PIN 查看订阅和资源。旧版 6 位 PIN 仍可使用。</p>
         <!-- 用 form 包起来：回车即提交，浏览器也能把密码框和表单关联起来 -->
         <form class="pt-pin-form" @submit.prevent="submitPin">
           <input
@@ -288,7 +288,7 @@
             连通性自检
           </a>
           <span>·</span>
-          <span>链接拉取无需额外鉴权，请仅发给受信设备</span>
+          <span>拿到此链接即可下载配置，请妥善保管。</span>
         </footer>
 
         <div v-if="appliedQuery && !hasAnyResult" class="pt-noresult">

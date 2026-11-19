@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">系统设置</h2>
-    <p class="mp-page-desc">对外地址、测速核心、首页访问 PIN、账号与备份。</p>
+    <p class="mp-page-desc">设置订阅地址、测速核心、访问权限和备份。</p>
 
     <ErrorState v-if="loadError" :error="loadError" @retry="load" />
 
@@ -9,13 +9,13 @@
     <div class="mp-card">
       <h3>分发设置</h3>
       <el-form label-position="top" style="max-width:560px">
-        <el-form-item label="对外基础地址（订阅链接使用该地址；留空则按当前访问地址生成）">
+        <el-form-item label="订阅地址前缀（留空时使用当前访问地址）">
           <el-input v-model="settings.base_url" class="mono" placeholder="https://panel.example.com" />
         </el-form-item>
         <el-form-item label="会话有效期（小时）">
           <el-input-number v-model.number="settings.session_ttl_hours" :min="1" :max="720" />
         </el-form-item>
-        <el-form-item label="配置更新提示（小时，写入 profile-update-interval，仅为客户端提示）">
+        <el-form-item label="建议的订阅更新间隔（小时，由客户端决定是否采用）">
           <el-input-number v-model.number="settings.profile_update_interval" :min="1" :max="168" />
         </el-form-item>
         <el-form-item label="核心下载代理（可选，仅用于安装测速核心，例如 http://127.0.0.1:7890）">
@@ -37,9 +37,7 @@
             <el-switch v-model="settings.node_name_unlock_badge" />
           </div>
           <p class="mp-form-hint">
-            开启后，AI 全部解锁（🔓）、流媒体解锁（🎬）、Netflix 高级版（📺）的节点
-            在名称里带上对应标记。徽章只增不减——未测或被拒不显示，节点名不会反复变化。
-            需要先在「网络体检」页跑过节点解锁检测。
+            下次构建时，在机场节点名称中标出已经确认的能力。检测过期或结论变化后，标记也会更新。
           </p>
         </el-form-item>
         <el-button :loading="savingSettings" @click="saveSettings" type="primary">保存设置</el-button>
@@ -82,7 +80,7 @@
         </el-form-item>
         <el-form-item label="远端保留份数">
           <el-input-number v-model="webdav.keep" :min="1" :max="100" />
-          <div class="mp-form-hint">超出后自动删除最旧的快照与其主密钥。</div>
+          <div class="mp-form-hint">超过保留数量时，自动删除最旧的快照及对应主密钥。</div>
         </el-form-item>
         <div class="mp-btn-grid">
           <el-button :loading="webdavSaving" @click="saveWebdav" type="primary">保存配置</el-button>

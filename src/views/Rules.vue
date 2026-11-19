@@ -2,8 +2,7 @@
   <div>
     <h2 class="mp-page-title">分流策略</h2>
     <p class="mp-page-desc">
-      规则按声明顺序自上而下匹配，第一条命中即生效，末条须为 MATCH 兜底。拖动手柄排序，勾选多条可批量上移下移；分页时只重排当前页，改动下次构建生效。筛选状态下排序自动暂停。
-      只显示当前分流方案里的规则，目标在方案内解析。
+      规则从上往下匹配，以第一条命中为准。MATCH 必须放在最后。更改顺序后，需重新构建并发布。
     </p>
 
     <VariantBar page="rules" v-model="variantId" @changed="onVariantsChanged" />
@@ -29,7 +28,7 @@
         <el-input
           v-model="query"
           class="mp-filter-search"
-          placeholder="搜索匹配值 / 目标 / 备注 / 类型"
+          placeholder="搜索匹配值、目标、备注或类型"
           clearable
           :prefix-icon="Search"
           @input="onQueryInput"

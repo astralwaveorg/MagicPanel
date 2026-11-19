@@ -4,8 +4,10 @@
 版本状态（已构建 / 测试中 / 生产中 / 已下线），失败或空结果不会覆盖现网。
 """
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 import shutil
+from tempfile import NamedTemporaryFile
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -326,27 +328,14 @@ def create_build(operator: str, note: str = "",
     overall = "success"
     with db.connect() as _conn:
         normalize_nodes = db.get_setting(_conn, "node_name_normalize", "1") == "1"
-        # 解锁徽章开关（默认关）：开着时「AI 全解锁」的节点名带 🔓
         unlock_badge = db.get_setting(_conn, "node_name_unlock_badge", "0") == "1"
+        quality_groups = db.get_setting(_conn, "probe_build_groups", "0") == "1"
     # 同一方案的 resolve 只做一次：plan 按 variant 展开（T + D 个产物/方案），
     # 原来每个产物都全量解析一遍引用图（2026-11-18 构建性能）
     resolved_by_variant: dict[int, dict] = {}
     from ..services.node_refs import resolve_snapshot
-    badge_lookup = None
-    if unlock_badge:
-        from ..services import unlock_check as _unlock_check
-        # 多维能力徽章（🔓 AI / 🎬 流媒体 / 📺 Netflix 高级版）：
-        # 分类来自构建前的解锁检测缓存，检测 → 分类 → 重命名 → 产物
-        badge_lookup = _unlock_check.capability_badges
-    # 质量摘要（吞吐/延迟）：来自漏斗结果文件，缺数据就不写进名字
-    perf_lookup = None
-    try:
-        from ..services import quality_funnel as _funnel
-        _quality = _funnel.load_results().get("nodes", {})
-        if _quality:
-            perf_lookup = lambda name: _quality.get(name) or {}
-    except Exception:
-        perf_lookup = None
+    from ..services import quality_funnel
+    quality_reader = quality_funnel.result_reader()
     for artifact_name, target, device, variant in plan:
         vid = int(variant["id"]) if variant else 0
         if vid not in resolved_by_variant:
@@ -371,8 +360,9 @@ def create_build(operator: str, note: str = "",
                                             device=device, variant=variant,
                                             normalize_nodes=normalize_nodes,
                                             resolved=resolved,
-                                            badge_lookup=badge_lookup,
-                                            perf_lookup=perf_lookup)
+                                            quality_reader=quality_reader,
+                                            quality_badges=unlock_badge,
+                                            quality_groups=quality_groups)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")
@@ -395,11 +385,13 @@ def create_build(operator: str, note: str = "",
             verification = "未通过"
         else:
             path = artifact_path(build_id, artifact_name)
-            path.write_bytes(text.encode("utf-8"))
+            with NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+                tmp = Path(handle.name)
+                handle.write(text.encode("utf-8"))
             try:
-                path.chmod(0o600)   # 产物含明文节点凭据
-            except OSError:
-                pass
+                tmp.replace(path)
+            finally:
+                tmp.unlink(missing_ok=True)
         results[artifact_name] = {
             "ok": not errors,
             "engine": target["engine"],
@@ -424,37 +416,7 @@ def create_build(operator: str, note: str = "",
         security.audit(conn, operator, "创建构建", "build", build_id,
                        {"status": overall, "note": note,
                         "artifacts": len(results)})
-    # 构建完成后补测缺失节点的解锁能力：下一轮构建才能把能力徽章写进产物。
-    # 后台线程执行（每个节点要起一次测速核心，绝不能占住构建请求）。
-    if unlock_badge:
-        _schedule_unlock_backfill(operator)
     return build_id, overall
-
-
-def _schedule_unlock_backfill(operator: str) -> None:
-    """构建后自动补测缺失节点的解锁能力（幂等、后台、单例）。"""
-    import threading as _threading
-
-    from ..services import unlock_check
-
-    state = unlock_check.batch_state()
-    if state.get("running"):
-        return          # 已有补测在跑：不重复排队
-    try:
-        missing = unlock_check.coverage().get("missing", 0)
-    except Exception:
-        return
-    if missing <= 0:
-        return
-
-    def worker():
-        try:
-            unlock_check.run_batch(qty=min(missing, 20), operator=operator or "构建后补测")
-        except Exception as exc:
-            import logging
-            logging.getLogger("magicpanel.builds").warning("构建后补测异常：%s", exc)
-
-    _threading.Thread(target=worker, daemon=True, name="unlock-backfill").start()
 
 
 @router.post("/builds", status_code=201)

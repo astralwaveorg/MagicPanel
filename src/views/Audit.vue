@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">审计日志</h2>
-    <p class="mp-page-desc">记录维护操作与设备下载；不含订阅地址、令牌或节点凭据。</p>
+    <p class="mp-page-desc">查看维护操作和设备下载记录。列表不显示订阅地址、令牌或节点凭据。</p>
 
     <div class="mp-toolbar" style="margin-bottom:12px">
       <div class="mp-btn-grid mp-toolbar-actions">
@@ -13,7 +13,7 @@
         </el-button>
       </div>
       <div class="mp-search-row">
-        <el-input v-model="keyword" placeholder="搜索操作 / 操作人 / 详情"
+        <el-input v-model="keyword" placeholder="搜索操作、操作人或详情"
                   clearable @keyup.enter="reload" @clear="reload" />
         <el-button @click="reload">搜索</el-button>
       </div>

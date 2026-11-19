@@ -19,7 +19,7 @@
 * 重试策略：只对超时与 5xx 重试，403 不重试（重试只会加重风控）。
 
 状态语义见 ``base.py`` 的模块说明：``unlocked`` / ``blocked`` / ``unknown`` /
-``error`` / ``unsupported``——**证据不足一律 unknown，不臆断**。
+``error`` / ``unsupported`` / ``reachable``。
 """
 from .base import (
     DEFAULT_MAX_WORKERS,
@@ -28,6 +28,7 @@ from .base import (
     MAX_BODY_CHARS,
     STATE_BLOCKED,
     STATE_ERROR,
+    STATE_REACHABLE,
     STATE_UNKNOWN,
     STATE_UNLOCKED,
     STATE_UNSUPPORTED,
@@ -66,6 +67,7 @@ __all__ = [
     "ProbeResult",
     "STATE_BLOCKED",
     "STATE_ERROR",
+    "STATE_REACHABLE",
     "STATE_UNKNOWN",
     "STATE_UNLOCKED",
     "STATE_UNSUPPORTED",

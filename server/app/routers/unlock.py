@@ -1,13 +1,86 @@
 """网络解锁检测接口：面板出口 / 指定节点两种模式 + 节点批量检测。"""
-import threading
+from collections import Counter
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from ..deps import CurrentUser, RequireCapabilities
 from ..services import unlock_check
 
 router = APIRouter(prefix="/api/v1/unlock", tags=["unlock"])
+
+
+@router.get("/quality")
+def quality(user=CurrentUser):
+    from .. import db
+    from ..services import quality_funnel, scheduler
+    from ..services.probes.registry import ALL_DETECTORS
+
+    candidates = scheduler._collect_probe_proxies()
+    current = quality_funnel.current_results(candidates)
+    names = [p["name"] for p in candidates]
+    rows = [{k: v for k, v in (current.get(name) or {"name": name, "stage": "unknown"}).items()
+             if k != "revision"} for name in names]
+    with db.connect() as conn:
+        auto = db.get_setting(conn, "probe_funnel_enabled", "0") == "1"
+        scheduler_on = db.get_setting(conn, "scheduler_enabled", "1") == "1"
+        config = quality_funnel._settings(conn)
+        build_groups = db.get_setting(conn, "probe_build_groups", "0")
+        name_template = db.get_setting(conn, "probe_node_name_template", "{name} · {original}")
+    return {"items": rows, "counts": dict(Counter(r["stage"] for r in rows)),
+            "task": scheduler.quality_task_status(), "auto": auto, "scheduler_on": scheduler_on,
+            "thresholds": {"delay_ms": config["max_delay_ms"], "speed_bps": config["min_speed_bps"]},
+            "settings": {
+                "probe_max_delay_ms": config["max_delay_ms"],
+                "probe_min_speed_bps": config["min_speed_bps"],
+                "probe_speed_bytes": config["speed_bytes"],
+                "probe_timeout_ms": round(config["timeout"] * 1000),
+                "probe_speed_timeout_sec": config["speed_timeout"],
+                "probe_concurrency": config["concurrency"],
+                "probe_round_limit": config["round_limit"],
+                "probe_retry": config["retry"],
+                "probe_refresh_hours": config["refresh_seconds"] // 3600,
+                "probe_platform_ids": config["platform_ids"],
+                "probe_build_groups": build_groups,
+                "probe_node_name_template": name_template,
+            },
+            "platforms": {pid: item.display_name for pid, item in ALL_DETECTORS.items()}}
+
+
+@router.post("/quality/run", status_code=202)
+def quality_run(user=RequireCapabilities("probe")):
+    from ..services import scheduler, tester
+    if not tester.core_status().get("available"):
+        raise HTTPException(409, "请先在系统设置安装 Mihomo 核心")
+    if not scheduler.start_quality_probe(user["username"]):
+        raise HTTPException(409, "有检测正在运行，或两轮检测的间隔还未结束")
+    return {"ok": True}
+
+
+@router.post("/quality/export")
+def quality_export(user=RequireCapabilities("reveal")):
+    from .. import db, security
+    from ..services import node_classes, quality_funnel, scheduler, tester
+    candidates = scheduler._collect_probe_proxies()
+    results = quality_funnel.current_results(candidates)
+    if not any(item.get("qualified") for item in results.values()):
+        raise HTTPException(409, "没有通过测速的节点")
+    if not scheduler._auto_probe_lock.acquire(blocking=False):
+        raise HTTPException(409, "正在检测节点，请完成后再导出")
+    try:
+        with db.connect() as conn:
+            template = db.get_setting(conn, "probe_node_name_template", node_classes.DEFAULT_NAME_TEMPLATE)
+        text = node_classes.export_pools(results, candidates, tester.validate_config, template=template)
+    except node_classes.ClassifyError as exc:
+        raise HTTPException(409, str(exc)) from None
+    finally:
+        scheduler._auto_probe_lock.release()
+    with db.tx() as conn:
+        security.audit(conn, user["username"], "export_node_quality", "node_quality",
+                       detail={"count": sum(bool(i.get("qualified")) for i in results.values())})
+    return Response(text, media_type="application/yaml",
+                    headers={"Content-Disposition": "attachment; filename=magicpanel-node-pools.yaml",
+                             "Cache-Control": "no-store"})
 
 
 class RunBody(BaseModel):
@@ -18,7 +91,7 @@ class RunBody(BaseModel):
 @router.get("/catalog")
 def catalog(user=CurrentUser):
     return {"checks": [
-        {"id": c["id"], "name": c["name"], "icon": c["icon"], "category": c["category"],
+        {"id": c["id"], "name": {"netflix_premium": "Netflix 非自制剧样本", "wikipedia": "维基百科"}.get(c["id"], c["name"]), "icon": c["icon"], "category": c["category"],
          "url": c.get("frame_url") or c["url"]}
         for c in unlock_check.CHECKS
     ], "categories": unlock_check.CATEGORY_NAMES}
@@ -26,44 +99,42 @@ def catalog(user=CurrentUser):
 
 @router.get("/last")
 def last(exit: str = "panel", user=CurrentUser):
-    return unlock_check.last_results(exit)
+    return unlock_check.last_results(unlock_check.PANEL_EVIDENCE_CACHE if exit == "panel" else exit)
 
 
 @router.post("/run")
 def run(body: RunBody, user=RequireCapabilities("probe")):
+    from ..services import scheduler
+    if not scheduler._auto_probe_lock.acquire(blocking=False):
+        raise HTTPException(409, "有检测正在运行，请稍后再试")
     try:
+        if body.exit in ("panel", ""):
+            return unlock_check.run_panel_evidence(body.ids)
         return unlock_check.run_checks(body.exit, body.ids, operator=user["username"])
     except LookupError as exc:
         raise HTTPException(400, str(exc))
     except RuntimeError as exc:
         raise HTTPException(400, str(exc))
+    finally:
+        scheduler._auto_probe_lock.release()
 
 
 class BatchBody(BaseModel):
-    qty: int = Field(default=3, ge=1, le=50)
+    qty: int = Field(default=3, ge=1, le=3)
     ids: list[str] = Field(default_factory=list)
 
 
 @router.post("/batch-detect")
 def batch_detect(body: BatchBody, user=RequireCapabilities("probe")):
-    """批量检测一批节点的 AI 解锁能力（后台线程）。
-
-    结果写 unlock 缓存（exit_id=原始节点名），重命名引擎据此给
-    「AI 全解锁」的节点加 🔓 徽章。每节点要起一次测速核心，
-    一批 3 个约 40-60 秒——放后台线程，接口立即返回进度查询方式。
-    """
-    state = unlock_check.batch_state()
-    if state.get("running"):
-        raise HTTPException(409, "已有批量检测在进行中，请等待完成或查询进度")
+    """旧版手动检测与节点质量检测共用一个调度位。"""
+    from ..services import scheduler
 
     def worker():
-        try:
-            unlock_check.run_batch(qty=body.qty, ids=body.ids or None,
-                                   operator=user["username"])
-        except Exception as exc:
-            unlock_check.logger.exception("批量解锁检测异常")
+        unlock_check.run_batch(qty=body.qty, ids=body.ids or None, operator=user["username"])
+        return {}
 
-    threading.Thread(target=worker, daemon=True, name="unlock-batch").start()
+    if not scheduler._start_auto_probe("unlock-batch", worker):
+        raise HTTPException(409, "有检测正在运行，或两轮检测的间隔还未结束")
     return {"ok": True, "started": True, "qty": body.qty}
 
 

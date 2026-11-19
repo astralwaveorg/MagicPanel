@@ -220,12 +220,16 @@ def test_batch_detect_api_and_settings_gate(client, monkeypatch):
     assert "🔓" not in content, "徽章开关关闭时产物不应有 🔓"
     assert "🇺🇸 [原始机场] 美国 01" in content, content
 
-    # 打开徽章开关 + 该节点 AI 全解锁（写缓存）→ 重新构建带 🔓
-    results = [{"id": i, "state": "unlocked", "status": 200, "region": "",
-                "latency_ms": 1, "detail": ""} for i in unlock_check.AI_CHECK_IDS]
-    unlock_check._save_cache("US 01",
-                             {"checked_at": 1, "exit": "US 01",
-                              "results": results, "ip": {}}, merge=False)
+    # 打开徽章开关后，构建只认与当前节点匹配的质量结论。
+    from app import db, security
+    from app.services import quality_funnel, scheduler
+    node = scheduler._collect_probe_proxies()[0]
+    with db.connect() as conn:
+        cfg = quality_funnel._settings(conn)
+    key = security.derive_subkey(security.load_master_material(), purpose="node-quality")
+    quality_funnel.save_results([quality_funnel.NodeQuality(
+        node["name"], stage="probed", badges="🔓", checked_at=int(_time.time()),
+        revision=quality_funnel._fingerprint(node, key, cfg))])
     client.put("/api/v1/settings", headers=h, json={"values": {
         "node_name_unlock_badge": "1"}})
     build2 = client.post("/api/v1/builds", headers=h, json={}).json()

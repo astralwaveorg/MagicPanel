@@ -2,8 +2,7 @@
   <div>
     <h2 class="mp-page-title">拓展模块</h2>
     <p class="mp-page-desc">
-      用于补充脚本、复写、面板等 YAML 片段，构建时按引擎合并至目标配置。
-      合并规则：字典递归合并、列表追加、标量覆盖；平台扩展最后生效，优先级最高。
+      添加脚本、复写等配置。构建时按引擎合并，平台扩展最后应用。
     </p>
 
     <div class="mp-toolbar">
@@ -113,7 +112,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="合并顺序（小的先合并）">
+            <el-form-item label="合并顺序（按数字从小到大）">
               <el-input-number v-model="form.sort" :min="0" :max="999" style="width:100%" />
             </el-form-item>
           </el-col>
@@ -173,7 +172,7 @@
                     placeholder="panel:&#10;  首页:&#10;    title: 家庭网络" />
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="form.note" placeholder="用途说明，会展示在 MagicPanel 订阅中心" />
+          <el-input v-model="form.note" placeholder="用途说明（显示在订阅中心）" />
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.enabled">启用（停用后不参与构建）</el-checkbox>

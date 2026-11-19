@@ -495,6 +495,7 @@ _auto_probe_lock = threading.Lock()
 _auto_probe_next: dict[str, float] = {}
 _auto_probe_failures: dict[str, int] = {}
 _funnel_batch = 10
+_quality_task = {"running": False, "last": {}}
 
 
 def _start_auto_probe(kind, work) -> bool:
@@ -533,14 +534,31 @@ def _run_quality_funnel(summary: dict) -> None:
     with db.connect() as conn:
         if not _enabled(conn, "probe_funnel_enabled"):
             return
+    if start_quality_probe(AUTO_OPERATOR, max_nodes=_funnel_batch):
+        summary["funnel"] = f"已触发（本轮最多 {_funnel_batch} 个节点）"
+
+
+def start_quality_probe(operator: str, *, max_nodes: int = 3) -> bool:
     from . import quality_funnel
 
     def work():
-        return quality_funnel.run_funnel(
-            _collect_probe_proxies(), operator=AUTO_OPERATOR, max_nodes=_funnel_batch)
+        _quality_task["running"] = True
+        try:
+            result = quality_funnel.run_funnel(
+                _collect_probe_proxies(), operator=operator, max_nodes=max_nodes)
+            _quality_task["last"] = result.get("stats", {})
+            return result
+        except Exception:
+            _quality_task["last"] = {"error": "测试未完成，请查看应用日志"}
+            raise
+        finally:
+            _quality_task["running"] = False
 
-    if _start_auto_probe("quality-funnel", work):
-        summary["funnel"] = f"已触发（本轮最多 {_funnel_batch} 个节点）"
+    return _start_auto_probe("quality-funnel", work)
+
+
+def quality_task_status():
+    return dict(_quality_task)
 
 
 def _collect_probe_proxies() -> list[dict]:
@@ -561,18 +579,19 @@ def _collect_probe_proxies() -> list[dict]:
     # 能力徽章与性能摘要的查询全部 miss（2026-11-19 实证）。
     catalog = [dict(r) for r in db.all_(conn, "SELECT * FROM node_catalog")]
     try:
-        for r in conn.execute("SELECT id AS source_id, snapshot_enc FROM sources "
-                              "WHERE snapshot_enc IS NOT NULL"):
+        for r in conn.execute("SELECT id AS source_id, snapshot_enc, filter FROM sources "
+                              "WHERE enabled=1 AND snapshot_enc IS NOT NULL ORDER BY id"):
             try:
                 raw = security.decrypt_text(r["snapshot_enc"]) or ""
                 proxies = source_nodes.extract(raw.encode("utf-8", "replace"))
-            except Exception:
+            except Exception as exc:
+                logger.warning("节点来源 %s 无法读取：%s", r["source_id"], type(exc).__name__)
                 continue
             for p in proxies:
                 if not isinstance(p, dict) or not p.get("name"):
                     continue
                 name = str(p["name"])
-                if name in seen:
+                if not source_nodes.match(r["filter"] or "", name):
                     continue
                 # 占位节点（剩余流量/到期时间…）不是真节点，探测它们只会
                 # 浪费一轮门禁时间
@@ -586,8 +605,11 @@ def _collect_probe_proxies() -> list[dict]:
                 try:
                     entry = source_node_service.map_emit_names(
                         [entry], source_id=int(r["source_id"]), catalog=catalog)[0]
-                except Exception:
-                    pass        # 目录没收录：用原始名探测
+                except ValueError:
+                    # 等下次订阅同步补全目录，不把结果归到另一个同名节点。
+                    continue
+                if entry["name"] in seen:
+                    continue
                 seen.add(str(entry["name"]))
                 out.append(entry)
         for r in conn.execute("SELECT * FROM local_nodes WHERE enabled=1 ORDER BY id"):
@@ -598,7 +620,8 @@ def _collect_probe_proxies() -> list[dict]:
                         "extra_yaml": security.decrypt_text(r["extra_yaml_enc"])
                         if r["extra_yaml_enc"] else None}
                 proxy = local_nodes.render_proxy(node, "mihomo")
-            except Exception:
+            except Exception as exc:
+                logger.warning("本地节点 %s 无法读取：%s", r["id"], type(exc).__name__)
                 continue
             name = str(proxy.get("name") or "")
             if name and name not in seen:

@@ -260,18 +260,31 @@ def provider_resource(token: str, name: str, request: Request):
         # 节点名称规范化（构建端与分发端同一套规则，见 services/node_rename）
         if db.get_setting(conn, "node_name_normalize", "1") == "1":
             badge_lookup = None
-            if db.get_setting(conn, "node_name_unlock_badge", "0") == "1":
+            perf_lookup = None
+            badge_enabled = db.get_setting(conn, "node_name_unlock_badge", "0") == "1"
+            if db.get_setting(conn, "probe_quality_provider_names", "0") == "1":
+                from ..services import quality_funnel, source_nodes
+                catalog = [dict(row) for row in db.all_(
+                    conn, "SELECT * FROM node_catalog WHERE source_id=? AND retired=0", (source["id"],))]
+                mapped = {}
+                for proxy in source_nodes.parse(text):
+                    try:
+                        mapped[proxy["name"]] = source_nodes.map_emit_names(
+                            [proxy], source_id=source["id"], catalog=catalog)[0]
+                    except ValueError:
+                        continue
+                results = quality_funnel.current_results(list(mapped.values()))
+                by_raw = {raw: results[proxy["name"]] for raw, proxy in mapped.items()
+                          if proxy["name"] in results}
+                perf_lookup = by_raw.get
+                if badge_enabled:
+                    badge_lookup = lambda raw: by_raw.get(raw, {}).get("badges", "")
+            elif badge_enabled:
                 from ..services import unlock_check as _unlock
                 badge_lookup = _unlock.ai_unlocked
             text = node_rename.normalize_snapshot(text, source=source["name"],
-                                                  badge_lookup=badge_lookup)
-        etag_src = (source["sha256"] or "") + (
-            ":filtered" if source["filter_unavailable"] else "")
-        if source["filter_unavailable"]:
-            # 过滤结果随测速变化，ETag 必须跟着变，否则客户端拿不到新的节点列表
-            etag_src += ":" + security.sha256_text(
-                source["test_results"] or "{}")[:16]
-        etag = security.sha256_text(etag_src or text)[:32]
+                                                  badge_lookup=badge_lookup, perf_lookup=perf_lookup)
+        etag = security.sha256_text(text)[:32]
 
         def record():
             with db.tx() as wconn:

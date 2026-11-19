@@ -1,10 +1,7 @@
 <template>
   <div class="mp-artifact">
     <p class="mp-page-desc">
-      配置分三层：<strong>引擎默认配置</strong>（内置基线，随程序发布）→
-      <strong>引擎平台配置</strong>（按引擎 + 平台）→
-      <strong>设备独立配置</strong>（最终产物个性化）。
-      越靠后优先级越高；每层只保存改动项，其余自动继承上一层。
+      <strong>引擎默认配置</strong>提供基础值，<strong>引擎平台配置</strong>适配客户端平台，<strong>设备独立配置</strong>适配单台设备。没有单独设置的项沿用上一层。
     </p>
 
     <!-- 手机：作用域改用下拉选择，左侧长列表在窄屏太占版面 -->
@@ -12,7 +9,7 @@
       v-if="isMobile"
       v-model="scopePicker"
       class="mp-artifact-picker"
-      placeholder="选择要配置的作用域"
+      placeholder="选择配置层"
     >
       <el-option-group v-for="group in scopeGroups" :key="group.kind" :label="group.title">
         <el-option
@@ -191,7 +188,7 @@
                 </div>
               </template>
 
-              <el-form-item label="高级 YAML（其他顶层键）">
+              <el-form-item label="其他顶层配置（YAML）">
                 <CodeEditor v-model="raw" language="yaml" height="300px" />
                 <div class="mp-form-hint">
                   编辑的是最终生效值，保存时只把与上层不同的部分记到当前层级。
@@ -265,7 +262,7 @@
         <el-form-item v-else-if="keyForm.kind === 'yaml'" label="值（YAML）">
           <CodeEditor v-model="keyForm.yaml" language="yaml" height="240px" />
         </el-form-item>
-        <el-form-item v-else label="文本值（留空保存为 null）">
+        <el-form-item v-else label="文本值（留空为 null）">
           <el-input v-model="keyForm.text" class="mono" />
         </el-form-item>
       </el-form>

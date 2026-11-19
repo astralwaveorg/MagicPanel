@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">规则来源</h2>
     <p class="mp-page-desc">
-      服务端抓取规则集并留存快照，构建引用后经订阅地址分发至设备；远程与内联来源独立更新。
+      管理构建时引用的规则集。面板抓取成功后保存内容，再按规则来源的设置分发给设备。
     </p>
 
     <div class="mp-toolbar">
@@ -32,7 +32,7 @@
         <el-input
           v-model="query"
           class="mp-filter-search"
-          placeholder="搜索名称或 URL"
+          placeholder="搜索名称或地址"
           clearable
           :prefix-icon="Search"
           @input="onQueryInput"
@@ -196,7 +196,7 @@
             内容由「自主维护」仓库里的这个文件决定：在自主维护页改完并提交，同步后这里跟着更新。
           </div>
         </el-form-item>
-        <el-form-item v-else label="规则内容（yaml payload 或每行一条）">
+        <el-form-item v-else label="规则内容（YAML payload 或每行一条）">
           <el-input v-model="form.inline_content" type="textarea" :rows="8" class="mono"
                     placeholder="payload:&#10;  - example.com" />
         </el-form-item>

@@ -2,8 +2,7 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      列表顺序即产物里的声明顺序，拖动手柄排序（筛选状态下不能拖动）。成员为空的组会补一个占位节点，避免客户端把空组改写成直连。
-      只显示当前分流方案里的组。
+      管理当前方案的策略组。拖动可调整显示顺序。空组会使用占位节点，防止客户端改走直连。
     </p>
 
     <VariantBar page="groups" v-model="variantId" @changed="onVariantsChanged" />
@@ -245,13 +244,13 @@
               （成员只由「包含策略」和「本地节点」决定）。
             </div>
           </el-form-item>
-          <el-form-item label="过滤正则（仅保留匹配的节点，可选）">
+          <el-form-item label="节点筛选（正则，可选）">
             <el-input v-model="form.filter" class="mono" />
           </el-form-item>
         </template>
         <el-form-item v-if="form.type === 'load-balance'" label="分配策略（仅 Mihomo 目标生效）">
           <el-select v-model="form.strategy" style="width:100%">
-            <el-option value="consistent-hashing" label="consistent-hashing（同目标固定节点）" />
+            <el-option value="consistent-hashing" label="consistent-hashing（同一目标固定到同一节点）" />
             <el-option value="round-robin" label="round-robin（轮询）" />
             <el-option value="sticky-sessions" label="sticky-sessions（会话保持）" />
           </el-select>

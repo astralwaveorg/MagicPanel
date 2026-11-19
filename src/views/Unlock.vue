@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">网络体检</h2>
-    <p class="mp-page-desc">当前网络测网页响应，服务器网络测服务可用性。</p>
+    <p class="mp-page-desc">当前网络检查网页响应，服务器网络还会检查访问限制和分流出口。</p>
 
     <div class="mp-card">
       <div class="unlock-toolbar">
@@ -29,6 +29,9 @@
         </div>
       </div>
       <p v-if="exitHint" class="mp-form-hint">{{ exitHint }}</p>
+      <p v-if="challengeCount" class="mp-form-hint">
+        {{ challengeCount }} 项触发人机校验，可打开网页核实。
+      </p>
       <p v-if="browserReview.length" class="mp-form-hint">
         {{ browserReview.length }} 项未确认响应，可点服务名打开网页核实。
       </p>
@@ -57,39 +60,30 @@
             <template #default="{ row }">
               <StatusDot :kind="serverKind(row.id)" :text="serverLabel(row.id)" />
               <span class="unlock-cell-sub">{{ serverSub(row.id) }}</span>
+              <div v-if="serverMap[row.id]" class="unlock-route" :title="routeTitle(row.id)">
+                {{ routeLabel(row.id) }}
+              </div>
             </template>
           </el-table-column>
         </el-table>
       </div>
     </div>
 
-    <p class="mp-form-hint unlock-help">点服务名打开网页。登录、地区权限和播放以实际使用为准。</p>
+    <p class="mp-form-hint unlock-help">点服务名打开网页，核实登录或播放。</p>
 
-    <div class="mp-card">
-      <h3>节点能力</h3>
-      <p class="mp-form-hint">补测结果用于生成节点名上的解锁标记。下次构建时生效。</p>
-      <p v-if="coverage" class="mp-form-hint">
-        已测 {{ coverage.covered }} / {{ coverage.total }} 个节点
-      </p>
-      <p v-if="batch && batch.total" class="mp-form-hint">
-        {{ batch.running ? `补测进行中 ${batch.done}/${batch.total}：${batch.current}`
-           : `上次补测完成 ${batch.done}/${batch.total}，其中 ${batch.unlocked} 个有能力标记` }}
-      </p>
-      <el-button size="small" type="success" :loading="batchStarting"
-                 :disabled="batch && batch.running"
-                 @click="startBatch">补测下一批节点</el-button>
-    </div>
+    <NodeQualityCard />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
 import { fmtTime, latencyText } from '../format'
 import { copyText } from '../utils/clipboard'
 import { BROWSER_CHECKS, probeAll, probeExitIp } from '../utils/browserChecks'
 import StatusDot from '../components/StatusDot.vue'
+import NodeQualityCard from '../components/NodeQualityCard.vue'
 
 const catalog = ref([])
 const serverMap = ref({})
@@ -100,10 +94,6 @@ const browserCheckedAt = ref(null)
 const serverCheckedAt = ref(null)
 const running = ref(false)
 const browserRunning = ref(false)
-const batchStarting = ref(false)
-const batch = ref(null)
-const coverage = ref(null)
-let batchTimer = null
 
 const categories = [
   { id: 'ai', name: '海外 AI' },
@@ -121,7 +111,8 @@ const browserLabels = {
   reachable: '有响应', unknown: '无法确认', timeout: '超时', idle: '未测', unsupported: '不适用',
 }
 const serverLabels = {
-  unlocked: '通过', blocked: '访问受限', unsupported: '不支持', error: '无法判定', idle: '未测',
+  reachable: '网页可达', unlocked: '已确认', blocked: '访问受限',
+  challenge: '人机校验', unknown: '无法确认', unsupported: '不支持', error: '检测失败', idle: '未测',
 }
 
 function browserStateOf(id) {
@@ -135,16 +126,30 @@ function browserLatency(id) {
   const r = browserMap.value[id]
   return r?.state === 'reachable' ? latencyText(r.latency_ms) : ''
 }
-function serverStateOf(id) { return serverMap.value[id]?.state || 'idle' }
+function serverStateOf(id) {
+  const result = serverMap.value[id]
+  return result?.extra?.reason === 'challenge' ? 'challenge' : result?.state || 'idle'
+}
 function serverLabel(id) { return serverLabels[serverStateOf(id)] || serverLabels.error }
 function serverKind(id) {
-  return { unlocked: 'ok', blocked: 'danger', error: 'warn' }[serverStateOf(id)] || 'muted'
+  return { reachable: 'ok', unlocked: 'ok', blocked: 'danger', challenge: 'warn', unknown: 'warn', error: 'warn' }[serverStateOf(id)] || 'muted'
 }
 function serverSub(id) {
   const r = serverMap.value[id]
   if (!r) return ''
   return [r.region && `地区 ${r.region}`, r.latency_ms != null && latencyText(r.latency_ms),
-    r.detail].filter(Boolean).join(' · ')
+    serverStateOf(id) === 'challenge' ? '' : r.detail].filter(Boolean).join(' · ')
+}
+
+function routeLabel(id) {
+  const route = serverMap.value[id]?.extra?.route
+  if (route?.source === 'router_connection' && route.node) return `实际节点：${route.node}`
+  if (route?.source === 'domain_trace' && route.ip) return `域名出口：${route.ip}${route.country ? ' · ' + route.country : ''}`
+  return '未获取服务出口'
+}
+function routeTitle(id) {
+  const route = serverMap.value[id]?.extra?.route
+  return [route?.domain, route?.chain?.slice().reverse().join(' → ')].filter(Boolean).join(' · ')
 }
 
 function counts(labels, getState, states) {
@@ -156,8 +161,9 @@ const summaries = computed(() => [
   { title: '当前网络', ip: browserIp.value, checkedAt: browserCheckedAt.value,
     items: counts(browserLabels, browserStateOf, ['reachable', 'unknown', 'timeout', 'idle', 'unsupported']) },
   { title: '服务器网络', ip: serverIp.value, checkedAt: serverCheckedAt.value,
-    items: counts(serverLabels, serverStateOf, ['unlocked', 'blocked', 'unsupported', 'error', 'idle']) },
+    items: counts(serverLabels, serverStateOf, ['reachable', 'unlocked', 'blocked', 'challenge', 'unknown', 'unsupported', 'error', 'idle']) },
 ])
+const challengeCount = computed(() => catalog.value.filter(c => serverStateOf(c.id) === "challenge").length)
 const browserReview = computed(() => catalog.value.filter(c =>
   ['unknown', 'timeout'].includes(browserStateOf(c.id))))
 const exitHint = computed(() => {
@@ -191,12 +197,6 @@ async function loadServerLast() {
     serverIp.value = entry.ip || {}
     serverCheckedAt.value = entry.checked_at || null
   }
-}
-
-async function loadCoverage() {
-  try {
-    coverage.value = await api('/api/v1/unlock/capability-coverage')
-  } catch { /* 覆盖率只是提示信息 */ }
 }
 
 async function runServerChecks() {
@@ -241,39 +241,13 @@ async function runBrowserChecks() {
   }
 }
 
-async function refreshBatch() {
-  try {
-    batch.value = await api('/api/v1/unlock/batch-status')
-    if (batch.value?.running) {
-      if (!batchTimer) batchTimer = setInterval(refreshBatch, 2000)
-    } else if (batchTimer) {
-      clearInterval(batchTimer)
-      batchTimer = null
-      loadCoverage()
-    }
-  } catch { /* 进度非关键 */ }
-}
-
-async function startBatch() {
-  if (batchStarting.value) return
-  batchStarting.value = true
-  try {
-    await api('/api/v1/unlock/batch-detect', { method: 'POST', body: { qty: 3 } })
-    ElMessage.success('补测已启动，后台进行中')
-    refreshBatch()
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    batchStarting.value = false
-  }
-}
-
 async function copyResults() {
   const lines = [`当前网络出口：${browserIp.value.ip || '未知'}`,
     `服务器网络出口：${serverIp.value.ip || '未知'}`]
   for (const c of catalog.value) {
     lines.push(`${c.name}：当前网络 ${browserLabel(c.id)}｜服务器网络 ${serverLabel(c.id)}`
-      + `${serverSub(c.id) ? '（' + serverSub(c.id) + '）' : ''}`)
+      + `${serverSub(c.id) ? '（' + serverSub(c.id) + '）' : ''}`
+      + (serverMap.value[c.id] ? '｜' + routeLabel(c.id) : ''))
   }
   try {
     await copyText(lines.join('\n'))
@@ -294,14 +268,12 @@ onMounted(async () => {
   } catch (e) {
     ElMessage.error(`最近检测结果加载失败：${e.message}`)
   }
-  loadCoverage()
-  refreshBatch()
 })
 
-onUnmounted(() => { if (batchTimer) clearInterval(batchTimer) })
 </script>
 
 <style scoped>
+.unlock-route { margin-top: 2px; font-size: 12px; color: var(--el-text-color-secondary); overflow-wrap: anywhere; }
 .unlock-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .unlock-meta { font-size: 12.5px; color: var(--mp-text-secondary); }
 .unlock-cols { display: flex; gap: 16px; flex-wrap: wrap; }

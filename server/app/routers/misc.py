@@ -26,13 +26,21 @@ EDITABLE_SETTINGS = {
     "probe_funnel_enabled", "probe_max_delay_ms", "probe_min_speed_bps",
     "probe_speed_bytes", "probe_timeout_ms", "probe_concurrency",
     "probe_round_limit", "probe_retry",
+    "probe_speed_timeout_sec", "probe_refresh_hours", "probe_platform_ids", "probe_build_groups", "probe_quality_provider_names",
+    "probe_node_name_template",
 }
 BOOL_SETTINGS = {
     "scheduler_enabled", "auto_fetch_sources", "auto_fetch_rules",
     "auto_fetch_snippets", "auto_test_sources", "auto_build_enabled",
     "auto_publish_enabled", "node_name_normalize", "node_name_unlock_badge",
     "unlock_batch_auto", "backup_include_runtime", "backup_include_history_builds",
-    "probe_funnel_enabled",
+    "probe_funnel_enabled", "probe_build_groups", "probe_quality_provider_names",
+}
+PROBE_RANGES = {
+    "probe_max_delay_ms": (1, 5000), "probe_min_speed_bps": (1, 100_000_000),
+    "probe_speed_bytes": (65536, 5242880), "probe_timeout_ms": (1000, 15000),
+    "probe_concurrency": (1, 6), "probe_round_limit": (1, 10), "probe_retry": (0, 1),
+    "probe_speed_timeout_sec": (3, 20), "probe_refresh_hours": (12, 168),
 }
 
 
@@ -47,7 +55,7 @@ def overview(user=CurrentUser):
             results = json.loads(r["test_results"] or "{}")
             names = [n.get("name") for n in json.loads(r["nodes_meta"] or "[]")]
             ok = sum(1 for n in names if results.get(n, -1) >= 0)
-            failed = sum(1 for n in names if results.get(n, -1) < 0)
+            failed = sum(1 for n in names if n in results and results[n] < 0)
             sources.append({
                 "id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
                 "last_status": r["last_status"], "last_error": error_summary(r["last_error"]),
@@ -55,7 +63,7 @@ def overview(user=CurrentUser):
                 "last_fetched_at": r["last_fetched_at"], "node_count": r["node_count"],
                 "tested_at": r["tested_at"],
                 "filter_unavailable": bool(r["filter_unavailable"]),
-                "tested_ok": ok, "tested_failed": failed,
+                "tested_ok": ok, "tested_failed": failed, "untested": len(names) - ok - failed,
             })
         rule_providers = [
             {"id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]),
@@ -328,6 +336,10 @@ class SettingsBody(BaseModel):
 
 @router.put("/settings")
 def put_settings(body: SettingsBody, user=CurrentUser):
+    if any(key.startswith("probe_") for key in body.values):
+        require_capability(user, "probe")
+    if "probe_quality_provider_names" in body.values:
+        require_capability(user, "publish_prod")
     if body.values.keys() & {"core_proxy", "base_url"}:
         require_capability(user, "reveal")
     for key in body.values:
@@ -347,6 +359,19 @@ def put_settings(body: SettingsBody, user=CurrentUser):
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise HTTPException(400, "对外基础地址不能包含凭据、查询参数或片段")
     for key, value in body.values.items():
+        if key in PROBE_RANGES:
+            low, high = PROBE_RANGES[key]
+            if not re.fullmatch(r"[0-9]{1,9}", value) or not low <= int(value) <= high:
+                raise HTTPException(400, f"{key} 必须是 {low}–{high} 之间的整数")
+        if key == "probe_node_name_template":
+            from ..services.node_classes import valid_name_template
+            if not valid_name_template(value):
+                raise HTTPException(400, "节点名模板须使用支持的占位符，最长 100 字")
+        if key == "probe_platform_ids":
+            from ..services.probes.registry import ALL_DETECTORS
+            ids = [item.strip() for item in value.split(",") if item.strip()]
+            if len(ids) != len(set(ids)) or set(ids) - ALL_DETECTORS.keys():
+                raise HTTPException(400, "平台列表含重复或未知项目")
         if key in BOOL_SETTINGS and value not in ("0", "1"):
             raise HTTPException(400, f"{key} 只能是 0 或 1")
         if key == "auto_build_interval_hours":

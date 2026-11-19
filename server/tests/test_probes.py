@@ -20,7 +20,7 @@ from app.services.probes import (
     STATE_ERROR,
     STATE_UNKNOWN,
     STATE_UNLOCKED,
-    STATE_UNSUPPORTED,
+    STATE_REACHABLE,
     classify,
     detect_platforms,
     detector_by_id,
@@ -228,90 +228,63 @@ def test_probe_result_to_dict():
 # ---------------------------------------------------------------- Netflix
 
 NETFLIX_TITLE = "https://www.netflix.com/title/81280792"
-NETFLIX_REGIONS = "https://www.netflix.com/regions"
+NETFLIX_ORIGINAL = "https://www.netflix.com/title/80057281"
 
 
-def test_netflix_full_library():
-    """标题页 isAvailable=true 且非自制剧 → 全库可用。"""
+def test_netflix_confirms_two_samples_but_not_playback():
     result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(200, text='{"isAvailable":true,"isOriginal":false,"countryCode":"US"}'),
-        NETFLIX_REGIONS: httpx.Response(200, text='{"country":"US","countryName":"United States"}'),
+        NETFLIX_TITLE: httpx.Response(200, text='{"isAvailable":true,"isOriginal":false}'),
+        NETFLIX_ORIGINAL: httpx.Response(200, text='{"isAvailable":true,"isOriginal":true,"countryCode":"US"}'),
     })
     assert result.state == STATE_UNLOCKED, result.detail
-    assert result.extra["full_library"] is True
-    assert result.extra["originals"] is True
+    assert result.extra["licensed_sample"] and result.extra["originals"]
+    assert result.extra["playback"] == "unverified"
     assert result.region == "US"
-    assert "全库" in result.detail
 
 
-def test_netflix_originals_only():
-    """标题页 isAvailable=true 但 isOriginal=true → 只能确认自制剧。"""
+def test_netflix_only_original_sample_confirmed():
     result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(200, text='{"isAvailable":true,"isOriginal":true}'),
-        NETFLIX_REGIONS: httpx.Response(200, text='{"country":"JP"}'),
+        NETFLIX_TITLE: httpx.Response(404),
+        NETFLIX_ORIGINAL: httpx.Response(200, text='{"isAvailable":true,"isOriginal":true,"countryCode":"JP"}'),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
-    assert result.extra["originals"] is True
-    assert result.extra["full_library"] is False
-    assert "仅自制剧" in result.detail
+    assert result.state == STATE_UNLOCKED
+    assert result.extra["originals"] and not result.extra["licensed_sample"]
+    assert result.extra["catalog"] == "originals_sample"
 
 
-def test_netflix_region_code_only():
-    """地区码要从标题页上下文取；/regions 是国家清单，不当地区码来源。"""
-    result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(200, text='{"isAvailable":true,"isOriginal":true,"countryCode":"HK"}'),
-        NETFLIX_REGIONS: httpx.Response(200, text='{"country":"AR"},{"country":"HK"}'),
-    })
-    assert result.region == "HK"
-
-
-def test_netflix_fully_blocked():
-    """标题页 403 且带地区特征 → 完全封锁。"""
+def test_netflix_both_samples_report_restriction():
     result = _probe(detector_by_id("netflix"), {
         NETFLIX_TITLE: httpx.Response(403, text="Not Available in your country"),
-        NETFLIX_REGIONS: httpx.Response(403, text="Not Available in your country"),
+        NETFLIX_ORIGINAL: httpx.Response(403, text="Not Available in your country"),
     })
-    assert result.state == STATE_BLOCKED, result.detail
-    assert "封锁" in result.detail
+    assert result.state == STATE_BLOCKED
+    assert result.extra["catalog"] == "blocked"
 
 
-def test_netflix_cloudflare_challenge_is_unknown():
-    """403 + Cloudflare 挑战 → unknown，不能当成封锁。"""
+def test_netflix_waf_header_is_unknown():
     result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(403, text="Just a moment... challenge-platform"),
-        NETFLIX_REGIONS: httpx.Response(403, text="Just a moment..."),
+        NETFLIX_TITLE: httpx.Response(403, headers={"cf-mitigated": "challenge"}),
     })
-    assert result.state == STATE_UNKNOWN, result.detail
+    assert result.state == STATE_UNKNOWN
+    assert result.extra["reason"] == "challenge"
 
 
-def test_netflix_trimmed_catalogue_is_originals_only():
-    """标题 404 但服务国家清单可达 → 目录被裁剪，仅自制剧。"""
+def test_netflix_homepage_without_catalog_evidence_is_unknown():
     result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(404, text=""),
-        NETFLIX_REGIONS: httpx.Response(200, text='{"country":"SG"}'),
+        NETFLIX_TITLE: httpx.Response(200, text="<html>Netflix</html>"),
+        NETFLIX_ORIGINAL: httpx.Response(200, text="<html>Netflix</html>"),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
-    assert result.extra["originals"] is True
-    assert result.extra["full_library"] is False
-
-
-def test_netflix_unreadable_flag_is_unknown():
-    """页面结构变了（读不出 isAvailable）→ unknown，不冒充解锁。"""
-    result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(200, text="<html>hello</html>"),
-        NETFLIX_REGIONS: httpx.Response(200, text='{"country":"US"}'),
-    })
-    assert result.state == STATE_UNKNOWN, result.detail
-    assert "isAvailable" in result.detail
+    assert result.state == STATE_UNKNOWN
+    assert result.extra["catalog"] == "unconfirmed"
 
 
 # ---------------------------------------------------------------- Disney+
 
-def test_disney_unlocked_with_region():
+def test_disney_reachable_with_region():
     result = _probe(detector_by_id("disney"), {
         "https://www.disneyplus.com/": httpx.Response(200, text='{"countryCode":"US"}'),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
     assert result.region == "US"
 
 
@@ -325,11 +298,11 @@ def test_disney_blocked_by_region_marker():
 
 # ---------------------------------------------------------------- HBO Max
 
-def test_max_unlocked():
+def test_max_reachable():
     result = _probe(detector_by_id("hbo"), {
         "https://play.max.com/": httpx.Response(200, text='{"countryCode":"US"}'),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
     assert result.region == "US"
     assert result.extra["main_site"] == "ok"
 
@@ -360,26 +333,31 @@ def test_max_bare_403_is_unknown():
 
 # ---------------------------------------------------------------- YouTube Premium
 
-def test_youtube_premium_unlocked_with_region():
+def test_youtube_premium_reachable_with_region():
     result = _probe(detector_by_id("youtube_premium"), {
         "https://www.youtube.com/premium": httpx.Response(200, text='{"countryCode":"US"}'),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
     assert result.region == "US"
     # 页面只给了一次 countryCode：不能确认 Premium 是否在该地区上架
     assert result.extra["premium_region_confirmed"] is False
     assert "未能确认" in result.detail
 
 
-def test_youtube_premium_region_confirmed_by_country_list():
-    """countryCode 出现两次以上 → 出现在可开通国家清单里。"""
-    body = '{"countryCode":"US","simpleText":"United States"},' \
-           '{"countryCode":"JP","simpleText":"Japan"},' \
-           '{"countryCode":"US"}'
+def test_youtube_premium_requires_explicit_eligibility():
+    endpoint = "https://www.youtube.com/premium"
+    duplicated_region = '{"countryCode":"US"},{"countryCode":"US"}'
     result = _probe(detector_by_id("youtube_premium"), {
-        "https://www.youtube.com/premium": httpx.Response(200, text=body),
+        endpoint: httpx.Response(200, text=duplicated_region),
     })
+    assert result.state == STATE_REACHABLE
+    assert result.extra["premium_region_confirmed"] is False
+    result = _probe(detector_by_id("youtube_premium"), {
+        endpoint: httpx.Response(200, text='{"countryCode":"US","isPremiumAvailableCountry":true}'),
+    })
+    assert result.state == STATE_UNLOCKED
     assert result.extra["premium_region_confirmed"] is True
+
 
 
 def test_youtube_premium_blocked():
@@ -392,31 +370,31 @@ def test_youtube_premium_blocked():
 
 # ---------------------------------------------------------------- TikTok
 
-def test_tiktok_unlocked_with_region():
+def test_tiktok_reachable_with_region():
     result = _probe(detector_by_id("tiktok"), {
         "https://www.tiktok.com/": httpx.Response(200, text='{"region":"US","countryCode":"US"}'),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
     assert result.region == "US"
     # 直播 / 创作者限制：无头请求拿不到 → unknown 并写明原因
     assert result.extra["live_status"] == "unknown"
     assert result.extra["creator_status"] == "unknown"
 
 
-def test_tiktok_blocked():
+def test_tiktok_bare_403_is_unknown():
     result = _probe(detector_by_id("tiktok"), {
         "https://www.tiktok.com/": httpx.Response(403, text=""),
     })
-    assert result.state == STATE_BLOCKED, result.detail
+    assert result.state == STATE_UNKNOWN, result.detail
 
 
 # ---------------------------------------------------------------- Spotify
 
-def test_spotify_unlocked_with_region():
+def test_spotify_reachable_with_region():
     result = _probe(detector_by_id("spotify"), {
         "https://www.spotify.com/": httpx.Response(200, text='{"country":"SE"}'),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
     assert result.region == "SE"
     assert result.extra["account_ip_match"] == "unknown"
 
@@ -431,11 +409,11 @@ def test_spotify_region_restricted():
 
 # ---------------------------------------------------------------- ChatGPT
 
-def test_chatgpt_unlocked():
+def test_chatgpt_reachable():
     result = _probe(detector_by_id("chatgpt"), {
         "https://chatgpt.com/": httpx.Response(200, text="<html>chatgpt</html>"),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
 
 
 def test_chatgpt_region_blocked():
@@ -475,11 +453,11 @@ def test_chatgpt_network_failure_is_error():
 
 # ---------------------------------------------------------------- Claude
 
-def test_claude_unlocked():
+def test_claude_reachable():
     result = _probe(detector_by_id("claude"), {
         "https://claude.ai/": httpx.Response(200, text="<html>claude</html>"),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
 
 
 def test_claude_region_blocked():
@@ -491,11 +469,11 @@ def test_claude_region_blocked():
 
 # ---------------------------------------------------------------- Prime Video
 
-def test_primevideo_unlocked():
+def test_primevideo_reachable():
     result = _probe(detector_by_id("primevideo"), {
         "https://www.primevideo.com/": httpx.Response(200, text='{"countryCode":"US"}'),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
     assert result.region == "US"
     assert result.extra["catalog"] == "unknown"
 
@@ -510,11 +488,11 @@ def test_primevideo_bare_403_is_unknown():
 
 # ---------------------------------------------------------------- Reddit
 
-def test_reddit_unlocked():
+def test_reddit_reachable():
     result = _probe(detector_by_id("reddit"), {
         "https://www.reddit.com/": httpx.Response(200, text="<html>reddit</html>"),
     })
-    assert result.state == STATE_UNLOCKED, result.detail
+    assert result.state == STATE_REACHABLE, result.detail
     assert result.extra["ip_blocked"] is False
 
 
@@ -596,10 +574,10 @@ def test_probes_package_does_not_import_unlock_check():
         assert not pattern.search(source), path.name
 
 
-def test_unsupported_state_used_for_missing_content():
-    """404 且平台声明为 unsupported → unsupported（不是 error）。"""
+def test_404_does_not_prove_service_unsupported():
+    """页面不存在不足以证明服务不支持。"""
     result = _probe(detector_by_id("wikipedia"), {
         "https://zh.wikipedia.org/w/api.php?action=query&meta=siteinfo&format=json":
             httpx.Response(404, text=""),
     })
-    assert result.state == STATE_UNSUPPORTED, result.detail
+    assert result.state == STATE_UNKNOWN, result.detail

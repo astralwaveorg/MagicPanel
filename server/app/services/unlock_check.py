@@ -245,6 +245,40 @@ def run_checks(exit_id: str = "panel", ids: list[str] | None = None,
     return entry
 
 
+# 管理页与旧门户分开保存，避免读取旧判定后展示为本次证据。
+PANEL_EVIDENCE_CACHE = "panel-evidence-v2"
+
+
+def run_panel_evidence(ids: list[str] | None = None) -> dict:
+    """服务器网络用与节点质量一致的判定口径，不启动代理核心。"""
+    from .probes import detect_platforms, detector_by_id, make_client_factory, ProbeResult
+    from .probes.route_evidence import ConnectionReader, RoutedDetector
+
+    checks = [check for check in CHECKS if not ids or check["id"] in ids]
+    aliases = {"biliintl": "bilibili_intl", "netflix_premium": "netflix"}
+    requested = list(dict.fromkeys(aliases.get(check["id"], check["id"]) for check in checks))
+    reader = ConnectionReader()
+    detectors = [RoutedDetector(d, reader) for pid in requested if (d := detector_by_id(pid))]
+    observed = {r.platform: r for r in detect_platforms(
+        detectors=detectors, client_factory=make_client_factory(),
+        max_workers=4, timeout=CHECK_TIMEOUT, retry=0)}
+    results = []
+    for check in checks:
+        pid = check["id"]
+        result = observed.get(aliases.get(pid, pid)) or ProbeResult(pid, "unknown", None)
+        item = {"id": pid, **result.to_dict()}
+        if pid == "netflix_premium":
+            confirmed = result.extra.get("licensed_sample") is True
+            if result.state == "unlocked" and not confirmed:
+                item["state"] = "unknown"
+            if confirmed:
+                item["detail"] = "非自制剧样本可见；未验证播放"
+        results.append(item)
+    entry = {"checked_at": int(time.time()), "exit": "panel", "results": results, "ip": exit_ip()}
+    _save_cache(PANEL_EVIDENCE_CACHE, entry, merge=bool(ids))
+    return entry
+
+
 def _load_all() -> dict:
     try:
         return json.loads(_CACHE_PATH.read_text())

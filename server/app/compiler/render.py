@@ -346,7 +346,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                   variant: dict | None = None,
                   normalize_nodes: bool = True,
                   resolved: dict | None = None,
-                  badge_lookup=None, perf_lookup=None) -> str:
+                  badge_lookup=None, perf_lookup=None, quality_reader=None,
+                  quality_badges=False, quality_groups=False) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
@@ -478,6 +479,14 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 f"节点来源“{src['name']}”设为内联下发，但没有可用节点"
                 "（尚未抓取，或全部被来源过滤正则/测速结果排除）")
 
+    local_proxies = [local_node_service.render_proxy(n, engine) for n in local_enabled.values()]
+    quality = (quality_reader(inline_nodes + fixed_nodes + local_proxies)
+               if quality_reader else {})
+    if quality_reader:
+        perf_lookup = quality.get
+        badge_lookup = (lambda name: quality.get(name, {}).get("badges", "")) if quality_badges else None
+    final_name = {}
+
     # 节点名称规范化（Sub-Store 风格）：机场来源的节点统一成
     # 「旗帜 地区 序号 [标签·来源]」的确定性格式。只作用于来源节点——
     # 本地节点是用户亲自维护的，命名保持权威不动（约束 17）。
@@ -500,6 +509,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                                                        perf_lookup=perf_lookup))
         dropped = {old for old, new in rename_map.items() if new is None}
         keep = {old: new for old, new in rename_map.items() if new is not None}
+        final_name = keep
         inline_nodes = [n for n in inline_nodes if n["name"] not in dropped]
         fixed_nodes = [n for n in fixed_nodes if n["name"] not in dropped]
         for n in inline_nodes + fixed_nodes:
@@ -511,8 +521,7 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                                 if p not in dropped]
 
     cfg["proxies"] = [_guard_proxy(engine)]
-    for node in local_enabled.values():
-        cfg["proxies"].append(local_node_service.render_proxy(node, engine))
+    cfg["proxies"].extend(local_proxies)
     all_fixed = {}
     for node in inline_nodes + fixed_nodes:
         previous = all_fixed.get(node['name'])
@@ -539,6 +548,17 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             cfg["proxy-groups"].append(
                 _group_entry(group, engine, names,
                              [s["name"] for s in sources], inline_names))
+
+    if quality_groups and engine == "mihomo" and quality:
+        usable = {entry["name"] for entry in cfg["proxies"]}
+        target_groups = cfg.setdefault("proxy-groups", [])
+        for label, badge in (("质量 · 达标节点", ""), ("质量 · AI 解锁", "🔓"),
+                             ("质量 · 流媒体解锁", "🎬"), ("质量 · Netflix 非自制剧样本", "📺")):
+            members = list(dict.fromkeys(final_name.get(name, name) for name, item in quality.items()
+                                         if item.get("qualified") and badge in item.get("badges", "")
+                                         and final_name.get(name, name) in usable))
+            if members and label not in usable and all(g["name"] != label for g in target_groups):
+                target_groups.append({"name": label, "type": "select", "proxies": members})
 
     # 本方案引用的规则来源：规则里的 RULE-SET ∪ DNS nameserver-policy 的
     # rule-set: 引用（约束 31 的三个 DNS 集合因此永不悬空）。

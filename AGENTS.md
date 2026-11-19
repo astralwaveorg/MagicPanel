@@ -15,6 +15,8 @@
 [Agent 交接提示词](docs/reference/Agent-交接提示词.md)，里面写清了架构、硬性约束、
 改配置的方式和发布流程，再动手。
 
+跨阶段工作由 Codex（GPT-6.2 Sol）负责需求分析、关键设计、评审和验收；通过 Agent Relay 将边界明确的开发、自测和运维交给 Claude Code（MiniMax-M3.1-Flash）。独立工作区或最小材料交接，遵循桥接授权。合并改动后按风险集中验证，再提交、推送和部署。
+
 **2026-11-17 Telegram/Claude 独立分流（向阳要求）**：新增可见 select 组 `✈️ Telegram`
 （默认 DIRECT，备选 日本软银01/02 节点直引、美国自建、默认代理）与 `🤖 Claude`
 （默认 美国自建NTT → 日本软银01/02 → 美国自动），排 sort 1/2；规则 anthropic/telegram/

@@ -4,23 +4,18 @@
       <div class="mp-page-head-row">
         <h2 class="mp-page-title">构建发布</h2>
         <div class="mp-btn-grid mp-page-head-actions">
-          <el-tooltip content="强制跑一轮：抓取上游、测速、创建新构建，再发布到目标环境" placement="bottom-end">
-            <el-button :loading="triggering" @click="runAutoNow" type="primary">立即发布</el-button>
+          <el-tooltip content="按自动任务设置更新来源、构建并发布到选定环境" placement="bottom-end">
+            <el-button :loading="triggering" @click="runAutoNow" type="primary">运行发布流程</el-button>
           </el-tooltip>
           <el-tooltip v-if="tab === 'builds'"
-                      content="只创建当前策略的不可变快照，不发布；发布在下面的表格里操作"
+                      content="校验当前配置并生成构建，不发布"
                       placement="bottom-end">
             <el-button :loading="building" @click="createBuild">创建构建</el-button>
-            <span v-if="capabilityCoverage && capabilityCoverage.missing"
-                  class="mp-toolbar-hint">
-              节点能力数据 {{ capabilityCoverage.covered }}/{{ capabilityCoverage.total }}
-              （还缺 {{ capabilityCoverage.missing }} 个，构建后自动补测；补测完成再构建一次即可把能力标记写进产物）
-            </span>
           </el-tooltip>
         </div>
       </div>
       <p class="mp-page-desc">
-        构建把当前策略固化为不可变快照并逐目标校验。构建有四种状态：已构建、测试中、生产中、已下线；同一时刻只有一个生产版本和一个测试版本。发布后客户端需下一次拉取才生效。
+        先构建并校验，再选择发布到测试或生产。设备下次更新订阅时获取新配置。
       </p>
     </div>
 
@@ -185,7 +180,7 @@
           {{ detail.note ? ` · ${detail.note}` : '' }}
         </p>
         <el-alert v-if="detail.verify_status !== 'success'" type="error" :closable="false"
-                  title="存在未通过的校验，不能发布" style="margin-bottom:12px" />
+                  title="校验未通过，无法发布" style="margin-bottom:12px" />
         <!-- 发布动作区：已构建 / 已下线给「发布测试」与「一键发布」 -->
         <div v-if="detail.status === 'BUILT' || detail.status === 'OFFLINE'" class="mp-drawer-actions">
           <el-button :disabled="detail.verify_status !== 'success' || !!busyId"
@@ -374,10 +369,7 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(() => {
-  load()
-  loadCapabilityCoverage()
-})
+onMounted(load)
 
 function onSelectionChange(selection) {
   selected.value = selection
@@ -431,9 +423,6 @@ async function createBuild() {
     } else {
       ElMessage.warning(`构建 #${build.id} 存在未通过的校验，请查看详情`)
     }
-    // 节点能力徽章在构建流程里写进产物名：构建后会自动补测缺失节点，
-    // 补测完成再构建一次，产物里的节点名才带上最新的能力标记
-    await loadCapabilityCoverage()
     openDetail(build)
   } catch (e) {
     error.value = e.message
@@ -441,14 +430,6 @@ async function createBuild() {
   } finally {
     building.value = false
   }
-}
-
-// 节点能力覆盖率：用于提示「补测完成后重新构建可让产物带上能力标记」
-const capabilityCoverage = ref(null)
-async function loadCapabilityCoverage() {
-  try {
-    capabilityCoverage.value = await api('/api/v1/unlock/capability-coverage')
-  } catch { capabilityCoverage.value = null }
 }
 
 function openDetail(build) {

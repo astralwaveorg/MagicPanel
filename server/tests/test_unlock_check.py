@@ -193,13 +193,12 @@ def test_node_rename_accepts_multi_badge():
     assert legacy["美国03 Hyper"] == "🇺🇸 [机场A] 美国 🔓 01"
 
 
-def test_build_uses_capability_badges(client, monkeypatch):
+def test_build_uses_capability_badges(client):
     """构建期用多维能力徽章重命名（检测 → 分类 → 重命名 → 产物）。"""
     import base64
-    import yaml
+    import time
     from conftest import auth_headers, setup_admin
     from test_api import make_policy
-    from app.services import unlock_check
 
     csrf = setup_admin(client)
     h = auth_headers(csrf)
@@ -216,12 +215,15 @@ def test_build_uses_capability_badges(client, monkeypatch):
         "mode": "inline"})
     assert r.status_code == 201, r.text
 
-    # 造缓存：AI 全解锁 + 流媒体全解锁 + Netflix 高级版
-    results = [{"id": i, "state": "unlocked", "status": 200, "region": "",
-                "latency_ms": 1, "detail": ""}
-               for i in unlock_check.AI_CHECK_IDS + unlock_check.STREAM_CHECK_IDS]
-    unlock_check._save_cache("US 01", {"checked_at": 1, "exit": "US 01",
-                                      "results": results, "ip": {}}, merge=False)
+    from app import db, security
+    from app.services import quality_funnel, scheduler
+    with db.connect() as conn:
+        cfg = quality_funnel._settings(conn)
+    key = security.derive_subkey(security.load_master_material(), purpose="node-quality")
+    node = scheduler._collect_probe_proxies()[0]
+    quality_funnel.save_results([quality_funnel.NodeQuality(
+        node["name"], stage="probed", badges="🔓🎬📺",
+        checked_at=int(time.time()), revision=quality_funnel._fingerprint(node, key, cfg))])
     client.put("/api/v1/settings", headers=h, json={"values": {
         "node_name_unlock_badge": "1"}})
 
@@ -229,7 +231,8 @@ def test_build_uses_capability_badges(client, monkeypatch):
     # 节点可能在顶层 proxies（inline）或 provider 快照（provider 模式）：
     # 两种下发路径都要带上能力徽章
     found = False
-    for name in build["results"]:
+    for name, result in build["results"].items():
+        assert result["ok"], result["errors"]
         content = client.get(
             f"/api/v1/builds/{build['id']}/artifact/{name}").json()["content"]
         if "🇺🇸 [原始机场] 美国 🔓🎬📺 01" in content:
