@@ -46,7 +46,7 @@ CHECKS = [
     {"id": "biliintl", "name": "Bilibili 海外版", "icon": "B", "category": "stream",
      "url": "https://www.bilibili.tv/"},
     {"id": "hbo", "name": "HBO Max", "icon": "▣", "category": "stream",
-     "url": "https://play.max.com/"},
+     "url": "https://www.hbomax.com/"},
     {"id": "tvbanywhere", "name": "TVBAnywhere", "icon": "T", "category": "region",
      "url": "https://www.tvbanywhere.com/"},
     {"id": "viu", "name": "Viu.com", "icon": "V", "category": "region",

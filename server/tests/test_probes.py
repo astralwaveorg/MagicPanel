@@ -293,12 +293,13 @@ def test_netflix_homepage_without_catalog_evidence_is_unknown():
 
 # ---------------------------------------------------------------- Disney+
 
-def test_disney_reachable_with_region():
+def test_disney_homepage_country_field_is_not_exit_evidence():
     result = _probe(detector_by_id("disney"), {
         "https://www.disneyplus.com/": httpx.Response(200, text='{"countryCode":"US"}'),
     })
     assert result.state == STATE_REACHABLE, result.detail
-    assert result.region == "US"
+    assert not result.region
+    assert result.extra["playback"] == "unverified"
 
 
 def test_disney_blocked_by_region_marker():
@@ -313,16 +314,17 @@ def test_disney_blocked_by_region_marker():
 
 def test_max_reachable():
     result = _probe(detector_by_id("hbo"), {
-        "https://play.max.com/": httpx.Response(200, text='{"countryCode":"US"}'),
+        "https://www.hbomax.com/": httpx.Response(200, text='{"countryCode":"US"}'),
     })
     assert result.state == STATE_REACHABLE, result.detail
-    assert result.region == "US"
+    assert not result.region
     assert result.extra["main_site"] == "ok"
+    assert result.extra["playback"] == "unverified"
 
 
 def test_max_blocked_by_region():
     result = _probe(detector_by_id("hbo"), {
-        "https://play.max.com/": httpx.Response(403, text="This title is not available in your region"),
+        "https://www.hbomax.com/": httpx.Response(403, text="This title is not available in your region"),
     })
     assert result.state == STATE_BLOCKED, result.detail
 
@@ -330,18 +332,21 @@ def test_max_blocked_by_region():
 def test_max_waf_is_unknown():
     """403 带 Cloudflare 特征 → 风控拦截，unknown 而不是 blocked。"""
     result = _probe(detector_by_id("hbo"), {
-        "https://play.max.com/": httpx.Response(403, text="Just a moment... cf-chl"),
+        "https://www.hbomax.com/": httpx.Response(403, headers={"cf-mitigated": "challenge"}),
     })
     assert result.state == STATE_UNKNOWN, result.detail
+    assert result.extra["main_site"] == "unknown"
     assert result.extra["risk_control"] is True
 
 
 def test_max_bare_403_is_unknown():
     """没有地区特征也没有风控特征的 403 → 无法判定，unknown。"""
     result = _probe(detector_by_id("hbo"), {
-        "https://play.max.com/": httpx.Response(403, text=""),
+        "https://www.hbomax.com/": httpx.Response(403, text=""),
     })
     assert result.state == STATE_UNKNOWN, result.detail
+    assert result.extra["main_site"] == "unknown"
+    assert result.extra["risk_control"] is None
 
 
 # ---------------------------------------------------------------- YouTube Premium

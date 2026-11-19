@@ -188,13 +188,14 @@ class NetflixDetector(Detector):
 
 
 class DisneyPlusDetector(_WebDetector):
-    """Disney+：读取网页证据和地区码；不推断播放权限。"""
+    """Disney+：区分网页响应和明确限制；首页的本地化目录不代表出口地区。"""
 
     platform_id = "disney"
     display_name = "Disney+"
     category = "streaming"
     body_limit = 1_200_000
     url = "https://www.disneyplus.com/"
+    region_patterns = ()
 
     markers = Markers(
         blocked_status=(403,),
@@ -204,6 +205,9 @@ class DisneyPlusDetector(_WebDetector):
                         "该国家或地区不可用"),
         block_requires_marker=False,
     )
+
+    def build_extra(self, resp: ProbeResponse) -> dict:
+        return {"playback": "unverified"}
 
 
 # =============================================================== 流媒体 · HBO Max
@@ -216,7 +220,8 @@ class MaxDetector(_WebDetector):
     display_name = "HBO Max"
     category = "streaming"
     body_limit = 1_200_000
-    url = "https://play.max.com/"
+    url = "https://www.hbomax.com/"
+    region_patterns = ()
 
     markers = Markers(
         blocked_status=(403,),
@@ -228,13 +233,15 @@ class MaxDetector(_WebDetector):
         block_requires_marker=True,
     )
 
-    def build_extra(self, resp: ProbeResponse) -> dict:
-        challenge = _has(resp.text, ("just a moment", "attention required", "cf-chl",
-                                     "challenge-platform"))
-        return {
-            "main_site": "ok" if resp.status == 200 else ("blocked" if resp.status == 403 else "unknown"),
-            "risk_control": True if challenge else (False if resp.status == 200 else None),
-        }
+    def probe(self, client: httpx.Client) -> ProbeResult:
+        result = super().probe(client)
+        result.extra.update(
+            main_site={STATE_REACHABLE: "ok", STATE_BLOCKED: "blocked"}.get(result.state, "unknown"),
+            risk_control=True if result.extra.get("reason") == "challenge" else
+                         (False if result.state == STATE_REACHABLE else None),
+            playback="unverified",
+        )
+        return result
 
 
 # =============================================================== 流媒体 · YouTube Premium
@@ -440,16 +447,19 @@ class RedditDetector(_WebDetector):
 # =============================================================== 流媒体 · 通用站点
 
 class HuluDetector(_WebDetector):
-    """Hulu：美国限定。403 为未上线地区的典型响应；正文含地区措辞时更明确。"""
+    """Hulu：区分公开首页和明确地区限制，首页不能证明账号可播放。"""
 
     platform_id = "hulu"
     display_name = "Hulu"
     category = "streaming"
     url = "https://www.hulu.com/"
+    region_patterns = ()
     markers = Markers(blocked_status=(403,), unsupported_status=(404,),
                        region_markers=("not available in your country", "not available in your region",
                                        "isn't available in your", "该国家或地区不可用"))
-    detail_blocked = "Hulu 在该出口不可用（美国限定）"
+
+    def build_extra(self, resp: ProbeResponse) -> dict:
+        return {"playback": "unverified"}
 
 
 class ParamountPlusDetector(_WebDetector):
