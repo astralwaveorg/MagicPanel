@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">规则来源</h2>
     <p class="mp-page-desc">
-      管理构建使用的规则集。同步后，设备可按设置更新。
+      管理分流规则使用的规则集。设备按各自的更新间隔下载。
     </p>
 
     <div class="mp-toolbar">

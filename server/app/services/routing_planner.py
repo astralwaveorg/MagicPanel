@@ -5,6 +5,23 @@ from .fingerprints import digest
 
 GOOGLE_TIERS = ('US', 'SG', 'JP')
 AI_SERVICES = ("chatgpt", "claude", "perplexity", "grok", "copilot")
+# 只改已存在的精确集合规则，保留国内规则和其它规则的首个命中顺序。
+SERVICE_RULES = {
+    "netflix": ("netflix", "🎞️ 国际影音"),
+    "primevideo": ("primevideo", "🎞️ 国际影音"),
+    "spotify": ("spotify", "🎞️ 国际影音"),
+    "twitch": ("twitch", "🎞️ 国际影音"),
+    "bbc": ("bbc", "🎞️ 国际影音"),
+    "biliintl": ("bilibili_intl", "🎞️ 国际影音"),
+    "openai": ("chatgpt", "🧠 人工智能"),
+    "anthropic": ("claude", "🤖 Claude"),
+    "perplexity": ("perplexity", "🧠 人工智能"),
+    "tiktok": ("tiktok", "🎵 TikTok"),
+}
+MEDIA_NAMES = {
+    "netflix": "Netflix", "primevideo": "Prime Video", "spotify": "Spotify",
+    "twitch": "Twitch", "bbc": "BBC", "bilibili_intl": "Bilibili 海外版",
+}
 
 
 def rank_ai(rows: list[dict]) -> list[str]:
@@ -52,7 +69,8 @@ def select_google_tier(rows: list[dict], exhaustion: list[dict], *, evaluation_a
 SERVICE_ALIAS_NAMES = {
     "claude": "Claude", "chatgpt": "ChatGPT", "gemini": "Gemini",
     "perplexity": "Perplexity", "grok": "Grok", "copilot": "Copilot",
-    "netflix": "Netflix", "tiktok": "TikTok", "youtube_premium": "YouTube Premium",
+    **MEDIA_NAMES, "tiktok": "TikTok", "youtube_premium": "YouTube Premium",
+    "disney": "Disney+", "hbo": "HBO Max",
 }
 
 
@@ -60,41 +78,35 @@ def verified_service_ids(row: dict, *, earliest: int, latest: int) -> list[str]:
     checked = row.get("checked_at")
     if not row.get("qualified") or type(checked) is not int or not earliest <= checked <= latest:
         return []
-    accepted = []
-    for pid in SERVICE_ALIAS_NAMES:
-        result = (row.get("probes") or {}).get(pid) or {}
-        extra = result.get("extra") or {}
-        status = result.get("status")
-        if (result.get("state") != "unlocked" or type(status) is not int or not 200 <= status < 300
-                or extra.get("reason") in {"challenge", "rate_limit", "unexplained_denial",
-                                           "ip_block", "region", "upstream", "page_response"}):
-            continue
-        if pid == "netflix" and (extra.get("catalog") != "licensed_sample" or not result.get("region")):
-            continue
-        accepted.append(pid)
-    return accepted
+    return [pid for pid in SERVICE_ALIAS_NAMES if _positive_result(row, pid)]
+
+
+def _positive_result(row: dict, pid: str) -> bool:
+    result = (row.get("probes") or {}).get(pid) or {}
+    extra = result.get("extra") or {}
+    status = result.get("status")
+    if (result.get("state") != "unlocked" or type(status) is not int or not 200 <= status < 300
+            or extra.get("reason") in {"challenge", "rate_limit", "unexplained_denial",
+                                       "ip_block", "region", "upstream", "page_response"}):
+        return False
+    return pid != "netflix" or (extra.get("catalog") == "licensed_sample" and bool(result.get("region")))
 
 
 def service_candidates(rows: list[dict], service: str, *, earliest: int,
-                       netflix_region: str = "JP") -> list[dict]:
-    """只为该业务选已确认且未过期的达标节点。网页响应、人机校验不入池。"""
-    if service != "netflix" and service not in AI_SERVICES:
+                       latest: int | None = None, netflix_region: str = "JP") -> list[dict]:
+    """候选与别名共用同一套正向判定。Netflix 选路要求确认日本片库。"""
+    if service not in SERVICE_ALIAS_NAMES:
         return []
     candidates = []
     for row in rows:
-        if not row.get("qualified") or not row.get("checked_at", 0) >= earliest:
+        checked = row.get("checked_at")
+        if (not row.get("qualified") or type(checked) is not int or checked < earliest
+                or (latest is not None and checked > latest) or not _positive_result(row, service)):
             continue
-        result = (row.get("probes") or {}).get(service) or {}
-        if result.get("state") != "unlocked":
+        result = row["probes"][service]
+        if service == "netflix" and result.get("region") != netflix_region:
             continue
-        extra = result.get("extra") or {}
-        if result.get("status") in (401, 403, 429, 451) or extra.get("reason") in {
-                "challenge", "rate_limit", "unexplained_denial", "ip_block", "region", "upstream"}:
-            continue
-        if service == "netflix":
-            if result.get("region") != netflix_region or extra.get("catalog") != "licensed_sample":
-                continue
-        preferred = (service != "netflix" and row.get("origin_kind") == "local"
+        preferred = (service in AI_SERVICES and row.get("origin_kind") == "local"
                      and row.get("country") in ("US", "JP"))
         candidates.append((not preferred, result.get("latency_ms") or row.get("delay_ms") or 10**9, row))
     return [row for _, _, row in sorted(candidates, key=lambda item: (

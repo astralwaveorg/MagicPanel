@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">设备管理</h2>
     <p class="mp-page-desc">
-      订阅地址泄露后，请更换令牌。旧地址立即失效；已下载的节点凭据需另行重置。
+      为每台设备分发配置。订阅地址泄露时可换发，旧地址会立即失效。
     </p>
 
     <div class="mp-toolbar">
@@ -362,7 +362,7 @@ async function reveal(row) {
 
 async function rotate(row) {
   if (!await confirmBox(
-    `轮换 “${row.display_name || row.name}” 的令牌？旧订阅地址立即失效，设备需改用新地址。`,
+    `轮换 “${row.display_name || row.name}” 的令牌？旧订阅地址立即失效，设备需改用新地址。已下载的节点凭据需另行更换。`,
     '轮换令牌', { type: 'warning', confirmButtonText: '轮换' },
   )) return
   try {

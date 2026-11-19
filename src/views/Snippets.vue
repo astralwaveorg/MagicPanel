@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">拓展模块</h2>
     <p class="mp-page-desc">
-      添加脚本、复写等配置。平台扩展可覆盖同名设置。
+      添加脚本、复写等配置。与平台设置同名时，以平台设置为准。
     </p>
 
     <div class="mp-toolbar">

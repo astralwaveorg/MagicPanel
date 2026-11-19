@@ -1,7 +1,7 @@
 <template>
   <div class="mp-artifact">
     <p class="mp-page-desc">
-      <strong>引擎默认配置</strong>提供基础值，<strong>引擎平台配置</strong>适配客户端平台，<strong>设备独立配置</strong>适配单台设备。没有单独设置的项沿用上一层。
+      <strong>引擎默认配置</strong>提供基础值，<strong>引擎平台配置</strong>适配客户端平台，<strong>设备独立配置</strong>适配单台设备。没单独设置的项目沿用上一层。
     </p>
 
     <!-- 手机：作用域改用下拉选择，左侧长列表在窄屏太占版面 -->

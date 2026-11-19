@@ -361,12 +361,19 @@ def _normalize_result(result: object, platform_id: str) -> ProbeResult:
 
 
 def _run_detector(detector: Detector, client_factory: Callable[[float], httpx.Client],
-                  timeout: float, retry: int) -> ProbeResult:
+                  timeout: float, retry: int, deadline: float | None = None) -> ProbeResult:
     """跑一个探测器：失败隔离 + 重试。"""
     started = time.monotonic()
     last: ProbeResult | None = None
     for attempt in range(max(0, retry) + 1):
         eff_timeout = min(float(getattr(detector, "timeout", None) or timeout), timeout)
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.25:
+                return last or ProbeResult(detector.platform_id, STATE_UNKNOWN, None,
+                                           detail="本轮时间已用完，等待复测",
+                                           extra={"reason": "budget"})
+            eff_timeout = min(remaining, eff_timeout)
         try:
             client = client_factory(eff_timeout)
         except Exception as exc:  # 客户端都建不出来，后面就不用试了
@@ -424,7 +431,8 @@ def detect_platforms(ids: Sequence[str] | None = None,
                       retry: int = DEFAULT_RETRY,
                       *,
                       max_workers: int = DEFAULT_MAX_WORKERS,
-                      detectors: Sequence[Detector] | None = None) -> list[ProbeResult]:
+                      detectors: Sequence[Detector] | None = None,
+                      deadline: float | None = None) -> list[ProbeResult]:
     """并发执行一批平台探测。
 
     * ``ids`` 为 None 时跑全部平台；未知 id 直接忽略（不报错，便于前端传旧缓存里的 id）。
@@ -448,7 +456,7 @@ def detect_platforms(ids: Sequence[str] | None = None,
     workers = max(1, min(max_workers, len(detectors)))
     results: list[ProbeResult] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_run_detector, d, factory, timeout, retry) for d in detectors]
+        futures = [pool.submit(_run_detector, d, factory, timeout, retry, deadline) for d in detectors]
         for future in futures:
             results.append(future.result())
     return results

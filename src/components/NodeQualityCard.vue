@@ -1,12 +1,12 @@
 <template>
   <section class="mp-card">
-    <h3>节点质量</h3>
+    <h3>节点测速与解锁</h3>
     <p class="mp-form-hint">
       从服务器测速。延迟低于 {{ thresholds.delay_ms }} ms、下载达到 {{ speedText(thresholds.speed_bps) }} 的节点才检测 AI 和流媒体。
     </p>
     <el-collapse v-if="quality.routing_candidates">
       <el-collapse-item title="分流候选" name="routing-candidates">
-        <p class="mp-form-hint">只列有近期通过记录的节点。这里的结果不会自动改变分流。</p>
+        <p class="mp-form-hint">只列有近期通过记录的节点。在发布新配置前，可在这里核对候选。</p>
         <dl class="quality-details">
           <template v-for="(pool, id) in quality.routing_candidates" :key="id">
             <dt>{{ id === 'netflix' ? 'Netflix 日本 · 非自制剧样本' : (quality.platforms?.[id] || id) }}</dt>
@@ -84,10 +84,6 @@
           <el-select v-model="draft.probe_platform_ids" multiple filterable clearable collapse-tags placeholder="留空检测全部平台">
             <el-option v-for="(name, id) in quality.platforms" :key="id" :label="name" :value="id" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="在 Mihomo 构建中加入质量分组">
-          <el-switch v-model="draft.probe_build_groups" active-value="1" inactive-value="0" />
-          <p class="mp-form-hint">下次构建时生效。现有分流规则不变。</p>
         </el-form-item>
         <el-form-item label="构建时生成服务别名">
           <el-switch v-model="draft.probe_build_aliases" active-value="1" inactive-value="0" />

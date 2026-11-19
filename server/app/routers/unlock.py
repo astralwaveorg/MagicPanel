@@ -42,8 +42,7 @@ def quality(user=CurrentUser):
         auto = db.get_setting(conn, "probe_funnel_enabled", "0") == "1"
         scheduler_on = db.get_setting(conn, "scheduler_enabled", "1") == "1"
         config = quality_funnel._settings(conn)
-        build_groups = db.get_setting(conn, "probe_build_groups", "0")
-        build_aliases = db.get_setting(conn, "probe_build_aliases", "0")
+        build_aliases = db.get_setting(conn, "probe_build_aliases", "1")
         labels = _regional_labels(conn, candidates)
         catalog = node_catalog.list_active_nodes(conn)
     origins = {r["emit_name"]: r for r in catalog if r["enabled"] and r["origin_kind"] == "local"}
@@ -53,10 +52,11 @@ def quality(user=CurrentUser):
         region = node_rename.detect_region(origin["raw_name"]) if origin else None
         annotated.append({**row, "origin_kind": "local" if origin else "source",
                           "country": {"🇺🇸": "US", "🇯🇵": "JP"}.get(region[0]) if region else None})
-    earliest = int(time.time()) - config["refresh_seconds"]
+    now = int(time.time())
+    earliest = now - config["refresh_seconds"]
     services = {}
-    for service in ("netflix", *routing_planner.AI_SERVICES):
-        pool = routing_planner.service_candidates(annotated, service, earliest=earliest)
+    for service in (*routing_planner.MEDIA_NAMES, *routing_planner.AI_SERVICES):
+        pool = routing_planner.service_candidates(annotated, service, earliest=earliest, latest=now)
         services[service] = {"count": len(pool), "nodes": [labels[item["name"]] for item in pool[:8]]}
     return {"items": [{**row, "name": labels[row["name"]]} for row in rows], "counts": dict(Counter(r["stage"] for r in rows)),
             "routing_candidates": services,
@@ -73,7 +73,6 @@ def quality(user=CurrentUser):
                 "probe_retry": config["retry"],
                 "probe_refresh_hours": config["refresh_seconds"] // 3600,
                 "probe_platform_ids": config["platform_ids"],
-                "probe_build_groups": build_groups,
                 "probe_build_aliases": build_aliases,
             },
             "platforms": {pid: item.display_name for pid, item in ALL_DETECTORS.items()}}

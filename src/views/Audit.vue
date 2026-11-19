@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">审计日志</h2>
-    <p class="mp-page-desc">查看操作和设备下载记录。订阅地址、令牌和节点凭据已隐藏。</p>
+    <p class="mp-page-desc">查看操作记录和设备拉取记录。</p>
 
     <div class="mp-toolbar" style="margin-bottom:12px">
       <div class="mp-btn-grid mp-toolbar-actions">

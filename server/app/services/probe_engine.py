@@ -264,13 +264,13 @@ class NodeEngine:
         elapsed = max(time.monotonic() - started, 0.001)
         return total / elapsed if total == size_bytes else 0.0
 
-    def probe_via_local(self, detectors, timeout: float, *, workers: int, retry: int) -> dict:
+    def probe_via_local(self, detectors, timeout: float, *, workers: int, retry: int, deadline: float | None = None) -> dict:
         """同一个节点的探测结束后才允许切换出口。"""
         from .probes import base as probe_base
 
         results = probe_base.detect_platforms(
             detectors=detectors, client_factory=probe_base.make_client_factory(self.proxy_url()),
-            timeout=timeout, retry=retry, max_workers=workers)
+            timeout=timeout, retry=retry, max_workers=workers, deadline=deadline)
         return {r.platform: r.to_dict() for r in results}
 
 

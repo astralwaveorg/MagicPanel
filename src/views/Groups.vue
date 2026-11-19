@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      管理当前方案的策略组。拖动可调整显示顺序。空组会使用占位节点，防止客户端改走直连。
+      为规则设置可用线路。拖动调整组的显示顺序。没有可用成员的组不会改走直连。
     </p>
 
     <VariantBar page="groups" v-model="variantId" @changed="onVariantsChanged" />
@@ -203,14 +203,14 @@
           <ScopeSelect v-model="form.targets" all-label="包含所有引擎平台"
                        :options="targetNames" />
           <div class="mp-form-hint">
-            仅在所选平台下发这个组及引用它的规则。
+            组和引用它的规则只发给所选平台。
           </div>
         </el-form-item>
         <el-form-item label="适用设备">
           <ScopeSelect v-model="form.devices" all-label="包含所有设备"
                        :options="deviceNames" />
           <div class="mp-form-hint">
-            只向选中的设备下发这个组。
+            只发给所选设备。
           </div>
         </el-form-item>
         <el-form-item label="本地节点">
@@ -225,7 +225,7 @@
           <SortableSelection v-model="selectedLocal" label="本地节点顺序" />
           <div v-if="selectedLocal.length" class="mp-form-hint">
             <el-button link type="primary" @click="pinLocalFirst">本地节点置顶</el-button>
-            <span>此处调整会同步到策略成员。</span>
+            <span>调整后，上面的成员顺序也会更新。</span>
           </div>
         </el-form-item>
         <template v-if="form.type !== 'relay'">
@@ -235,7 +235,7 @@
             <SortableSelection v-if="!hasAllScope(form.use_sources) && form.use_sources.length < sourceNames.length"
                                v-model="form.use_sources" label="节点来源顺序" />
             <div class="mp-form-hint">
-              「包含所有来源」会纳入新增来源。来源排序适用于订阅下发，内联节点按名称排列。
+              选「包含所有来源」后，新增来源会自动加入。此处顺序只影响按订阅下发的来源。
             </div>
           </el-form-item>
           <el-form-item label="节点筛选（正则，可选）">

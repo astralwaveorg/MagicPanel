@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">系统概览</h2>
     <p class="mp-page-desc">
-      查看当前发布版本、节点来源和设备更新状态。
+      查看发布版本、订阅更新和设备拉取情况。
     </p>
 
     <ErrorState v-if="error" :error="error" @retry="load" />

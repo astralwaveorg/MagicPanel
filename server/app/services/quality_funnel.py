@@ -113,9 +113,11 @@ def _checked_at(item: dict) -> int:
 def _matching_results(proxies, results, cfg, key):
     if not results:
         return {}
-    earliest = int(time.time()) - cfg["refresh_seconds"] - FAILED_RECHECK_SECONDS
+    now = int(time.time())
+    earliest = now - cfg["refresh_seconds"] - FAILED_RECHECK_SECONDS
     return {p["name"]: old for p in proxies
             if (old := results.get(p.get("name"))) and _checked_at(old) >= earliest
+            and _checked_at(old) <= now
             and old.get("revision") == _fingerprint(p, key, cfg)}
 
 
@@ -151,6 +153,8 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
         age = now - _checked_at(old)
         if only_missing:
             interval = cfg["refresh_seconds"] if old.get("stage") in ("probed", "unsupported") else FAILED_RECHECK_SECONDS
+            if old.get("reason") == "部分平台等待复测":
+                interval = FAILED_RECHECK_SECONDS
             if old.get("revision") == revision and 0 <= age < interval:
                 continue
         pending.append(proxy)
@@ -243,8 +247,12 @@ def _measure_nodes(engine, candidates, cfg, detectors, revisions, results, stats
             continue
         # 三级：解锁矩阵
         probes = engine.probe_via_local(detectors, cfg["timeout"],
-                                       workers=cfg["concurrency"], retry=cfg["retry"])
+                                       workers=cfg["concurrency"], retry=cfg["retry"],
+                                       deadline=min(deadline, time.monotonic() + 110))
         quality.probes = probes
+        if any((probe.get("extra") or {}).get("reason") == "budget" for probe in probes.values()):
+            quality.reason = "部分平台等待复测"
+            stats["partial"] = stats.get("partial", 0) + 1
         quality.stage = "probed"
         quality.badges = badges_from_probes(probes)
         quality.region = region_from_probes(probes)

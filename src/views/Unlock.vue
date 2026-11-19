@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2 class="mp-page-title">网络体检</h2>
-    <p class="mp-page-desc">当前网络测网页响应；服务器网络还查访问限制和出口。</p>
+    <p class="mp-page-desc">查看当前网络和服务器网络能访问哪些服务。</p>
 
     <div class="mp-card">
       <div class="unlock-toolbar">
@@ -23,7 +23,7 @@
             </span>
           </div>
           <p v-if="group.checkedAt || group.ip.ip" class="unlock-meta">
-            <span v-if="group.ip.ip">查询出口 {{ maskIp(group.ip.ip) }} {{ group.ip.country }}</span>
+            <span v-if="group.ip.ip">参考出口 {{ maskIp(group.ip.ip) }} {{ group.ip.country }}</span>
             <span v-if="group.checkedAt">检测于 {{ fmtTime(group.checkedAt) }}</span>
           </p>
         </div>
@@ -54,6 +54,9 @@
             <template #default="{ row }">
               <StatusDot :kind="browserKind(row.id)" :text="browserLabel(row.id)" />
               <span class="unlock-cell-sub">{{ browserLatency(row.id) }}</span>
+              <div v-if="browserMap[row.id]" class="unlock-route" :title="browserMap[row.id]?.route?.domain">
+                {{ browserRouteLabel(row.id) }}
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="服务器网络" min-width="190">
@@ -141,11 +144,16 @@ function serverSub(id) {
     serverStateOf(id) === 'challenge' ? '' : r.detail].filter(Boolean).join(' · ')
 }
 
+function browserRouteLabel(id) {
+  const route = browserMap.value[id]?.route
+  return route?.ip ? `域名出口：${route.ip}${route.country ? ' · ' + route.country : ''}` : '未取得服务出口'
+}
+
 function routeLabel(id) {
   const route = serverMap.value[id]?.extra?.route
   if (route?.source === 'router_connection' && route.node) return `实际节点：${route.node}`
   if (route?.source === 'domain_trace' && route.ip) return `域名出口：${route.ip}${route.country ? ' · ' + route.country : ''}`
-  return '未获取服务出口'
+  return '未取得服务出口'
 }
 function routeTitle(id) {
   const route = serverMap.value[id]?.extra?.route
@@ -247,6 +255,7 @@ async function copyResults() {
   for (const c of catalog.value) {
     lines.push(`${c.name}：当前网络 ${browserLabel(c.id)}｜服务器网络 ${serverLabel(c.id)}`
       + `${serverSub(c.id) ? '（' + serverSub(c.id) + '）' : ''}`
+      + (browserMap.value[c.id] ? '｜当前网络 ' + browserRouteLabel(c.id) : '')
       + (serverMap.value[c.id] ? '｜' + routeLabel(c.id) : ''))
   }
   try {

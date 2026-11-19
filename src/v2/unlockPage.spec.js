@@ -56,7 +56,7 @@ test('页面挂载后渲染两网络环境对照表与分类（非空白）', as
   expect(wrapper.text()).toContain('检测当前网络')
   // 未测状态可见
   expect(wrapper.text()).toContain('未测')
-  expect(wrapper.text()).toContain('节点质量')
+  expect(wrapper.text()).toContain('节点测速与解锁')
   expect(wrapper.text()).toContain('测试线路')
   expect(wrapper.text()).toContain('导出达标节点')
 })

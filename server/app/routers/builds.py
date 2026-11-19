@@ -236,13 +236,25 @@ def _alias_snapshot(conn) -> dict:
     from ..services import quality_funnel, routing_planner
     now = int(time.time())
     cutoff = now - quality_funnel._settings(conn)["refresh_seconds"]
+    catalog = {node["emit_name"]: node for node in node_rename.regional_catalog(conn)
+               if not node.get("retired")}
     evidence = {}
     for name, row in quality_funnel.load_results().get("nodes", {}).items():
         if not isinstance(row, dict) or not row.get("revision"):
             continue
         services = routing_planner.verified_service_ids(row, earliest=cutoff, latest=now)
         if services:
-            evidence[name] = {"revision": row["revision"], "services": services}
+            node = catalog.get(name)
+            flag, _ = node_rename.regional_region((node or {}).get("raw_name") or name)
+            local = bool(node and node.get("source_id") is None)
+            probes = row.get("probes") or {}
+            evidence[name] = {
+                "revision": row["revision"], "services": services,
+                "preferred_ai": local and flag in ("🇺🇸", "🇯🇵"),
+                "regions": {pid: probes[pid].get("region") for pid in services},
+                "latencies": {pid: probes[pid].get("latency_ms") or row.get("delay_ms") or 10**9
+                              for pid in services},
+            }
     return evidence
 
 
@@ -251,7 +263,7 @@ def current_policy(conn) -> tuple[dict, str]:
     snapshot = collect_snapshot(conn, regional=regional)
     if regional:
         snapshot["regional_catalog"] = node_rename.regional_catalog(conn)
-        if db.get_setting(conn, "probe_build_aliases", "0") == "1":
+        if db.get_setting(conn, "probe_build_aliases", "1") == "1":
             snapshot["service_aliases"] = _alias_snapshot(conn)
     policy_sha = security.sha256_text(
         json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
@@ -364,9 +376,6 @@ def create_build(operator: str, note: str = "",
     with db.connect() as _conn:
         normalize_nodes = db.get_setting(_conn, "node_name_normalize", "1") == "1"
         unlock_badge = db.get_setting(_conn, "node_name_unlock_badge", "0") == "1"
-        quality_groups = db.get_setting(_conn, "probe_build_groups", "0") == "1"
-        service_evidence_cutoff = (int(time.time()) - quality_funnel._settings(_conn)["refresh_seconds"]
-                                   if quality_groups else None)
     # 同一方案的 resolve 只做一次：plan 按 variant 展开（T + D 个产物/方案），
     # 原来每个产物都全量解析一遍引用图（2026-11-18 构建性能）
     resolved_by_variant: dict[int, dict] = {}
@@ -403,9 +412,7 @@ def create_build(operator: str, note: str = "",
                                             resolved=resolved,
                                             quality_reader=quality_reader,
                                             quality_badges=unlock_badge,
-                                            quality_groups=quality_groups,
-                                            regional_plan=regional_plan,
-                                            service_evidence_cutoff=service_evidence_cutoff)
+                                            regional_plan=regional_plan)
                 errors.extend(validate.validate_rendered(text, target["engine"]))
             except Exception as exc:  # 渲染异常归为构建失败，不中断其他目标
                 errors.append(f"渲染失败：{exc}")

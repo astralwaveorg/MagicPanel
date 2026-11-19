@@ -1,7 +1,7 @@
 <template>
   <div>
     <p class="mp-page-desc">
-      为不同客户端生成配置。平台扩展用于设置该平台特有的参数。
+      选择客户端平台，按需补充该平台的专用设置。
     </p>
 
     <div class="mp-toolbar">

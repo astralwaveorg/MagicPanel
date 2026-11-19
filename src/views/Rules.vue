@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">分流策略</h2>
     <p class="mp-page-desc">
-      规则按顺序匹配，第一条命中即生效。MATCH 放最后。调整后请重新构建并发布。
+      按列表顺序匹配，命中第一条就停止。修改后重新构建并发布。
     </p>
 
     <VariantBar page="rules" v-model="variantId" @changed="onVariantsChanged" />

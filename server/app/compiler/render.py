@@ -343,14 +343,92 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
     return groups, rules
 
 
+def _apply_service_groups(cfg, rules, evidence, quality, final_name):
+    """只引用有权分发的节点。现有服务规则原位换组，保留直连和首个命中。"""
+    materials = {p["name"]: p for p in cfg["proxies"] if p["name"] != config.GUARD_PROXY}
+    groups = cfg.setdefault("proxy-groups", [])
+    by_name = {g["name"]: g for g in groups}
+    used = set(materials) | set(by_name) | set(config.BUILTIN_TARGETS) | {config.GUARD_PROXY}
+    eligible = {name: item for name, item in evidence.items()
+                if name in final_name and quality.get(name, {}).get("revision") == item["revision"]
+                and final_name[name] in materials}
+    aliases = {}
+    for pid, service in routing_planner.SERVICE_ALIAS_NAMES.items():
+        members = {}
+        for original, proof in sorted(eligible.items()):
+            if pid not in proof["services"]:
+                continue
+            base = final_name[original]
+            label = f"{base} - {service}"
+            if label in used:
+                continue
+            cfg["proxies"].append({**materials[base], "name": label})
+            used.add(label)
+            members[original] = label
+        if members:
+            aliases[pid] = members
+
+    routed = set()
+    updated = []
+    for rule in rules:
+        domain_set = str(rule.get("value", "")).lower()
+        service = routing_planner.SERVICE_RULES.get(domain_set) if rule["type"] == "RULE-SET" else None
+        if not service or rule["target"] != service[1] or rule["target"] not in by_name:
+            updated.append(rule)
+            continue
+        pid, previous = service
+        eligible_names = [name for name in aliases.get(pid, {})
+                          if pid != "netflix" or eligible[name].get("regions", {}).get(pid) == "JP"]
+        eligible_names.sort(key=lambda name: (
+            pid in routing_planner.AI_SERVICES and not eligible[name].get("preferred_ai"),
+            eligible[name].get("latencies", {}).get(pid, 10**9), final_name[name]))
+        nodes = [aliases[pid][name] for name in eligible_names]
+        # 已有独立分流只有确认通过才调整。通用影音可以先拆开，仍沿用原线路。
+        if not nodes and pid not in routing_planner.MEDIA_NAMES:
+            updated.append(rule)
+            continue
+        # 已有 Claude/TikTok 专组，保留客户端的原组名和规则目标。
+        if previous in {"🤖 Claude", "🎵 TikTok"}:
+            entry = by_name[previous]
+            entry.pop("use", None)
+            entry.pop("filter", None)
+            entry["proxies"] = nodes
+            if len(nodes) > 1:
+                entry.update(type="fallback", url=config.HEALTH_CHECK_URL, interval=600)
+            routed.add(pid)
+            updated.append(rule)
+            continue
+        label = "Netflix 日本" if pid == "netflix" and nodes else routing_planner.SERVICE_ALIAS_NAMES[pid]
+        if label in used:
+            updated.append(rule)
+            continue
+        fallbacks = [ref for ref in by_name[previous].get("proxies", [])
+                     if ref in used and ref not in config.BUILTIN_TARGETS and ref != config.GUARD_PROXY]
+        group = {"name": label, "type": "select", "proxies": nodes or [previous, *fallbacks]}
+        if len(nodes) > 1:
+            group.update(type="fallback", url=config.HEALTH_CHECK_URL, interval=600)
+        groups.append(group)
+        used.add(label)
+        routed.add(pid)
+        updated.append({**rule, "target": label})
+    # 没有独立规则的服务仍可以手选，菜单中不重复创建已经参与分流的服务。
+    for pid, members in aliases.items():
+        label = f"已验证 · {routing_planner.SERVICE_ALIAS_NAMES[pid]}"
+        if pid not in routed and label not in used:
+            groups.append({"name": label, "type": "select", "proxies": sorted(members.values())})
+            used.add(label)
+    if not groups:
+        cfg.pop("proxy-groups", None)
+    return updated
+
+
 def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                   device: dict | None = None,
                   variant: dict | None = None,
                   normalize_nodes: bool = True,
                   resolved: dict | None = None,
                   badge_lookup=None, perf_lookup=None, quality_reader=None,
-                  quality_badges=False, quality_groups=False, regional_plan=None,
-                  service_evidence_cutoff=None) -> str:
+                  quality_badges=False, regional_plan=None) -> str:
     """渲染单个目标的完整配置文本。
 
     device 为空 = 该引擎平台的共享产物（设备专属条目不进入）；
@@ -638,50 +716,9 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 _group_entry(group, engine, names,
                              [s["name"] for s in sources], inline_names, filter_names))
 
-    if regional_plan is not None and snapshot.get("service_aliases"):
-        # 只复制当前产物已经有权分发的节点，代理参数与前置链不变。
-        aliases = snapshot["service_aliases"]
-        eligible = {name: evidence for name, evidence in aliases.items()
-                    if (item := quality.get(name)) and item.get("revision") == evidence["revision"]
-                    and name in final_name}
-        materials = {p["name"]: p for p in cfg["proxies"] if p["name"] != config.GUARD_PROXY}
-        target_groups = cfg.setdefault("proxy-groups", [])
-        used = set(materials) | {g["name"] for g in target_groups}
-        used |= set(config.BUILTIN_TARGETS) | {config.GUARD_PROXY}
-        for pid, service in routing_planner.SERVICE_ALIAS_NAMES.items():
-            members = []
-            for base in sorted({final_name[name] for name, evidence in eligible.items()
-                                if pid in evidence["services"]}):
-                alias = f"{base} - {service}"
-                if base not in materials or alias in used:
-                    continue
-                cfg["proxies"].append({**materials[base], "name": alias})
-                used.add(alias)
-                members.append(alias)
-            label = f"已验证 · {service}"
-            if members and label not in used:
-                target_groups.append({"name": label, "type": "select", "proxies": members})
-                used.add(label)
-
-    if quality_groups and engine == "mihomo" and quality:
-        usable = {entry["name"] for entry in cfg["proxies"]}
-        target_groups = cfg.setdefault("proxy-groups", [])
-        for label, badge in (("质量 · 达标节点", ""), ("质量 · AI 解锁", "🔓"),
-                             ("质量 · 流媒体解锁", "🎬"), ("质量 · Netflix 非自制剧样本", "📺")):
-            members = list(dict.fromkeys(final_name.get(name, name) for name, item in quality.items()
-                                         if item.get("qualified") and badge in item.get("badges", "")
-                                         and final_name.get(name, name) in usable))
-            if members and label not in usable and all(g["name"] != label for g in target_groups):
-                target_groups.append({"name": label, "type": "select", "proxies": members})
-        if service_evidence_cutoff is not None:
-            label = "Netflix 日本 · 非自制剧样本"
-            candidates = routing_planner.service_candidates(
-                list(quality.values()), "netflix", earliest=service_evidence_cutoff)
-            members = list(dict.fromkeys(
-                final_name.get(item["name"], item["name"]) for item in candidates
-                if final_name.get(item["name"], item["name"]) in usable))
-            if members and label not in usable and all(g["name"] != label for g in target_groups):
-                target_groups.append({"name": label, "type": "select", "proxies": members})
+    if regional_plan is not None:
+        rules = _apply_service_groups(cfg, rules, snapshot.get("service_aliases") or {},
+                                      quality, final_name)
 
     # 本方案引用的规则来源：规则里的 RULE-SET ∪ DNS nameserver-policy 的
     # rule-set: 引用（约束 31 的三个 DNS 集合因此永不悬空）。

@@ -18,7 +18,7 @@
         </div>
       </div>
       <p class="mp-page-desc">
-        校验通过后可发布。设备下次更新订阅时使用新配置。
+        先构建并校验，再发布。设备更新订阅后生效。
       </p>
     </div>
 
@@ -147,7 +147,7 @@
         </div>
 
         <div class="mp-card">
-          <h3>发布历史（最近 10 条）</h3>
+          <h3>最近 10 条发布记录</h3>
           <EmptyState v-if="!error && !releases.length" reason="还没有发布记录。" />
           <div v-else class="mp-table-wrap">
             <el-table :data="releases" size="small">

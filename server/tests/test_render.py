@@ -149,3 +149,32 @@ def test_service_aliases_copy_only_scoped_nodes_with_matching_revisions():
         assert cfg["proxy-groups"][0]["proxies"] == ["JP first", "JP second"]
         assert "JP second - Gemini" not in proxies
         assert "US private - TikTok" not in proxies
+
+
+def test_service_groups_split_media_in_place_and_require_jp_netflix_evidence():
+    from app.compiler import render
+
+    rows = [
+        {"type": "RULE-SET", "value": "cn", "target": "DIRECT"},
+        {"type": "RULE-SET", "value": "netflix", "target": "🎞️ 国际影音"},
+        {"type": "RULE-SET", "value": "spotify", "target": "🎞️ 国际影音"},
+        {"type": "RULE-SET", "value": "anthropic", "target": "🤖 Claude"},
+        {"type": "MATCH", "value": "", "target": "🚀 默认代理"},
+    ]
+    groups = [{"name": name} for name in ("🎞️ 国际影音", "🤖 Claude")]
+    cfg = {"proxies": [{"name": name, "type": "ss"} for name in ("日本 01", "美国 01", "日本 02")],
+           "proxy-groups": groups}
+    evidence = {
+        "jp": {"revision": "now", "services": ["netflix"], "regions": {"netflix": "JP"}},
+        "us": {"revision": "now", "services": ["netflix"], "regions": {"netflix": "US"}},
+        "stale": {"revision": "old", "services": ["claude"]},
+    }
+    rules = render._apply_service_groups(
+        cfg, rows, evidence, {name: {"revision": "now"} for name in evidence},
+        {"jp": "日本 01", "us": "美国 01", "stale": "日本 02"})
+    assert [r["target"] for r in rules] == [
+        "DIRECT", "Netflix 日本", "Spotify", "🤖 Claude", "🚀 默认代理"]
+    assert [r["value"] for r in rules] == [r["value"] for r in rows]
+    assert groups[-2]["proxies"] == ["日本 01 - Netflix"]
+    assert groups[-1]["proxies"] == ["🎞️ 国际影音"]
+    assert "日本 02 - Claude" not in {p["name"] for p in cfg["proxies"]}

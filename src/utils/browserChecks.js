@@ -3,13 +3,13 @@ export const BROWSER_CHECKS = [
   // ai
   { id: 'gemini', name: 'Google Gemini', icon: '✦', category: 'ai',
     url: 'https://gemini.google.com/favicon.ico', site: 'https://gemini.google.com/' },
-  { id: 'chatgpt', name: 'ChatGPT', icon: '◎', category: 'ai',
+  { id: 'chatgpt', trace: true, name: 'ChatGPT', icon: '◎', category: 'ai',
     url: 'https://chatgpt.com/favicon.ico', site: 'https://chatgpt.com/' },
-  { id: 'claude', name: 'Claude', icon: '✳', category: 'ai',
+  { id: 'claude', trace: true, name: 'Claude', icon: '✳', category: 'ai',
     url: 'https://claude.ai/favicon.ico', site: 'https://claude.ai/' },
-  { id: 'grok', name: 'Grok', icon: '𝕏', category: 'ai',
+  { id: 'grok', trace: true, name: 'Grok', icon: '𝕏', category: 'ai',
     url: 'https://grok.com/favicon.ico', site: 'https://grok.com/' },
-  { id: 'perplexity', name: 'Perplexity', icon: '◈', category: 'ai',
+  { id: 'perplexity', trace: true, name: 'Perplexity', icon: '◈', category: 'ai',
     url: 'https://www.perplexity.ai/favicon.ico', site: 'https://www.perplexity.ai/' },
   { id: 'copilot', name: 'Copilot', icon: '⌘', category: 'ai',
     url: 'https://copilot.microsoft.com/favicon.ico', site: 'https://copilot.microsoft.com/' },
@@ -71,6 +71,43 @@ export async function probeOne(check, timeoutMs = BROWSER_TIMEOUT_MS) {
   return { id: check.id, state, latency_ms: Math.round(performance.now() - started) }
 }
 
+// 同域诊断接口允许跨域读取时才展示 IP，不能以通用查询站替代。
+export async function probeServiceExit(check, timeoutMs = 2500) {
+  const target = new URL('/cdn-cgi/trace', check.url)
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const resp = await fetch(target.href, {
+      mode: 'cors', redirect: 'error', cache: 'no-store', credentials: 'omit',
+      referrerPolicy: 'no-referrer', signal: ctrl.signal,
+    })
+    if (!resp.ok || !resp.headers.get('content-type')?.startsWith('text/plain')) return null
+    const reader = resp.body?.getReader()
+    if (!reader) return null
+    const decoder = new TextDecoder()
+    let body = ''
+    while (body.length <= 2048) {
+      const { done, value } = await reader.read()
+      if (done) break
+      body += decoder.decode(value.subarray(0, 2049), { stream: true })
+    }
+    if (body.length > 2048) return null
+    const fields = Object.fromEntries(body.split(/\r?\n/).filter(s => s.includes('='))
+      .map(s => [s.slice(0, s.indexOf('=')), s.slice(s.indexOf('=') + 1)]))
+    const ip = fields.ip || ''
+    const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(p => Number(p) <= 255)
+    const ipv6 = ip.includes(':') && /^[\da-f:]+$/i.test(ip)
+      && new URL('http://[' + ip + ']').hostname.startsWith('[')
+    if (fields.h?.toLowerCase() !== target.hostname || !(ipv4 || ipv6)) return null
+    return { ip, domain: target.hostname, country: /^[A-Z]{2}$/.test(fields.loc || '') ? fields.loc : '' }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+    ctrl.abort()
+  }
+}
+
 /** 出口 IP 与国家（ipinfo.io 开放 CORS）。 */
 export async function probeExitIp(timeoutMs = BROWSER_TIMEOUT_MS) {
   const ctrl = new AbortController()
@@ -97,6 +134,9 @@ export async function probeAll(checks, onResult, concurrency = 6,
     while (queue.length) {
       const check = queue.shift()
       const result = await probeOne(check, timeoutMs)
+      if (check.trace && result.state === 'reachable') {
+        result.route = await probeServiceExit(check)
+      }
       results[result.id] = result
       if (onResult) onResult(result)
     }
