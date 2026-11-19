@@ -9,6 +9,7 @@
                    @click="runServerChecks">检测服务器网络</el-button>
         <el-button size="small" type="success" :loading="browserRunning" :disabled="!catalog.length"
                    @click="runBrowserChecks">检测当前网络</el-button>
+        <el-button size="small" @click="openNodeCheck">检测指定节点</el-button>
         <el-button size="small" :disabled="!hasResults" @click="copyResults">复制结果</el-button>
       </div>
     </div>
@@ -74,6 +75,32 @@
 
     <p class="mp-form-hint unlock-help">点服务名，打开网页验证登录或播放。</p>
 
+    <el-dialog v-model="nodeDialog" title="检测指定节点" width="min(680px, 94vw)">
+      <el-select v-model="nodeKey" @change="nodeResults = []" filterable placeholder="选择节点" aria-label="选择节点"
+                 :loading="nodeLoading" :disabled="nodeRunning" style="width: 100%; margin-bottom: 8px">
+        <el-option v-for="node in nodeOptions" :key="node.probe_key" :value="node.probe_key" :label="node.name" />
+      </el-select>
+      <el-select v-model="nodeServices" @change="nodeResults = []" multiple filterable placeholder="选择服务" aria-label="选择服务"
+                 :disabled="nodeRunning" style="width: 100%">
+        <el-option v-for="service in catalog" :key="service.id" :value="service.id" :label="service.name" />
+      </el-select>
+      <p class="mp-form-hint">这次检测只走所选节点。网页可达不代表可登录或播放。</p>
+      <el-table v-if="nodeResults.length" :data="nodeResults" size="small">
+        <el-table-column label="服务" prop="name" min-width="125" />
+        <el-table-column label="结果" min-width="200">
+          <template #default="{ row }">
+            {{ row.state === 'unknown' && row.extra?.reason === 'challenge' ? '人机校验' : serverLabels[row.state] }}
+            <span v-if="row.detail"> · {{ row.detail }}</span>
+            <div class="unlock-route">{{ resultRouteLabel(row) }}</div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button type="primary" :loading="nodeRunning" :disabled="!nodeKey || !nodeServices.length"
+                   @click="runNodeCheck">开始检测</el-button>
+      </template>
+    </el-dialog>
+
     <NodeQualityCard />
   </div>
 </template>
@@ -97,6 +124,13 @@ const browserCheckedAt = ref(null)
 const serverCheckedAt = ref(null)
 const running = ref(false)
 const browserRunning = ref(false)
+const nodeDialog = ref(false)
+const nodeOptions = ref([])
+const nodeKey = ref('')
+const nodeServices = ref([])
+const nodeResults = ref([])
+const nodeLoading = ref(false)
+const nodeRunning = ref(false)
 
 const categories = [
   { id: 'ai', name: '海外 AI' },
@@ -150,8 +184,11 @@ function browserRouteLabel(id) {
 }
 
 function routeLabel(id) {
-  const route = serverMap.value[id]?.extra?.route
-  if (route?.source === 'router_connection' && route.node) return `实际节点：${route.node}`
+  return resultRouteLabel(serverMap.value[id])
+}
+function resultRouteLabel(result) {
+  const route = result?.extra?.route
+  if (['router_connection', 'probe_connection'].includes(route?.source) && route.node) return `实际节点：${route.node}`
   if (route?.source === 'domain_trace' && route.ip) return `域名出口：${route.ip}${route.country ? ' · ' + route.country : ''}`
   return '未取得服务出口'
 }
@@ -224,6 +261,37 @@ async function runServerChecks() {
     ElMessage.error(e.message)
   } finally {
     running.value = false
+  }
+}
+
+async function openNodeCheck() {
+  nodeDialog.value = true
+  if (nodeOptions.value.length || nodeLoading.value) return
+  nodeLoading.value = true
+  try {
+    const data = await api('/api/v1/unlock/quality')
+    nodeOptions.value = (data.items || []).filter(node => node.probe_key)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    nodeLoading.value = false
+  }
+}
+
+async function runNodeCheck() {
+  if (nodeRunning.value) return
+  nodeRunning.value = true
+  nodeResults.value = []
+  try {
+    const entry = await api('/api/v1/unlock/run', {
+      method: 'POST', body: { exit: nodeKey.value, ids: nodeServices.value },
+    })
+    const names = Object.fromEntries(catalog.value.map(service => [service.id, service.name]))
+    nodeResults.value = (entry.results || []).map(row => ({ ...row, name: names[row.id] || row.id }))
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    nodeRunning.value = false
   }
 }
 

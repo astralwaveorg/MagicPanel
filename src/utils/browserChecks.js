@@ -36,6 +36,12 @@ export const BROWSER_CHECKS = [
   { id: 'viu', name: 'Viu.com', icon: 'V', category: 'region',
     url: 'https://www.viu.com/favicon.ico', site: 'https://www.viu.com/' },
   // web
+  { id: 'google_search', name: 'Google 搜索', icon: 'G', category: 'web',
+    url: 'https://www.google.com/favicon.ico', site: 'https://www.google.com/' },
+  { id: 'gmail_web', name: 'Gmail', icon: 'M', category: 'web',
+    url: 'https://mail.google.com/mail/', site: 'https://mail.google.com/mail/' },
+  { id: 'youtube_web', name: 'YouTube', icon: '▶', category: 'web',
+    url: 'https://www.youtube.com/favicon.ico', site: 'https://www.youtube.com/' },
   { id: 'reddit', name: 'Reddit', icon: 'R', category: 'web',
     url: 'https://www.reddit.com/favicon.ico', site: 'https://www.reddit.com/' },
   { id: 'wikipedia', name: '维基百科', icon: 'W', category: 'web',

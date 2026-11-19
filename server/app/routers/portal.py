@@ -449,7 +449,7 @@ def portal_provider_detail(body: ProviderDetailBody, request: Request, response:
 @router.get("/unlock")
 def portal_unlock_last():
     """门户公开：最近一次面板出口的解锁检测结果。"""
-    return unlock_check.last_results("panel")
+    return unlock_check.last_results(unlock_check.PORTAL_EVIDENCE_CACHE)
 
 
 _unlock_run_lock = threading.Lock()
@@ -462,7 +462,7 @@ def portal_unlock_run():
     打这个端点会让面板出口持续对外发请求。
     """
     import time as _time
-    last = unlock_check.last_results("panel")
+    last = unlock_check.last_results(unlock_check.PORTAL_EVIDENCE_CACHE)
     now = int(_time.time())
     if last.get("checked_at") and now - last.get("checked_at", 0) < 60:
         return last
@@ -471,13 +471,18 @@ def portal_unlock_run():
         raise HTTPException(429, "已有检测在进行中，请稍后刷新结果")
     try:
         # 双重检查：排队期间可能别人已经跑完
-        last = unlock_check.last_results("panel")
+        last = unlock_check.last_results(unlock_check.PORTAL_EVIDENCE_CACHE)
         now = int(_time.time())
         if last.get("checked_at") and now - last.get("checked_at", 0) < 60:
             return last
+        from ..services import scheduler
+        if not scheduler._auto_probe_lock.acquire(blocking=False):
+            raise HTTPException(429, "已有检测在进行中，请稍后刷新结果")
         try:
             return unlock_check.run_checks("panel", operator="portal")
-        except Exception as exc:
-            raise HTTPException(502, f"检测执行失败：{exc}")
+        except RuntimeError:
+            raise HTTPException(502, "服务器网络检测失败") from None
+        finally:
+            scheduler._auto_probe_lock.release()
     finally:
         _unlock_run_lock.release()

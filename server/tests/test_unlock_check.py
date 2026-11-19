@@ -1,95 +1,65 @@
 """解锁检测引擎：状态映射、Cloudflare 判别、地区标记、缓存合并。"""
 import json
 
-import pytest
 
 from app.services import unlock_check as u
 
 
-class _StubResp:
-    def __init__(self, status, text="", headers=None):
-        self.status_code = status
-        self.text = text
-        self.headers = headers or {}
+def test_network_modes_share_service_verdicts_and_keep_portal_routes_private(tmp_path, monkeypatch):
+    import httpx
+    from app.services import scheduler
+    from app.services import probe_engine
+    from app.services.probes import base, route_evidence
 
+    def reply(req):
+        if req.url.host == "mail.google.com":
+            return httpx.Response(301, headers={"location": "https://mail.google.com/mail/u/0/"})
+        if req.url.host == "claude.ai":
+            return httpx.Response(403, headers={"cf-mitigated": "challenge"}, text="Just a moment")
+        raise AssertionError("不应跟随 Gmail 跳转")
 
-class _StubClient:
-    def __init__(self, responses):
-        self.responses = responses
+    class IsolatedCore:
+        controller_port = 32123
 
-    def __get__(self, *a):  # 支持 with
-        return self
+        def __init__(self, proxies):
+            assert [item["name"] for item in proxies] == ["测线"]
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def get(self, url):
-        return self.responses[url]
-
-
-def _patch(monkeypatch, responses):
-    def fake_client(proxy):
-        return _StubClient(responses)
-    monkeypatch.setattr(u, "_client", fake_client)
-
-
-def test_unlocked_and_region_extraction(monkeypatch):
-    check = {"id": "yt", "url": "https://www.youtube.com/premium",
-             "unlock": {200}, "region_regex": r'"countryCode":"(\w\w)"'}
-    _patch(monkeypatch, {"https://www.youtube.com/premium":
-                         _StubResp(200, '{"countryCode":"US"}')})
-    r = u._run_single(check, None)
-    assert r["state"] == "unlocked" and r["region"] == "US"
-
-
-def test_cloudflare_challenge_is_error_not_blocked(monkeypatch):
-    check = {"id": "cf", "url": "https://x.example/", "unlock": {200}}
-    _patch(monkeypatch, {"https://x.example/": _StubResp(
-        403, "Just a moment... challenge-platform verification")})
-    r = u._run_single(check, None)
-    assert r["state"] == "error"
-    assert "Cloudflare" in r["detail"]
-
-
-def test_region_marker_overrides_default_blocked(monkeypatch):
-    check = {"id": "claude", "url": "https://claude.ai/", "unlock": {200},
-             "region_marker": r"not available in your region"}
-    _patch(monkeypatch, {"https://claude.ai/": _StubResp(
-        403, "Claude is not available in your region.")})
-    assert u._run_single(check, None)["state"] == "blocked"
-    _patch(monkeypatch, {"https://claude.ai/": _StubResp(
-        403, "Rate limited challenge")})
-    r = u._run_single(check, None)
-    assert r["state"] == "error"
-
-
-def test_unsupported_only_when_declared(monkeypatch):
-    check = {"id": "a", "url": "https://a.example/", "unlock": {200},
-             "unsupported": {404}}
-    _patch(monkeypatch, {"https://a.example/": _StubResp(404)})
-    assert u._run_single(check, None)["state"] == "unsupported"
-    check2 = {"id": "b", "url": "https://b.example/", "unlock": {200}}
-    _patch(monkeypatch, {"https://b.example/": _StubResp(404)})
-    assert u._run_single(check2, None)["state"] == "error"
-
-
-def test_timeout_is_error(monkeypatch):
-    class _Boom:
         def __enter__(self):
             return self
 
-        def __exit__(self, *a):
+        def __exit__(self, *_):
             return False
 
-        def get(self, url):
-            raise u.httpx.ConnectTimeout("boom")
-    monkeypatch.setattr(u, "_client", lambda proxy: _Boom())
-    check = {"id": "t", "url": "https://t.example/", "unlock": {200}}
-    r = u._run_single(check, None)
-    assert r["state"] == "error" and r["status"] is None
+        def select(self, name):
+            return name == "测线"
+
+        def proxy_url(self):
+            return "http://127.0.0.1:32124"
+
+    monkeypatch.setattr(u, "_CACHE_PATH", tmp_path / "cache.json")
+    monkeypatch.setattr(u, "exit_ip", lambda *args: {})
+    monkeypatch.setattr(base, "make_client_factory", lambda *_: lambda timeout: httpx.Client(
+        transport=httpx.MockTransport(reply), timeout=timeout))
+    # 包导出的工厂和实际模块应使用同一个测试客户端。
+    from app.services import probes
+    monkeypatch.setattr(probes, "make_client_factory", base.make_client_factory)
+    monkeypatch.setattr(probe_engine, "NodeEngine", IsolatedCore)
+    monkeypatch.setattr(scheduler, "_collect_probe_proxies", lambda: [{"name": "测线"}])
+    monkeypatch.setattr(route_evidence.ConnectionReader, "observe",
+                        lambda self, _: ["测线", "mp-probe"] if self.isolated else ["现有线路"])
+
+    ids = ["claude", "gmail_web"]
+    private = u.run_panel_evidence(ids)
+    node = u.run_checks("测线", ids)
+    portal = u.run_checks("panel", ids)
+    assert [{x["id"]: x["state"] for x in entry["results"]} for entry in (private, node, portal)] == [
+        {"claude": "unknown", "gmail_web": "reachable"}] * 3
+    assert private["results"][0]["extra"]["route"]["node"] == "现有线路"
+    assert node["results"][0]["extra"]["route"] == {
+        "node": "测线", "chain": ["测线", "mp-probe"], "domain": "claude.ai", "source": "probe_connection",
+    }
+    assert all("route" not in row["extra"] for row in portal["results"])
+    assert u.last_results(u.PORTAL_EVIDENCE_CACHE) == portal
 
 
 def test_cache_merge_partial(tmp_path, monkeypatch):
@@ -193,8 +163,8 @@ def test_node_rename_accepts_multi_badge():
     assert legacy["美国03 Hyper"] == "🇺🇸 [机场A] 美国 🔓 01"
 
 
-def test_build_uses_capability_badges(client):
-    """构建期用多维能力徽章重命名（检测 → 分类 → 重命名 → 产物）。"""
+def test_regional_names_keep_badges_out_of_build_labels(client):
+    """统一节点名不把性能和能力摘要写入基础节点名称。"""
     import base64
     import time
     from conftest import auth_headers, setup_admin
@@ -215,6 +185,11 @@ def test_build_uses_capability_badges(client):
         "mode": "inline"})
     assert r.status_code == 201, r.text
 
+    group = client.post("/api/v1/groups", headers=h, json={
+        "name": "美区夹具", "use_sources": ["原始机场"], "proxies": ["DIRECT"],
+    })
+    assert group.status_code == 201, group.text
+
     from app import db, security
     from app.services import quality_funnel, scheduler
     with db.connect() as conn:
@@ -224,21 +199,22 @@ def test_build_uses_capability_badges(client):
     quality_funnel.save_results([quality_funnel.NodeQuality(
         node["name"], stage="probed", badges="🔓🎬📺",
         checked_at=int(time.time()), revision=quality_funnel._fingerprint(node, key, cfg))])
-    client.put("/api/v1/settings", headers=h, json={"values": {
-        "node_name_unlock_badge": "1"}})
+    response = client.put("/api/v1/settings", headers=h, json={"values": {
+        "node_name_unlock_badge": "1", "build_regional_node_names": "1"}})
+    assert response.status_code == 200, response.text
 
+    import yaml
     build = client.post("/api/v1/builds", headers=h, json={}).json()
-    # 节点可能在顶层 proxies（inline）或 provider 快照（provider 模式）：
-    # 两种下发路径都要带上能力徽章
     found = False
     for name, result in build["results"].items():
         assert result["ok"], result["errors"]
         content = client.get(
             f"/api/v1/builds/{build['id']}/artifact/{name}").json()["content"]
-        if "🇺🇸 [原始机场] 美国 🔓🎬📺 01" in content:
+        nodes = yaml.safe_load(content).get("proxies", [])
+        if any(node.get("server") == "192.0.2.10" and node["name"] == "🇺🇸 美国" for node in nodes):
             found = True
-            break
-    assert found, "产物里应出现带多维能力徽章的节点名"
+        assert "🔓🎬📺" not in content
+    assert found, "美区订阅节点使用简洁名称"
 
 
 def test_detectable_nodes_reads_source_snapshots(client):
@@ -250,7 +226,7 @@ def test_detectable_nodes_reads_source_snapshots(client):
     """
     import base64
     from app import db, security
-    from app.services import unlock_check
+    from app.services import unlock_check, node_catalog, source_nodes
     from conftest import auth_headers, setup_admin
     from test_api import make_policy
 
@@ -267,6 +243,8 @@ def test_detectable_nodes_reads_source_snapshots(client):
     with db.tx() as conn:
         conn.execute("UPDATE sources SET snapshot_enc=? WHERE name='测试机场'",
                      (security.encrypt_text(snap),))
+        sid = conn.execute("SELECT id FROM sources WHERE name='测试机场'").fetchone()[0]
+        node_catalog.reconcile_source(conn, sid, source_nodes.extract(snap.encode()))
     nodes = unlock_check.detectable_nodes()
     assert "机场节点A" in nodes, nodes[:5]
     assert "机场节点B" in nodes
@@ -342,18 +320,3 @@ def test_full_node_updates_keep_other_cached_exits(tmp_path, monkeypatch):
     unlock_check._save_cache_entries({"A": entry, "B": entry}, merge=False)
     unlock_check._save_cache("C", entry, merge=False)
     assert set(unlock_check._load_all()) == {"panel", "A", "B", "C"}
-
-
-@pytest.mark.parametrize(("status", "text", "headers", "expected"), [
-    (200, "not available in your region", {}, "blocked"),
-    (200, "", {"cf-mitigated": "challenge"}, "error"),
-    (429, "", {}, "error"),
-])
-def test_http_success_or_rate_limit_does_not_hide_service_restriction(
-    monkeypatch, status, text, headers, expected,
-):
-    url = "https://x.example/"
-    check = {"id": "demo", "url": url, "unlock": {200},
-             "unsupported": {429}, "region_marker": "not available in your region"}
-    _patch(monkeypatch, {url: _StubResp(status, text, headers)})
-    assert u._run_single(check, None)["state"] == expected

@@ -58,7 +58,7 @@ def quality(user=CurrentUser):
     for service in (*routing_planner.MEDIA_NAMES, *routing_planner.AI_SERVICES):
         pool = routing_planner.service_candidates(annotated, service, earliest=earliest, latest=now)
         services[service] = {"count": len(pool), "nodes": [labels[item["name"]] for item in pool[:8]]}
-    return {"items": [{**row, "name": labels[row["name"]]} for row in rows], "counts": dict(Counter(r["stage"] for r in rows)),
+    return {"items": [{**row, "probe_key": row["name"], "name": labels[row["name"]]} for row in rows], "counts": dict(Counter(r["stage"] for r in rows)),
             "routing_candidates": services,
             "task": scheduler.quality_task_status(), "auto": auto, "scheduler_on": scheduler_on,
             "thresholds": {"delay_ms": config["max_delay_ms"], "speed_bps": config["min_speed_bps"]},
@@ -141,7 +141,19 @@ def run(body: RunBody, user=RequireCapabilities("probe")):
     try:
         if body.exit in ("panel", ""):
             return unlock_check.run_panel_evidence(body.ids)
-        return unlock_check.run_checks(body.exit, body.ids, operator=user["username"])
+        result = unlock_check.run_checks(body.exit, body.ids, operator=user["username"])
+        from .. import db
+        with db.connect() as conn:
+            rows = db.all_(conn, "SELECT DISTINCT source_id FROM node_catalog WHERE emit_name=? AND retired=0",
+                           (result["exit"],))
+            names = (_regional_labels(conn, [{"name": result["exit"], "source_id": rows[0]["source_id"]}])
+                     if len(rows) == 1 else {})
+        for item in result["results"]:
+            route = item.get("extra", {}).get("route") or {}
+            if route.get("source") == "probe_connection":
+                route["node"] = names.get(route.get("node"), route.get("node"))
+                route["chain"] = [names.get(member, member) for member in route["chain"]]
+        return result
     except LookupError as exc:
         raise HTTPException(400, str(exc))
     except RuntimeError as exc:

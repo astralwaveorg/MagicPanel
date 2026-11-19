@@ -36,17 +36,18 @@ def matching_chain(connections: list, host: str, source_ips: set[str], port: str
 class ConnectionReader:
     """可选的局域网只读控制器。配置或连接不可用时直接降级。"""
 
-    def __init__(self):
-        self.nat_source = _ip(os.environ.get("MAGICPANEL_ROUTE_SOURCE_IP"))
+    def __init__(self, *, endpoint: str | None = None, isolated: bool = False):
+        self.nat_source = "" if isolated else _ip(os.environ.get("MAGICPANEL_ROUTE_SOURCE_IP"))
+        self.isolated = isolated
         self.endpoint = ""
         self.headers = {}
         try:
-            base = httpx.URL(os.environ.get("MAGICPANEL_ROUTE_CONTROLLER", ""))
+            base = httpx.URL(endpoint or os.environ.get("MAGICPANEL_ROUTE_CONTROLLER", ""))
             addr = ipaddress.ip_address(base.host)
             if (base.scheme not in {"http", "https"} or not (addr.is_private or addr.is_loopback)
                     or base.userinfo or base.path not in ("", "/") or base.query or base.fragment):
                 return
-            secret_file = os.environ.get("MAGICPANEL_ROUTE_TOKEN_FILE")
+            secret_file = None if isolated else os.environ.get("MAGICPANEL_ROUTE_TOKEN_FILE")
             if secret_file:
                 token = Path(secret_file).read_text(encoding="utf-8").strip()
                 if token:
@@ -122,7 +123,8 @@ class RoutedDetector(Detector):
             # 跳转或多样本均有相同路径证据才显示节点；取同域出口时注明域名。
             if routes[0] and all(chain == routes[0] for chain in routes):
                 result.extra["route"] = {"node": routes[0][0], "chain": routes[0],
-                                         "domain": domain.host, "source": "router_connection"}
+                                         "domain": domain.host, "source": ("probe_connection" if self.reader.isolated
+                                                                           else "router_connection")}
             else:
                 route = trace_exit(client, domain)
                 if route:
