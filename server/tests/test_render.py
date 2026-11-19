@@ -151,6 +151,41 @@ def test_service_aliases_copy_only_scoped_nodes_with_matching_revisions():
         assert "US private - TikTok" not in proxies
 
 
+def test_stash_hysteria2_alias_matches_mihomo_evidence_without_changing_output():
+    from app.compiler import render
+    from app.services import local_nodes, quality_funnel
+
+    node = {"id": 1, "name": "日本软银 01", "node_type": "", "protocol": "hysteria2",
+            "server": "test.invalid", "port": 443, "enabled": True,
+            "params": {"password": "synthetic", "up": 20, "down": 40}}
+    snapshot = _snapshot()
+    snapshot["local_nodes"] = [node]
+    snapshot["groups"] = [{"name": "选择", "type": "select", "local_nodes": [1],
+                           "targets": ["*"], "devices": ["*"]}]
+    plan = {(None, node["name"]): node["name"]}
+    conf = {"max_delay_ms": 3000, "min_speed_bps": 2000000, "speed_bytes": 1000000, "platform_ids": []}
+    def revision(proxy):
+        return quality_funnel._fingerprint(proxy, b"fixture", conf)
+    expected = revision(local_nodes.render_proxy(node, "mihomo"))
+    snapshot["service_aliases"] = {
+        node["name"]: {"revision": expected, "services": ["netflix"], "regions": {"netflix": "JP"}},
+    }
+    def generate():
+        return yaml.safe_load(render.render_target(
+            snapshot, {"name": "phone", "engine": "stash"}, regional_plan=plan,
+            quality_reader=lambda nodes: {n["name"]: {"revision": revision(n)} for n in nodes}))
+
+    cfg = generate()
+    nodes = {n["name"]: n for n in cfg["proxies"]}
+    name = node["name"]
+    base = nodes[name]
+    assert "auth" in base and "password" not in base
+    assert base == local_nodes.render_proxy(node, "stash")
+    assert nodes[f"{name} - Netflix"] == {**base, "name": f"{name} - Netflix"}
+    node["port"] = 8443
+    assert not any(n["name"].endswith(" - Netflix") for n in generate()["proxies"])
+
+
 def test_service_groups_split_media_in_place_and_require_jp_netflix_evidence():
     from app.compiler import render
 

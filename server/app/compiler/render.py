@@ -637,7 +637,15 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 "（尚未抓取，或全部被来源过滤正则/测速结果排除）")
 
     local_proxies = [local_node_service.render_proxy(n, engine) for n in local_enabled.values()]
-    quality = (quality_reader(inline_nodes + fixed_nodes + local_proxies)
+    quality_materials = local_proxies
+    if quality_reader and engine == "stash":
+        # 自建 Hysteria2 的 auth/up-speed/down-speed 是 Stash 的输出字段。
+        # 测速用同一本地节点的 Mihomo 连接参数取证；保留发给 Stash 的原始字段。
+        quality_materials = [
+            local_node_service.render_proxy(node, "mihomo") if node["protocol"] == "hysteria2" else emitted
+            for node, emitted in zip(local_enabled.values(), local_proxies)
+        ]
+    quality = (quality_reader(inline_nodes + fixed_nodes + quality_materials)
                if quality_reader else {})
     if quality_reader:
         perf_lookup = quality.get
