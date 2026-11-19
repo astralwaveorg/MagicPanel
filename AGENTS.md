@@ -25,6 +25,19 @@ telegram-ip 移到 ai-cn 之后（sort 25-27，早于一切 AI/通讯集合）�
 注意：Telegram 默认直连在大陆无法连通（TG 被墙），此为向阳明确选择，客户端可手切。
 构建 #296。
 
+**2026-11-20 本地节点统一命名与编辑修复（构建 #335）**：本地节点改名
+「美国NTT 01/02 → 美国自建 01/02」「日本软银 01/02 → 日本自建 01/02」（组员引用随
+`refresh_node_projection` 自动重映射；随之变化的是「日本自建（仅移动）」「美国自建」等组名）。
+修复本地节点编辑被「未知协议参数字段」永久卡死：update_node 剔除存储侧协议白名单外的
+遗留键（客户端提交侧仍 400 严格），openLocalEdit 经 reveal 回填表单——列表接口自
+b878a12 只回 public_params，`row.params` 恒为 undefined 导致编辑框全空。渲染器服务
+别名只按 MEDIA_ROUTE_REGIONS 生成（netflix→JP、hulu/hbo→US），不再向 proxies 写
+孤儿别名节点。Netflix 日本组成员 = 有近期 JP 片库证据的节点，含机场标签为台湾但
+实测 JP 出口的节点。改前/改后快照在 `policy/snapshots/2026-11-20-{before,after}-rename.json`。
+手机专属组「🇯🇵 日本软银」（variant 2）名称未随节点改名，是否同步改名待向阳定。
+Claude/Perplexity 在美/日自建节点均为 Cloudflare 人机校验（无法判定），不据此改 AI
+分流；Netflix 日本播放仍需向阳实测。
+
 **2026-11-17 全视图逐页巡检**：前端 16 个视图（含 Login/Setup/Portal）全部纳入
 挂载冒烟测试（`src/v2/allViews.spec.js`，用生产数据形状做夹具）；修复 10 处
 `rows.value = resp.items` 无 undefined 兜底的整页崩溃隐患（`?? []`）。新增页面
