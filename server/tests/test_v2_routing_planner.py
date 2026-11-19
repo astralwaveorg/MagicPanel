@@ -149,5 +149,55 @@ def test_google_artifact_report_requires_two_failures_for_each_current_us_node()
     assert report(proofs)["tier"] == "SG"
     assert report(proofs + [sample("usb", "US", "unknown", 40)])["tier"] is None
     assert report(proofs + [sample("usa", "US", "observed-ok", 5)])["tier"] == "US"
+    cfg["proxy-groups"][3]["proxies"].append("usa")
+    assert report(proofs)["state"] == "scope_incomplete"
+    cfg["proxy-groups"][3]["proxies"].pop()
     cfg["proxy-groups"][1]["use"] = ["unlisted"]
     assert report(proofs)["state"] == "scope_incomplete"
+
+
+def test_production_google_scope_checks_artifact_and_reports_retired_candidates(client, monkeypatch, tmp_path):
+    import json
+    import yaml
+
+    from app import config, db, security
+    from app.services import google_evidence, google_scope, node_rename
+    from v2_helpers import admin, at, make_local
+
+    make_local(client, admin(client), name="美国 NTT 01")
+    monkeypatch.setattr(config, "BUILDS_DIR", tmp_path)
+    with db.tx() as conn:
+        rows = node_rename.regional_catalog(conn)
+        node = dict(conn.execute("SELECT * FROM node_catalog").fetchone())
+        node["revision"] = node["current_revision"]
+        groups = google_evidence.TIER_GROUPS
+        top = {"name": google_evidence.GOOGLE_GROUP, "proxies": list(groups.values())}
+        leaf = "美国 NTT 01"
+        cfg = {"proxies": [{"name": leaf, "server": "fixture-host.invalid", "port": 7777}],
+               "proxy-groups": [top, *({"name": name, "proxies": [leaf if tier == "US" else config.GUARD_PROXY]}
+                                       for tier, name in groups.items())]}
+        payload = yaml.safe_dump(cfg, allow_unicode=True)
+        snapshot = {"regional_catalog": rows, "node_catalog": [node], "groups": []}
+        build = conn.execute(
+            "INSERT INTO builds(created_at,created_by,status,verify_status,policy_sha,snapshot,results) "
+            "VALUES(?,?,'PRODUCTION','success','fixture',?,?)",
+            (at(0).isoformat(), "fixture", security.encrypt_payload(json.dumps(snapshot)),
+             json.dumps({"fixture": {"ok": True, "sha256": security.sha256_text(payload)}}))).lastrowid
+        path = tmp_path / str(build) / "fixture.yaml"
+        path.parent.mkdir()
+        path.write_text(payload)
+        scope = google_scope.production_scope(conn, "fixture", now=at(1))
+        assert scope["scope_complete"]
+        assert scope["tiers"]["US"] == [{"name": leaf, "node_uid": node["node_uid"],
+                                          "origin_kind": "local", "revision": node["revision"],
+                                          "current_revision_matches": True}]
+        assert scope["recommendation"]["state"] == "needs_review"
+        assert "fixture-host.invalid" not in json.dumps(scope)
+        conn.execute("UPDATE node_catalog SET retired=1")
+        changed = google_scope.production_scope(conn, "fixture", now=at(1))
+        assert not changed["scope_complete"]
+        assert changed["recommendation"]["state"] == "catalog_changed"
+        path.write_text(payload + "\n")
+        import pytest
+        with pytest.raises(ValueError, match="google_artifact_digest_mismatch"):
+            google_scope.production_scope(conn, "fixture", now=at(1))

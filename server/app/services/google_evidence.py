@@ -38,8 +38,8 @@ def public_report(report):
             "coverage": public}
 
 
-def artifact_report(cfg, catalog, regional_plan, samples, *, evaluation_at):
-    """按产物中的实际组成员统计证据；诊断结果不改写客户端线路。"""
+def artifact_scope(cfg, catalog, regional_plan):
+    """只收录实际下发、可映射到唯一节点版本的候选。"""
     groups = {group["name"]: group for group in cfg.get("proxy-groups", [])}
     if GOOGLE_GROUP not in groups:
         return None
@@ -72,17 +72,38 @@ def artifact_report(cfg, catalog, regional_plan, samples, *, evaluation_at):
     incomplete = (top.get("proxies", []) != list(TIER_GROUPS.values())
                   or bool(top.get("use") or top.get("include-all")))
     members = {}
+    seen = set()
     for tier, group in TIER_GROUPS.items():
         names, missing = leaves(group)
         incomplete |= missing
         members[tier] = {by_name[name][0]["node_uid"]: {
+            "name": name,
             "revision": by_name[name][0]["revision"],
             "origin_kind": by_name[name][0]["origin_kind"],
-        } for name in names}
+        } for name in sorted(names)}
+        incomplete |= bool(seen.intersection(members[tier])) or len(members[tier]) != len(names)
+        seen.update(members[tier])
+    return members, incomplete
+
+
+def evaluate_scope(scope, samples, *, evaluation_at):
+    members, incomplete = scope
+    # 名称可以修改，报告的范围指纹只绑定节点 ID 与版本。
+    members = {tier: {uid: {k: v for k, v in node.items() if k != "name"}
+                      for uid, node in rows.items()} for tier, rows in members.items()}
     report = qualify_google_manifest(members, samples, evaluation_at=evaluation_at)
-    return {"state": "scope_incomplete" if incomplete else report["state"],
-            "tier": None if incomplete else report["tier"],
-            "coverage": report["coverage"]}
+    if incomplete:
+        report.update(state="scope_incomplete", tier=None, candidate_uids=[], exhaustion=[])
+    return report
+
+
+def artifact_report(cfg, catalog, regional_plan, samples, *, evaluation_at):
+    """按产物中的实际组成员统计证据；诊断结果不改写客户端线路。"""
+    scope = artifact_scope(cfg, catalog, regional_plan)
+    if scope is None:
+        return None
+    report = evaluate_scope(scope, samples, evaluation_at=evaluation_at)
+    return {key: report[key] for key in ("state", "tier", "coverage")}
 
 
 def observations(conn, *, now: datetime) -> list[dict]:
