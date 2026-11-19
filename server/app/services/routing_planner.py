@@ -151,10 +151,24 @@ SERVICE_ALIAS_NAMES = {
 
 
 def verified_service_ids(row: dict, *, earliest: int, latest: int) -> list[str]:
-    checked = row.get("checked_at")
-    if not row.get("qualified") or type(checked) is not int or not earliest <= checked <= latest:
-        return []
-    return [pid for pid in SERVICE_ALIAS_NAMES if _positive_result(row, pid)]
+    return list(service_proofs(row, earliest=earliest, latest=latest))
+
+
+def service_proofs(row: dict, *, earliest: int, latest: int | None) -> dict:
+    """统一候选、别名和保留证据口径，始终按原检测时间判定有效期。"""
+    proofs = {}
+    for pid in SERVICE_ALIAS_NAMES:
+        proof = (row.get("retained_proofs") or {}).get(pid)
+        if row.get("qualified") and _positive_result(row, pid):
+            proof = {"checked_at": row.get("checked_at"), "delay_ms": row.get("delay_ms"),
+                     "result": row["probes"][pid]}
+        if not proof:
+            continue
+        checked = proof.get("checked_at")
+        if (type(checked) is int and checked >= earliest and (latest is None or checked <= latest)
+                and _positive_result({"probes": {pid: proof.get("result")}}, pid)):
+            proofs[pid] = proof
+    return proofs
 
 
 def _positive_result(row: dict, pid: str) -> bool:
@@ -175,17 +189,16 @@ def service_candidates(rows: list[dict], service: str, *, earliest: int,
         return []
     candidates = []
     for row in rows:
-        checked = row.get("checked_at")
-        if (not row.get("qualified") or type(checked) is not int or checked < earliest
-                or (latest is not None and checked > latest) or not _positive_result(row, service)):
+        proof = service_proofs(row, earliest=earliest, latest=latest).get(service)
+        if not proof:
             continue
-        result = row["probes"][service]
+        result = proof["result"]
         required_region = netflix_region if service == "netflix" else MEDIA_ROUTE_REGIONS.get(service)
         if required_region and result.get("region") != required_region:
             continue
         preferred = (service in AI_SERVICES and row.get("origin_kind") == "local"
                      and row.get("country") in ("US", "JP"))
-        candidates.append((not preferred, result.get("latency_ms") or row.get("delay_ms") or 10**9, row))
+        candidates.append((not preferred, result.get("latency_ms") or proof.get("delay_ms") or 10**9, row))
     return [row for _, _, row in sorted(candidates, key=lambda item: (
         item[0], item[1], item[2].get("name", "")))]
 

@@ -49,6 +49,34 @@ def test_badges_from_probes():
     assert "🎬" in badges2
 
 
+def test_temporary_service_failure_does_not_refresh_or_erase_unexpired_proof(tmp_path, monkeypatch):
+    from app.services import quality_funnel as q, routing_planner as r
+
+    monkeypatch.setattr(q, "RESULT_PATH", tmp_path / "quality.json")
+    success = {"state": "unlocked", "status": 200, "region": "JP",
+               "extra": {"catalog": "licensed_sample"}}
+    challenge = {"state": "unknown", "status": 403, "extra": {"reason": "challenge"}}
+    def save(when, probe, revision="r1", stage="probed"):
+        q.save_results([q.NodeQuality("JP", delay_ms=100, checked_at=when, revision=revision,
+                                      stage=stage, probes={"netflix": probe})], keep_seconds=100)
+        return q.load_results()["nodes"]["JP"]
+
+    save(100, success)
+    row = save(175, challenge)
+    assert row["probes"]["netflix"] == challenge
+    proof = r.service_proofs(row, earliest=80, latest=180)["netflix"]
+    assert proof["checked_at"] == 100 and proof["result"] == success
+    assert r.service_candidates([row], "netflix", earliest=80, latest=180) == [row]
+    row = save(199, challenge)
+    assert not r.verified_service_ids(row, earliest=101, latest=201)
+    blocked = {"state": "blocked", "status": 403, "extra": {"reason": "region"}}
+    assert "retained_proofs" not in save(200, blocked)
+    save(250, success)
+    assert "retained_proofs" not in save(260, challenge, revision="r2")
+    save(270, success)
+    assert "retained_proofs" not in save(280, challenge, stage="speed_failed")
+
+
 def test_region_from_probes_prefers_netflix():
     probes = {"netflix": {"region": "HK"}, "youtube_premium": {"region": "US"}}
     assert quality_funnel.region_from_probes(probes) == "HK"

@@ -167,8 +167,13 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
         age = now - _checked_at(old)
         if only_missing:
             interval = cfg["refresh_seconds"] if old.get("stage") in ("probed", "unsupported") else FAILED_RECHECK_SECONDS
-            if old.get("reason") == "部分平台等待复测":
+            if old.get("retained_proofs"):
+                interval = min(FAILED_RECHECK_SECONDS, cfg["refresh_seconds"] // 8)
+            elif old.get("reason") == "部分平台等待复测":
                 interval = FAILED_RECHECK_SECONDS
+            elif routing_planner.service_proofs(old, earliest=0, latest=int(now)):
+                # 在有业务证据的线路过期前复测，给短暂失败留出复核时间。
+                interval = max(FAILED_RECHECK_SECONDS, interval * 3 // 4)
             if old.get("revision") == revision and 0 <= age < interval:
                 continue
         pending.append(proxy)
@@ -226,7 +231,8 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
 
     stats["elapsed_sec"] = int(time.monotonic() - started)
     if results:
-        save_results(results, operator, active_names=set(revisions))
+        save_results(results, operator, active_names=set(revisions),
+                     keep_seconds=cfg["refresh_seconds"])
     return {"results": [r.to_dict() for r in results], "stats": stats}
 
 
@@ -326,13 +332,39 @@ def load_results() -> dict:
         return {"nodes": {}}
 
 
-def save_results(results: list[NodeQuality], operator: str = "系统", *, active_names=None) -> None:
+def _retain_service_proofs(old, new, *, keep_seconds):
+    from .routing_planner import service_proofs
+
+    if not old or not new["revision"] or old.get("revision") != new["revision"]:
+        return {}
+    now = new["checked_at"]
+    prior = service_proofs(old, earliest=now - keep_seconds, latest=now)
+    download = new["download"]
+    retryable_download = (download.get("error") in {"timeout", "transfer_error", "short_body"}
+                          or (download.get("error") == "http_status"
+                              and (download.get("status") == 429 or (download.get("status") or 0) >= 500)))
+    if ((new["stage"] == "inconclusive" and retryable_download)
+            or (new["stage"] == "latency_failed" and new["delay_ms"] < 0)):
+        return prior
+    if not new["qualified"]:
+        return {}
+    return {pid: proof for pid, proof in prior.items()
+            if (new["probes"].get(pid) or {}).get("state") in ("unknown", "error")
+            and (new["probes"][pid].get("extra") or {}).get("reason") not in {"region", "ip_block"}}
+
+
+def save_results(results: list[NodeQuality], operator: str = "系统", *,
+                 active_names=None, keep_seconds=86400) -> None:
     """保留当前质量状态及历史快照；旧解锁缓存只供手动网络体检。"""
     data = load_results()
     nodes = {name: value for name, value in data.get("nodes", {}).items()
              if active_names is None or name in active_names}
     for quality in results:
-        nodes[quality.name] = quality.to_dict()
+        row = quality.to_dict()
+        kept = _retain_service_proofs(nodes.get(quality.name), row, keep_seconds=keep_seconds)
+        if kept:
+            row["retained_proofs"] = kept
+        nodes[quality.name] = row
     payload = {"updated_at": int(time.time()), "operator": operator,
                "nodes": nodes}
     _atomic_write(RESULT_PATH, json.dumps(payload, ensure_ascii=False, indent=1))

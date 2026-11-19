@@ -242,18 +242,17 @@ def _alias_snapshot(conn) -> dict:
     for name, row in quality_funnel.load_results().get("nodes", {}).items():
         if not isinstance(row, dict) or not row.get("revision"):
             continue
-        services = routing_planner.verified_service_ids(row, earliest=cutoff, latest=now)
-        if services:
+        proofs = routing_planner.service_proofs(row, earliest=cutoff, latest=now)
+        if proofs:
             node = catalog.get(name)
             flag, _ = node_rename.regional_region((node or {}).get("raw_name") or name)
             local = bool(node and node.get("source_id") is None)
-            probes = row.get("probes") or {}
             evidence[name] = {
-                "revision": row["revision"], "services": services,
+                "revision": row["revision"], "services": list(proofs),
                 "preferred_ai": local and flag in ("🇺🇸", "🇯🇵"),
-                "regions": {pid: probes[pid].get("region") for pid in services},
-                "latencies": {pid: probes[pid].get("latency_ms") or row.get("delay_ms") or 10**9
-                              for pid in services},
+                "regions": {pid: proof["result"].get("region") for pid, proof in proofs.items()},
+                "latencies": {pid: proof["result"].get("latency_ms") or proof.get("delay_ms") or 10**9
+                              for pid, proof in proofs.items()},
             }
     return evidence
 
