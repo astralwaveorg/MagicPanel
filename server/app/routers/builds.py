@@ -3,6 +3,7 @@
 构建把当前策略固化为不可变快照并逐目标渲染；发布按状态机切换
 版本状态（已构建 / 测试中 / 生产中 / 已下线），失败或空结果不会覆盖现网。
 """
+import difflib
 import json
 from pathlib import Path
 from datetime import datetime, timezone
@@ -579,7 +580,7 @@ def get_artifact(bid: int, target_name: str, user=RequireCapabilities('reveal'))
 
 
 @router.get("/builds/{bid}/diff/{other_id}")
-def diff_builds(bid: int, other_id: int, user=CurrentUser):
+def diff_builds(bid: int, other_id: int, name: str = "", user=CurrentUser):
     with db.connect() as conn:
         _get_build(conn, bid)
         _get_build(conn, other_id)
@@ -589,14 +590,27 @@ def diff_builds(bid: int, other_id: int, user=CurrentUser):
     build_dir_b = config.BUILDS_DIR / str(bid)
     a_files = {p.stem for p in build_dir_a.glob("*.yaml")} if build_dir_a.is_dir() else set()
     b_files = {p.stem for p in build_dir_b.glob("*.yaml")} if build_dir_b.is_dir() else set()
-    targets = sorted(a_files | b_files)
-    diffs = {}
-    for name in targets:
+    if name:
+        # 带产物名：返回该产物的统一差异文本，供前端弹框直接展示。
+        # name 先按 stem 白名单校验，天然挡住路径拼接。
+        if name not in a_files and name not in b_files:
+            raise HTTPException(404, "两个构建都没有这个产物")
         a = build_dir_a / f"{name}.yaml"
         b = build_dir_b / f"{name}.yaml"
         old = a.read_text(encoding="utf-8").splitlines() if a.exists() else []
         new = b.read_text(encoding="utf-8").splitlines() if b.exists() else []
-        diffs[name] = {"changed": old != new, "before_lines": len(old), "after_lines": len(new)}
+        diff = "\n".join(difflib.unified_diff(
+            old, new, fromfile=f"#{other_id}/{name}.yaml",
+            tofile=f"#{bid}/{name}.yaml", lineterm=""))
+        return {"target": name, "changed": old != new, "diff": diff}
+    targets = sorted(a_files | b_files)
+    diffs = {}
+    for target in targets:
+        a = build_dir_a / f"{target}.yaml"
+        b = build_dir_b / f"{target}.yaml"
+        old = a.read_text(encoding="utf-8").splitlines() if a.exists() else []
+        new = b.read_text(encoding="utf-8").splitlines() if b.exists() else []
+        diffs[target] = {"changed": old != new, "before_lines": len(old), "after_lines": len(new)}
     return {"targets": diffs}
 
 

@@ -70,6 +70,36 @@
       </header>
 
       <main class="pt-main">
+        <!-- 全部节点订阅：裸配置，方便导入其它客户端或分享 -->
+        <section v-if="nodesFeed.url" class="pt-nodes">
+          <div class="pt-sec-head">
+            <h2 class="pt-sec-title">全部节点<small>{{ nodesFeed.nodeCount || '' }} 个节点 · 不含分流规则</small></h2>
+          </div>
+          <div class="pt-card pt-nodes-card">
+            <p class="pt-card-note">
+              所有启用节点的裸订阅：一个策略组加一条兜底规则，没有分流策略，适合导入任意客户端。
+              链接即凭据，泄露等同于节点池泄露；重置后旧链接立即失效。
+            </p>
+            <div
+              class="pt-card-url"
+              :title="nodesFeed.url + '（点击复制）'"
+              @click="copy(nodesFeed.url, 'nodes-url')"
+            >{{ nodesFeed.url }}</div>
+            <div class="pt-card-actions">
+              <button
+                class="pt-btn primary"
+                @click="copy(nodesFeed.url, 'nodes')"
+              >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制地址' }}</button>
+              <a class="pt-btn" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
+              <button class="pt-btn" @click="showQr('全部节点订阅', nodesFeed.url)">二维码</button>
+              <button class="pt-btn pt-btn-danger" @click="rotateNodesToken" :disabled="rotateArmed === 'busy'">
+                {{ rotateArmed === 'arming' ? '再点一次确认重置' : (rotateArmed === 'busy' ? '重置中…' : '重置链接') }}
+              </button>
+            </div>
+            <p v-if="rotateError" class="pt-card-note pt-rotate-error">{{ rotateError }}</p>
+          </div>
+        </section>
+
         <!-- 核心配置 -->
         <section v-if="engineGroups.length">
           <div class="pt-sec-head">
@@ -157,7 +187,7 @@
                     <button
                       class="pt-btn"
                       :disabled="!urlFor(d)"
-                      @click="showQr(d)"
+                      @click="showQr((d.display_name || d.name) + (pickOf(d) ? `（${pickOf(d)}）` : ''), urlFor(d))"
                     >二维码</button>
                   </div>
                 </article>
@@ -669,6 +699,46 @@ watch(appliedQuery, (q) => {
 
 const guides = computed(() => data.value?.guides || [])
 
+// 全部节点订阅：所有启用节点的裸配置（一个策略组 + MATCH），不含分流。
+const nodesFeed = computed(() => data.value?.nodes_feed || {})
+const rotateArmed = ref('')
+let rotateTimer = 0
+
+function armRotate() {
+  rotateArmed.value = 'arming'
+  clearTimeout(rotateTimer)
+  rotateTimer = setTimeout(() => { rotateArmed.value = '' }, 4000)
+}
+
+async function rotateNodesToken() {
+  // 两段式：第一次点击进入待确认态，4 秒内再点才真正重置。
+  if (rotateArmed.value !== 'arming') {
+    armRotate()
+    return
+  }
+  rotateArmed.value = 'busy'
+  try {
+    const resp = await fetch('/api/v1/portal/rotate-nodes-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin', cache: 'no-store',
+      body: JSON.stringify({ pin: authorizedPin }),
+    })
+    if (!resp.ok) {
+      const detail = await resp.json().catch(() => ({}))
+      throw new Error(detail.message || '重置失败')
+    }
+    rotateArmed.value = ''
+    await fetchData(authorizedPin)
+  } catch (e) {
+    rotateArmed.value = ''
+    rotateError.value = e.message
+    setTimeout(() => { rotateError.value = '' }, 4000)
+  }
+}
+
+const rotateError = ref('')
+
 const hasAnyResult = computed(() =>
   devices.value.length || clients.value.length || rules.value.length
   || ruleProviders.value.length || snippetGroups.value.length)
@@ -759,12 +829,10 @@ function installUrl(d) {
   return deviceResources.value.get(d.name)?.installUrl || ''
 }
 
-async function showQr(d) {
+async function showQr(label, url) {
   const id = ++qrSequence
-  const url = urlFor(d)
   if (!url) return
-  qrDevice.value = (d.display_name || d.name)
-    + (pickOf(d) ? `（${pickOf(d)}）` : '')
+  qrDevice.value = label
   qrText.value = url
   if (qrCache.has(url)) {
     qrUrl.value = qrCache.get(url)
@@ -1315,6 +1383,9 @@ onUnmounted(() => {
 .pt-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.4); }
 .pt-btn.primary { background: #5468f0; border-color: #5468f0; color: #fff; }
 .pt-btn.primary:hover:not(:disabled) { background: #6476f5; }
+.pt-btn.pt-btn-danger { border-color: rgba(226, 92, 92, 0.7); color: #e2b5b5; }
+.pt-btn.pt-btn-danger:hover:not(:disabled) { background: rgba(226, 92, 92, 0.18); }
+.pt-rotate-error { color: #e2b5b5; }
 .pt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 规则 */

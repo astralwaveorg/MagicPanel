@@ -66,6 +66,37 @@ def test_scope_all_sentinel_means_everything(client):
     assert "空范围组" not in artifact
 
 
+def test_build_diff_returns_unified_text_for_named_target(client):
+    """「与上一构建对比」：按产物名返回统一差异文本（2026-11-20 弹框空白修复）。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    client.post("/api/v1/targets", headers=h, json={
+        "name": "stash-ios", "engine": "stash", "platform": "ios"})
+    client.post("/api/v1/groups", headers=h, json={
+        "name": "组A", "type": "select", "proxies": ["DIRECT"]})
+    client.post("/api/v1/rules", headers=h, json={"type": "MATCH", "target": "组A"})
+    first = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert first["verify_status"] == "success", first
+    client.put("/api/v1/groups/1", headers=h, json={
+        "name": "组A改名", "type": "select", "proxies": ["DIRECT"]})
+    second = client.post("/api/v1/builds", headers=h, json={}).json()
+    assert second["verify_status"] == "success", second
+
+    named = client.get(
+        f"/api/v1/builds/{second['id']}/diff/{first['id']}?name=stash-ios", headers=h).json()
+    assert named["changed"] is True
+    assert "+- MATCH,组A改名" in named["diff"]
+    assert named["diff"].startswith("---")
+
+    meta = client.get(
+        f"/api/v1/builds/{second['id']}/diff/{first['id']}", headers=h).json()
+    assert meta["targets"]["stash-ios"]["changed"] is True
+
+    missing = client.get(
+        f"/api/v1/builds/{second['id']}/diff/{first['id']}?name=不存在的产物", headers=h)
+    assert missing.status_code == 404
+
+
 def test_rules_page_filters(client):
     """规则分页支持搜索与筛选，并给出未筛选时的总数。"""
     csrf = setup_admin(client)

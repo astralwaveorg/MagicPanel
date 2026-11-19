@@ -283,6 +283,48 @@ def clear_my_pin(user=RequireCapabilities('edit', 'reveal')):
     return {"ok": True}
 
 
+NODES_TOKEN_KEY = "portal_nodes_token_enc"
+
+
+def _nodes_token(conn) -> str:
+    stored = db.get_setting(conn, NODES_TOKEN_KEY, "")
+    if not stored:
+        return ""
+    try:
+        return security.decrypt_text(stored)
+    except Exception:
+        return ""
+
+
+def _ensure_nodes_token(conn) -> str:
+    """懒生成「全部节点」订阅令牌；已存在则原样返回。需在写事务内调用。"""
+    existing = _nodes_token(conn)
+    if existing:
+        return existing
+    token = security.new_device_token()
+    db.set_setting(conn, NODES_TOKEN_KEY, security.encrypt_text(token))
+    return token
+
+
+@router.post("/rotate-nodes-token")
+def rotate_nodes_token(body: PinBody, request: Request):
+    """重置「全部节点」订阅链接：旧令牌立即失效。
+
+    门槛与门户数据一致：维护者会话免 PIN，访客凭 PIN。
+    """
+    with db.tx() as conn:
+        user = _session_user(conn, request)
+        if not user:
+            if not body.pin:
+                raise HTTPException(401, "请输入 PIN 或登录维护者账号")
+            _check_pin(conn, request, body.pin)
+        token = security.new_device_token()
+        db.set_setting(conn, NODES_TOKEN_KEY, security.encrypt_text(token))
+        security.audit(conn, user["username"] if user else "portal",
+                       "重置全部节点订阅链接", "settings", 0)
+    return {"ok": True}
+
+
 def _build_ok_artifacts(conn, env: str) -> set[str]:
     """某个环境当前生效构建里构建成功的产物名集合。"""
     status = "PRODUCTION" if env == "production" else "TESTING"
@@ -397,6 +439,19 @@ def portal_data(body: PinBody, request: Request, response: Response):
             for r in db.all_(
                 conn, "SELECT * FROM snippets WHERE enabled=1 ORDER BY sort, id")
         ]
+        # 「全部节点」订阅：令牌懒生成（首访生成，之后复用），节点池实时统计。
+        # 生成需要写库，单独开短事务，不混进上面的只读连接。
+        nodes_token = _nodes_token(conn)
+        if not nodes_token:
+            with db.tx() as wconn:
+                nodes_token = _ensure_nodes_token(wconn)
+        from ..services import scheduler
+        node_count = len(scheduler._collect_probe_proxies())
+        nodes_feed = {
+            "url": f"{base}/feed/nodes/{nodes_token}.yaml",
+            "preview_url": f"/feed/nodes/{nodes_token}.yaml?preview=1",
+            "node_count": node_count,
+        }
     return {
         "base_url": base,
         "devices": devices,
@@ -406,6 +461,7 @@ def portal_data(body: PinBody, request: Request, response: Response):
         "rules": rules,
         "rule_providers": rule_providers,
         "snippets": snippets,
+        "nodes_feed": nodes_feed,
         "release_state": release_state,
     }
 

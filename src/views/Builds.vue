@@ -490,13 +490,15 @@ async function previewArtifact(name) {
 }
 
 async function openDiff(name) {
-  const idx = rows.value.findIndex((r) => r.id === detail.value.id)
-  const prev = rows.value[idx + 1]
+  const detailId = detail.value.id
+  // 上一构建按 id 找：列表可能被搜索过滤，按下标取相邻行会拿错
+  const prev = rows.value.filter((r) => r.id < detailId)
+    .sort((a, b) => b.id - a.id)[0]
   if (!prev) return ElMessage.info('没有更早的构建可以对比')
   try {
-    const data = await api(`/api/v1/builds/${detail.value.id}/diff/${prev.id}`)
-    diffTarget.value = `${name}（#${prev.id} → #${detail.value.id}）`
-    diffContent.value = data.targets[name] || ''
+    const data = await api(`/api/v1/builds/${detailId}/diff/${prev.id}?name=${encodeURIComponent(name)}`)
+    diffTarget.value = `${name}（#${prev.id} → #${detailId}）`
+    diffContent.value = data.changed ? (data.diff || '（内容相同）') : '（无差异）'
     diffVisible.value = true
   } catch (e) {
     ElMessage.error(e.message)

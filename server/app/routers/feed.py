@@ -7,8 +7,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 import base64
+import hmac
 import json
 import urllib.parse
+
+import yaml
 
 from .. import config, db, security
 from ..services import base_config as base_config_service
@@ -232,6 +235,74 @@ def device_config(token: str, request: Request, preview: bool = False,
             return _respond(request, text, etag, extra, allow_304=False)
         return _respond(request, text, etag, extra, record=record,
                         record_304=record_304)
+
+
+def _resolve_nodes_token(conn, token: str) -> str:
+    """门户「全部节点」订阅令牌：settings 存密文，取原文比对。"""
+    stored = db.get_setting(conn, "portal_nodes_token_enc", "")
+    if not stored or not token:
+        return ""
+    try:
+        plain = security.decrypt_text(stored)
+    except Exception:
+        return ""
+    return plain if hmac.compare_digest(plain, token) else ""
+
+
+def _render_nodes_config() -> tuple[str, int]:
+    """全部节点裸配置：所有启用节点 + 一个 select 组 + MATCH 兜底。
+
+    节点池与探测、构建同一来源（_collect_probe_proxies）：已统一 emit_name、
+    剔除占位与公告节点、重名去重，含启用的本地节点。方言为 Mihomo/Clash。
+    """
+    from ..services import scheduler
+    proxies = scheduler._collect_probe_proxies()
+    names = [str(p["name"]) for p in proxies if p.get("name")]
+    doc = {
+        "mixed-port": 7890,
+        "allow-lan": False,
+        "mode": "rule",
+        "log-level": "warning",
+        "unified-delay": True,
+        "tcp-concurrent": True,
+        "profile": {"store-selected": True},
+        "proxies": proxies,
+        "proxy-groups": [{
+            "name": "🚀 默认代理",
+            "type": "select",
+            "proxies": [*names, "DIRECT"],
+        }],
+        "rules": ["MATCH,🚀 默认代理"],
+    }
+    text = yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=4096)
+    header = ("# MagicPanel 全部节点订阅：只含节点与一条兜底规则，不含分流策略。\n"
+              f"# 节点 {len(names)} 个，实时渲染于 {db.now()}。\n")
+    return header + text, len(names)
+
+
+@router.api_route("/nodes/{token}.yaml", methods=["GET", "HEAD"])
+def nodes_config(token: str, request: Request, preview: bool = False):
+    """门户「全部节点」订阅：一个令牌覆盖全部启用节点，不含分流规则。
+
+    与设备订阅同一安全模型（高熵令牌即凭据）；?preview=1 供门户内嵌预览，
+    不做 304 协商、不加缓存。无设备统计可记，令牌轮换即全部失效。
+    """
+    with db.connect() as conn:
+        if not _resolve_nodes_token(conn, token):
+            return Response("not found", status_code=404)
+        interval = db.get_setting(conn, "profile_update_interval", "12")
+    text, count = _render_nodes_config()
+    etag = security.sha256_text(text)[:32]
+    extra = {
+        "profile-update-interval": interval,
+        "X-MagicPanel-Node-Count": str(count),
+        "Content-Disposition": 'attachment; filename="magicpanel-nodes.yaml"',
+    }
+    if preview:
+        extra["Content-Disposition"] = 'inline; filename="magicpanel-nodes.yaml"'
+        extra["Cache-Control"] = "no-store"
+        return _respond(request, text, etag, extra, allow_304=False)
+    return _respond(request, text, etag, extra)
 
 
 @router.api_route("/{token}/res/provider/{name}", methods=["GET", "HEAD"])
