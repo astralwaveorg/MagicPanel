@@ -82,7 +82,7 @@ def test_probe_store_claim_finish_and_cancel(client):
         job = probe_store.enqueue(conn, trigger='event', observer_id='fixture',
             nodes=[NodeKey('node-a', 1)], services=('basic',), schedule_key=None,
             now=at(10), deadline=at(240))
-        first = probe_store.claim(conn, worker_id='one', now=at(11))
+        first = probe_store.claim(conn, worker_id='one', now=at(11), lease_seconds=120)
         second = probe_store.claim(conn, worker_id='two', now=at(11))
         assert first and not second
         probe_store.finish(conn, first['id'], worker_id='one',
@@ -90,3 +90,32 @@ def test_probe_store_claim_finish_and_cancel(client):
         with pytest.raises(ValueError):
             probe_store.cancel(conn, job['id'], expected_revision=job['revision'] - 1,
                                now=at(13))
+
+
+def test_multi_item_probe_queue_continues_after_expired_lease_without_resending(client):
+    from app import db
+    from app.services import probe_store
+    from v2_helpers import at
+
+    with db.tx(immediate=True) as conn:
+        job = probe_store.enqueue(conn, trigger='manual', observer_id='nas',
+            nodes=[('A', 1), ('B', 1), ('C', 1)], services=('google:critical',),
+            schedule_key=None, now=at(0), deadline=at(30))
+        assert probe_store.claim(conn, worker_id='test', observer_id='other', now=at(1)) is None
+        first = probe_store.claim(conn, worker_id='test', observer_id='nas', now=at(1))
+        assert first['observer_id'] == 'nas'
+        assert probe_store.claim(conn, worker_id='parallel', now=at(1)) is None
+        assert probe_store.claim(conn, worker_id='test', now=at(2))['id'] != first['id']
+        with pytest.raises(ValueError, match='probe_lease_invalid'):
+            probe_store.finish(conn, first['id'], worker_id='test', now=at(2),
+                               result={'result_state': 'observed-ok'})
+        running = conn.execute("SELECT id FROM probe_items WHERE state='running'").fetchone()[0]
+        probe_store.finish(conn, running, worker_id='test', now=at(2),
+                           result={'result_state': 'challenge'})
+        last = probe_store.claim(conn, worker_id='test', now=at(3))
+        assert last['id'] not in {first['id'], running}
+        probe_store.finish(conn, last['id'], worker_id='test', now=at(3),
+                           result={'result_state': 'observed-ok'})
+        assert probe_store.claim(conn, worker_id='test', now=at(4)) is None
+        assert conn.execute("SELECT state FROM probe_jobs WHERE id=?", (job['id'],)).fetchone()[0] == 'incomplete'
+        assert conn.execute("SELECT attempts FROM probe_items WHERE id=?", (first['id'],)).fetchone()[0] == 1

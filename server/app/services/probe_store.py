@@ -1,7 +1,7 @@
 """持久探测队列；网络与耗时操作必须由 worker 在事务外执行。"""
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from .. import db
 from .probe_models import JOB_STATES, NodeKey, RESULT_STATES
@@ -12,7 +12,9 @@ def _json(value) -> str:
 
 
 def _iso(value) -> str:
-    return value.isoformat()
+    if value.utcoffset() is None:
+        raise ValueError('probe_time_invalid')
+    return value.astimezone(timezone.utc).isoformat(timespec='microseconds')
 
 
 def enqueue(conn, *, trigger: str, observer_id: str, nodes: list[NodeKey],
@@ -52,39 +54,60 @@ def list_jobs(conn, *, limit: int, offset: int) -> dict:
     return page
 
 
-def claim(conn, *, worker_id: str, now, lease_seconds: int = 60) -> dict | None:
-    """CAS 抢占下一个到期 item；调用方必须提供 IMMEDIATE 事务。"""
-    if not worker_id:
+def claim(conn, *, worker_id: str, now, lease_seconds: int = 60,
+          observer_id: str | None = None) -> dict | None:
+    """领取一个到期项目。同一任务串行；失联的请求不自动重刷目标。"""
+    if not worker_id or type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
         raise ValueError('probe_worker_invalid')
     if not conn.in_transaction:
         raise ValueError('probe_transaction_required')
-    job = db.one(conn, "SELECT * FROM probe_jobs WHERE state='queued' AND cancel_requested=0 "
-                 "AND deadline_at>=? ORDER BY created_at,id LIMIT 1", (_iso(now),))
-    if job is None:
-        return None
-    item = db.one(conn, "SELECT * FROM probe_items WHERE job_id=? AND state='queued' "
-                  "AND (next_at IS NULL OR next_at<=?) ORDER BY next_at,id LIMIT 1",
-                  (job['id'], _iso(now)))
+    current = _iso(now)
+    conn.execute("UPDATE probe_items SET state='failed',lease_owner=NULL,lease_until=NULL "
+                 "WHERE state='running' AND julianday(lease_until)<=julianday(?) AND EXISTS ("
+                 "SELECT 1 FROM probe_jobs j WHERE j.id=probe_items.job_id "
+                 "AND j.cancel_requested=0 AND (? IS NULL OR j.observer_id=?))",
+                 (current, observer_id, observer_id))
+    conn.execute("UPDATE probe_jobs SET state='incomplete',lease_owner=NULL,updated_at=? "
+                 "WHERE state IN ('queued','running') AND cancel_requested=0 "
+                 "AND (? IS NULL OR observer_id=?) AND (julianday(deadline_at)<=julianday(?) OR ("
+                 "NOT EXISTS (SELECT 1 FROM probe_items i WHERE i.job_id=probe_jobs.id "
+                 "AND i.state IN ('queued','running')) AND EXISTS ("
+                 "SELECT 1 FROM probe_items i WHERE i.job_id=probe_jobs.id AND i.state='failed')))",
+                 (current, observer_id, observer_id, current))
+    item = db.one(conn, "SELECT i.*,j.observer_id FROM probe_items i "
+                  "JOIN probe_jobs j ON j.id=i.job_id "
+                  "WHERE j.state IN ('queued','running') AND j.cancel_requested=0 "
+                  "AND julianday(j.deadline_at)>julianday(?) AND (? IS NULL OR j.observer_id=?) "
+                  "AND i.state='queued' AND (i.next_at IS NULL OR julianday(i.next_at)<=julianday(?)) "
+                  "AND NOT EXISTS (SELECT 1 FROM probe_items active WHERE active.job_id=j.id "
+                  "AND active.state='running') "
+                  "ORDER BY j.created_at,j.id,i.next_at,i.id LIMIT 1",
+                  (current, observer_id, observer_id, current))
     if item is None:
         return None
-    until = _iso(now.replace(microsecond=0) + timedelta(seconds=lease_seconds))
+    until = _iso(now + timedelta(seconds=lease_seconds))
     changed = conn.execute("UPDATE probe_items SET state='running',lease_owner=?,lease_until=?,"
                            "attempts=attempts+1 WHERE id=? AND state='queued'",
                            (worker_id, until, item['id'])).rowcount
     if not changed:
         return None
     conn.execute("UPDATE probe_jobs SET state='running',lease_owner=?,updated_at=? "
-                 "WHERE id=? AND state IN ('queued','running')", (worker_id, _iso(now), job['id']))
-    return {'id': item['id'], 'job_id': job['id'], 'node_uid': item['node_uid'],
+                 "WHERE id=? AND state IN ('queued','running')", (worker_id, current, item['job_id']))
+    return {'id': item['id'], 'job_id': item['job_id'], 'observer_id': item['observer_id'],
+            'node_uid': item['node_uid'],
             'node_revision': item['node_revision'], 'service_key': item['service_key'],
             'lease_until': until}
+
 
 def finish(conn, item_id: str, worker_id: str, result: dict, now) -> None:
     if not conn.in_transaction:
         raise ValueError('probe_transaction_required')
     item = db.one(conn, 'SELECT * FROM probe_items WHERE id=?', (item_id,))
     job = db.one(conn, 'SELECT * FROM probe_jobs WHERE id=?', (item['job_id'],)) if item else None
-    if not item or not job or item['state'] != 'running' or item['lease_owner'] != worker_id:
+    if (not item or not job or item['state'] != 'running' or item['lease_owner'] != worker_id
+            or job['state'] != 'running' or job['cancel_requested']
+            or not item['lease_until'] or datetime.fromisoformat(item['lease_until']) <= now
+            or datetime.fromisoformat(job['deadline_at']) <= now):
         raise ValueError('probe_lease_invalid')
     state = result.get('result_state')
     if state not in RESULT_STATES:
@@ -105,10 +128,11 @@ def finish(conn, item_id: str, worker_id: str, result: dict, now) -> None:
                   _iso(result.get('valid_until', now))))
     conn.execute("UPDATE probe_items SET state='completed',lease_owner=NULL,lease_until=NULL WHERE id=?",
                  (item_id,))
-    remaining = db.one(conn, "SELECT COUNT(*) AS n FROM probe_items WHERE job_id=? AND state!='completed'",
-                       (job['id'],))['n']
-    job_state = 'completed' if remaining == 0 else 'incomplete'
-    conn.execute('UPDATE probe_jobs SET state=?,updated_at=? WHERE id=?',
+    states = {row['state'] for row in conn.execute(
+        'SELECT DISTINCT state FROM probe_items WHERE job_id=?', (job['id'],))}
+    job_state = ('queued' if 'queued' in states else
+                 'incomplete' if states != {'completed'} else 'completed')
+    conn.execute('UPDATE probe_jobs SET state=?,lease_owner=NULL,updated_at=? WHERE id=?',
                  (job_state, _iso(now), job['id']))
 
 

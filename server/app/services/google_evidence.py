@@ -3,7 +3,7 @@
 import json
 from datetime import datetime
 
-from .probe_observers import GOOGLE_PROBE_HOST_ALLOWLIST
+from .probe_observers import GOOGLE_PROBE_HOST_ALLOWLIST, verified_proof
 from .. import config
 from .routing_planner import GOOGLE_TIERS, _time, qualify_google_manifest
 
@@ -62,7 +62,7 @@ def observations(conn, *, now: datetime) -> list[dict]:
     rows = conn.execute("""
         SELECT i.node_uid, i.node_revision, r.result_state, r.egress_json, r.evidence_json,
                r.measured_at, r.valid_until, p.qualified_at, p.expires_at, p.contract_json,
-               o.config_revision
+               o.config_revision, o.public_key, o.id AS observer_id, p.proof_json
         FROM probe_results r JOIN probe_items i ON i.id=r.item_id
         JOIN probe_jobs j ON j.id=i.job_id AND j.observer_id=r.observer_id
         JOIN probe_paths p ON p.observer_id=r.observer_id AND p.epoch=r.path_epoch
@@ -82,6 +82,7 @@ def observations(conn, *, now: datetime) -> list[dict]:
             measured, valid, qualified, expires = (_time(r[key]) for key in
                                                      ("measured_at", "valid_until", "qualified_at", "expires_at"))
             if (not all((measured, valid, qualified, expires)) or not qualified <= measured <= now < min(expires, valid)
+                    or not verified_proof(r["observer_id"], r["public_key"], contract, json.loads(r["proof_json"]))
                     or contract.get("config_revision") != r["config_revision"]
                     or "google" not in contract.get("scopes", [])
                     or egress.get("scope") != "google" or egress.get("verified") is not True
