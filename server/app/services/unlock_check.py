@@ -47,6 +47,14 @@ CHECKS = [
      "url": "https://www.bilibili.tv/"},
     {"id": "hbo", "name": "HBO Max", "icon": "▣", "category": "stream",
      "url": "https://www.hbomax.com/"},
+    {"id": "hulu", "name": "Hulu", "icon": "H", "category": "stream",
+     "url": "https://www.hulu.com/"},
+    {"id": "primevideo", "name": "Prime Video", "icon": "P", "category": "stream",
+     "url": "https://www.primevideo.com/"},
+    {"id": "twitch", "name": "Twitch", "icon": "T", "category": "stream",
+     "url": "https://www.twitch.tv/"},
+    {"id": "bbc", "name": "BBC iPlayer", "icon": "B", "category": "stream",
+     "url": "https://www.bbc.co.uk/iplayer"},
     {"id": "tvbanywhere", "name": "TVBAnywhere", "icon": "T", "category": "region",
      "url": "https://www.tvbanywhere.com/"},
     {"id": "viu", "name": "Viu.com", "icon": "V", "category": "region",
@@ -114,7 +122,7 @@ def _observe_checks(ids, *, proxy=None, reader=None):
     for check in checks:
         pid = check["id"]
         result = observed.get(aliases.get(pid, pid)) or ProbeResult(pid, "unknown", None)
-        item = {"id": pid, **result.to_dict()}
+        item = {"id": pid, **result.to_dict(), "checked_at": int(time.time())}
         if pid == "netflix_premium":
             confirmed = result.extra.get("licensed_sample") is True
             if result.state == "unlocked" and not confirmed:

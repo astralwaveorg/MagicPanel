@@ -6,7 +6,7 @@
     <div class="mp-card">
       <div class="unlock-toolbar">
         <el-button size="small" type="success" :loading="running"
-                   @click="runServerChecks">检测服务器网络</el-button>
+                   @click="runServerChecks()">检测服务器网络</el-button>
         <el-button size="small" type="success" :loading="browserRunning" :disabled="!catalog.length"
                    @click="runBrowserChecks">检测当前网络</el-button>
         <el-button size="small" @click="openNodeCheck">检测指定节点</el-button>
@@ -25,7 +25,7 @@
           </div>
           <p v-if="group.checkedAt || group.ip.ip" class="unlock-meta">
             <span v-if="group.ip.ip">参考出口 {{ maskIp(group.ip.ip) }} {{ group.ip.country }}</span>
-            <span v-if="group.checkedAt">检测于 {{ fmtTime(group.checkedAt) }}</span>
+            <span v-if="group.checkedAt">最近检测 {{ fmtTime(group.checkedAt) }}</span>
           </p>
         </div>
       </div>
@@ -63,10 +63,18 @@
           <el-table-column label="服务器网络" min-width="190">
             <template #default="{ row }">
               <StatusDot :kind="serverKind(row.id)" :text="serverLabel(row.id)" />
-              <span class="unlock-cell-sub">{{ serverSub(row.id) }}</span>
+              <span class="unlock-cell-sub"
+                    :title="serverMap[row.id]?.checked_at ? fmtTime(serverMap[row.id].checked_at) : ''">{{ serverSub(row.id) }}</span>
               <div v-if="serverMap[row.id]" class="unlock-route" :title="routeTitle(row.id)">
                 {{ routeLabel(row.id) }}
               </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="86">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" :disabled="running"
+                         :aria-label="`从服务器检测 ${row.name}`"
+                         @click="runServerChecks([row.id])">检测</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -244,14 +252,14 @@ async function loadServerLast() {
   }
 }
 
-async function runServerChecks() {
+async function runServerChecks(ids = []) {
   if (running.value) return
   running.value = true
   try {
     const entry = await api('/api/v1/unlock/run', {
-      method: 'POST', body: { exit: 'panel', ids: [] },
+      method: 'POST', body: { exit: 'panel', ids },
     })
-    const map = {}
+    const map = ids.length ? { ...serverMap.value } : {}
     for (const r of entry.results || []) map[r.id] = r
     serverMap.value = map
     serverIp.value = entry.ip || {}

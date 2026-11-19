@@ -90,6 +90,30 @@ test('检测服务器网络后展示解锁结论与出口信息', async () => {
   expect(wrapper.text()).not.toContain('一致')
 })
 
+test('单项复测只请求所选服务并保留其他服务的结果', async () => {
+  const request = vi.fn(async (path, options) => {
+    if (path === '/api/v1/unlock/run') {
+      return new Response(JSON.stringify({ ...RUN_RESULT,
+        results: [{ id: 'netflix', state: 'reachable', status: 200 }] }))
+    }
+    const responses = {
+      '/api/v1/unlock/catalog': CATALOG,
+      '/api/v1/unlock/last?exit=panel': RUN_RESULT,
+      '/api/v1/unlock/quality': QUALITY,
+    }
+    return new Response(JSON.stringify(responses[path] ?? {}))
+  })
+  vi.stubGlobal('fetch', request)
+  wrapper = mount(Unlock, { global: { plugins: [ElementPlus] } })
+  await flushPromises()
+  await wrapper.get('button[aria-label="从服务器检测 Netflix"]').trigger('click')
+  await flushPromises()
+  const [, options] = request.mock.calls.find(([path]) => path === '/api/v1/unlock/run')
+  expect(JSON.parse(options.body)).toEqual({ exit: 'panel', ids: ['netflix'] })
+  expect(wrapper.text()).toContain('域名出口：192.0.2.2')
+  expect(wrapper.text()).not.toContain('访问受限')
+})
+
 test('浏览器被拦、服务器通过时只提示核实，不判分流异常', async () => {
   const responses = {
     '/api/v1/unlock/catalog': CATALOG,
