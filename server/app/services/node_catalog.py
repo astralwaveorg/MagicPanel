@@ -8,6 +8,7 @@ from collections import Counter
 from .. import db, security
 from ..schemas.nodes import split_parameters
 from . import local_nodes, node_identity, resource_store, source_nodes
+from .node_rename import is_subscription_notice
 
 
 def _transaction(conn):
@@ -151,6 +152,7 @@ def reconcile_source(conn, source_id: int, nodes: list[dict]):
     source = conn.execute('SELECT * FROM sources WHERE id=?', (source_id,)).fetchone()
     if source is None:
         raise ValueError('catalog_source_missing')
+    nodes = [node for node in nodes if not is_subscription_notice(str(node["name"]))]
     key = node_identity.derive_catalog_key(security.load_master_material())
     fingerprints = [node_identity.fingerprints(p, source_id=source_id, key=key) for p in nodes]
     trusted_key = source['trusted_upstream_id_key']
@@ -165,9 +167,10 @@ def reconcile_source(conn, source_id: int, nodes: list[dict]):
                            'WHERE c.source_id=? ORDER BY c.ordinal', (source_id,)))
     report = _report()
     matched, used, ambiguous = {}, set(), {}
+    candidates = [row for row in old if not is_subscription_notice(row["raw_name"])]
     if trusted_key:
-        _match_trusted(conn, upstream, old, matched, used, ambiguous, report, source_id)
-    _match_fingerprints(conn, nodes, fingerprints, old, matched, used, ambiguous, report, source_id, trusted_key)
+        _match_trusted(conn, upstream, candidates, matched, used, ambiguous, report, source_id)
+    _match_fingerprints(conn, nodes, fingerprints, candidates, matched, used, ambiguous, report, source_id, trusted_key)
     for i, proxy in enumerate(nodes):
         if i not in matched and i in ambiguous:
             used.update(ambiguous[i])
@@ -181,6 +184,23 @@ def reconcile_source(conn, source_id: int, nodes: list[dict]):
             conn.execute('UPDATE node_catalog SET upstream_id_hmac=? WHERE node_uid=?', (upstream[i], uid))
         used.add(uid)
     _retire_missing(conn, old, used, report)
+    return _finish(conn, report)
+
+
+def retire_subscription_notices(conn):
+    """退役未被策略引用的旧公告，保留目录 ID 和历史版本。"""
+    _transaction(conn)
+    groups = list(conn.execute("SELECT members_v2,proxies FROM proxy_groups"))
+    refs = {entry.get("ref") for row in groups
+            for entry in json.loads(row["members_v2"] or "[]") if entry.get("kind") == "node"}
+    names = {name for row in groups for name in json.loads(row["proxies"] or "[]")}
+    rows = list(conn.execute("SELECT node_uid, raw_name, emit_name, retired FROM node_catalog "
+                             "WHERE origin_kind='source' AND retired=0"))
+    notices = [row for row in rows if row["node_uid"] not in refs
+               and row["emit_name"] not in names and row["raw_name"] not in names
+               and is_subscription_notice(row["raw_name"])]
+    report = _report()
+    _retire_missing(conn, notices, set(), report)
     return _finish(conn, report)
 
 

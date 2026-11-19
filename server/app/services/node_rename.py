@@ -94,6 +94,11 @@ def is_prompt_node(name: str) -> bool:
     return bool(text) and bool(INFO_DOMAIN_PATTERN.search(text))
 
 
+def is_subscription_notice(name: str) -> bool:
+    """识别订阅附带的公告和用量提示；只对订阅节点使用。"""
+    return is_info_node(name) or is_prompt_node(name)
+
+
 def _extract_multiplier(name: str) -> str | None:
     m = _MULTIPLIER_PATTERN.search(name)
     if not m:

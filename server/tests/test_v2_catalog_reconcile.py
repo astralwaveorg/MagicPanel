@@ -1,6 +1,32 @@
 from v2_helpers import admin, import_source, proxy
 
 
+def test_subscription_notices_do_not_replace_real_nodes_or_reuse_old_ids(client):
+    import pytest
+    from app import db
+    from app.services import node_catalog, source_nodes
+
+    notice = proxy("发布页: service.example.com")
+    real = proxy("香港 01")
+    source = import_source(client, admin(client), [notice, real, notice])
+    assert source["node_count"] == 1
+    assert source_nodes.parse(source_nodes.dump([notice, real])) == [real]
+    with pytest.raises(source_nodes.SourceError, match="只有通知"):
+        source_nodes.extract(source_nodes.dump([notice]).encode())
+    with db.tx(immediate=True) as conn:
+        first = node_catalog.list_active_nodes(conn)[0]
+        # 旧目录里曾把提示当作节点；有相同连接材料也不能借用旧 ID。
+        conn.execute("UPDATE node_catalog SET raw_name=? WHERE node_uid=?",
+                     (notice["name"], first["node_uid"]))
+        report = node_catalog.retire_subscription_notices(conn)
+        assert report["retired"] == [first["node_uid"]]
+        assert node_catalog.retire_subscription_notices(conn)["retired"] == []
+        node_catalog.reconcile_source(conn, source["id"], [notice, real, notice])
+        current, = node_catalog.list_active_nodes(conn)
+        assert current["raw_name"] == real["name"] and current["node_uid"] != first["node_uid"]
+        assert node_catalog.get_revision(conn, first["node_uid"], 1) is not None
+
+
 def test_source_rename_keeps_uid_and_material_version(client):
     from app import db
     from app.services import node_catalog

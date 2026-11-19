@@ -15,6 +15,7 @@ import re
 import urllib.parse
 
 import yaml
+from .node_rename import is_subscription_notice
 
 logger = logging.getLogger("magicpanel.source_nodes")
 
@@ -34,11 +35,16 @@ def extract(body: bytes) -> list[dict]:
     """
     text = body.decode("utf-8", errors="replace").strip()
     if text.startswith("proxies:") or "\nproxies:" in text[:4096]:
-        return _extract_clash_yaml(body)
-    uris = _decode_uri_list(text)
-    if uris:
-        return _from_uris(uris)
-    raise SourceError(_describe_unparsable(text))
+        nodes = _extract_clash_yaml(body)
+    else:
+        uris = _decode_uri_list(text)
+        if not uris:
+            raise SourceError(_describe_unparsable(text))
+        nodes = _from_uris(uris)
+    nodes = [node for node in nodes if not is_subscription_notice(str(node["name"]))]
+    if not nodes:
+        raise SourceError("订阅里只有通知，没有可用节点")
+    return nodes
 
 
 def _extract_clash_yaml(body: bytes) -> list[dict]:
@@ -331,7 +337,7 @@ def dump(nodes: list[dict]) -> str:
                           sort_keys=False, width=4096)
 
 
-def parse(text: str) -> list[dict]:
+def parse(text: str, *, include_notices: bool = False) -> list[dict]:
     """从已存快照里取回节点定义；内容坏了就当没有节点。"""
     try:
         data = yaml.safe_load(text)
@@ -340,7 +346,8 @@ def parse(text: str) -> list[dict]:
     if not isinstance(data, dict) or not isinstance(data.get("proxies"), list):
         return []
     return [dict(item) for item in data["proxies"]
-            if isinstance(item, dict) and item.get("name") and item.get("type")]
+            if isinstance(item, dict) and item.get("name") and item.get("type")
+            and (include_notices or not is_subscription_notice(str(item["name"])))]
 
 
 def match(pattern: str, name: str) -> bool:

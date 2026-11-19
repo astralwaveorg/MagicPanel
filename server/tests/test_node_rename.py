@@ -112,6 +112,11 @@ def test_settings_gate_controls_build_and_feed(client):
     })
     assert r.status_code == 201, r.text
 
+    group = client.post("/api/v1/groups", headers=h, json={
+        "name": "内联节点", "type": "select", "use_sources": ["原始机场"],
+    })
+    assert group.status_code == 201, group.text
+
     # 关闭开关：产物节点名原样
     client.put("/api/v1/settings", headers=h, json={"values": {"node_name_normalize": "0"}})
     build = client.post("/api/v1/builds", headers=h, json={}).json()
@@ -214,6 +219,10 @@ def test_batch_detect_api_and_settings_gate(client, monkeypatch):
         "content_b64": base64.b64encode(snap_text.encode()).decode(),
         "mode": "inline"})
     assert r.status_code == 201, r.text
+    group = client.post("/api/v1/groups", headers=h, json={
+        "name": "内联节点", "type": "select", "use_sources": ["原始机场"],
+    })
+    assert group.status_code == 201, group.text
     build = client.post("/api/v1/builds", headers=h, json={}).json()
     content = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]

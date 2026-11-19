@@ -15,7 +15,7 @@ from ..services import base_config as base_config_service
 from ..services import runtime_profiles
 from ..compiler import render, validate
 from ..services import node_rename
-from ..services import tester
+from ..services import source_nodes, tester
 from .builds import artifact_file
 
 router = APIRouter(prefix="/feed", tags=["feed"])
@@ -248,22 +248,24 @@ def provider_resource(token: str, name: str, request: Request):
         if not source or not source["snapshot_enc"]:
             return Response("not found", status_code=404)
         text = security.decrypt_text(source["snapshot_enc"])
-        # 开启过滤时只分发测试通过的节点；失败节点对设备不可见
+        # 旧快照也要去掉占位通知，与命名开关无关。
+        excluded = {p["name"] for p in source_nodes.parse(text, include_notices=True)
+                    if node_rename.is_subscription_notice(str(p["name"]))}
         if source["filter_unavailable"]:
             results = json.loads(source["test_results"] or "{}")
-            failed = {k for k, v in results.items() if v < 0}
-            if failed:
-                try:
-                    text = tester.filter_snapshot(text, failed)
-                except tester.TestError:
-                    pass  # 快照异常时回退为完整内容，不阻断分发
+            excluded.update(k for k, v in results.items() if v < 0)
+        if excluded:
+            try:
+                text = tester.filter_snapshot(text, excluded)
+            except tester.TestError:
+                pass  # 快照异常时回退为完整内容，不阻断分发
         # 节点名称规范化（构建端与分发端同一套规则，见 services/node_rename）
         if db.get_setting(conn, "node_name_normalize", "1") == "1":
             badge_lookup = None
             perf_lookup = None
             badge_enabled = db.get_setting(conn, "node_name_unlock_badge", "0") == "1"
             if db.get_setting(conn, "probe_quality_provider_names", "0") == "1":
-                from ..services import quality_funnel, source_nodes
+                from ..services import quality_funnel
                 catalog = [dict(row) for row in db.all_(
                     conn, "SELECT * FROM node_catalog WHERE source_id=? AND retired=0", (source["id"],))]
                 mapped = {}
