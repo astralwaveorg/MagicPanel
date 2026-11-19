@@ -547,6 +547,10 @@ def start_quality_probe(operator: str, *, max_nodes: int = 3) -> bool:
             result = quality_funnel.run_funnel(
                 _collect_probe_proxies(), operator=operator, max_nodes=max_nodes)
             _quality_task["last"] = result.get("stats", {})
+            stats = _quality_task["last"]
+            if stats.get("pending") and not stats.get("error"):
+                logger.info("节点检测：本轮 %s 个，完成平台检测 %s 个，耗时 %s 秒",
+                            stats["pending"], stats["probed"], stats["elapsed_sec"])
             return result
         except Exception:
             _quality_task["last"] = {"error": "测试未完成，请查看应用日志"}

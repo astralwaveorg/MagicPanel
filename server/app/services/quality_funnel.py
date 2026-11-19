@@ -138,12 +138,16 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
     proxies：Mihomo 节点字典列表（含 name/server/port/type）。
     only_missing=True 时跳过已有完整结果的节点（增量跑）。
     """
+    from . import routing_planner
     from .probes import registry
 
     with db.connect() as conn:
         cfg = _settings(conn)
     previous = load_results().get("nodes", {})
     detectors = registry.detectors_for(cfg["platform_ids"] or None)
+    if not cfg["platform_ids"]:
+        # 先测参与构建的服务。预算不足时，少见平台可以留到复测。
+        detectors.sort(key=lambda detector: detector.platform_id not in routing_planner.SERVICE_ALIAS_NAMES)
     key = security.derive_subkey(security.load_master_material(), purpose="node-quality")
 
     from . import node_rename
@@ -168,8 +172,15 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
             if old.get("revision") == revision and 0 <= age < interval:
                 continue
         pending.append(proxy)
-    pending.sort(key=lambda p: (_checked_at(previous.get(p["name"], {}))
-                                if previous.get(p["name"], {}).get("revision") == revisions[p["name"]] else 0))
+    def queue_key(proxy: dict) -> tuple[int, bool]:
+        name = proxy["name"]
+        old = previous.get(name, {})
+        last = _checked_at(old) if old.get("revision") == revisions[name] else 0
+        # 同样缺测时先测本地节点。跑过的节点仍按上次检测时间排队，
+        # 因此不会反复插队，订阅节点也能按批次完成。
+        return last, proxy.get("source_id") is not None
+
+    pending.sort(key=queue_key)
     limit = cfg["round_limit"]
     if max_nodes is not None:
         limit = min(limit, max_nodes)

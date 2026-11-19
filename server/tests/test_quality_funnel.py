@@ -161,8 +161,8 @@ def test_batch_selects_uncached_nodes_before_applying_limit(client, monkeypatch)
             return -1
 
     monkeypatch.setattr(quality_funnel.probe_engine, "NodeEngine", Engine)
-    quality_funnel.run_funnel([_proxy(n) for n in [*previous, "未测", "下批"]],
-                              max_nodes=1)
+    quality_funnel.run_funnel([*(_proxy(n) for n in previous),
+                               {**_proxy("下批"), "source_id": 1}, _proxy("未测")], max_nodes=1)
     assert saved == ["未测"]
     assert "完成0" in quality_funnel.current_results([_proxy("完成0")])
     changed = {**_proxy("完成0"), "port": 9443}

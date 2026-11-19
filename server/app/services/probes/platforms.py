@@ -627,6 +627,43 @@ class BilibiliIntlDetector(_WebDetector):
     detail_blocked = "哔哩哔哩国际版在该出口不可用"
 
 
+class TwitchDetector(_WebDetector):
+    """检查 Twitch 网页响应；直播和点播均需播放器确认。"""
+
+    platform_id = "twitch"
+    display_name = "Twitch"
+    category = "streaming"
+    url = "https://www.twitch.tv/"
+    markers = Markers(block_requires_marker=True)
+
+    def build_extra(self, _resp: ProbeResponse) -> dict:
+        return {"playback": "unverified"}
+
+    def extract_region(self, *_args) -> str:
+        return ""
+
+
+class BBCDetector(_WebDetector):
+    """检查 BBC iPlayer 入口；BBC 新闻页可访问不代表 iPlayer 能播放。"""
+
+    platform_id = "bbc"
+    display_name = "BBC iPlayer"
+    category = "streaming"
+    url = "https://www.bbc.co.uk/iplayer"
+    markers = Markers(
+        block_requires_marker=True,
+        region_markers=("bbc iplayer only works in the uk",
+                        "bbc iplayer is only available in the uk",
+                        "bbc iplayer is not available outside the uk"),
+    )
+
+    def build_extra(self, _resp: ProbeResponse) -> dict:
+        return {"playback": "unverified"}
+
+    def extract_region(self, *_args) -> str:
+        return ""
+
+
 class TVBAnywhereDetector(_WebDetector):
     """TVBAnywhere：香港地区服务。"""
 
@@ -788,6 +825,8 @@ ALL_PLATFORM_DETECTORS: tuple[Detector, ...] = (
     WeTVDetector(),
     DiscoveryPlusDetector(),
     BilibiliIntlDetector(),
+    TwitchDetector(),
+    BBCDetector(),
     TVBAnywhereDetector(),
     ChatGPTDetector(),
     ClaudeDetector(),

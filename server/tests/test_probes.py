@@ -539,6 +539,21 @@ def test_registry_ids_are_unique():
     assert len(ids) == len(ALL_DETECTORS)
 
 
+def test_twitch_and_iplayer_homepages_do_not_prove_playback():
+    from app.services.routing_planner import verified_service_ids
+
+    for pid in ("twitch", "bbc"):
+        detector = ALL_DETECTORS[pid]
+        result = _probe(detector, {detector.url: httpx.Response(200, text='{"locale":"en-GB"}')})
+        assert (result.state, result.region) == (STATE_REACHABLE, "")
+        row = {"qualified": True, "checked_at": 100, "probes": {pid: result.to_dict()}}
+        assert not verified_service_ids(row, earliest=90, latest=110)
+
+    bbc = ALL_DETECTORS["bbc"]
+    denied = _probe(bbc, {bbc.url: httpx.Response(403, text="BBC iPlayer only works in the UK.")})
+    assert denied.state == STATE_BLOCKED
+
+
 def test_registry_entries_are_well_formed():
     for platform_id, detector in ALL_DETECTORS.items():
         assert detector.platform_id == platform_id
