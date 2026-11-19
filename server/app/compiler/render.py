@@ -371,8 +371,9 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
             aliases[pid] = members
 
     def ordered_nodes(pid):
+        region = routing_planner.MEDIA_ROUTE_REGIONS.get(pid)
         names = [name for name in aliases.get(pid, {})
-                 if pid != "netflix" or eligible[name].get("regions", {}).get(pid) == "JP"]
+                 if not region or eligible[name].get("regions", {}).get(pid) == region]
         names.sort(key=lambda name: (
             pid in routing_planner.AI_SERVICES and not eligible[name].get("preferred_ai"),
             eligible[name].get("latencies", {}).get(pid, 10**9), final_name[name]))
@@ -420,6 +421,9 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
             # 保留已下发的 Netflix 组名和旧线路供手选；日本组只收已确认的节点。
             add_service_group("Netflix 日本", nodes)
             add_service_group(label, [], ["Netflix 日本", previous, *fallbacks])
+        elif pid in {"hulu", "hbo"}:
+            # 保留原美国组为手动选项。只把确认美国地区的节点排到它前面。
+            add_service_group(label, [], [*nodes, previous, *fallbacks])
         else:
             add_service_group(label, nodes if pid != "netflix" else [], [previous, *fallbacks])
         routed.add(pid)

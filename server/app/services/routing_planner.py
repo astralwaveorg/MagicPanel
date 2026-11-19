@@ -14,6 +14,8 @@ SERVICE_RULES = {
     "twitch": ("twitch", "🎞️ 国际影音"),
     "bbc": ("bbc", "🎞️ 国际影音"),
     "biliintl": ("bilibili_intl", "🎞️ 国际影音"),
+    "huluusa": ("hulu", "🇺🇸美国"),
+    "hbousa": ("hbo", "🇺🇸美国"),
     "openai": ("chatgpt", "🧠 人工智能"),
     "anthropic": ("claude", "🤖 Claude"),
     "perplexity": ("perplexity", "🧠 人工智能"),
@@ -25,7 +27,9 @@ AI_DOMAIN_RULES = {"perplexity": "perplexity.ai", "grok": "grok.com",
 MEDIA_NAMES = {
     "netflix": "Netflix", "primevideo": "Prime Video", "spotify": "Spotify",
     "twitch": "Twitch", "bbc": "BBC", "bilibili_intl": "Bilibili 海外版",
+    "hulu": "Hulu", "hbo": "HBO Max",
 }
+MEDIA_ROUTE_REGIONS = {"netflix": "JP", "hulu": "US", "hbo": "US"}
 
 
 def rank_ai(rows: list[dict]) -> list[str]:
@@ -142,7 +146,7 @@ SERVICE_ALIAS_NAMES = {
     "claude": "Claude", "chatgpt": "ChatGPT", "gemini": "Gemini",
     "perplexity": "Perplexity", "grok": "Grok", "copilot": "Copilot",
     **MEDIA_NAMES, "tiktok": "TikTok", "youtube_premium": "YouTube Premium",
-    "disney": "Disney+", "hbo": "HBO Max",
+    "disney": "Disney+",
 }
 
 
@@ -166,7 +170,7 @@ def _positive_result(row: dict, pid: str) -> bool:
 
 def service_candidates(rows: list[dict], service: str, *, earliest: int,
                        latest: int | None = None, netflix_region: str = "JP") -> list[dict]:
-    """候选与别名共用同一套正向判定。Netflix 选路要求确认日本片库。"""
+    """候选与别名共用正向判定，选路另检查服务要求的地区。"""
     if service not in SERVICE_ALIAS_NAMES:
         return []
     candidates = []
@@ -176,7 +180,8 @@ def service_candidates(rows: list[dict], service: str, *, earliest: int,
                 or (latest is not None and checked > latest) or not _positive_result(row, service)):
             continue
         result = row["probes"][service]
-        if service == "netflix" and result.get("region") != netflix_region:
+        required_region = netflix_region if service == "netflix" else MEDIA_ROUTE_REGIONS.get(service)
+        if required_region and result.get("region") != required_region:
             continue
         preferred = (service in AI_SERVICES and row.get("origin_kind") == "local"
                      and row.get("country") in ("US", "JP"))

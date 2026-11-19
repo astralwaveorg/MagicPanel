@@ -181,6 +181,31 @@ def test_service_groups_split_media_in_place_and_require_jp_netflix_evidence():
     assert "日本 02 - Claude" not in {p["name"] for p in cfg["proxies"]}
 
 
+def test_us_media_use_only_eligible_us_nodes_and_keep_the_previous_us_group():
+    from app.compiler.render import _apply_service_groups
+
+    rows = [
+        {"type": "RULE-SET", "value": "HuluUSA", "target": "🇺🇸美国"},
+        {"type": "RULE-SET", "value": "HBOUSA", "target": "🇺🇸美国"},
+        {"type": "RULE-SET", "value": "disney", "target": "Disney+"},
+        {"type": "RULE-SET", "value": "cn", "target": "DIRECT"},
+    ]
+    cfg = {"proxies": [{"name": name} for name in ("美国 01", "日本 01")],
+           "proxy-groups": [{"name": "🇺🇸美国"}]}
+    evidence = {
+        "us": {"revision": "current", "services": ["hbo"], "regions": {"hbo": "US"}},
+        "jp": {"revision": "current", "services": ["hbo", "hulu"],
+               "regions": {"hbo": "JP", "hulu": "JP"}},
+    }
+    result = _apply_service_groups(cfg, rows, evidence,
+                                   {key: {"revision": "current"} for key in evidence},
+                                   {"us": "美国 01", "jp": "日本 01"})
+    assert result == [{**rows[0], "target": "Hulu"}, {**rows[1], "target": "HBO Max"}, *rows[2:]]
+    groups = {group["name"]: group for group in cfg["proxy-groups"]}
+    assert groups["Hulu"]["proxies"] == ["🇺🇸美国"]
+    assert groups["HBO Max"]["proxies"] == ["美国 01 - HBO Max", "🇺🇸美国"]
+
+
 def test_ai_service_rules_preserve_google_direct_and_explicit_overrides():
     from app.compiler import render
 
