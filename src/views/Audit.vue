@@ -33,7 +33,12 @@
           <el-table-column prop="action" label="动作" min-width="150" />
           <el-table-column label="对象" min-width="130">
             <template #default="{ row }">
-              <span v-if="row.object_type" class="mono">{{ row.object_type }}#{{ row.object_id }}</span>
+              <el-tooltip v-if="row.object_type" placement="top" :show-after="200">
+                <template #content>
+                  <span class="mono">{{ row.object_type }}#{{ row.object_id }}</span>
+                </template>
+                <span>{{ objectLabel(row.object_type) }}#{{ row.object_id }}</span>
+              </el-tooltip>
               <span v-else>—</span>
             </template>
           </el-table-column>
@@ -121,6 +126,20 @@ function onSize(size) {
 }
 
 onMounted(load)
+
+// 审计对象类型的中文口径：字段值保持 slug 不变（审计记录不可改），
+// 显示层给出可读名称
+const OBJECT_TYPE_LABELS = {
+  group: '策略组', rule: '分流规则', source: '节点来源', provider: '规则来源',
+  variant: '分流方案', target: '引擎平台', device: '设备', build: '构建',
+  user: '维护者', settings: '设置', backup: '备份', deps: '自主维护',
+  audit: '审计', base_config: '基础配置', snippet: '拓展模块', portal: '门户',
+  automation: '自动任务', release: '发布', unlock: '解锁检测',
+}
+
+function objectLabel(type) {
+  return OBJECT_TYPE_LABELS[type] || type || '—'
+}
 
 function onSelect(list) {
   selection.value = list

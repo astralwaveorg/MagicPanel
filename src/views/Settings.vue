@@ -27,8 +27,19 @@
             <el-switch v-model="settings.node_name_normalize" />
           </div>
           <p class="mp-form-hint">
-            机场节点统一为「旗帜 [标签·来源] 国名 序号」格式（开启能力徽章时徽章紧跟国名），并丢弃剩余流量、套餐到期这类占位节点。
+            机场节点统一为「旗帜 [机场·标签] 国名 序号」格式（开启能力徽章时徽章紧跟国名），并丢弃剩余流量、套餐到期这类占位节点。
             本地节点命名不受影响；关闭后产物与订阅恢复原始名称。
+          </p>
+        </el-form-item>
+        <el-form-item>
+          <div class="mp-switch-row">
+            <span class="mp-switch-label">节点名显示解锁徽章</span>
+            <el-switch v-model="settings.node_name_unlock_badge" />
+          </div>
+          <p class="mp-form-hint">
+            开启后，AI 全部解锁（🔓）、流媒体解锁（🎬）、Netflix 高级版（📺）的节点
+            在名称里带上对应标记。徽章只增不减——未测或被拒不显示，节点名不会反复变化。
+            需要先在「网络体检」页跑过节点解锁检测。
           </p>
         </el-form-item>
         <el-button :loading="savingSettings" @click="saveSettings" type="primary">保存设置</el-button>
@@ -280,7 +291,10 @@ import UserAvatar from '../components/UserAvatar.vue'
 import ErrorState from '../components/ErrorState.vue'
 import StatusDot from '../components/StatusDot.vue'
 
-const settings = reactive({ base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '', node_name_normalize: true })
+const settings = reactive({
+  base_url: '', session_ttl_hours: 168, profile_update_interval: 1, core_proxy: '',
+  node_name_normalize: true, node_name_unlock_badge: false,
+})
 // 整页加载失败时给 ErrorState + 重试，而不是留一片空白表单
 const loadError = ref('')
 const isMobile = useMobile()
@@ -327,6 +341,7 @@ async function load() {
       profile_update_interval: Number(s.profile_update_interval) || 1,
       core_proxy: s.core_proxy || '',
       node_name_normalize: s.node_name_normalize !== '0',
+      node_name_unlock_badge: s.node_name_unlock_badge === '1',
     })
     users.value = u
     portalEnabled.value = p.enabled
@@ -414,6 +429,7 @@ async function saveSettings() {
       profile_update_interval: String(settings.profile_update_interval),
       core_proxy: settings.core_proxy,
       node_name_normalize: settings.node_name_normalize ? '1' : '0',
+      node_name_unlock_badge: settings.node_name_unlock_badge ? '1' : '0',
     } } })
     ElMessage.success('已保存')
   } catch (e) {

@@ -41,7 +41,7 @@
                    clearable @change="applyFilter">
           <el-option value="remote" label="远程 URL" />
           <el-option value="inline" label="内联内容" />
-          <el-option value="repo" label="维护仓库" />
+          <el-option value="repo" label="仓库托管" />
         </el-select>
         <el-select v-model="filters.behavior" class="mp-filter-select" placeholder="全部行为"
                    clearable @change="applyFilter">
@@ -135,7 +135,7 @@
             </template>
           </el-table-column>
           <el-table-column label="抓取间隔" width="110" align="right">
-            <template #default="{ row }">{{ row.kind === 'inline' ? '—' : row.interval }}</template>
+            <template #default="{ row }">{{ row.kind === 'inline' ? '—' : intervalText(row.interval) }}</template>
           </el-table-column>
           <el-table-column label="最近成功" min-width="160">
             <template #default="{ row }"><span class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span></template>
@@ -184,7 +184,7 @@
           <el-radio-group v-model="form.kind">
             <el-radio value="remote">远程 URL</el-radio>
             <el-radio value="inline">内联内容</el-radio>
-            <el-radio value="repo">维护仓库</el-radio>
+            <el-radio value="repo">仓库托管</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="form.kind === 'remote'" label="URL">
@@ -324,11 +324,11 @@ import ErrorState from '../components/ErrorState.vue'
 import Pager from '../components/Pager.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
-import { fmtTime, shortSha, sourceStatus } from '../format'
+import { fmtTime, intervalText, shortSha, sourceStatus } from '../format'
 import { copyText } from '../utils/clipboard'
 
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管由自主维护同步而来）
-const KIND_LABELS = { remote: '远程', inline: '内联', repo: '维护仓库' }
+const KIND_LABELS = { remote: '远程', inline: '内联', repo: '仓库托管' }
 
 // 失败原因要能看懂：后端给的是脱敏后的中文说明（不回显含凭据的原文）
 function failReason(row) {

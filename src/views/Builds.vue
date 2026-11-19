@@ -128,17 +128,17 @@
                   <div class="op-grid">
                     <el-button size="small" @click="openDetail(row)" type="info" plain>详情</el-button>
                     <template v-if="row.status === 'BUILT'">
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success" plain>发布测试</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success" plain>发布至测试环境</el-button>
                       <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishBoth(row)" type="success" plain>一键发布</el-button>
                       <el-button size="small" :loading="busyId === row.id" @click="remove(row)" type="danger" plain>删除</el-button>
                     </template>
                     <template v-else-if="row.status === 'TESTING'">
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToProd(row)" type="success" plain>发布至生产</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToProd(row)" type="success" plain>发布至生产环境</el-button>
                       <el-button size="small" :loading="busyId === row.id" @click="offlineBuild(row)" type="warning" plain>下线</el-button>
                     </template>
                     <template v-else-if="row.status === 'OFFLINE'">
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success">重新测试</el-button>
-                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="rollbackToProd(row)" type="warning" plain>回滚至生产</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="publishToTest(row)" type="success">重新发布至测试环境</el-button>
+                      <el-button size="small" :loading="busyId === row.id" :disabled="!verified(row)" @click="rollbackToProd(row)" type="warning" plain>回滚至生产环境</el-button>
                     </template>
                   </div>
                 </template>
@@ -190,7 +190,7 @@
         <div v-if="detail.status === 'BUILT' || detail.status === 'OFFLINE'" class="mp-drawer-actions">
           <el-button :disabled="detail.verify_status !== 'success' || !!busyId"
                      :loading="busyId === detail.id"
-                     @click="publishToTest(detail)" type="success" plain>发布测试</el-button>
+                     @click="publishToTest(detail)" type="success" plain>发布至测试环境</el-button>
           <el-button :disabled="detail.verify_status !== 'success' || !!busyId"
                      :loading="busyId === detail.id"
                      @click="publishBoth(detail)" type="success" plain>一键发布</el-button>

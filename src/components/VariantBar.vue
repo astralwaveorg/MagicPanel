@@ -5,9 +5,8 @@
       <el-select :model-value="modelValue" class="vb-select" @change="onSelect">
         <el-option v-for="v in variants" :key="v.id" :value="v.id"
                    :label="variantLabel(v)">
-          <span>{{ v.name }}</span>
+          <span>{{ variantLabel(v) }}</span>
           <span v-if="!v.enabled" class="vb-disabled-tag">已停用</span>
-          <span v-if="v.is_system" class="vb-system-tag">系统</span>
         </el-option>
       </el-select>
       <span v-if="current?.note" class="vb-note">{{ current.note }}</span>
@@ -40,7 +39,7 @@
               <el-form-item label="从哪套复制">
                 <el-select v-model="createForm.copy_from" style="width:100%">
                   <el-option v-for="v in variants" :key="v.id" :value="v.id"
-                             :label="v.name + (v.id === 0 ? '（推荐起点）' : '')" />
+                             :label="variantLabel(v) + (v.id === 0 ? '（推荐起点）' : '')" />
                 </el-select>
               </el-form-item>
             </el-col>
@@ -57,7 +56,7 @@
       <el-table :data="variants" size="small" v-loading="loadingVariants">
         <el-table-column label="方案" min-width="130">
           <template #default="{ row }">
-            <span>{{ row.name }}</span>
+            <span>{{ variantLabel(row) }}</span>
             <el-tag v-if="row.is_system" size="small" type="info" class="vb-tag">系统</el-tag>
             <el-tag v-if="!row.enabled" size="small" type="warning" class="vb-tag">已停用</el-tag>
           </template>
@@ -135,7 +134,11 @@ const editForm = ref({ id: 0, name: '', note: '', enabled: true, is_system: fals
 const current = computed(() =>
   variants.value.find((v) => v.id === props.modelValue) || null)
 
+// 方案名的唯一显示口径：系统方案固定叫「默认方案」，其余用方案自身名称。
+// 选择框收起态、下拉列表项、方案管理表格、复制来源下拉都走这里，
+// 避免同一个方案在不同位置显示成不同名字。
 function variantLabel(v) {
+  if (!v) return ''
   return v.id === 0 ? '默认方案' : v.name
 }
 
@@ -237,7 +240,7 @@ async function move(row, delta) {
 async function remove(row) {
   const { confirmBox } = await import('../confirm')
   if (!await confirmBox(
-    `删除方案「${row.name}」？该方案的 ${row.groups_count} 个策略组与 ${row.rules_count} 条规则会一并删除。`,
+    `删除方案「${variantLabel(row)}」？该方案的 ${row.groups_count} 个策略组与 ${row.rules_count} 条规则会一并删除。`,
     '删除分流方案', { type: 'warning', confirmButtonText: '删除' },
   )) return
   try {
@@ -271,11 +274,8 @@ async function remove(row) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vb-system-tag,
 .vb-disabled-tag {
   margin-left: 6px;
-}
-.vb-disabled-tag {
   color: var(--el-color-warning);
   font-size: 12px;
 }

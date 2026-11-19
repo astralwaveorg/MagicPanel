@@ -85,8 +85,10 @@
             </template>
           </el-table-column>
           <el-table-column prop="name" label="名称" min-width="110" />
-          <el-table-column prop="type" label="类型" width="90" />
-          <el-table-column label="适用平台" min-width="150">
+          <el-table-column label="类型" width="90">
+            <template #default="{ row }">{{ groupTypeLabel(row.type) }}</template>
+          </el-table-column>
+          <el-table-column label="适用引擎平台" min-width="150">
             <template #default="{ row }">
               <!-- 列里只给一行摘要，完整清单靠悬浮提示，避免行高被撑开 -->
               <el-tooltip placement="top" :show-after="200">
@@ -102,7 +104,7 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="隐藏" width="80">
+          <el-table-column label="客户端可见" width="100">
             <template #default="{ row }">{{ row.hidden ? '隐藏' : '显示' }}</template>
           </el-table-column>
           <el-table-column label="包含策略" width="160">
@@ -173,11 +175,11 @@
           <el-col :span="12">
             <el-form-item label="类型">
               <el-select v-model="form.type" style="width:100%">
-                <el-option value="select" label="select（手动选择）" />
-                <el-option value="url-test" label="url-test（延迟测速）" />
-                <el-option value="fallback" label="fallback（故障切换）" />
-                <el-option value="load-balance" label="load-balance（负载均衡）" />
-                <el-option value="relay" label="relay（链式转发）" />
+                <el-option value="select" label="手动选择" />
+                <el-option value="url-test" label="自动测速" />
+                <el-option value="fallback" label="故障切换" />
+                <el-option value="load-balance" label="负载均衡" />
+                <el-option value="relay" label="链式转发" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -379,7 +381,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { ALL_SCOPE, hasAllScope, collapseIfComplete } from '../scopeOptions'
-import { scopeBrief, proxiesBrief, sourceBrief, localNodeBrief } from '../format'
+import { groupTypeLabel, scopeBrief, proxiesBrief, sourceBrief, localNodeBrief } from '../format'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import { useRefDialog } from '../useRefDialog'

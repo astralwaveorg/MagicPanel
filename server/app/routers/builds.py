@@ -546,7 +546,7 @@ def get_artifact(bid: int, target_name: str, user=RequireCapabilities('reveal'))
         security.audit(conn, user['username'], '查看构建产物', 'build', bid, {'fields': ['artifact']})
     path = artifact_file(bid, target_name)
     if not path.exists():
-        raise HTTPException(404, "该目标没有构建产物")
+        raise HTTPException(404, "该引擎平台没有构建产物")
     return {"target": target_name, "content": path.read_text(encoding="utf-8")}
 
 

@@ -122,7 +122,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
-import { fmtTime } from '../format'
+import { fmtTime, latencyText } from '../format'
 import { copyText } from '../utils/clipboard'
 import { BROWSER_CHECKS, probeAll, probeExitIp } from '../utils/browserChecks'
 import StatusDot from '../components/StatusDot.vue'
@@ -164,7 +164,7 @@ function browserKind(id) {
 }
 function browserLatency(id) {
   const r = browserMap.value[id]
-  return r && r.latency_ms ? `${r.latency_ms}ms` : ''
+  return r && r.latency_ms ? latencyText(r.latency_ms) : ''
 }
 function browserCount(state) {
   return Object.values(browserMap.value).filter(r => r.state === state).length
@@ -189,7 +189,7 @@ function serverSub(id) {
   if (!r) return ''
   const bits = []
   if (r.region) bits.push(`地区 ${r.region}`)
-  if (r.latency_ms) bits.push(`${r.latency_ms}ms`)
+  if (r.latency_ms) bits.push(latencyText(r.latency_ms))
   if (r.detail) bits.push(r.detail)
   return bits.join(' · ')
 }

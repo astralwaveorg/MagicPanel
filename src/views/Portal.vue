@@ -62,7 +62,7 @@
             <button class="pt-search-btn" type="submit">搜索</button>
           </form>
           <p class="pt-hero-sub">
-            {{ devices.length }} 台设备 · {{ data.rules.length }} 条个人规则 ·
+            {{ devices.length }} 台设备 · {{ data.rules.length }} 条规则 ·
             {{ data.rule_providers.length }} 个规则来源 ·
             {{ releaseText('production') }} · {{ releaseText('testing') }}
           </p>
@@ -113,7 +113,7 @@
                   <p class="pt-card-meta">
                     <span class="pt-plat">{{ platformLabel(d.platform) }}</span> · {{ d.target_name }}
                     <template v-if="hasOwnProfile(d)">
-                      · 设备：{{ d.display_name }}
+                      · 设备名：{{ d.display_name }}
                     </template>
                   </p>
                   <!-- 分流方案选择：这台设备要用哪一套策略组与规则。
@@ -128,7 +128,7 @@
                       :title="variantTitle(v)"
                       :aria-pressed="pickOf(d) === v"
                       @click="setPick(d, v)"
-                    >{{ v === '' ? '默认' : v }}</button>
+                    >{{ v === '' ? '默认方案' : v }}</button>
                   </div>
                   <div
                     v-if="urlFor(d)"
@@ -578,7 +578,9 @@ const providerSummary = computed(() => {
     .map((b) => `${BEHAVIOR_LABELS[b]} ${list.filter((p) => p.behavior === b).length}`)
     .join(' · ')
   const tail = uncounted ? `共 ${total} 条（另有 ${uncounted} 个二进制集合未统计）` : `共 ${total} 条`
-  return `${list.length} 个来源 · 远程 ${remote} · 内联 ${list.length - remote} · ${kinds} · ${tail}`
+  const repo = list.filter((p) => p.kind === 'repo').length
+  const inline = list.filter((p) => p.kind === 'inline').length
+  return `${list.length} 个来源 · 远程 ${remote} · 内联 ${inline} · 仓库托管 ${repo} · ${kinds} · ${tail}`
 })
 
 // 分组标题的条目数：整组都数不出来时别显示「0 条」
@@ -590,7 +592,7 @@ function providerGroupMeta(g) {
 
 function behaviorLabel(b) { return BEHAVIOR_LABELS[b] || b }
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管是自主维护带来的第三种）
-const PROVIDER_KIND_LABELS = { remote: '远程', inline: '内联', repo: '维护仓库' }
+const PROVIDER_KIND_LABELS = { remote: '远程', inline: '内联', repo: '仓库托管' }
 function providerKindLabel(k) { return PROVIDER_KIND_LABELS[k] || k }
 function formatLabel(f) { return FORMAT_LABELS[f] || f }
 
@@ -743,7 +745,7 @@ function urlFor(d) {
   return deviceResources.value.get(d.name)?.url || ''
 }
 
-// 「下载」保存到本地的文件名：设备名[@方案].yaml
+// 「下载」保存到本地的文件名：文件名[@方案].yaml
 function downloadName(d) {
   return deviceResources.value.get(d.name)?.downloadName || ''
 }

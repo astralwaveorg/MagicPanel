@@ -94,7 +94,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="target" label="目标" min-width="110" />
-          <el-table-column label="适用平台" min-width="150">
+          <el-table-column label="适用引擎平台" min-width="150">
             <template #default="{ row }">
               <!-- 列里只给一行摘要，完整清单靠悬浮提示，避免行高被撑开 -->
               <el-tooltip placement="top" :show-after="200">

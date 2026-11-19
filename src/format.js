@@ -128,6 +128,19 @@ export function latencyText(ms) {
 }
 
 /** 间隔秒数（抓取/测速间隔类）：自动选 天/小时/分钟/秒。 */
+// 策略组类型的中文口径（全站唯一来源）
+export const GROUP_TYPE_LABELS = {
+  select: '手动选择',
+  'url-test': '自动测速',
+  fallback: '故障切换',
+  'load-balance': '负载均衡',
+  relay: '链式转发',
+}
+
+export function groupTypeLabel(type) {
+  return GROUP_TYPE_LABELS[type] || type || '—'
+}
+
 export function intervalText(sec) {
   const n = Number(sec)
   if (!Number.isFinite(n) || n <= 0) return '—'

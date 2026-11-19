@@ -99,7 +99,7 @@
 
     <EmptyState
       v-if="!error && !rows.length && !hasFilter"
-      reason="还没有订阅来源。"
+      reason="还没有节点来源。"
       next="点击“添加订阅”，填入订阅地址后执行抓取。"
     />
     <EmptyState
@@ -163,7 +163,7 @@
             <template #default="{ row }">{{ row.auto_fetch === false ? '—' : row.fail_count }}</template>
           </el-table-column>
           <el-table-column label="抓取间隔" width="110" align="right">
-            <template #default="{ row }">{{ row.auto_fetch === false ? '—' : row.interval }}</template>
+            <template #default="{ row }">{{ row.auto_fetch === false ? '—' : intervalText(row.interval) }}</template>
           </el-table-column>
           <el-table-column label="客户端更新" width="110" align="right">
             <template #default="{ row }">
@@ -172,7 +172,7 @@
           </el-table-column>
           <el-table-column label="测速间隔" width="110" align="right">
             <template #default="{ row }">
-              {{ row.auto_test === false ? '关' : (row.test_interval ? row.test_interval : '关') }}
+              {{ row.auto_test === false ? '关' : (row.test_interval ? intervalText(row.test_interval) : '关') }}
             </template>
           </el-table-column>
           <el-table-column label="最近错误" min-width="160">
@@ -254,7 +254,7 @@
           <el-table-column label="测速状态" width="130">
             <template #default="{ row }">
               <StatusDot v-if="row.test_status === 'ok'" kind="ok"
-                         :text="`成功 ${row.test_delay} ms`" />
+                         :text="`成功 ${latencyText(row.test_delay)}`" />
               <StatusDot v-else-if="row.test_status === 'failed'" kind="danger" text="失败" />
               <span v-else style="color:var(--mp-muted)">未测速</span>
             </template>
@@ -362,7 +362,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑订阅来源' : '添加订阅来源'"
+    <el-dialog :close-on-click-modal="false" v-model="dialog" :title="editing ? '编辑节点来源' : '添加节点来源'"
                width="min(560px, 94vw)">
       <el-form :model="form" label-position="top">
         <el-form-item label="名称">
@@ -374,7 +374,7 @@
             <span>机场订阅常要带 Cookie 与特定 UA 才给内容；粘贴一条 curl 命令即可自动填好地址与请求头。</span>
           </div>
         </el-form-item>
-        <el-form-item v-if="isFileSource" label="订阅来源">
+        <el-form-item v-if="isFileSource" label="节点来源">
           <el-input model-value="文件来源：内容来自上传的订阅文件" readonly />
           <div class="mp-form-hint">
             <el-button link type="primary" size="small" @click="openFileReplace">替换文件</el-button>
@@ -638,7 +638,7 @@ import Pager from '../components/Pager.vue'
 import ErrorState from '../components/ErrorState.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
-import { fmtTime, shortSha, sourceStatus } from '../format'
+import { fmtTime, intervalText, latencyText, shortSha, sourceStatus } from '../format'
 import { copyText } from '../utils/clipboard'
 import { parseCurl } from '../utils/curlParse'
 
