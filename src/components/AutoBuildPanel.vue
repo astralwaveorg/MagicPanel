@@ -3,7 +3,7 @@
     <ul class="mp-page-desc mp-desc-list">
       <li>服务端按各来源的间隔自动抓取上游、按测速间隔自动测速</li>
       <li>策略变化时按设定间隔创建构建并发布</li>
-      <li>页面标题行的「立即发布」会忽略到期时间，强制执行一轮抓取、测速和构建检查</li>
+      <li>页面标题行的「抓取并发布」会忽略到期时间，强制执行一轮抓取、测速和构建检查</li>
     </ul>
 
     <div class="mp-card">
@@ -14,7 +14,7 @@
           <span class="mp-toolbar-hint">上次运行：{{ fmtTime(status.last_tick_at) }}</span>
           <span v-if="!status.autostart" class="mp-toolbar-hint">后台循环未启动</span>
         </div>
-        <!-- 「立即发布」是页面级主操作，在标题行右侧，这里不再重复放一个 -->
+        <!-- 「抓取并发布」是页面级主操作，在标题行右侧，这里不再重复放一个 -->
       </div>
       <div class="mp-auto-status">
         <div>
@@ -162,7 +162,7 @@
 
 <script setup>
 // 「自动运行配置」面板：只管配置与记录，执行类动作在页面标题行。
-// 状态与动作来自共享模块，与标题行的「立即发布」按钮同源。
+// 状态与动作来自共享模块，与标题行的「抓取并发布」按钮同源。
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import StatusDot from './StatusDot.vue'

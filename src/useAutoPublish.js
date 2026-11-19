@@ -6,6 +6,7 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from './api'
+import { confirmBox } from './confirm'
 import { ENV_LABELS, RELEASE_ACTION_LABELS } from './format'
 
 const status = ref({
@@ -133,14 +134,33 @@ export async function saveAutoSettings() {
   }
 }
 
-// 强制跑一轮：抓取 → 测速 → 构建检查 → 发布
+// 强制跑一轮：按当前设置抓取 → 测速 → 构建检查 → 发布。
+// 发布目标可能是生产（auto_publish_env 默认 production），先按设置确认再执行。
 export async function runAutoNow() {
   if (triggering.value) return
+  let settings = {}
+  try {
+    settings = await api('/api/v1/settings')
+  } catch { /* 读不到设置时按默认全开确认 */ }
+  const fetchOn = settings.auto_fetch_sources !== '0'
+  const testOn = settings.auto_test_sources !== '0'
+  const publishOn = settings.auto_publish_enabled !== '0'
+  const env = settings.auto_publish_env === 'testing' ? 'testing' : 'production'
+  const steps = []
+  if (fetchOn) steps.push('抓取节点来源与规则')
+  if (testOn) steps.push('测速')
+  steps.push('创建构建并校验（策略未变化会跳过构建）')
+  steps.push(publishOn ? `发布到${env === 'testing' ? '测试' : '生产'}` : '不发布（自动发布已关闭）')
+  const ok = await confirmBox(
+    `将按当前自动任务设置执行：${steps.join(' → ')}。`,
+    '抓取并发布', { confirmButtonText: '执行', cancelButtonText: '取消' },
+  )
+  if (!ok) return
   triggering.value = true
   const beforeTick = status.value.last_tick_at
   try {
     await api('/api/v1/automation/run', { method: 'POST' })
-    ElMessage.success('已开始强制执行，正在等待运行结果…')
+    ElMessage.success('已开始执行，正在等待运行结果…')
     let seenRunning = false
     let finished = false
     // 抓取 + 测速 + 核心校验可能要几分钟，最多等 10 分钟；
@@ -158,7 +178,10 @@ export async function runAutoNow() {
       if (!status.value.running && !seenRunning) break
     }
     if (finished) {
-      ElMessage.success('自动任务执行完成')
+      const published = status.value.last_result?.published
+      ElMessage.success(published
+        ? `执行完成，已发布到${ENV_LABELS[published] || published}`
+        : '自动任务执行完成')
       await loadAutoPublish()
     } else {
       ElMessage.warning('未获取到本轮结果，请稍后刷新查看运行记录')

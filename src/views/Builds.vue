@@ -4,16 +4,18 @@
       <div class="mp-page-head-row">
         <h2 class="mp-page-title">构建发布</h2>
         <div class="mp-btn-grid mp-page-head-actions">
-          <el-tooltip content="按自动任务设置更新来源、构建和发布" placement="bottom-end">
-            <el-button :loading="triggering" @click="runAutoNow" type="primary">运行自动任务</el-button>
+          <el-tooltip content="按自动任务设置：抓取来源 → 测速 → 构建并校验 → 发布；发布目标以自动任务设置为准（默认生产）" placement="bottom-end">
+            <el-button :loading="triggering" @click="runAutoNow" type="primary">抓取并发布</el-button>
           </el-tooltip>
           <el-tooltip v-if="tab === 'builds'"
-                      content="校验当前配置并生成构建，不发布"
+                      content="校验当前配置并生成构建，不发布；发布用构建行内的「发布测试 / 发布生产」"
                       placement="bottom-end">
             <el-button :loading="building" @click="createBuild()">创建构建</el-button>
           </el-tooltip>
-          <el-tooltip v-if="tab === 'builds'" content="生成统一节点名和已验证服务别名，不发布">
-            <el-button :disabled="building" @click="createBuild(true)">预览统一节点名</el-button>
+          <el-tooltip v-if="tab === 'builds'"
+                      content="生成一次带统一节点名与服务别名的预览构建，不发布；会在列表留下预览记录"
+                      placement="bottom-end">
+            <el-button :disabled="building" @click="createBuild(true)" text>预览节点改名</el-button>
           </el-tooltip>
         </div>
       </div>
@@ -297,7 +299,7 @@
 </template>
 
 <script setup>
-// 构建发布页：两个 tab（手动构建发布 / 自动运行配置）+ 页面级「立即发布」「创建构建」。
+// 构建发布页：两个 tab（手动构建发布 / 自动运行配置）+ 页面级「抓取并发布」「创建构建」。
 // tab 走 query 参数（?tab=builds / ?tab=auto），两个 tab 各自可直达。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
