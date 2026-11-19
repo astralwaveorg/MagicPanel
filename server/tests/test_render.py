@@ -173,9 +173,10 @@ def test_service_groups_split_media_in_place_and_require_jp_netflix_evidence():
         cfg, rows, evidence, {name: {"revision": "now"} for name in evidence},
         {"jp": "日本 01", "us": "美国 01", "stale": "日本 02"})
     assert [r["target"] for r in rules] == [
-        "DIRECT", "Netflix 日本", "Spotify", "🤖 Claude", "🚀 默认代理"]
+        "DIRECT", "Netflix", "Spotify", "🤖 Claude", "🚀 默认代理"]
     assert [r["value"] for r in rules] == [r["value"] for r in rows]
-    assert groups[-2]["proxies"] == ["日本 01 - Netflix"]
+    assert groups[-3]["proxies"] == ["日本 01 - Netflix"]
+    assert groups[-2]["proxies"] == ["Netflix 日本", "🎞️ 国际影音"]
     assert groups[-1]["proxies"] == ["🎞️ 国际影音"]
     assert "日本 02 - Claude" not in {p["name"] for p in cfg["proxies"]}
 

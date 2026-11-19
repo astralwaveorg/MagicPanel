@@ -408,13 +408,18 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
             routed.add(pid)
             updated.append(rule)
             continue
-        label = "Netflix 日本" if pid == "netflix" and nodes else routing_planner.SERVICE_ALIAS_NAMES[pid]
+        label = routing_planner.SERVICE_ALIAS_NAMES[pid]
         if label in used:
             updated.append(rule)
             continue
         fallbacks = [ref for ref in by_name[previous].get("proxies", [])
                      if ref in used and ref not in config.BUILTIN_TARGETS and ref != config.GUARD_PROXY]
-        add_service_group(label, nodes, [previous, *fallbacks])
+        if pid == "netflix" and nodes and "Netflix 日本" not in used:
+            # 保留已下发的 Netflix 组名和旧线路供手选；日本组只收已确认的节点。
+            add_service_group("Netflix 日本", nodes)
+            add_service_group(label, [], ["Netflix 日本", previous, *fallbacks])
+        else:
+            add_service_group(label, nodes if pid != "netflix" else [], [previous, *fallbacks])
         routed.add(pid)
         updated.append({**rule, "target": label})
 

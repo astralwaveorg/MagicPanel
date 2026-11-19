@@ -30,7 +30,7 @@ DEFAULT_PROBE_RETRY = 1
 # 结果落盘位置
 RESULT_PATH = config.DATA_DIR / "node_quality.json"
 FAILED_RECHECK_SECONDS = 6 * 3600
-RESULT_FORMAT = 4
+RESULT_FORMAT = 5
 DOWNLOAD_ERRORS = {
     "wrong_node": "无法确认测速节点",
     "http_status": "测速站返回 HTTP {status}",

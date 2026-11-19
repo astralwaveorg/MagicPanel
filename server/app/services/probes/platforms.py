@@ -12,7 +12,9 @@
 * **只用正文里真实存在的特征**做判定，不臆造页面结构；页面结构变了就
   降级成 ``unknown`` 并在 ``detail`` 里说明。
 """
+import json
 import re
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -112,7 +114,35 @@ class NetflixDetector(Detector):
     original_url = "https://www.netflix.com/title/80057281"
     url = title_url
     timeout = 14.0
+    body_limit = 1_500_000
     markers = Markers(region_markers=(r"you seem to be using a vpn or proxy",))
+
+    @staticmethod
+    def sample(resp: ProbeResponse, url: str) -> tuple[bool | None, bool | None, str]:
+        """只读目标片名的公开目录对象；语言或其它影片的标记不作证据。"""
+        title_id = int(url.rsplit("/", 1)[-1])
+        final = urlsplit(resp.url)
+        match = re.fullmatch(r"(?:/([a-z]{2})(?:-[a-z]{2})?)?/title/(\d+)/?", final.path)
+        if final.scheme != "https" or final.hostname != "www.netflix.com" or not match or int(match[2]) != title_id:
+            return None, None, ""
+        matches = set()
+        decoder = json.JSONDecoder()
+        # Netflix 的内嵌对象使用 JS 的十六进制转义；转成 JSON 转义后纯解析，不执行脚本。
+        text = re.sub(r"\\(?:x([a-fA-F0-9]{2})|[^\r\n])",
+                      lambda m: r"\u00" + m[1] if m[1] else m[0], resp.text)
+        for marker in re.finditer(r'"metaData"\s*:\s*(?=\{)', text):
+            try:
+                item, _ = decoder.raw_decode(text, marker.end())
+            except (ValueError, RecursionError):
+                continue
+            if (item.get("videoId") == title_id and item.get("topLevelVideoId") == title_id
+                    and type(item.get("isAvailable")) is bool and type(item.get("isOriginal")) is bool):
+                matches.add((item["isAvailable"], item["isOriginal"]))
+        if len(matches) != 1:
+            return None, None, ""
+        available, original = matches.pop()
+        # /title/... 没有地区信息，不能自行推断是美国。
+        return available, original, (match[1] or "").upper()
 
     def probe(self, client: httpx.Client) -> ProbeResult:
         title = self.fetch(client, self.title_url)
@@ -122,16 +152,15 @@ class NetflixDetector(Detector):
                                detail=title_status.detail, extra={"reason": title_status.reason})
         original = self.fetch(client, self.original_url)
         original_status = classify_page(original, self.markers)
-        region = self.extract_region(original.text) or self.extract_region(title.text)
+        title_available, title_is_original, title_region = self.sample(title, self.title_url)
+        original_available, original_is_original, original_region = self.sample(original, self.original_url)
         has_original = (original_status.state == STATE_REACHABLE
-                        and _json_flag(original.text, "isAvailable") is True
-                        and _json_flag(original.text, "isOriginal") is True)
+                        and original_available is True and original_is_original is True)
         has_licensed = (title_status.state == STATE_REACHABLE
-                        and _json_flag(title.text, "isAvailable") is True
-                        and _json_flag(title.text, "isOriginal") is False)
+                        and title_available is True and title_is_original is False)
+        region = (title_region if title_region == original_region else "") if has_licensed else original_region
         limited = (title_status.state == STATE_BLOCKED or
-                   (title_status.state == STATE_REACHABLE
-                    and _json_flag(title.text, "isAvailable") is False))
+                   (title_status.state == STATE_REACHABLE and title_available is False))
         extra = {"originals": has_original, "licensed_sample": has_licensed,
                  "catalog": "unconfirmed", "playback": "unverified"}
         if has_original and has_licensed:

@@ -232,24 +232,36 @@ NETFLIX_ORIGINAL = "https://www.netflix.com/title/80057281"
 
 
 def test_netflix_confirms_two_samples_but_not_playback():
+    title = NETFLIX_TITLE.replace("/title/", "/jp-en/title/")
+    original = NETFLIX_ORIGINAL.replace("/title/", "/jp-en/title/")
+    # 真实页面把目录对象放在正文后段；前面的无关对象不能干扰样本。
+    body = (' ' * 760_000
+            + '{"metaData":{"videoId":999,"topLevelVideoId":999,"isAvailable":false,"isOriginal":true},'
+              '"target":{"metaData":{"videoId":81280792,"topLevelVideoId":81280792,'
+              r'"url":"\x2Ftitle\x2F81280792","isAvailable":true,"isOriginal":false}}}')
     result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(200, text='{"isAvailable":true,"isOriginal":false}'),
-        NETFLIX_ORIGINAL: httpx.Response(200, text='{"isAvailable":true,"isOriginal":true,"countryCode":"US"}'),
+        NETFLIX_TITLE: httpx.Response(302, headers={"Location": title}),
+        NETFLIX_ORIGINAL: httpx.Response(302, headers={"Location": original}),
+        title: httpx.Response(200, text=body),
+        original: httpx.Response(200, text='{"metaData":{"videoId":80057281,"topLevelVideoId":80057281,'
+                                          '"isAvailable":true,"isOriginal":true}}'),
     })
     assert result.state == STATE_UNLOCKED, result.detail
     assert result.extra["licensed_sample"] and result.extra["originals"]
     assert result.extra["playback"] == "unverified"
-    assert result.region == "US"
+    assert result.region == "JP"
 
 
 def test_netflix_only_original_sample_confirmed():
     result = _probe(detector_by_id("netflix"), {
         NETFLIX_TITLE: httpx.Response(404),
-        NETFLIX_ORIGINAL: httpx.Response(200, text='{"isAvailable":true,"isOriginal":true,"countryCode":"JP"}'),
+        NETFLIX_ORIGINAL: httpx.Response(200, text='{"metaData":{"videoId":80057281,"topLevelVideoId":80057281,'
+                                                  '"isAvailable":true,"isOriginal":true}}'),
     })
     assert result.state == STATE_UNLOCKED
     assert result.extra["originals"] and not result.extra["licensed_sample"]
     assert result.extra["catalog"] == "originals_sample"
+    assert result.region == ""
 
 
 def test_netflix_both_samples_report_restriction():
@@ -271,7 +283,8 @@ def test_netflix_waf_header_is_unknown():
 
 def test_netflix_homepage_without_catalog_evidence_is_unknown():
     result = _probe(detector_by_id("netflix"), {
-        NETFLIX_TITLE: httpx.Response(200, text="<html>Netflix</html>"),
+        NETFLIX_TITLE: httpx.Response(200, text='{"metaData":{"videoId":1111,"topLevelVideoId":81280792,'
+                                               '"isAvailable":true,"isOriginal":false}}'),
         NETFLIX_ORIGINAL: httpx.Response(200, text="<html>Netflix</html>"),
     })
     assert result.state == STATE_UNKNOWN
