@@ -2,8 +2,8 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      列表顺序即产物声明顺序：拖动手柄排序，分页仅重排当前页。地区筛选为空的组由「空组保护」占位，防止客户端隐式改为直连。
-      列表只显示所选分流方案里的组；每个方案是一套完整的组与规则，构建时各出一套产物。
+      列表顺序即产物里的声明顺序，拖动手柄排序（筛选状态下不能拖动）。成员为空的组会补一个占位节点，避免客户端把空组改写成直连。
+      只显示当前分流方案里的组。
     </p>
 
     <VariantBar page="groups" v-model="variantId" @changed="onVariantsChanged" />
@@ -71,7 +71,7 @@
     <EmptyState
       v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的策略组。"
-      next="换个关键词，或点上方“清空筛选”看全部策略组。"
+      next="没有符合筛选条件的结果。清除筛选后显示全部。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -183,7 +183,7 @@
           </el-col>
         </el-row>
         <el-form-item :label="form.type === 'relay'
-          ? '包含策略（按顺序组成转发链，至少两个，仅限策略组、本地节点或 DIRECT / REJECT）'
+          ? '包含策略（转发链，按顺序排列，至少两个：策略组、本地节点或 DIRECT / REJECT）'
           : '包含策略（按顺序组成，可用策略组、本地节点或 DIRECT / REJECT）'">
           <MultiSelectClear :has-value="form.proxies.length" @clear="form.proxies = []">
             <el-select v-model="form.proxies" multiple filterable allow-create default-first-option
@@ -212,8 +212,8 @@
           <ScopeSelect v-model="form.devices" all-label="包含所有设备"
                        :options="deviceNames" />
           <div class="mp-form-hint">
-            个性化放这里：选了设备后，这个策略组只出现在这些设备自己的产物里，
-            同平台的其他设备不受影响；选「包含所有设备」表示所有设备。
+            选了设备后，这个策略组只出现在这些设备的产物里，其他设备不受影响；
+            选「包含所有设备」则所有设备都有。
           </div>
         </el-form-item>
         <el-form-item label="本地节点（单节点，可多选）">
@@ -229,8 +229,7 @@
               本地节点排在最前
             </el-checkbox>
             <span>
-              开启后本地节点会排在该组其它节点之前（fallback / url-test 组按顺序取用），
-              适合"优先用自己的机房节点、机场节点兜底"。
+              开启后本地节点排在组内其它节点之前，适合自建机房节点优先、机场节点兜底的组。
             </span>
           </div>
         </el-form-item>
@@ -610,7 +609,8 @@ async function save() {
 
 
 async function remove(row) {
-  if (!await confirmBox(`删除策略组 “${row.name}”？`, '删除策略组')) return
+  if (!await confirmBox(`删除策略组 “${row.name}”？`, '删除策略组',
+    { type: 'warning', confirmButtonText: '删除' })) return
   try {
     await api(`/api/v1/groups/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')
@@ -621,7 +621,7 @@ async function remove(row) {
         title: `删除策略组“${row.name}”`,
         message: e.message,
         references: e.detail.references,
-        hint: '删除时会自动把其它策略组里的成员引用摘掉，并删除指向它的分流规则。',
+        hint: '删除时会自动解除其它策略组对它的成员引用，并删除指向它的分流规则。',
         action: () => forceDeleteGroup(row),
       })
       return

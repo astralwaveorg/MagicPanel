@@ -105,7 +105,7 @@
     <EmptyState
       v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的来源。"
-      next="换个关键词，或点上方“清空筛选”看全部来源。"
+      next="没有符合筛选条件的结果。清除筛选后显示全部。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -196,7 +196,7 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="过滤不可用" width="100" align="center">
+          <el-table-column label="只分发可用节点" width="130" align="center">
             <template #default="{ row }">{{ row.filter_unavailable ? '开启' : '关闭' }}</template>
           </el-table-column>
           <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
@@ -371,7 +371,7 @@
             <el-button link type="primary" size="small" @click="openCurlImport">
               从 curl 命令导入地址与请求头
             </el-button>
-            <span>机场订阅常要带 Cookie 与特定 UA 才给内容，粘一条 curl 就能填好。</span>
+            <span>机场订阅常要带 Cookie 与特定 UA 才给内容；粘贴一条 curl 命令即可自动填好地址与请求头。</span>
           </div>
         </el-form-item>
         <el-form-item v-if="isFileSource" label="订阅来源">
@@ -445,7 +445,7 @@
         </el-row>
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12">
-            <el-form-item label="客户端更新间隔（0 = 跟随抓取间隔）">
+            <el-form-item label="客户端更新间隔（秒，0 = 跟随抓取间隔）">
               <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
               <div v-if="form.mode === 'inline'" class="mp-form-hint">
                 内联下发时这个间隔不起作用：节点已写进配置，客户端不再单独下载节点列表。
@@ -472,7 +472,7 @@
           </el-checkbox>
         </el-form-item>
         <el-form-item>
-          <el-checkbox v-model="form.enabled">启用（停用后不进入构建，也不向设备分发）</el-checkbox>
+          <el-checkbox v-model="form.enabled">启用（停用后不进入新构建；已被发布产物引用的来源仍会继续下发）</el-checkbox>
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.filter_unavailable">
@@ -481,7 +481,7 @@
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.allow_private">
-            允许访问内网地址（仅订阅确位于内网时开启，存在 SSRF 风险）
+            允许访问内网地址（仅当订阅地址在内网时开启，存在 SSRF 风险）
           </el-checkbox>
         </el-form-item>
         <el-form-item>
@@ -494,8 +494,8 @@
                     placeholder="http://内网代理:端口" />
           <div class="mp-form-hint" style="margin-top:6px">
             <template v-if="currentProxy">当前：{{ currentProxy }}　</template>
-            面板跑在 NAS 上，默认走路由器 OpenClash 透明代理，通常不需要开这个开关。
-            确实要指定时填内网可达的代理地址，不要写 127.0.0.1（那是容器自己）。
+            面板部署在 NAS 上，出站默认经路由器透明代理，通常不需要开启。
+            确需指定时填内网可达的代理地址，不要填 127.0.0.1（指向容器自身）。
           </div>
         </el-form-item>
       </el-form>

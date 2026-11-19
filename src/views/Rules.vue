@@ -2,8 +2,8 @@
   <div>
     <h2 class="mp-page-title">分流策略</h2>
     <p class="mp-page-desc">
-      规则按声明顺序自上而下首次匹配，末条须为 MATCH 兜底。拖动手柄或勾选多条批量移动即可排序（触屏长按可拖）；分页仅重排当前页，调整于下次构建生效。筛选状态下规则不相邻，排序自动暂停。
-      列表只显示所选分流方案里的规则；规则目标在方案内解析。
+      规则按声明顺序自上而下匹配，第一条命中即生效，末条须为 MATCH 兜底。拖动手柄排序，勾选多条可批量上移下移；分页时只重排当前页，改动下次构建生效。筛选状态下排序自动暂停。
+      只显示当前分流方案里的规则，目标在方案内解析。
     </p>
 
     <VariantBar page="rules" v-model="variantId" @changed="onVariantsChanged" />
@@ -66,7 +66,7 @@
     <EmptyState
       v-if="!error && !rows.length"
       :reason="hasFilter ? '没有符合筛选条件的规则。' : '还没有分流规则。'"
-      :next="hasFilter ? '换个关键词，或点上方“清空筛选”看全部规则。' : '点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。'"
+      :next="hasFilter ? '没有符合筛选条件的结果。清除筛选后显示全部。' : '点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。'"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -163,7 +163,7 @@
             <el-option value="REJECT-DROP" label="REJECT-DROP（静默丢弃）" />
           </el-select>
           <div class="mp-form-hint">
-            下拉里列出的就是**本方案**的策略组（与「策略组」页当前所选方案一致）：
+            下拉里列出的就是本方案的策略组（与「策略组」页当前所选方案一致）：
             规则只作用于本方案，跨方案引用会被拒绝；同名组在不同方案里是两个独立的组。
           </div>
         </el-form-item>
@@ -179,8 +179,8 @@
           <ScopeSelect v-model="form.devices" all-label="包含所有设备"
                        :options="deviceNames" />
           <div class="mp-form-hint">
-            个性化放这里：选了设备后，这条规则只出现在这些设备自己的产物里，
-            同平台的其他设备不受影响；选「包含所有设备」表示所有设备。
+            选了设备后，这条规则只出现在这些设备的产物里，其他设备不受影响；
+            选「包含所有设备」则所有设备都有。
           </div>
         </el-form-item>
         <el-form-item label="备注（可选）">
@@ -197,7 +197,7 @@
             不记入连接列表（命中的连接不显示在客户端连接页，流量统计照常）
           </el-checkbox>
           <el-checkbox v-if="canPreMatching" v-model="form.pre_matching">
-            提前拒绝（连接还没建立就拒掉，广告类请求最省 CPU 与内存）
+            提前拒绝（连接建立前就拒绝，用于广告类请求）
           </el-checkbox>
           <div class="mp-form-hint">
             这两项是 Stash 的能力，只有 Stash 产物会带上，Mihomo 产物不受影响。
@@ -225,7 +225,7 @@
           <el-checkbox v-model="batch.useTarget">修改目标</el-checkbox>
         </el-form-item>
         <el-select v-if="batch.useTarget" v-model="batch.target" filterable style="width:100%"
-                   placeholder="选择统一的出站">
+                   placeholder="选择统一的目标">
           <el-option v-for="g in groups" :key="g.name" :value="g.name" :label="g.name" />
           <el-option value="DIRECT" label="DIRECT（直连）" />
           <el-option value="REJECT" label="REJECT（拒绝）" />
@@ -518,7 +518,7 @@ async function save() {
     return ElMessage.warning('请填写匹配值（MATCH 兜底规则无需匹配值）')
   }
   if (form.pre_matching && !preMatchingTargetOk.value) {
-    return ElMessage.warning('pre-matching 的目标只能是 REJECT / REJECT-DROP 字面量（引擎限制）')
+    return ElMessage.warning('「提前拒绝」的目标只能是 REJECT / REJECT-DROP（引擎限制）')
   }
   saving.value = true
   try {
@@ -581,7 +581,7 @@ async function submitOrder(ids) {
 async function remove(row) {
   if (!await confirmBox(
     `删除规则 “${row.type},${row.value || '(兜底)'} → ${row.target}”？`, '删除规则',
-    { type: 'warning' },
+    { type: 'warning', confirmButtonText: '删除' },
   )) return
   try {
     await api(`/api/v1/rules/${row.id}`, { method: 'DELETE' })

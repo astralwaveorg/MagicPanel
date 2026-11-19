@@ -279,13 +279,13 @@
 
     <el-dialog :close-on-click-modal="false" v-model="addDialog" title="新增参数" width="min(560px, 94vw)">
       <p class="mp-dialog-desc">
-        在任意节点下新增参数。路径用点号分隔，如 <span class="mono">dns.nameserver</span>；
+        在任意节点下新增参数。路径用点号分隔，如 <span class="mono">sniffer</span>；
         顶层参数直接写名字。值按 YAML 解析：<span class="mono">true</span>、<span class="mono">123</span>、
         <span class="mono">["1.1.1.1","8.8.8.8"]</span> 或一段映射。
       </p>
       <el-form :model="addForm" label-position="top">
         <el-form-item label="参数路径">
-          <el-input v-model="addForm.path" class="mono" placeholder="例如 dns.nameserver 或 sniffer" />
+          <el-input v-model="addForm.path" class="mono" placeholder="例如 sniffer 或 allow-lan" />
         </el-form-item>
         <el-form-item label="参数值（YAML）">
           <el-input v-model="addForm.value" type="textarea" :rows="5" class="mono"

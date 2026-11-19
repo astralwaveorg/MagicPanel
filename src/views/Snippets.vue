@@ -24,7 +24,7 @@
     <EmptyState
       v-if="!rows.length"
       reason="暂未添加任何拓展模块。"
-      next="点击“添加模块”即可配置，例如为 Stash 增加面板，或为 Mihomo 追加 DNS 配置。"
+      next="点击“添加模块”创建片段，可选脚本、复写、面板、通用四类。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -173,7 +173,7 @@
                     placeholder="panel:&#10;  首页:&#10;    title: 家庭网络" />
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="form.note" placeholder="用途说明，会展示在 Magic Panel 首页" />
+          <el-input v-model="form.note" placeholder="用途说明，会展示在 MagicPanel 订阅中心" />
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.enabled">启用（停用后不参与构建）</el-checkbox>
@@ -341,7 +341,8 @@ async function refresh(row) {
 
 async function remove(row) {
   if (!await confirmBox(
-    `删除模块 “${row.name}”？下次构建不再包含该片段。`, '删除拓展模块')) return
+    `删除模块 “${row.name}”？下次构建不再包含该片段。`, '删除拓展模块',
+    { type: 'warning', confirmButtonText: '删除' })) return
   try {
     await api(`/api/v1/snippets/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')

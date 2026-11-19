@@ -2,7 +2,7 @@
   <div>
     <h2 class="mp-page-title">设备管理</h2>
     <p class="mp-page-desc">
-      每台设备一个固定订阅地址；令牌泄露可轮换使其失效，已下发的节点凭据需联系机场重置。
+      每台设备一个固定订阅地址。令牌泄露后可轮换令牌，旧地址立即失效；已下发的节点凭据需联系机场重置。
     </p>
 
     <div class="mp-toolbar">
@@ -28,7 +28,7 @@
     <EmptyState
       v-else-if="!error && !rows.length"
       reason="还没有设备。"
-      next="点击“添加设备”；订阅地址只显示一次，请立即保存。"
+      next="点击“添加设备”创建；订阅地址随时可在列表点“复制地址”取回。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -92,7 +92,7 @@
       <el-form :model="form" label-position="top">
         <el-form-item label="文件名">
           <el-input v-model="form.name" placeholder="例如：Stash-Macmini" />
-          <div class="mp-form-hint">将作为下载配置的文件名（.yaml），并作为设备的唯一标识，请勿重复。</div>
+          <div class="mp-form-hint">作为下载配置的文件名（.yaml）与设备唯一标识；重名会导致订阅地址冲突。</div>
         </el-form-item>
         <el-form-item label="引擎平台">
           <el-select v-model="form.target_id" style="width:100%" @change="onTargetChange">
@@ -115,8 +115,8 @@
         </el-form-item>
         <el-form-item label="设备独立配置">
           <div class="mp-form-hint">
-            端口、DNS、日志等个性化配置，请前往「基础配置 → 设备独立配置」修改。
-            该页面可查看配置的逐层继承来源。
+            端口、日志等个性化配置在「基础配置 → 设备独立配置」修改，该页可查看逐层继承来源。
+            DNS 段固定在引擎默认配置，平台层与设备层不可覆盖。
           </div>
         </el-form-item>
       </el-form>
@@ -353,7 +353,7 @@ async function reveal(row) {
       await navigator.clipboard.writeText(resp.subscription_url)
       ElMessage.success('订阅地址已复制')
     } catch {
-      ElMessage.warning('复制失败，请到 Magic Panel 首页查看')
+      ElMessage.warning('复制失败，请到 MagicPanel 订阅中心查看')
     }
   } catch (e) {
     ElMessage.error(e.message)
@@ -378,7 +378,7 @@ async function rotate(row) {
 async function remove(row) {
   if (!await confirmBox(
     `删除设备 “${row.display_name || row.name}”？其订阅地址同时失效，下载文件名 “${row.name}” 也不再可用。`,
-    '删除设备', { type: 'warning' },
+    '删除设备', { type: 'warning', confirmButtonText: '删除' },
   )) return
   try {
     await api(`/api/v1/devices/${row.id}`, { method: 'DELETE' })

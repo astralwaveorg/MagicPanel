@@ -7,7 +7,7 @@
   >
     <div class="mp-secret-box">
       <div v-if="url">
-        <div style="font-size:12.5px;margin-bottom:6px">这台设备的订阅地址（只显示这一次，也可随时在 Magic Panel 首页查看）：</div>
+        <div style="font-size:12.5px;margin-bottom:6px">这台设备的订阅地址（可在「订阅中心」随时查看）：</div>
         <el-input :model-value="url" readonly class="mono">
           <template #append>
             <el-button @click="copy">复制</el-button>
@@ -15,10 +15,10 @@
         </el-input>
       </div>
       <div v-else>
-        地址可在 Magic Panel 首页随时查看、复制或扫码，无需在此保存。
+        地址可在「订阅中心」随时查看、复制或扫码，无需在此保存。
       </div>
       <div style="font-size: 12.5px; margin-top: 10px">
-        该地址包含访问凭据。泄露后持地址者可下载完整配置；
+        该地址包含访问凭据，泄露后他人可下载完整配置；
         在 <strong>设备</strong> 页轮换令牌可使旧地址立即失效，节点凭据需联系机场重置。
       </div>
     </div>

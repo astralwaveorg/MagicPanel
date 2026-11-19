@@ -41,7 +41,7 @@
                    clearable @change="applyFilter">
           <el-option value="remote" label="远程 URL" />
           <el-option value="inline" label="内联内容" />
-          <el-option value="repo" label="仓库托管" />
+          <el-option value="repo" label="维护仓库" />
         </el-select>
         <el-select v-model="filters.behavior" class="mp-filter-select" placeholder="全部行为"
                    clearable @change="applyFilter">
@@ -81,7 +81,7 @@
     <EmptyState
       v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的规则来源。"
-      next="换个关键词，或点上方“清空筛选”看全部规则来源。"
+      next="没有符合筛选条件的结果。清除筛选后显示全部。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -175,7 +175,7 @@
                 <el-option value="classical" label="classical（经典规则）" />
               </el-select>
               <div v-if="form.behavior === 'classical'" class="mp-form-hint">
-                Stash 官方不推荐 classical：只能顺序匹配，显著增加耗时与内存。纯域名集合建议改用 domain。
+                Stash 官方不推荐 classical：只能顺序匹配，开销高于 domain。自维护集合按项目约定保持 classical。
               </div>
             </el-form-item>
           </el-col>
@@ -210,7 +210,7 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <!-- 内联内容由本机维护，没有抓取这回事 -->
+          <!-- 内联内容由面板维护，没有抓取这回事 -->
           <el-col v-if="form.kind === 'remote'" :span="12">
             <el-form-item label="抓取间隔（秒）">
               <el-input-number v-model="form.interval" :min="600" :max="604800" style="width:100%" />
@@ -225,10 +225,10 @@
               <el-input-number v-model="form.client_interval" :min="0" :max="604800" style="width:100%" />
             </el-form-item>
             <div v-if="form.kind === 'inline'" class="mp-form-hint">
-              内联内容由本机维护：改完保存，构建时即刻生效，客户端按上面的间隔重新拉取。
+              内联内容由面板维护：保存后在下一次构建生效，客户端按上面的间隔重新拉取。
             </div>
             <div v-else-if="form.kind === 'repo'" class="mp-form-hint">
-              仓库托管：内容由「自主维护」仓库里的文件决定，改完在那边提交并同步。
+              维护仓库：内容由「自主维护」仓库里的文件决定，改完在那边提交并同步。
             </div>
           </el-col>
         </el-row>

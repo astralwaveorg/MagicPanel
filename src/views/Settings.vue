@@ -27,7 +27,7 @@
             <el-switch v-model="settings.node_name_normalize" />
           </div>
           <p class="mp-form-hint">
-            机场节点统一成「旗帜 地区 序号 [倍率·来源]」格式并丢弃占位节点（剩余流量/套餐到期）。
+            机场节点统一为「旗帜 [标签·来源] 国名 序号」格式（开启能力徽章时徽章紧跟国名），并丢弃剩余流量、套餐到期这类占位节点。
             本地节点命名不受影响；关闭后产物与订阅恢复原始名称。
           </p>
         </el-form-item>
@@ -133,11 +133,11 @@
     </div>
 
     <div class="mp-card">
-      <h3>Magic Panel 首页访问</h3>
+      <h3>MagicPanel 订阅中心访问</h3>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        首页凭 4 位 PIN 进入，用于快速复制设备订阅地址；已登录维护者免 PIN。
-        PIN 与账号绑定，一人一 PIN，任一有效即可进入，撤销某人的不影响其他人。
-        PIN 只是查看门槛，链接安全由地址中的高熵令牌承担；连续输错 5 次锁定 10 分钟。
+        首页凭 4 位 PIN 进入，用于复制设备订阅地址；已登录的维护者免 PIN。
+        PIN 与账号绑定，一人一 PIN，任一有效即可进入，撤销某个人的 PIN 不影响其他人。
+        PIN 只是查看门槛，链接安全由地址中的随机令牌承担。连续输错 5 次锁定 10 分钟。
       </p>
       <!-- 输入框与按钮同一行；窄屏再换行 -->
       <div class="mp-row-actions">
@@ -155,7 +155,7 @@
       </p>
       <span style="font-size:12.5px;margin-top:8px;display:block"
             :style="{ color: portalEnabled ? 'var(--mp-ok)' : 'var(--mp-text-secondary)' }">
-        Magic Panel 首页{{ portalEnabled ? '已开启' : '未开启（至少一人设置 PIN 后开启）' }}
+        MagicPanel 订阅中心{{ portalEnabled ? '已开启' : '未开启（至少一人设置 PIN 后开启）' }}
       </span>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:14px 0 0">
         已设置 PIN 的维护者：{{ pinUsersText }}
@@ -379,7 +379,7 @@ async function savePin() {
     if (store.user) store.user.has_portal_pin = true
     portalEnabled.value = true
     portalPin.value = ''
-    ElMessage.success('Magic Panel 首页访问 PIN 已设置')
+    ElMessage.success('MagicPanel 订阅中心访问 PIN 已设置')
     await load()
   } catch (e) {
     ElMessage.error(e.message)
@@ -390,7 +390,7 @@ async function savePin() {
 
 async function clearPin() {
   if (!await confirmBox(
-    '撤销后你的 PIN 将不能进入 Magic Panel 首页；其他维护者的 PIN 不受影响。确定继续？', '撤销访问 PIN')) return
+    '撤销后本 PIN 失效，其他维护者的 PIN 不受影响。确认撤销？', '撤销访问 PIN')) return
   savingPin.value = true
   try {
     await api('/api/v1/portal/my-pin', { method: 'DELETE' })

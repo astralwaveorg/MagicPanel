@@ -2,7 +2,7 @@
   <router-view v-if="isAuthPage" />
   <div v-else class="mp-layout">
     <aside class="mp-aside">
-      <div class="mp-brand" title="返回 Magic Panel 首页" @click="router.push('/')">
+      <div class="mp-brand" title="返回 MagicPanel 订阅中心" @click="router.push('/')">
         <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel">
         <span class="mp-brand-text">
           MagicPanel
@@ -32,7 +32,7 @@
     </aside>
 
     <el-drawer v-model="drawer" direction="ltr" size="240px" :with-header="false">
-      <div class="mp-brand" title="返回 Magic Panel 首页" @click="drawer = false; router.push('/')">
+      <div class="mp-brand" title="返回 MagicPanel 订阅中心" @click="drawer = false; router.push('/')">
         <img src="/logo.svg" class="mp-brand-logo" alt="MagicPanel">
         <span class="mp-brand-text">
           MagicPanel

@@ -2,13 +2,11 @@
   <div>
     <h2 class="mp-page-title">网络体检</h2>
     <p class="mp-page-desc">
-      同一批服务在<b>两种网络环境</b>下的对照：
-      右列是<b>服务器网络</b>（面板所在机器经路由器代理链的出口，判「能不能解锁」，
-      这是权威结论）；左列是<b>当前网络</b>（打开本页的这台设备，浏览器直连该服务，
-      判「能不能连上」，仅供参考）。
-      <br />左列的局限：浏览器对跨域重定向与 <code>X-Frame-Options</code> 的
-      站点无法自动判定，可能把「其实能通」显示成不可达——用终端 curl 一下即可自证
-      （命令见下方提示）。
+      右列：服务器网络。面板所在机器经路由器代理链的出口，判断服务是否解锁，
+      以此为准。
+      <br />左列：当前网络。打开本页的这台设备直连服务，只反映能否连上。
+      <br />浏览器无法自动判定跨域重定向与带 <code>X-Frame-Options</code> 的站点，
+      这类结果可能与实际不符，可用终端 curl 复核。
     </p>
 
     <div class="mp-card">
@@ -43,7 +41,8 @@
             <div class="unlock-col-head">服务器网络（面板出口）</div>
             <div class="unlock-col-body">
               <div class="cnt ok"><b>{{ serverCount('unlocked') }}</b>解锁</div>
-              <div class="cnt bad"><b>{{ serverCount('blocked') + serverCount('unsupported') }}</b>不支持</div>
+              <div class="cnt bad"><b>{{ serverCount('blocked') }}</b>区域拒绝</div>
+              <div class="cnt bad"><b>{{ serverCount('unsupported') }}</b>不支持</div>
               <div class="cnt warn"><b>{{ serverCount('error') }}</b>异常</div>
               <div class="cnt idle"><b>{{ serverCount('idle') }}</b>未测</div>
             </div>
@@ -59,8 +58,8 @@
       </el-alert>
       <p v-if="unknownServer.length" class="mp-form-hint" style="margin-top:8px">
         另有 {{ unknownServer.length }} 项（{{ unknownServer.map(c => c.name).join('、') }}）
-        在服务器侧被 Cloudflare 人机校验挡住，无法判定是否解锁——这是无头检测的
-        固有限制，不计入上面的不一致。
+        在服务器侧无法判定，可能是 Cloudflare 人机校验，也可能该服务不支持当前出口地区。
+        这类结果不计入上面的不一致。
       </p>
     </div>
 
@@ -221,14 +220,14 @@ const mismatchHint = computed(() => {
     browserStateOf(c.id) === 'reachable' && serverStateOf(c.id) !== 'unlocked')
   const parts = []
   if (onlyServer.length) {
-    const names = onlyServer.map(c => c.name).join('、')
-    parts.push(`${names}：服务器网络能解锁、这台设备的浏览器连不上。`
-      + '先在**这台设备**的终端跑一次 curl 自证——能返回状态码就说明网络是通的，'
+    parts.push(`${onlyServer.length} 项服务在服务器网络可解锁，当前网络连不上。`
+      + '先在这台设备的终端复核，能返回状态码即说明网络可达，'
       + '只是浏览器的跨域策略测不出来：'
-      + `（终端执行：curl -sI -m 8 ${onlyServer[0].url || ''} | head -1）`)
+      + `curl -sI -m 8 ${onlyServer[0].url || ''} | head -1`)
   }
   if (onlyBrowser.length) {
-    parts.push(`${onlyBrowser.map(c => c.name).join('、')}：你这台设备能连上、服务器出口不行——出口 IP 被该服务限权`)
+    parts.push(`${onlyBrowser.length} 项服务当前网络可连，服务器出口不可用，`
+      + '通常是出口 IP 被该服务限制')
   }
   return parts.join('；')
 })

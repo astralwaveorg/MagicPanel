@@ -47,7 +47,7 @@
         </div>
         <div class="stat-sub">
           最近更新 {{ latestConfig ? fmtTime(latestConfig) : '—' }}<br />
-          {{ configPulledRecently }}/{{ data.devices?.length || 0 }} 台最近24小时有配置拉取记录；是否加载成功另列
+          {{ configPulledRecently }}/{{ data.devices?.length || 0 }} 台最近 24 小时有配置拉取记录；是否加载成功另列
         </div>
         <div v-if="data.counts?.devices_stale > 0" class="stat-sub">
           <span class="mp-cell-flag">
@@ -87,9 +87,9 @@
           {{ direct.egress.country || direct.egress.country_code || '未知地区' }}
           · 观测于 {{ direct.checked_at ? fmtTime(direct.checked_at) : '时间未确认' }}
         </div>
-        <div v-else class="stat-sub">尚未发起路径检测——点「发起检测」主动验证。</div>
+        <div v-else class="stat-sub">尚未发起路径检测。点「发起检测」验证一次。</div>
         <div v-if="direct.path_evidence" class="stat-sub">路径结论：{{ direct.path_evidence.conclusion }}</div>
-        <div v-else class="stat-sub">出口归属地不能证明测速已绕过透明代理——点「发起检测」用境内/境外双回显取证。</div>
+        <div v-else class="stat-sub">出口归属地不能证明测速已绕过透明代理。点「发起检测」用境内、境外双回显对比。</div>
         <div v-if="directRequest.state.error" class="stat-sub">记录读取失败，可点击重试。</div>
       </div>
 
@@ -188,7 +188,7 @@
             </span>
           </el-progress>
           <span class="avail-meta">
-            {{ s.filter_unavailable ? '过滤不可用节点：开' : '过滤不可用：关' }} ·
+            {{ s.filter_unavailable ? '只分发可用节点：开' : '只分发可用节点：关' }} ·
             {{ fmtTime(s.tested_at) }}
           </span>
         </div>

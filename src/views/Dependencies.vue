@@ -42,7 +42,7 @@
     <!-- 未配置时的引导 -->
     <el-alert v-if="!status.configured" type="info" :closable="false" show-icon
               title="还没有配置依赖仓库"
-              description="填好仓库地址与鉴权密钥后克隆，仓库里的 rule/*.yaml 会自动成为规则来源，改完推上去客户端立刻生效。" />
+              description="填好仓库地址与鉴权密钥后克隆，仓库里的 rule/*.yaml 会自动成为规则来源。推送后面板立即提供新内容，客户端按自己的更新间隔重新下载。" />
 
     <ErrorState v-if="error" :error="error" @retry="load" />
 

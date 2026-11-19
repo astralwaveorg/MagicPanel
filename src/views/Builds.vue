@@ -195,7 +195,7 @@
                      :loading="busyId === detail.id"
                      @click="publishBoth(detail)" type="success" plain>一键发布</el-button>
           <span class="mp-form-hint">
-            一键发布：同一事务内先置测试再置生产，发布历史只记一条
+            一键发布：在同一事务内先发布到测试环境、再发布到生产环境，发布历史只记一条
           </span>
         </div>
         <div v-for="(result, name) in detail.results" :key="name" class="mp-card mp-artifact">
@@ -529,7 +529,7 @@ async function publishBoth(row) {
 
 async function publishToProd(row) {
   if (!await confirmBox(
-    `⚠️ 确定将构建 #${row.id} 设为生产版本吗？这将会影响所有线上设备。当前的线上版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
+    `⚠️ 确定将构建 #${row.id} 设为生产版本吗？这将会影响所有线上设备。当前生产版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
     '发布至生产环境', { type: 'warning', confirmButtonText: '发布' },
   )) return
   busyId.value = row.id
@@ -546,7 +546,7 @@ async function publishToProd(row) {
 
 async function rollbackToProd(row) {
   if (!await confirmBox(
-    `确定将构建 #${row.id} 回滚为生产版本吗？这将会影响所有线上设备。当前的线上版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
+    `确定将构建 #${row.id} 回滚为生产版本吗？这将会影响所有线上设备。当前生产版本（${currentBuildText(releaseState.value.production)}）将被转为已下线。`,
     '回滚生产版本', { type: 'warning', confirmButtonText: '回滚' },
   )) return
   busyId.value = row.id

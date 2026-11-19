@@ -166,7 +166,7 @@
           </template>
         </section>
         <p v-else-if="!appliedQuery" class="pt-empty">
-          暂无订阅地址：设备尚未创建或尚未发布版本，请联系维护者在管理后台完成配置与发布。
+          暂无订阅地址：设备尚未创建，或尚无已发布的版本。
         </p>
 
         <!-- 客户端资源 -->
@@ -534,7 +534,7 @@ const PROVIDER_DIMENSIONS = [
   { key: 'behavior', label: '按行为' },
   { key: 'origin', label: '按来源' },
 ]
-const BEHAVIOR_LABELS = { domain: '域名', ipcidr: 'IP 段', classical: '混合' }
+const BEHAVIOR_LABELS = { domain: '域名', ipcidr: 'IP 段', classical: '经典规则' }
 const FORMAT_LABELS = { yaml: 'YAML', mrs: 'MRS', text: 'Text' }
 const BEHAVIOR_ORDER = ['domain', 'ipcidr', 'classical']
 const providerDimension = ref('behavior')
@@ -857,7 +857,7 @@ async function sendPin(submittedPin) {
   const body = await resp.json().catch(() => ({}))
   if (resp.ok) return body
   let message = typeof body.detail === 'string' ? body.detail : body.detail?.message
-  if (resp.status === 404) message = 'Magic Panel 首页未启用，请联系维护者在后台设置 PIN'
+  if (resp.status === 404) message = '订阅中心未启用，请联系维护者在后台设置 PIN'
   const error = new Error(message || (resp.status === 429 ? '暂时限流，请稍后重试' : '加载失败，请重试'))
   error.status = resp.status
   if (resp.status === 429) {

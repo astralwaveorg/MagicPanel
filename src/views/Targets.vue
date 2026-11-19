@@ -264,7 +264,7 @@ async function save() {
 }
 
 async function remove(row) {
-  if (!await confirmBox(`删除引擎平台 “${row.name}”？`, '删除引擎平台')) return
+  if (!await confirmBox(`删除引擎平台 “${row.name}”？`, '删除引擎平台', { type: 'warning', confirmButtonText: '删除' })) return
   try {
     await api(`/api/v1/targets/${row.id}`, { method: 'DELETE' })
     ElMessage.success('已删除')
