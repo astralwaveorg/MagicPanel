@@ -30,7 +30,15 @@ DEFAULT_PROBE_RETRY = 1
 # 结果落盘位置
 RESULT_PATH = config.DATA_DIR / "node_quality.json"
 FAILED_RECHECK_SECONDS = 6 * 3600
-RESULT_FORMAT = 2
+RESULT_FORMAT = 3
+DOWNLOAD_ERRORS = {
+    "wrong_node": "无法确认测速节点",
+    "http_status": "测速站返回 HTTP {status}",
+    "encoded": "测速站返回压缩数据",
+    "timeout": "下载测速超时",
+    "transfer_error": "测速连接中断",
+    "short_body": "测速站返回的数据不足",
+}
 
 
 @dataclass
@@ -46,6 +54,7 @@ class NodeQuality:
     checked_at: int = 0
     revision: str = ""
     reason: str = ""
+    download: dict = field(default_factory=dict)
 
     @property
     def qualified(self) -> bool:
@@ -59,6 +68,7 @@ class NodeQuality:
             "probes": self.probes, "badges": self.badges, "region": self.region,
             "checked_at": self.checked_at,
             "revision": self.revision, "reason": self.reason, "qualified": self.qualified,
+            "download": self.download,
         }
 
 
@@ -234,14 +244,18 @@ def _measure_nodes(engine, candidates, cfg, detectors, revisions, results, stats
             quality.reason = "无法确认选中的节点"
             results.append(quality)
             continue
-        speed = engine.download_speed(
+        sample = engine.download_speed(
             name, f"https://speed.cloudflare.com/__down?bytes={cfg['speed_bytes']}",
             size_bytes=cfg["speed_bytes"], timeout=cfg["speed_timeout"])
+        quality.download = {"bytes": sample.received_bytes, "response_ms": sample.response_ms,
+                            "status": sample.status, "error": sample.error}
+        speed = sample.speed_bps
         quality.speed_bps = speed
-        if speed < cfg["min_speed_bps"]:
-            quality.stage = "speed_failed" if speed > 0 else "inconclusive"
-            quality.reason = "下载速度低于下限" if speed > 0 else "未完成测速下载"
-            if speed > 0:
+        if sample.error or speed < cfg["min_speed_bps"]:
+            quality.stage = "inconclusive" if sample.error else "speed_failed"
+            quality.reason = (DOWNLOAD_ERRORS[sample.error].format(status=sample.status)
+                              if sample.error else "下载速度低于下限")
+            if not sample.error:
                 stats["speed_failed"] += 1
             results.append(quality)
             continue

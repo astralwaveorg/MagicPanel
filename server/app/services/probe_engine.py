@@ -23,6 +23,7 @@ import tempfile
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -44,6 +45,15 @@ class EngineError(Exception):
         super().__init__(message)
         self.index = index
         self.types = types
+
+
+@dataclass(frozen=True)
+class DownloadSample:
+    speed_bps: float = 0.0
+    received_bytes: int = 0
+    response_ms: int | None = None
+    status: int | None = None
+    error: str = ""
 
 
 class NodeEngine:
@@ -237,32 +247,38 @@ class NodeEngine:
         return -1
 
     def download_speed(self, name: str, url: str, size_bytes: int = 5 * 1024 * 1024,
-                       timeout: float = 20.0) -> float:
-        """下载吞吐（字节/秒）。
-
-        经本地 mixed-port 下载固定大小文件，量字节数与耗时。
-        用 ``Accept-Encoding: identity`` 避免压缩后的字节数失真。
-        """
+                       timeout: float = 20.0) -> DownloadSample:
+        """完整下载才计分。响应开销单列，总超时仍从请求开始计算。"""
         if self.controller is None or name != self._current:
-            return 0.0
+            return DownloadSample(error="wrong_node")
         headers = {"Accept-Encoding": "identity"}
         started = time.monotonic()
         total = 0
+        status = response_ms = None
         try:
             with httpx.Client(trust_env=False, proxy=self.proxy_url()) as client, client.stream(
                     "GET", url, headers=headers, timeout=timeout) as resp:
-                if resp.status_code != 200 or resp.headers.get("content-encoding", "identity").lower() != "identity":
-                    return 0.0
+                body_start = time.monotonic()
+                response_ms = round((body_start - started) * 1000)
+                status = resp.status_code
+                if status != 200:
+                    return DownloadSample(response_ms=response_ms, status=status, error="http_status")
+                if resp.headers.get("content-encoding", "identity").lower() != "identity":
+                    return DownloadSample(response_ms=response_ms, status=status, error="encoded")
                 for chunk in resp.iter_raw():
                     if time.monotonic() - started >= timeout:
-                        return 0.0
+                        return DownloadSample(0, total, response_ms, status, "timeout")
                     total += min(len(chunk), size_bytes - total)
                     if total >= size_bytes:
                         break
+                elapsed = max(time.monotonic() - body_start, 0.001)
+        except httpx.TimeoutException:
+            return DownloadSample(0, total, response_ms, status, "timeout")
         except httpx.HTTPError:
-            return 0.0
-        elapsed = max(time.monotonic() - started, 0.001)
-        return total / elapsed if total == size_bytes else 0.0
+            return DownloadSample(0, total, response_ms, status, "transfer_error")
+        if total != size_bytes:
+            return DownloadSample(0, total, response_ms, status, "short_body")
+        return DownloadSample(total / elapsed, total, response_ms, status)
 
     def probe_via_local(self, detectors, timeout: float, *, workers: int, retry: int, deadline: float | None = None) -> dict:
         """同一个节点的探测结束后才允许切换出口。"""

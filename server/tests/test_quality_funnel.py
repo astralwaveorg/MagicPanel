@@ -222,9 +222,14 @@ def test_download_speed_uses_selected_proxy(monkeypatch):
 
     original_client = httpx.Client
     monkeypatch.setattr(probe_engine.httpx, "Client", factory)
-    assert engine.download_speed("节点", "https://example.test/", size_bytes=4) > 0
-    assert engine.download_speed("节点", "https://example.test/", size_bytes=9) == 0
-    assert engine.download_speed("另一节点", "https://example.test/", size_bytes=4) == 0
+    ticks = iter((10.0, 11.0, 11.5, 12.0))
+    with monkeypatch.context() as ctx:
+        ctx.setattr(probe_engine, "time", type("Clock", (), {"monotonic": staticmethod(lambda: next(ticks))}))
+        sample = engine.download_speed("节点", "https://example.test/", size_bytes=8)
+    assert (sample.speed_bps, sample.received_bytes, sample.response_ms) == (8, 8, 1_000)
+    short = engine.download_speed("节点", "https://example.test/", size_bytes=9)
+    assert (short.speed_bps, short.received_bytes, short.error) == (0, 8, "short_body")
+    assert engine.download_speed("另一节点", "https://example.test/", size_bytes=4).error == "wrong_node"
 
 
 def test_export_only_replaces_verified_pool(tmp_path, monkeypatch):

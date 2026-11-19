@@ -43,6 +43,10 @@
       <el-table :data="visible" size="small" empty-text="没有符合条件的节点">
         <el-table-column type="expand">
           <template #default="{ row }">
+            <p v-if="row.download" class="mp-form-hint">
+              已下载 {{ (row.download.bytes / 1048576).toFixed(2) }} MiB
+              <template v-if="row.download.response_ms != null"> · 响应等待 {{ latencyText(row.download.response_ms) }}</template>
+            </p>
             <p v-if="!Object.keys(row.probes || {}).length" class="mp-form-hint">{{ row.reason || '还没有平台检测结果。' }}</p>
             <dl v-else class="quality-details">
               <div v-for="(probe, id) in row.probes" :key="id">
@@ -61,7 +65,7 @@
         <el-table-column label="延迟" min-width="85">
           <template #default="{ row }">{{ row.delay_ms >= 0 ? latencyText(row.delay_ms) : '—' }}</template>
         </el-table-column>
-        <el-table-column label="下载" min-width="100">
+        <el-table-column label="下载速度" min-width="100">
           <template #default="{ row }">{{ row.speed_bps ? speedText(row.speed_bps) : '—' }}</template>
         </el-table-column>
         <el-table-column label="检测时间" min-width="145">
