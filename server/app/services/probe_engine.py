@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import httpx
@@ -64,12 +65,16 @@ class NodeEngine:
         self.workdir: Path | None = None
         self.proc: subprocess.Popen | None = None
         self.controller: httpx.Client | None = None
-        self._log_lines: list[str] = []
+        self._log_lines: deque[str] = deque(maxlen=32)
         self._current: str = ""
 
     # ---------------------------------------------------------------- 生命周期
     def __enter__(self) -> "NodeEngine":
-        self.start()
+        try:
+            self.start()
+        except BaseException:
+            self.close()
+            raise
         return self
 
     def __exit__(self, *exc) -> None:
@@ -143,19 +148,20 @@ class NodeEngine:
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+                self.proc.wait()
             self.proc = None
         if self.workdir is not None:
             shutil.rmtree(self.workdir, ignore_errors=True)
             self.workdir = None
 
     @staticmethod
-    def _drain(proc, sink: list) -> None:
+    def _drain(proc, sink) -> None:
         stream = getattr(proc, "stdout", None)
         if stream is None:
             return
         try:
             for line in stream:
-                sink.append(line)
+                sink.append(line[-300:])
         except (ValueError, OSError):
             pass
 
@@ -180,8 +186,11 @@ class NodeEngine:
         if resp.status_code >= 400:
             logger.warning("切换节点被拒 %s：HTTP %s", name, resp.status_code)
             return False
+        self._current = ""
+        if not self._liveness():
+            return False
         self._current = name
-        return self._liveness()
+        return True
 
     def _liveness(self) -> bool:
         """探活：确认新节点真的接管了本地入站。"""
@@ -232,12 +241,14 @@ class NodeEngine:
         started = time.monotonic()
         total = 0
         try:
-            with self.controller.stream(
+            with httpx.Client(trust_env=False, proxy=self.proxy_url()) as client, client.stream(
                     "GET", url, headers=headers, timeout=timeout) as resp:
                 if resp.status_code >= 400:
                     return 0.0
-                for chunk in resp.iter_bytes(65536):
-                    total += len(chunk)
+                for chunk in resp.iter_raw():
+                    if time.monotonic() - started >= timeout:
+                        return 0.0
+                    total += min(len(chunk), size_bytes - total)
                     if total >= size_bytes:
                         break
         except httpx.HTTPError:

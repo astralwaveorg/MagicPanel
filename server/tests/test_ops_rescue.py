@@ -80,7 +80,7 @@ def test_failed_health_restores_actual_old_digest_without_build(tmp_path):
 def test_deploy_script_offline_dispatches_before_ssh():
     body = (Path(__file__).resolve().parents[2]/'scripts/deploy.sh').read_text(encoding='utf-8')
     assert '--image-manifest' in body
-    assert body.index('scripts.ops.rescue deploy') < body.index('DIRTY=')
+    assert body.index('scripts.ops.rescue deploy') < body.index('git ls-remote')
     assert 'IMAGE_TAG=' not in body
 
 
@@ -314,7 +314,7 @@ def test_build_failure_is_inside_digest_rollback_trap():
 
 
 @pytest.mark.skipif(sys.platform=='win32',reason='requires POSIX executable fixtures; also exercised in WSL')
-@pytest.mark.parametrize('fault',['build','data','domain'])
+@pytest.mark.parametrize('fault',['build','revision','data','domain'])
 def test_real_deploy_shell_with_fake_ssh_restores_digest_after_failure(tmp_path,fault):
     import os,subprocess,json
     root=Path(__file__).resolve().parents[2]
@@ -329,6 +329,8 @@ from pathlib import Path
 a=sys.argv[1:];s=Path(os.environ['FIXTURE_STATE'])
 with open(os.environ['FIXTURE_LOG'],'a') as f:f.write(json.dumps(a)+'\\n')
 if a[0]=='inspect':print('healthy' if a[2]=='{{.State.Health.Status}}' else s.read_text())
+elif a[:2]==['image','inspect']:
+ print('wrong-revision' if os.environ['FIXTURE_FAULT']=='revision' else os.environ['FIXTURE_REVISION'])
 elif a[0]=='compose':
  if '--build' in a:s.write_text('sha256:'+'2'*64);sys.exit(1 if os.environ['FIXTURE_FAULT']=='build' else 0)
  flags=[i for i,v in enumerate(a) if v=='-f']
@@ -338,18 +340,29 @@ elif a[0]=='exec' and os.environ['FIXTURE_FAULT']=='data':sys.exit(1)
 ''')
     (tools/'ssh').write_text('#!/bin/bash\nbash -c "${@: -1}"\n')
     (tools/'rsync').write_text('#!/bin/bash\nexit 0\n')
-    (tools/'scp').write_text('#!/bin/bash\nexit 0\n')
     (tools/'curl').write_text('#!/bin/bash\nif [ "$FIXTURE_FAULT" = "domain" ]; then printf 500; else printf 200; fi\n')
-    (tools/'git').write_text('#!/bin/bash\nif [ "$1" = "ls-files" ]; then printf "scripts/ops/rescue.py\\n"; fi\n')
+    (tools/'git').write_text('''#!/bin/bash
+case "$1" in
+  status) ;;
+  rev-parse) printf '%s\\n' "$FIXTURE_REVISION" ;;
+  ls-remote) printf '%s\\trefs/heads/main\\n' "$FIXTURE_REVISION" ;;
+  archive) tar -cf - -T /dev/null ;;
+  ls-files) printf 'scripts/ops/rescue.py\\n' ;;
+esac
+''')
     for f in tools.iterdir():f.chmod(0o755)
-    environment={**os.environ,'PATH':str(tools)+':'+os.environ['PATH'],'NAS_HOST':'fixture','NAS_DIR':str(tmp_path/'nas'),'FIXTURE_STATE':str(state),'FIXTURE_LOG':str(log),'FIXTURE_FAULT':fault,'PYTHONPATH':str(root),'PYTHONUTF8':'1'}
-    (tmp_path/'nas').mkdir()
+    environment={**os.environ,'PATH':str(tools)+':'+os.environ['PATH'],'NAS_HOST':'fixture','NAS_DIR':str(tmp_path/'nas'),'FIXTURE_STATE':str(state),'FIXTURE_LOG':str(log),'FIXTURE_FAULT':fault,'FIXTURE_REVISION':'a'*40,'PYTHONPATH':str(root),'PYTHONUTF8':'1'}
+    (tmp_path/'nas'/'scripts').mkdir(parents=True)
+    (tmp_path/'nas'/'scripts'/'check_data_consistency.py').touch()
     result=subprocess.run(['bash',str(root/'scripts/deploy.sh'),'--fast'],cwd=root,env=environment,capture_output=True,text=True)
     assert result.returncode==1,result.stdout+result.stderr
     assert state.read_text()==old
     commands=[json.loads(x) for x in log.read_text().splitlines()]
     restores=[a for a in commands if a[0]=='compose' and '--no-build' in a]
-    assert len(restores)==1 and restores[0][-2:]==['--pull','never']
+    assert len(restores)==1 and restores[0][-3:]==['--pull','never','magicpanel']
+    assert any(a[-2:]==['--build','magicpanel'] for a in commands)
+    if fault in ('data','domain'):
+        assert any(a[:2]==['exec','-i'] for a in commands)
 
 
 @pytest.mark.parametrize('manifest',[None,[],{'schema':1,'files':[None]}, {'schema':1,'files':[{'path':[]}]}])

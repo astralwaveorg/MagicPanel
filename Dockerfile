@@ -48,6 +48,9 @@ RUN mkdir -p /app/data
 EXPOSE 8000
 VOLUME ["/app/data"]
 
+ARG MAGICPANEL_REVISION=unknown
+LABEL org.opencontainers.image.revision=$MAGICPANEL_REVISION
+
 # 健康检查要覆盖真实依赖：接口可用、数据目录可写、磁盘还有余量。
 # 只探一个接口的话，磁盘写满时面板依然"健康"，但构建与订阅会先后失败。
 HEALTHCHECK --interval=30s --timeout=8s --start-period=20s --retries=3 \

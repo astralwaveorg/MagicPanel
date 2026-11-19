@@ -128,3 +128,89 @@ def test_safe_name_strips_illegal_chars_and_dedupes():
     assert "," not in first and "#" not in first
     second = node_classes._safe_name("香港,节点 #1", used)
     assert second != first and second.endswith("-02")
+
+
+def test_batch_selects_uncached_nodes_before_applying_limit(client, monkeypatch):
+    import time
+    from app.services import quality_funnel
+
+    now = int(time.time())
+    previous = {
+        **{f"完成{i}": {"stage": "probed"} for i in range(10)},
+        "刚失败": {"stage": "speed_failed", "checked_at": now},
+    }
+    monkeypatch.setattr(quality_funnel, "load_results", lambda: {"nodes": previous})
+    saved = []
+    monkeypatch.setattr(quality_funnel, "save_results",
+                        lambda results, operator: saved.extend(r.name for r in results))
+
+    class Engine:
+        def __init__(self, proxies):
+            assert [p["name"] for p in proxies] == ["未测"]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            pass
+
+        def delay_of(self, *args, **kwargs):
+            return -1
+
+    monkeypatch.setattr(quality_funnel.probe_engine, "NodeEngine", Engine)
+    quality_funnel.run_funnel([_proxy(n) for n in [*previous, "未测", "下批"]],
+                              max_nodes=1)
+    assert saved == ["未测"]
+
+
+def test_engine_start_failure_removes_workdir(tmp_path, monkeypatch):
+    import subprocess
+    from app.services.probe_engine import EngineError, NodeEngine
+
+    engine = NodeEngine([_proxy("节点")])
+    engine.workdir = tmp_path / "leaked"
+    engine.workdir.mkdir()
+
+    class Process:
+        killed = False
+        reaped = False
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired("mihomo", timeout)
+            self.reaped = True
+
+        def kill(self):
+            self.killed = True
+
+    process = engine.proc = Process()
+
+    def fail_start():
+        raise EngineError("探测核心启动超时")
+
+    monkeypatch.setattr(engine, "start", fail_start)
+    with pytest.raises(EngineError):
+        with engine:
+            pytest.fail("核心未启动")
+    assert process.reaped
+    assert not (tmp_path / "leaked").exists()
+
+
+def test_download_speed_uses_selected_proxy(monkeypatch):
+    import httpx
+    from app.services import probe_engine
+
+    engine = probe_engine.NodeEngine([_proxy("节点")])
+    engine.controller = object()
+
+    def factory(**kwargs):
+        assert kwargs == {"trust_env": False, "proxy": engine.proxy_url()}
+        return original_client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, stream=httpx.ByteStream(b"12345678"))))
+
+    original_client = httpx.Client
+    monkeypatch.setattr(probe_engine.httpx, "Client", factory)
+    assert engine.download_speed("节点", "https://example.test/", size_bytes=4) > 0

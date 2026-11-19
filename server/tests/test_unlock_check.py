@@ -7,9 +7,10 @@ from app.services import unlock_check as u
 
 
 class _StubResp:
-    def __init__(self, status, text=""):
+    def __init__(self, status, text="", headers=None):
         self.status_code = status
         self.text = text
+        self.headers = headers or {}
 
 
 class _StubClient:
@@ -327,3 +328,29 @@ def test_map_emit_names_still_rejects_missing():
                 "ordinal": 1, "retired": False}]
     with pytest.raises(ValueError, match="catalog_material_invalid"):
         source_nodes.map_emit_names([{"name": "不存在"}], source_id=9, catalog=catalog)
+
+
+def test_full_node_updates_keep_other_cached_exits(tmp_path, monkeypatch):
+    from app.services import unlock_check
+
+    monkeypatch.setattr(unlock_check, "_CACHE_PATH", tmp_path / "cache.json")
+    entry = {"results": [{"id": "netflix", "state": "unlocked"}]}
+    unlock_check._save_cache("panel", entry, merge=False)
+    unlock_check._save_cache_entries({"A": entry, "B": entry}, merge=False)
+    unlock_check._save_cache("C", entry, merge=False)
+    assert set(unlock_check._load_all()) == {"panel", "A", "B", "C"}
+
+
+@pytest.mark.parametrize(("status", "text", "headers", "expected"), [
+    (200, "not available in your region", {}, "blocked"),
+    (200, "", {"cf-mitigated": "challenge"}, "error"),
+    (429, "", {}, "error"),
+])
+def test_http_success_or_rate_limit_does_not_hide_service_restriction(
+    monkeypatch, status, text, headers, expected,
+):
+    url = "https://x.example/"
+    check = {"id": "demo", "url": url, "unlock": {200},
+             "unsupported": {429}, "region_marker": "not available in your region"}
+    _patch(monkeypatch, {url: _StubResp(status, text, headers)})
+    assert u._run_single(check, None)["state"] == expected

@@ -30,6 +30,7 @@ DEFAULT_PROBE_RETRY = 1
 
 # 结果落盘位置
 RESULT_PATH = config.DATA_DIR / "node_quality.json"
+FAILED_RECHECK_SECONDS = 6 * 3600
 
 
 @dataclass
@@ -69,7 +70,8 @@ def _settings(conn) -> dict:
     return {
         "max_delay_ms": num("probe_max_delay_ms", DEFAULT_MAX_DELAY_MS),
         "min_speed_bps": num("probe_min_speed_bps", DEFAULT_MIN_SPEED_BPS),
-        "speed_bytes": num("probe_speed_bytes", DEFAULT_SPEED_TEST_BYTES),
+        "speed_bytes": max(1, min(DEFAULT_SPEED_TEST_BYTES,
+                                 num("probe_speed_bytes", DEFAULT_SPEED_TEST_BYTES))),
         "speed_url": db.get_setting(conn, "probe_speed_url", DEFAULT_SPEED_TEST_URL),
         "timeout": float(num("probe_timeout_ms", int(DEFAULT_PROBE_TIMEOUT * 1000))) / 1000,
         "concurrency": num("probe_concurrency", DEFAULT_PROBE_CONCURRENCY),
@@ -79,7 +81,7 @@ def _settings(conn) -> dict:
 
 
 def run_funnel(proxies: list[dict], operator: str = "系统",
-               only_missing: bool = True) -> dict:
+               only_missing: bool = True, *, max_nodes: int | None = None) -> dict:
     """跑一轮漏斗，返回 {results: [...], stats: {...}}。
 
     proxies：Mihomo 节点字典列表（含 name/server/port/type）。
@@ -87,14 +89,15 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
     """
     from .probes import registry
 
-    conn = db.connect()
-    cfg = _settings(conn)
+    with db.connect() as conn:
+        cfg = _settings(conn)
     previous = load_results().get("nodes", {})
     detectors = registry.detectors_for()
 
     from . import node_rename
 
     pending = []
+    now = time.time()
     for proxy in proxies:
         name = str(proxy.get("name") or "")
         if not name:
@@ -104,10 +107,14 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
             continue
         if only_missing:
             old = previous.get(name)
-            if old and old.get("stage") == "probed":
+            if old and (old.get("stage") == "probed" or
+                        now - (old.get("checked_at") or 0) < FAILED_RECHECK_SECONDS):
                 continue
         pending.append(proxy)
-    pending = pending[: cfg["round_limit"]]
+    limit = max(1, min(cfg["round_limit"], DEFAULT_ROUND_LIMIT))
+    if max_nodes is not None:
+        limit = min(limit, max_nodes)
+    pending = pending[:limit]
     if not pending:
         return {"results": [], "stats": {"skipped": "没有待测节点"}}
 
@@ -161,7 +168,8 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
         stats["error"] = str(exc)
 
     stats["elapsed_sec"] = int(time.monotonic() - started)
-    save_results(results, operator)
+    if results:
+        save_results(results, operator)
     return {"results": [r.to_dict() for r in results], "stats": stats}
 
 
@@ -219,8 +227,8 @@ def save_results(results: list[NodeQuality], operator: str = "系统") -> None:
         nodes[quality.name] = quality.to_dict()
     payload = {"updated_at": int(time.time()), "operator": operator,
                "nodes": nodes}
-    _atomic_write(RESULT_PATH, json.dumps(payload, ensure_ascii=False, indent=1))
     # 同步 unlock 缓存：probed 节点的 19 项结果按 unlock_check 的缓存结构写入
+    entries = {}
     for quality in results:
         if quality.stage != "probed" or not quality.probes:
             continue
@@ -231,7 +239,9 @@ def save_results(results: list[NodeQuality], operator: str = "系统") -> None:
             for pid, item in quality.probes.items()]
         entry = {"checked_at": quality.checked_at, "exit": quality.name,
                  "results": results_list, "ip": {}}
-        unlock_check._save_cache(quality.name, entry, merge=False)
+        entries[quality.name] = entry
+    unlock_check._save_cache_entries(entries, merge=False)
+    _atomic_write(RESULT_PATH, json.dumps(payload, ensure_ascii=False, indent=1))
     snapshot = RESULT_PATH.parent / f"snapshot-{int(time.time())}.json"
     _atomic_write(snapshot, json.dumps(payload, ensure_ascii=False, indent=1))
     # 快照只留最近 20 份

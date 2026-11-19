@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 
@@ -489,53 +490,57 @@ def _run_auto_build(summary: dict, now: datetime, force: bool = False,
     summary["published"] = env
 
 
-# 漏斗单例标记：调度线程每 30 秒 tick 一次，漏斗一轮要跑几分钟，
-# 没有这个标记会并发起多个核心实例（端口冲突 + 带宽打满导致误判）
-_funnel_lock = threading.Lock()
-_funnel_running = {"on": False}
-_funnel_batch = 30            # 每轮最多新增探测的节点数（分多轮跑完全量）
+# 两种自动探测共用一个工作位，上一轮结束后才启动下一轮。
+_auto_probe_lock = threading.Lock()
+_auto_probe_next: dict[str, float] = {}
+_auto_probe_failures: dict[str, int] = {}
+_funnel_batch = 10
 
 
-def _run_quality_funnel(summary: dict) -> None:
-    """周期性质量漏斗（2026-11-19）：延迟 → 吞吐 → 解锁矩阵。
-
-    开关 ``probe_funnel_enabled``（默认关）。跑在后台线程：
-    一次要起核心、逐节点切换探测，绝不能占住调度线程。
-    每轮最多新增 _funnel_batch 个节点（增量），全量分多轮完成。
-    """
-    with db.connect() as conn:
-        if not _enabled(conn, "probe_funnel_enabled", "0"):
-            return
-    if _funnel_running["on"]:
-        return          # 上一轮还在跑：不重复排队（内存级单例）
-    from . import quality_funnel
-
-    proxies = _collect_probe_proxies()
-    if not proxies:
-        summary["funnel"] = "没有可探测的节点"
-        return
+def _start_auto_probe(kind, work) -> bool:
+    if not _auto_probe_lock.acquire(blocking=False):
+        return False
+    if time.monotonic() < _auto_probe_next.get(kind, 0):
+        _auto_probe_lock.release()
+        return False
 
     def worker():
         try:
-            result = quality_funnel.run_funnel(
-                proxies[:_funnel_batch], operator=AUTO_OPERATOR)
-            stats = result.get("stats", {})
-            logger.info("质量漏斗：待测 %s，探测 %s，达标 %s，耗时 %ss",
-                        stats.get("pending"), stats.get("probed"),
-                        stats.get("qualified"), stats.get("elapsed_sec"))
+            result = work()
+            error = result.get("error") or result.get("stats", {}).get("error")
+            if error:
+                raise RuntimeError(error)
+            _auto_probe_failures.pop(kind, None)
+            _auto_probe_next[kind] = time.monotonic() + 300
         except Exception as exc:
-            logger.warning("质量漏斗异常：%s", exc)
+            failures = _auto_probe_failures.get(kind, 0) + 1
+            _auto_probe_failures[kind] = failures
+            cooldown = 1800 if failures >= 3 else 60 * failures
+            _auto_probe_next[kind] = time.monotonic() + cooldown
+            logger.warning("自动探测 %s 失败，%s 秒后重试：%s", kind, cooldown, exc)
         finally:
-            _funnel_running["on"] = False
+            _auto_probe_lock.release()
 
-    if not _funnel_lock.acquire(blocking=False):
-        return
     try:
-        _funnel_running["on"] = True
-        threading.Thread(target=worker, daemon=True, name="quality-funnel").start()
+        threading.Thread(target=worker, daemon=True, name=kind).start()
+    except Exception:
+        _auto_probe_lock.release()
+        raise
+    return True
+
+
+def _run_quality_funnel(summary: dict) -> None:
+    with db.connect() as conn:
+        if not _enabled(conn, "probe_funnel_enabled"):
+            return
+    from . import quality_funnel
+
+    def work():
+        return quality_funnel.run_funnel(
+            _collect_probe_proxies(), operator=AUTO_OPERATOR, max_nodes=_funnel_batch)
+
+    if _start_auto_probe("quality-funnel", work):
         summary["funnel"] = f"已触发（本轮最多 {_funnel_batch} 个节点）"
-    finally:
-        _funnel_lock.release()
 
 
 def _collect_probe_proxies() -> list[dict]:
@@ -605,38 +610,20 @@ def _collect_probe_proxies() -> list[dict]:
 
 
 def _run_unlock_batch(summary: dict) -> None:
-    """自动轮转的节点解锁批量检测（2026-11-18，「自动管理」）。
-
-    开关 unlock_batch_auto（默认关）开着时，每轮 tick 触发一小批
-    （unlock_batch_size，默认 3 个）节点的 AI 解锁检测——放 daemon 线程：
-    每节点要起测速核心（10-20 秒），绝不能占调度线程，否则整轮被拖住。
-    结果写 unlock 缓存，重命名引擎据此给 AI 全解锁的节点加 🔓。
-    """
-    import threading as _threading
-
     with db.connect() as conn:
-        if not _enabled(conn, "unlock_batch_auto", "0"):
+        # 漏斗已覆盖解锁探测，两项都开时只运行漏斗。
+        if not _enabled(conn, "unlock_batch_auto") or _enabled(conn, "probe_funnel_enabled"):
             return
         try:
-            qty = max(1, min(50, int(_setting(conn, "unlock_batch_size", "3") or 3)))
+            qty = max(1, min(3, int(_setting(conn, "unlock_batch_size", "3") or "3")))
         except ValueError:
             qty = 3
-    state = unlock_check.batch_state()
-    if state.get("running"):
-        summary["unlock_batch"] = "上一批仍在运行，跳过"
+    if unlock_check.batch_state().get("running"):
         return
-
-    def worker():
-        try:
-            result = unlock_check.run_batch(qty=qty, operator=AUTO_OPERATOR)
-            if result.get("unlocked") is not None:
-                logger.info("解锁批量检测：完成 %s，AI 全解锁 %s",
-                            result.get("done"), result.get("unlocked"))
-        except Exception as exc:
-            logger.warning("解锁批量检测异常：%s", exc)
-
-    _threading.Thread(target=worker, daemon=True, name="unlock-batch-auto").start()
-    summary["unlock_batch"] = f"已触发一批（{qty} 个节点）"
+    if _start_auto_probe(
+        "unlock-batch-auto", lambda: unlock_check.run_batch(qty=qty, operator=AUTO_OPERATOR)
+    ):
+        summary["unlock_batch"] = f"已触发一批（{qty} 个节点）"
 
 
 def _clear_publish_backoff(conn) -> None:
@@ -785,7 +772,13 @@ def run_once(force: bool = False, trigger: str = "scheduled",
                 summary["errors"].append(f"探测任务调度失败：{exc}")
                 logger.warning("探测任务调度失败：%s", exc)
             if test_sources:
-                _run_source_test(summary, now, force=force)
+                if _auto_probe_lock.acquire(blocking=False):
+                    try:
+                        _run_source_test(summary, now, force=force)
+                    finally:
+                        _auto_probe_lock.release()
+                else:
+                    summary["test_skipped"] = "已有自动节点探测在运行"
             _run_auto_build(summary, now, force=force, actor_user_id=actor_user_id)
             _run_retention(summary)
             _run_unlock_batch(summary)

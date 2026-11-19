@@ -106,39 +106,33 @@ def _run_single(check: dict, proxy: str | None) -> dict:
         status = resp.status_code
         body_head = resp.text[:60000]
         latency = int((time.monotonic() - started) * 1000)
-        region = ""
-        if status in check.get("unlock", {200, 302, 301}):
+        region, detail = "", ""
+        marker = check.get("region_marker")
+        cf_challenge = (getattr(resp, "headers", {}).get("cf-mitigated") == "challenge"
+                        or (status in (403, 503) and _CF_CHALLENGE_PATTERN.search(body_head)))
+        if cf_challenge:
+            state, detail = "error", "Cloudflare 人机校验"
+        elif marker and re.search(marker, body_head, re.IGNORECASE):
+            state, detail = "blocked", "服务提示地区限制"
+        elif status == 429:
+            state, detail = "error", "请求频率受限"
+        elif status in check.get("unlock", {200, 302, 301}):
             state = "unlocked"
             rx = check.get("region_regex")
             if rx:
                 m = re.search(rx, body_head)
                 if m:
                     region = m.group(1).upper()
+        elif marker and status in (403, 503):
+            state, detail = "error", f"HTTP {status}，未确认限制原因"
+        elif status in check.get("blocked", {403}):
+            state, detail = "blocked", f"HTTP {status}，未确认限制原因"
+        elif status in check.get("unsupported", set()):
+            state, detail = "unsupported", f"HTTP {status}"
         else:
-            # 403/503 带 Cloudflare 人机校验特征时，无法区分区域拒绝还是
-            # 数据中心 IP 被拦（常见误判），如实标记「无法判定」。
-            if status in (403, 503) and _CF_CHALLENGE_PATTERN.search(body_head):
-                return {"id": check["id"], "status": status, "state": "error",
-                        "region": "", "latency_ms": latency,
-                        "detail": "Cloudflare 人机校验，无法判定"}
-            marker = check.get("region_marker")
-            if marker and re.search(marker, body_head, re.IGNORECASE):
-                state = "blocked"
-            elif marker and status in (403, 503):
-                # 声明了区域标记却没有命中：多半是人机校验/风控，如实标记无法判定
-                return {"id": check["id"], "status": status, "state": "error",
-                        "region": "", "latency_ms": latency,
-                        "detail": "403 无区域特征，无法判定"}
-            elif status in check.get("blocked", {403}):
-                state = "blocked"
-            elif status in check.get("unsupported", set()):
-                state = "unsupported"
-            elif status in {429}:
-                state = "blocked"
-            else:
-                state = "error"
+            state, detail = "error", f"HTTP {status}"
         return {"id": check["id"], "status": status, "state": state,
-                "region": region, "latency_ms": latency, "detail": ""}
+                "region": region, "latency_ms": latency, "detail": detail}
     except httpx.HTTPStatusError as exc:
         return {"id": check["id"], "status": exc.response.status_code,
                 "state": "blocked", "region": "", "latency_ms": int((time.monotonic() - started) * 1000),
@@ -217,6 +211,7 @@ def _exit_proxy(exit_id: str) -> tuple[str | None, str]:
             time.sleep(0.2)
     else:
         proc.kill()
+        proc.wait()
         shutil.rmtree(wd, ignore_errors=True)
         raise RuntimeError("解锁检测核心启动超时")
 
@@ -226,6 +221,7 @@ def _exit_proxy(exit_id: str) -> tuple[str | None, str]:
             proc.wait(timeout=5)
         except Exception:
             proc.kill()
+        proc.wait()
         shutil.rmtree(wd, ignore_errors=True)
 
     return f"http://127.0.0.1:{mixed}", cleanup
@@ -245,7 +241,7 @@ def run_checks(exit_id: str = "panel", ids: list[str] | None = None,
             cleanup()
     entry = {"checked_at": int(time.time()), "exit": exit_id or "panel",
              "results": results, "ip": ip}
-    _save_cache(exit_id or "panel", entry, merge=not ids)
+    _save_cache(exit_id or "panel", entry, merge=bool(ids))
     return entry
 
 
@@ -256,19 +252,32 @@ def _load_all() -> dict:
         return {}
 
 
+_cache_write_lock = threading.Lock()
+
+
+def _save_cache_entries(entries: dict, *, merge: bool) -> None:
+    if not entries:
+        return
+    with _cache_write_lock:
+        try:
+            all_cache = json.loads(_CACHE_PATH.read_text())
+        except FileNotFoundError:
+            all_cache = {}
+        for exit_id, entry in entries.items():
+            prev = all_cache.get(exit_id) or {}
+            if merge and prev.get("results"):
+                merged = {r["id"]: r for r in prev["results"]}
+                merged.update((r["id"], r) for r in entry["results"])
+                entry = {**entry, "results": list(merged.values())}
+            all_cache[exit_id] = entry
+        _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _CACHE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(all_cache, ensure_ascii=False))
+        tmp.replace(_CACHE_PATH)
+
+
 def _save_cache(exit_id: str, entry: dict, merge: bool) -> None:
-    all_cache = _load_all() if merge else {}
-    prev = all_cache.get(exit_id) or {}
-    if merge and prev.get("results"):
-        merged = {r["id"]: r for r in prev["results"]}
-        for r in entry["results"]:
-            merged[r["id"]] = r
-        entry["results"] = list(merged.values())
-    all_cache[exit_id] = entry
-    _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _CACHE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(all_cache, ensure_ascii=False))
-    tmp.replace(_CACHE_PATH)
+    _save_cache_entries({exit_id: entry}, merge=merge)
 
 
 def last_results(exit_id: str = "panel") -> dict:
@@ -444,12 +453,13 @@ def run_batch(qty: int = 3, ids: list[str] | None = None,
     _batch_state.update(running=True, done=0, error="", trigger=operator or "manual")
     try:
         all_nodes = ids if ids else detectable_nodes()
-        cursor = int(db.get_setting(db.connect(), "unlock_batch_cursor", "0") or 0)
+        with db.connect() as conn:
+            cursor = int(db.get_setting(conn, "unlock_batch_cursor", "0") or 0)
         queue = all_nodes[cursor % len(all_nodes):] + all_nodes[:cursor % len(all_nodes)]             if all_nodes else []
         batch = queue[:max(1, qty)]
         _batch_state["total"] = len(batch)
         unlocked = 0
-        import time as _time
+        failures = 0
         _batch_state["started_at"] = db.now()
         for node in batch:
             if not _batch_state["running"]:
@@ -462,12 +472,19 @@ def run_batch(qty: int = 3, ids: list[str] | None = None,
                 if capability_badges(node):
                     unlocked += 1
             except Exception as exc:
+                failures += 1
                 logger.warning("节点解锁批量检测失败 %s：%s", node, exc)
             _batch_state["done"] += 1
             cursor += 1
-        db.set_setting(db.connect(), "unlock_batch_cursor", str(cursor % max(1, len(all_nodes))))
+        if batch:
+            with db.tx() as conn:
+                db.set_setting(conn, "unlock_batch_cursor", str(cursor % len(all_nodes)))
         _batch_state.update(running=False, finished_at=db.now(), current="",
                             unlocked=unlocked)
-        return {"ok": True, "done": _batch_state["done"], "unlocked": unlocked}
+        result = {"ok": True, "done": _batch_state["done"], "unlocked": unlocked}
+        if failures and failures == _batch_state["done"]:
+            result.update(ok=False, error="本批节点检测均失败")
+        return result
     finally:
+        _batch_state.update(running=False, current="")
         _batch_lock.release()

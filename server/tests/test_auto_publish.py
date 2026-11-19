@@ -5,7 +5,7 @@
 把明明写着「核心校验通过」的设备产物当成没校验——
 自动构建于是每小时建一次、永远发不到生产环境。
 """
-import time
+import threading
 
 from app.services import scheduler
 from conftest import auth_headers, setup_admin
@@ -188,40 +188,71 @@ def test_scheduler_survives_probe_schedule_lock_failure(client, monkeypatch):
     assert "build" in summary or summary.get("build_error")
 
 
-def test_quality_funnel_single_instance(client, monkeypatch):
-    """漏斗防重入：上一轮还在跑时，新 tick 不再排队（否则并发起多个核心实例）。"""
+def test_auto_probes_share_worker_and_cool_down(client, monkeypatch):
     from app import db
-    from app.services import scheduler
+    from app.services import quality_funnel, scheduler
 
-    # 开启漏斗
     with db.tx() as conn:
         db.set_setting(conn, "probe_funnel_enabled", "1")
+        db.set_setting(conn, "unlock_batch_auto", "1")
+    monkeypatch.setattr(scheduler, "_auto_probe_next", {})
+    monkeypatch.setattr(scheduler, "_auto_probe_failures", {})
+    started = threading.Event()
+    finish = threading.Event()
+    monkeypatch.setattr(scheduler, "_collect_probe_proxies", list)
 
-    started = []
-    monkeypatch.setattr(scheduler, "_collect_probe_proxies", lambda: [
-        {"name": "节点A", "type": "ss", "server": "192.0.2.1", "port": 8388}])
+    def slow_funnel(proxies, *, operator, max_nodes):
+        assert max_nodes == 10
+        started.set()
+        assert finish.wait(5)
+        return {"stats": {}}
 
-    # 模拟 worker 卡住：run_funnel 不返回
-    def slow_funnel(proxies, operator="", only_missing=True):
-        started.append(1)
-        time.sleep(0.5)
-        return {"results": [], "stats": {}}
+    monkeypatch.setattr(quality_funnel, "run_funnel", slow_funnel)
+    summary = {}
+    scheduler._run_unlock_batch(summary)
+    scheduler._run_quality_funnel(summary)
+    try:
+        assert started.wait(5)
+        assert "unlock_batch" not in summary
+        # 即使运行中切换到旧检测，也不能并行起另一组核心。
+        with db.tx() as conn:
+            db.set_setting(conn, "probe_funnel_enabled", "0")
+        blocked = {}
+        scheduler._run_unlock_batch(blocked)
+        assert blocked == {}
+        with db.tx() as conn:
+            db.set_setting(conn, "auto_test_sources", "1")
+        tick = scheduler.run_once()
+        assert tick["test_skipped"] == "已有自动节点探测在运行"
+    finally:
+        finish.set()
+        assert scheduler._auto_probe_lock.acquire(timeout=5)
+        scheduler._auto_probe_lock.release()
+    with db.tx() as conn:
+        db.set_setting(conn, "probe_funnel_enabled", "1")
+    cooled = {}
+    scheduler._run_quality_funnel(cooled)
+    assert cooled == {}
 
-    import time as _time
-    from app.services import quality_funnel as _qf
-    monkeypatch.setattr(_qf, "run_funnel", slow_funnel)
 
-    summary1 = {}
-    scheduler._run_quality_funnel(summary1)
-    assert "funnel" in summary1, "第一轮应触发"
-    assert started, "worker 应已启动"
+def test_auto_probe_errors_back_off(monkeypatch):
+    class InlineThread:
+        def __init__(self, *, target, **kwargs):
+            self.target = target
 
-    # worker 还在跑（sleep 中），第二个 tick 不应再触发
-    summary2 = {}
-    scheduler._run_quality_funnel(summary2)
-    assert "funnel" not in summary2, "上一轮未结束时不该再排队"
+        def start(self):
+            self.target()
 
-    _time.sleep(0.6)
-    summary3 = {}
-    scheduler._run_quality_funnel(summary3)
-    assert "funnel" in summary3, "上一轮结束后应可再次触发"
+    clock = [100.]
+    monkeypatch.setattr(scheduler.threading, "Thread", InlineThread)
+    monkeypatch.setattr(scheduler.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(scheduler, "_auto_probe_next", {})
+    monkeypatch.setattr(scheduler, "_auto_probe_failures", {})
+    work = lambda: {"stats": {"error": "核心启动失败"}}
+    for wait in (60, 120, 1800):
+        assert scheduler._start_auto_probe("quality-funnel", work)
+        clock[0] += wait - 1
+        assert not scheduler._start_auto_probe("quality-funnel", work)
+        clock[0] += 1
+    assert scheduler._start_auto_probe("quality-funnel", lambda: {"stats": {}})
+    assert scheduler._auto_probe_failures == {}

@@ -8,6 +8,7 @@ services:
       # 构建期代理：NAS 刚重启时外网可能未就绪，npm/pip 拉包需要走代理。
       # 只影响镜像构建，不会进入运行时环境。
       args:
+        MAGICPANEL_REVISION: "${MAGICPANEL_REVISION:-unknown}"
         HTTP_PROXY: "${HTTP_PROXY:-}"
         HTTPS_PROXY: "${HTTPS_PROXY:-}"
         NO_PROXY: "${NO_PROXY:-}"
@@ -46,6 +47,7 @@ services:
   # 每日备份：数据库一致性快照 + 主密钥归档，保留最近 14 份。
   # 没有备份的话，NAS 一次磁盘故障就会让所有凭据不可恢复。
   backup:
+    profiles: ["backup"]
     image: python:3.12-slim
     container_name: magicpanel-backup
     restart: unless-stopped

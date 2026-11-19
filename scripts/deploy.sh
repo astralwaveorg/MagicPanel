@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 一键发布到 NAS：测试 → 同步工作区 → 重建容器 → 健康检查 → 域名验证
 # 用法：scripts/deploy.sh [--fast]
-#   --fast  跳过后端测试，适合只改了前端的快速验证
+#   --fast  跳过后端测试，例如已在本地跑完同一提交的测试
 # 可用环境变量覆盖：NAS_HOST NAS_DIR DOMAIN
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,10 +27,10 @@ if [ "$OFFLINE" = "1" ]; then
 fi
 [ -z "$IMAGE_MANIFEST" ] || { echo "--image-manifest requires --offline" >&2; exit 42; }
 
-DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
-if [ "$DIRTY" != "0" ]; then
-  echo "提示：工作区有 $DIRTY 处未提交改动，将按当前工作区内容发布"
-fi
+[ -z "$(git status --porcelain)" ] || { echo "请先提交工作区改动再部署" >&2; exit 1; }
+REVISION=$(git rev-parse HEAD)
+REMOTE_REVISION=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+[ "$REVISION" = "$REMOTE_REVISION" ] || { echo "当前提交与 origin/main 不一致，请先同步并推送" >&2; exit 1; }
 
 if [ "$SKIP_TESTS" = "0" ]; then
   echo "== 后端测试 =="
@@ -67,6 +67,9 @@ if [ "$DATA_CHECK" != "writable" ]; then
 fi
 
 echo "== 同步代码到 $NAS_HOST:$NAS_DIR =="
+STAGING=$(mktemp -d)
+trap 'rm -rf -- "$STAGING"' EXIT
+git archive "$REVISION" | tar -xf - -C "$STAGING"
 # data 目录是线上持久化数据，排除且 --delete 不会触及
 # --delete 会删掉 NAS 侧独有的文件（1Panel 生成的 override、.env 里的代理配置等），
 # 这些文件不在仓库里，一旦被删下次构建就会拉包失败——必须排除。
@@ -85,7 +88,7 @@ rsync -az --delete \
   --exclude 'docker-compose.override.yml' \
   --exclude 'docker-compose.override.yaml' \
   --exclude '*.bak' \
-  ./ "$NAS_HOST:$NAS_DIR/"
+  "$STAGING/" "$NAS_HOST:$NAS_DIR/"
 
 echo "== 重建并重启容器 =="
 # 记录当前镜像，失败时回滚到它
@@ -101,22 +104,27 @@ import sys
 from pathlib import Path
 from scripts.ops.rescue import compose_image_override, restore_argv
 old = sys.argv[1]
+inspect = ['docker', 'inspect', '--format', '{{.Image}} {{.State.Health.Status}}', 'magicpanel']
+current = subprocess.run(inspect, capture_output=True, text=True)
+if current.returncode == 0 and current.stdout.strip() == old + ' healthy':
+    print('原镜像仍在健康运行，无需切换', file=sys.stderr)
+    sys.exit(0)
 # private_path 拒绝任何含符号链接的路径，而 macOS 的 /tmp 是指向 /private/tmp 的符号链接，
 # 直接写死 /tmp 会让回滚在 Mac 上直接抛 PRIVATE_PATH_SYMLINK，镜像停在坏版本。
 # 先解析成真实路径，两种系统都能落地。
 rescue_root = Path(os.path.realpath('/tmp')) / 'magicpanel-rescue'
 override = compose_image_override(rescue_root, old)
-subprocess.run(restore_argv(str(Path.cwd()), str(override)), check=True)
+subprocess.run(restore_argv(str(Path.cwd()), str(override)) + ['magicpanel'], check=True)
 actual = subprocess.check_output(['docker', 'inspect', '--format', '{{.Image}}', 'magicpanel'], text=True).strip()
 if actual != old:
     raise SystemExit('RESTORED_IMAGE_MISMATCH')
 PY
-    echo "已核对回滚镜像ID，请检查容器健康与日志" >&2
   fi
 }
 finish_deploy() {
   local status=$?
   trap - EXIT
+  rm -rf -- "$STAGING"
   if [ "$status" -ne 0 ]; then
     restore_previous
   fi
@@ -142,11 +150,16 @@ if [ -n "${DEPLOY_PROXY:-}" ]; then
     "cd '$NAS_DIR' && CFG=\$(mktemp -d) && \
      HTTP_PROXY='$DEPLOY_PROXY' HTTPS_PROXY='$DEPLOY_PROXY' \
      NO_PROXY='localhost,127.0.0.1,10.0.0.0/8' \
-     DOCKER_CONFIG=\$CFG docker compose up -d --build; rc=\$?; rm -rf \$CFG; exit \$rc"
+     MAGICPANEL_REVISION='$REVISION' DOCKER_CONFIG=\$CFG docker compose up -d --build magicpanel; rc=\$?; rm -rf \$CFG; exit \$rc"
 else
   ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && CFG=\$(mktemp -d) && \
-   DOCKER_CONFIG=\$CFG docker compose up -d --build; rc=\$?; rm -rf \$CFG; exit \$rc"
+   MAGICPANEL_REVISION='$REVISION' DOCKER_CONFIG=\$CFG docker compose up -d --build magicpanel; rc=\$?; rm -rf \$CFG; exit \$rc"
 fi
+
+ACTUAL_REVISION=$(ssh -o BatchMode=yes "$NAS_HOST" \
+  "docker image inspect \$(docker inspect --format '{{.Image}}' magicpanel) --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}'")
+[ "$ACTUAL_REVISION" = "$REVISION" ] || { echo "运行镜像与待部署提交不一致" >&2; exit 1; }
+echo "运行提交：$ACTUAL_REVISION"
 
 echo "== 等待健康检查 =="
 STATUS=""
@@ -164,13 +177,12 @@ if [ "$STATUS" != "healthy" ]; then
 fi
 
 echo "== 数据自检 =="
-# 把自检脚本拷进容器，对运行中的数据库做一致性检查：
+# 在容器内对运行中的数据库做一致性检查：
 # 引用完整性、命名规范、冗余覆盖、结构键越权——数据层面的问题在这里挡住，
 # 不留给用户在下发配置时才发现。
-scp -q "$REPO_DIR/scripts/check_data_consistency.py" "$NAS_HOST:/tmp/check_data.py" 2>/dev/null || true
-if ! ssh -o BatchMode=yes "$NAS_HOST" "docker cp /tmp/check_data.py magicpanel:/tmp/check_data.py && \
-  docker exec magicpanel python3 /tmp/check_data.py /app/data/magicpanel.db"; then
-  echo "数据自检未通过，请按上面的提示修正数据（面板已发布，但数据需要整理）" >&2
+if ! ssh -o BatchMode=yes "$NAS_HOST" "cd '$NAS_DIR' && \
+  docker exec -i magicpanel python3 - /app/data/magicpanel.db < scripts/check_data_consistency.py"; then
+  echo "数据自检未通过" >&2
   exit 1
 fi
 
@@ -187,4 +199,5 @@ for path in /api/v1/setup/status / /admin/login; do
 done
 [ "$FAIL" = "0" ] && echo "发布完成：$DOMAIN" || { echo "域名验证未通过，请检查反代与证书" >&2; exit 1; }
 
+rm -rf -- "$STAGING"
 trap - EXIT
