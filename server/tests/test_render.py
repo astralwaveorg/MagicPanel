@@ -130,7 +130,8 @@ def test_service_aliases_copy_only_scoped_nodes_with_matching_revisions():
     snapshot["groups"] = [{"name": "选择", "type": "select", "local_nodes": [1, 2],
                            "targets": ["*"], "devices": ["*"]}]
     snapshot["service_aliases"] = {
-        "JP first": {"revision": "matching", "services": ["claude", "netflix"]},
+        "JP first": {"revision": "matching", "services": ["claude", "netflix"],
+                     "regions": {"netflix": "JP"}},
         "JP second": {"revision": "stale", "services": ["gemini"]},
         "US private": {"revision": "matching", "services": ["tiktok"]},
     }
@@ -214,6 +215,8 @@ def test_service_groups_split_media_in_place_and_require_jp_netflix_evidence():
     assert groups[-2]["proxies"] == ["Netflix 日本", "🎞️ 国际影音"]
     assert groups[-1]["proxies"] == ["🎞️ 国际影音"]
     assert "日本 02 - Claude" not in {p["name"] for p in cfg["proxies"]}
+    # 美国地区的 Netflix 证据不会进「Netflix 日本」组，也不应生成孤儿别名节点
+    assert "美国 01 - Netflix" not in {p["name"] for p in cfg["proxies"]}
 
 
 def test_claude_adds_verified_choices_without_removing_manual_routes():
@@ -260,6 +263,9 @@ def test_us_media_use_only_eligible_us_nodes_and_keep_the_previous_us_group():
     groups = {group["name"]: group for group in cfg["proxy-groups"]}
     assert groups["Hulu"]["proxies"] == ["🇺🇸美国"]
     assert groups["HBO Max"]["proxies"] == ["美国 01 - HBO Max", "🇺🇸美国"]
+    # 日本地区的 HBO 证据不进 HBO Max 组，也不生成孤儿别名
+    assert "日本 01 - HBO Max" not in {p["name"] for p in cfg["proxies"]}
+    assert "日本 01 - Hulu" not in {p["name"] for p in cfg["proxies"]}
 
 
 def test_ai_service_rules_preserve_google_direct_and_explicit_overrides():

@@ -356,9 +356,13 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name, *, local_ai
                 and final_name[name] in materials}
     aliases = {}
     for pid, service in routing_planner.SERVICE_ALIAS_NAMES.items():
+        region = routing_planner.MEDIA_ROUTE_REGIONS.get(pid)
         members = {}
         for original, proof in sorted(eligible.items()):
             if pid not in proof["services"]:
+                continue
+            if region and (proof.get("regions") or {}).get(pid) != region:
+                # 地区过滤外的节点不会进任何组：别名只会是客户端里的孤儿节点
                 continue
             base = final_name[original]
             label = f"{base} - {service}"
