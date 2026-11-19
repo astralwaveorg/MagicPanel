@@ -418,6 +418,25 @@ def _apply_service_groups(cfg, rules, evidence, quality, final_name):
         routed.add(pid)
         updated.append({**rule, "target": label})
 
+    # Amazon 通用集合也包含 primevideo.com。只把专用域提前，
+    # 整组提到 Amazon 前会误改 www.amazon.com 等商城请求。
+    prime = routing_planner.MEDIA_NAMES["primevideo"]
+    prime_domain = "primevideo.com"
+    if "primevideo" in routed and not any(
+        row["type"] in {"DOMAIN", "DOMAIN-SUFFIX"} and (
+            (host := str(row.get("value") or "").lower()) == prime_domain
+            or (host and (host.endswith("." + prime_domain) or prime_domain.endswith("." + host)))
+        ) for row in updated
+    ):
+        retail = next((i for i, row in enumerate(updated)
+                       if row["type"] == "RULE-SET" and str(row.get("value")).lower() == "amazon"
+                       and row["target"] == "🛒 跨境电商"), None)
+        if retail is not None and any(
+            row["type"] == "RULE-SET" and str(row.get("value")).lower() == "primevideo" and row["target"] == prime
+            for row in updated[retail + 1:]
+        ):
+            updated.insert(retail, {"type": "DOMAIN-SUFFIX", "value": prime_domain, "target": prime})
+
     # 只在现有通用 AI 集合前细分。保留所有在它之前的直连、Google 与用户自定义规则。
     anchor = next((i for i, rule in enumerate(updated)
                    if rule["type"] == "RULE-SET" and rule.get("value", "").lower() in

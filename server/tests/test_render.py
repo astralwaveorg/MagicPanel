@@ -209,3 +209,19 @@ def test_ai_service_rules_preserve_google_direct_and_explicit_overrides():
     groups = {g["name"]: g for g in cfg["proxy-groups"]}
     assert groups["ChatGPT"]["proxies"] == ["美国 NTT 01 - ChatGPT", "日本 01 - ChatGPT"]
     assert "Grok" not in groups
+def test_prime_video_site_precedes_amazon_without_reordering_other_rules():
+    from app.compiler.render import _apply_service_groups
+
+    amazon_cn = {"type": "RULE-SET", "value": "AmazonCN", "target": "DIRECT"}
+    amazon = {"type": "RULE-SET", "value": "Amazon", "target": "🛒 跨境电商"}
+    prime_set = {"type": "RULE-SET", "value": "PrimeVideo", "target": "🎞️ 国际影音"}
+    explicit = {"type": "DOMAIN", "value": "www.primevideo.com", "target": "DIRECT"}
+    def render(rules):
+        cfg = {"proxies": [], "proxy-groups": [{"name": "🎞️ 国际影音"}]}
+        return _apply_service_groups(cfg, rules, {}, {}, {})
+
+    result = render([amazon_cn, amazon, prime_set])
+    assert result == [amazon_cn, {"type": "DOMAIN-SUFFIX", "value": "primevideo.com", "target": "Prime Video"},
+                      amazon, {**prime_set, "target": "Prime Video"}]
+    assert render([amazon_cn, explicit, amazon, prime_set]) == [
+        amazon_cn, explicit, amazon, {**prime_set, "target": "Prime Video"}]
