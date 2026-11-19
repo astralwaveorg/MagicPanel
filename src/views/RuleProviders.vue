@@ -81,7 +81,7 @@
     <EmptyState
       v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的规则来源。"
-      next="没有符合筛选条件的结果。清除筛选后显示全部。"
+      next="清除筛选即可显示全部规则来源。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -244,8 +244,8 @@
           <el-input v-model="form.proxy_url" class="mono" placeholder="http://内网代理:端口" />
           <div class="mp-form-hint" style="margin-top:6px">
             <template v-if="currentProxy">当前：{{ currentProxy }}　</template>
-            面板跑在 NAS 上，默认走路由器 OpenClash 透明代理，通常不需要开这个开关。
-            确实要指定时填内网可达的代理地址，不要写 127.0.0.1（那是容器自己）。
+            面板部署在 NAS 上，出站默认经路由器透明代理，通常不需要开启。
+            确需指定时填内网可达的代理地址，不要填 127.0.0.1（指向容器自身）。
           </div>
         </el-form-item>
       </el-form>

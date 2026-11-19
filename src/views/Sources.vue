@@ -104,7 +104,7 @@
     <EmptyState
       v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的来源。"
-      next="没有符合筛选条件的结果。清除筛选后显示全部。"
+      next="清除筛选即可显示全部来源。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">

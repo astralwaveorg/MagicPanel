@@ -2,7 +2,8 @@
   <div>
     <h2 class="mp-page-title">策略组</h2>
     <p class="mp-page-desc">
-      为规则设置可用线路。拖动调整组的显示顺序。没有可用成员的组不会改走直连。
+      为规则选择可用线路，拖动调整组在客户端里的显示顺序。
+      组没有任何可用成员时，产物会放一个占位节点，避免客户端把空组隐式改成直连；命中这种组的连接会失败，而不是悄悄直连。
     </p>
 
     <VariantBar page="groups" v-model="variantId" @changed="onVariantsChanged" />
@@ -70,7 +71,7 @@
     <EmptyState
       v-else-if="!error && !rows.length"
       reason="没有符合筛选条件的策略组。"
-      next="没有符合筛选条件的结果。清除筛选后显示全部。"
+      next="清除筛选即可显示全部策略组。"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">

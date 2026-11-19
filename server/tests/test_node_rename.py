@@ -27,25 +27,30 @@ def test_region_detection_zh_en_flag():
 
 
 def test_normalize_full_format():
-    alloc = {}
-    out = node_rename.normalize_name("🇺🇸 美国01 Hyper", source="神龙机场", alloc=alloc)
-    assert out == "🇺🇸 [神龙机场] 美国 01"
-    out2 = node_rename.normalize_name("US-LA 0.5x [A]", source="夜煞云", alloc=alloc)
-    assert out2 == "🇺🇸 [0.5x·夜煞云] 美国 02"
-    # 家宽进入地区名；IEPL 与运营商成为标签
-    out3 = node_rename.normalize_name("日本家宽-01 Home", source="夜煞云", alloc=alloc)
-    assert out3 == "🇯🇵 [夜煞云] 日本家宽 01"
-    out4 = node_rename.normalize_name("韩国 [IEPL] | 5x 移动", source="夜煞云", alloc=alloc)
-    assert out4 == "🇰🇷 [5x·IEPL·移动·夜煞云] 韩国 01"
+    alloc, codes = {}, {}
+    out = node_rename.normalize_name("🇺🇸 美国01 Hyper", source="神龙机场",
+                                     alloc=alloc, codes=codes)
+    assert out == "🇺🇸 [神] 美国 01"
+    out2 = node_rename.normalize_name("US-LA 0.5x [A]", source="夜煞云",
+                                      alloc=alloc, codes=codes)
+    # 序号按「机场 + 地区」分配：夜煞云的美国节点从 01 重新起算
+    assert out2 == "🇺🇸 [夜·0.5x] 美国 01"
+    # 家宽进入地区名；IEPL 与运营商成为标签；「Hyper」不是解锁服务
+    out3 = node_rename.normalize_name("日本家宽-01 Home", source="夜煞云",
+                                      alloc=alloc, codes=codes)
+    assert out3 == "🇯🇵 [夜] 日本家宽 01"
+    out4 = node_rename.normalize_name("韩国 [IEPL] | 5x 移动", source="夜煞云",
+                                      alloc=alloc, codes=codes)
+    assert out4 == "🇰🇷 [夜·5x·IEPL·移动] 韩国 01"
 
 
 def test_seq_alloc_is_deterministic_per_batch():
     names = ["🇭🇰 香港 01", "🇭🇰 香港 02", "HK/03", "🇭🇰 香港 01"]
     mapping = node_rename.rename_batch(names, source="夜煞云")
-    assert mapping[names[0]] == "🇭🇰 [夜煞云] 香港 01"
-    assert mapping[names[1]] == "🇭🇰 [夜煞云] 香港 02"
-    assert mapping[names[2]] == "🇭🇰 [夜煞云] 香港 03"
-    assert mapping[names[3]] == "🇭🇰 [夜煞云] 香港 01"
+    assert mapping[names[0]] == "🇭🇰 [夜] 香港 01"
+    assert mapping[names[1]] == "🇭🇰 [夜] 香港 02"
+    assert mapping[names[2]] == "🇭🇰 [夜] 香港 03"
+    assert mapping[names[3]] == "🇭🇰 [夜] 香港 01"
     # 同样的输入永远得到同样的输出（确定性）
     assert node_rename.rename_batch(names, source="夜煞云") == mapping
 
@@ -81,7 +86,7 @@ proxies:
     import yaml
     data = yaml.safe_load(out)
     names = [p["name"] for p in data["proxies"]]
-    assert names == ["🇺🇸 [神龙机场] 美国 01", "🇺🇸 [神龙机场] 美国 02"]
+    assert names == ["🇺🇸 [神] 美国 01", "🇺🇸 [神] 美国 02"]
 
 
 def test_settings_gate_controls_build_and_feed(client):
@@ -132,27 +137,28 @@ def test_settings_gate_controls_build_and_feed(client):
     content2 = client.get(
         f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
     assert "香港 IEPL 01" not in content2, "开启后应规范化改名"
-    assert "[IEPL·原始机场]" in content2, content2
+    assert "[原·IEPL]" in content2, content2
 
 
 def test_badge_position_and_gating():
     """新格式：国旗 [机场·标签] 国名 🔓 序号——徽章只在判定为真时加。"""
     from app.services import node_rename
 
-    alloc = {}
-    plain = node_rename.normalize_name("美国01 Hyper", source="神龙机场", alloc=alloc)
-    assert plain == "🇺🇸 [神龙机场] 美国 01"
+    alloc, codes = {}, {}
+    plain = node_rename.normalize_name("美国01 Hyper", source="神龙机场",
+                                       alloc=alloc, codes=codes)
+    assert plain == "🇺🇸 [神] 美国 01"
     badged = node_rename.normalize_name("美国02 Hyper", source="神龙机场",
-                                        alloc=alloc, badge=True)
-    assert badged == "🇺🇸 [神龙机场] 美国 🔓 02"
+                                        alloc=alloc, codes=codes, badge=True)
+    assert badged == "🇺🇸 [神] 美国 🔓 02"
     assert node_rename.UNLOCK_BADGE == "🔓"
 
     # badge_lookup 只给判定为真的节点加徽章
     mapping = node_rename.rename_batch(
         ["美国01 Hyper", "美国02 Hyper"], source="神龙机场",
         badge_lookup=lambda n: n.endswith("02 Hyper"))
-    assert mapping["美国01 Hyper"] == "🇺🇸 [神龙机场] 美国 01"
-    assert mapping["美国02 Hyper"] == "🇺🇸 [神龙机场] 美国 🔓 02"
+    assert mapping["美国01 Hyper"] == "🇺🇸 [神] 美国 01"
+    assert mapping["美国02 Hyper"] == "🇺🇸 [神] 美国 🔓 02"
 
 
 def test_ai_unlocked_requires_all_ai_checks():
@@ -227,7 +233,7 @@ def test_batch_detect_api_and_settings_gate(client, monkeypatch):
     content = client.get(
         f"/api/v1/builds/{build['id']}/artifact/stash-ios").json()["content"]
     assert "🔓" not in content, "徽章开关关闭时产物不应有 🔓"
-    assert "🇺🇸 [原始机场] 美国 01" in content, content
+    assert "🇺🇸 [原] 美国 01" in content, content
 
     # 打开徽章开关后，构建只认与当前节点匹配的质量结论。
     from app import db, security
@@ -244,7 +250,7 @@ def test_batch_detect_api_and_settings_gate(client, monkeypatch):
     build2 = client.post("/api/v1/builds", headers=h, json={}).json()
     content2 = client.get(
         f"/api/v1/builds/{build2['id']}/artifact/stash-ios").json()["content"]
-    assert "🇺🇸 [原始机场] 美国 🔓 01" in content2, content2
+    assert "🇺🇸 [原] 美国 🔓 01" in content2, content2
 
 
 def test_prompt_node_detection():
@@ -274,3 +280,49 @@ def test_network_quality_keeps_configured_local_name(client):
     result = client.get("/api/v1/unlock/quality", headers=headers)
     assert result.status_code == 200, result.text
     assert [item["name"] for item in result.json()["items"]] == ["🇺🇸 美国NTT 01"]
+
+
+def test_regional_names_include_airport_code_and_hit_only_info():
+    """订阅节点新格式：机场代码 + 命中正则才加的家宽/倍率/解锁服务。"""
+    catalog = [
+        {"source_id": 1, "emit_name": "s1", "raw_name": "🇭🇰 HK-01 解锁Netflix",
+         "display_name": "🇭🇰 HK-01 解锁Netflix", "retired": False, "source_name": "夜煞云"},
+        {"source_id": 1, "emit_name": "s2", "raw_name": "🇺🇸 US 家宽 0.5x",
+         "display_name": "🇺🇸 US 家宽 0.5x", "retired": False, "source_name": "夜煞云"},
+        {"source_id": 2, "emit_name": "s3", "raw_name": "🇭🇰 香港 x2 GPT",
+         "display_name": "🇭🇰 香港 x2 GPT", "retired": False, "source_name": "神龙机场"},
+        {"source_id": 2, "emit_name": "s4", "raw_name": "🇯🇵 JP-04",
+         "display_name": "🇯🇵 JP-04", "retired": False, "source_name": "神龙机场"},
+        {"source_id": 3, "emit_name": "s5", "raw_name": "🇭🇰 HK-05",
+         "display_name": "🇭🇰 HK-05", "retired": False, "source_name": "神龙机场"},
+    ]
+    names = node_rename.regional_names(catalog)
+    # 夜煞云→夜，神龙机场→神；序号按「机场 + 地区」各自从 01 起
+    assert names[(1, "s1")] == "🇭🇰 [夜] 香港 NF"
+    assert names[(1, "s2")] == "🇺🇸 [夜] 美国家宽 0.5x"
+    assert names[(2, "s3")] == "🇭🇰 [神] 香港 2x GPT 01"
+    assert names[(2, "s4")] == "🇯🇵 [神] 日本"
+    assert names[(3, "s5")] == "🇭🇰 [神] 香港 02"
+
+
+def test_airport_code_collision_extends_to_unique():
+    codes: dict = {}
+    a = node_rename._source_code("神龙机场", codes)
+    b = node_rename._source_code("神机网络", codes)
+    assert a == "神"
+    assert b.startswith("神") and b != a
+    # 同来源重复调用返回同一个代码
+    assert node_rename._source_code("神龙机场", codes) == a
+    assert node_rename._source_code("", codes) == ""
+
+
+def test_service_and_multiplier_patterns():
+    assert node_rename._extract_services("HK Netflix解锁") == "NF"
+    assert node_rename._extract_services("美国家宽GPT+YouTube") == "GPT·YT"
+    assert node_rename._extract_services("HK 解锁") == "解锁"
+    assert node_rename._extract_services("普通节点") is None
+    assert node_rename._extract_multiplier("×2 日本") == "2x"
+    assert node_rename._extract_multiplier("x0.5 节点") == "0.5x"
+    assert node_rename._extract_multiplier("倍率0.5 节点") == "0.5x"
+    assert node_rename._extract_multiplier("rate:1.5 US") == "1.5x"
+    assert node_rename._extract_multiplier("Xray 节点") is None

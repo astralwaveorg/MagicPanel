@@ -1,11 +1,19 @@
 """节点名称规范化（Sub-Store 风格）：机场订阅的节点名千奇百怪——
 有中英混杂、有超长宣传语、有「剩余流量」这类占位节点。构建与分发时统一
-成「旗帜 [机场·标签] 国名 徽章 序号」的确定性格式，客户端里看起来整齐划一。
+成「旗帜 [机场代码·线路标签] 国名 关键信息 徽章 序号」的确定性格式。
 
-    🇺🇸 [神龙机场·IEPL] 美国 🔓 01     ← 开启解锁徽章且该节点 AI 全解锁
-    🇺🇸 [神龙机场] 美国 01            ← 常态
+    🇺🇸 [神·IEPL] 美国家宽 01          ← 本地/来源信息齐全（2026-11-20 格式）
+    🇭🇰 [夜] 香港 2x NF 07            ← 命中倍率与解锁服务的订阅节点
+    🇺🇸 [神·0.5x·IEPL] 美国 🔓 01      ← provider 快照路径，含解锁徽章
+    🇺🇸 [神] 美国 01                  ← 常态：没有命中就不加
 
-机场提前：客户端按名字排序时同一机场的节点自然聚拢，方便对照管理。
+关键信息只在原节点名正则命中时保留（没有就不加）：
+* 机场代码：来源名的首个汉字或前两个字母，撞码时加长到唯一；
+  机场提前让同一机场的节点在客户端排序时自然聚拢。
+* 家宽：家宽 / 住宅 / ISP / residential 等标记。
+* 倍率：0.5x、2x、×2、x2、2倍、倍率0.5、rate:0.5，统一规范成「0.5x」形态。
+* 解锁服务：Netflix→NF、ChatGPT→GPT、YouTube→YT 等已知 token，
+  最多标 3 个；只有泛「解锁」时才标「解锁」。
 
 设计约束：
 * 确定性：同一个名字在同一个来源批次里永远得到同一个结果（序号按出现顺序分配），
@@ -77,10 +85,113 @@ _REGIONS = (
 _REGION_COMPILED = [(re.compile(p, re.IGNORECASE), flag, cn) for p, flag, cn in _REGIONS]
 
 # 附加标签：倍率 / 家宽 / 专线 / 运营商
-_MULTIPLIER_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*[xX倍]")
-_HOME_PATTERN = re.compile(r"家宽|家寬|家庭宽带|住宅|宽带|\bhome\b|\bisp\b", re.IGNORECASE)
+# 倍率：0.5x、2x、2倍（数字在前），×2、x2（乘号在前，前面不能是字母数字，
+# 避开 Xray 之类），倍率0.5、rate:0.5（显式关键字最优先）。
+_MULTIPLIER_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*[xX倍×]")
+_MULTIPLIER_PREFIX_PATTERN = re.compile(r"(?<![a-z0-9])[xX×]\s*(\d+(?:\.\d+)?)")
+_MULTIPLIER_KEYWORD_PATTERN = re.compile(
+    r"倍率\s*[:：=]?\s*(\d+(?:\.\d+)?)|rate\s*[:：=]?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+_HOME_PATTERN = re.compile(r"家宽|家寬|家庭宽带|住宅|宽带|\bhome\b|\bisp\b|\bresidential\b", re.IGNORECASE)
 _IEPL_PATTERN = re.compile(r"iepl|iplc|专线|專線", re.IGNORECASE)
 _CARRIER_PATTERN = re.compile(r"(移动|移動|cmcc|china mobile|联通|聯通|unicom|电信|電信|telecom)")
+
+# 机场在节点名里标注的解锁服务：命中才保留，规范化成短标签。
+# 泛「解锁」只在没有任何具体服务命中时才标，避免「解锁Netflix」重复标注。
+def _latin(word: str) -> str:
+    """ASCII 字母边界：CJK 与拉丁连写时（如「宽GPT」）\b 不成立，用环视替代。"""
+    return rf"(?<![a-z0-9]){word}(?![a-z0-9])"
+
+
+_SERVICE_TOKENS = (
+    (r"netflix|网飞", "NF"),
+    (r"disney|迪士尼", "Disney"),
+    (rf"{_latin('chatgpt')}|openai|{_latin('gpt')}", "GPT"),
+    (r"claude", "Claude"),
+    (r"gemini", "Gemini"),
+    (rf"{_latin('copilot')}", "Copilot"),
+    (r"tiktok|抖音国际", "TikTok"),
+    (r"youtube|油管", "YT"),
+    (rf"{_latin('hbo')}", "HBO"),
+    (rf"{_latin('hulu')}", "Hulu"),
+    (r"spotify", "Spotify"),
+    (rf"telegram|{_latin('tg')}", "TG"),
+    (rf"{_latin('steam')}", "Steam"),
+    (r"流媒体|streaming", "流媒体"),
+)
+_SERVICE_COMPILED = [(re.compile(p, re.IGNORECASE), label) for p, label in _SERVICE_TOKENS]
+_GENERIC_UNLOCK_PATTERN = re.compile(r"解锁|解鎖|unlock", re.IGNORECASE)
+
+_SERVICE_LABEL_CAP = 3  # 最多标 3 个服务，防止超长宣传语把名字撑爆
+
+
+def _extract_multiplier(name: str) -> str | None:
+    text = name or ""
+    m = _MULTIPLIER_KEYWORD_PATTERN.search(text)
+    if m:
+        return f"{float(m.group(1) or m.group(2)):g}x"
+    m = _MULTIPLIER_PATTERN.search(text)
+    if m:
+        return f"{float(m.group(1)):g}x"
+    m = _MULTIPLIER_PREFIX_PATTERN.search(text)
+    if m:
+        return f"{float(m.group(1)):g}x"
+    return None
+
+
+def _extract_services(name: str) -> str | None:
+    found = []
+    for pattern, label in _SERVICE_COMPILED:
+        if pattern.search(name or "") and label not in found:
+            found.append(label)
+            if len(found) >= _SERVICE_LABEL_CAP:
+                return "·".join(found)
+    if not found and _GENERIC_UNLOCK_PATTERN.search(name or ""):
+        return "解锁"
+    return "·".join(found) if found else None
+
+
+def _airport_code(source: str, used: set[str]) -> str:
+    """机场代码：中文来源取首个汉字，拉丁来源取前两个字母。
+
+    两个来源撞码时逐字加长机场名到唯一；名字太短退化成「代码+序号」。
+    used 是本批次已占用的代码集合，保证同批来源的代码互不相同。
+    """
+    text = re.sub(r"[\s()（）·\-—/|]+", "", (source or "").strip())
+    if not text:
+        return ""
+    is_hanzi = "\u4e00" <= text[0] <= "\u9fff"
+
+    def take(n: int) -> str:
+        part = text[:max(1, n)]
+        return part.upper() if not is_hanzi else part
+
+    size = 1 if is_hanzi else 2
+    code = take(size)
+    if code not in used:
+        used.add(code)
+        return code
+    n = size + 1
+    while n <= len(text):
+        longer = take(n)
+        if longer not in used:
+            used.add(longer)
+            return longer
+        n += 1
+    serial = 2
+    while f"{take(size)}{serial}" in used:
+        serial += 1
+    code = f"{take(size)}{serial}"
+    used.add(code)
+    return code
+
+
+def _source_code(source: str, cache: dict) -> str:
+    """每来源只算一次机场代码；cache（来源 → 代码）跨整批共享。"""
+    if not source:
+        return ""
+    if source not in cache:
+        cache[source] = _airport_code(source, set(cache.values()))
+    return cache[source]
 
 
 def is_info_node(name: str) -> bool:
@@ -97,14 +208,6 @@ def is_prompt_node(name: str) -> bool:
 def is_subscription_notice(name: str) -> bool:
     """识别订阅附带的公告和用量提示；只对订阅节点使用。"""
     return is_info_node(name) or is_prompt_node(name)
-
-
-def _extract_multiplier(name: str) -> str | None:
-    m = _MULTIPLIER_PATTERN.search(name)
-    if not m:
-        return None
-    value = m.group(1)
-    return f"{float(value):g}x"
 
 
 def detect_region(name: str) -> tuple[str, str] | None:
@@ -180,13 +283,22 @@ def regional_catalog(conn) -> list[dict]:
                          "display_name": row["name"]}
              for row in conn.execute("SELECT id, name, node_type FROM local_nodes ORDER BY id")}
     rows = [dict(row) for row in conn.execute(
-        "SELECT source_id, emit_name, raw_name, display_name, retired "
-        "FROM node_catalog WHERE origin_kind='source' ORDER BY ordinal")]
+        "SELECT c.source_id, c.emit_name, c.raw_name, c.display_name, c.retired, "
+        "s.name AS source_name FROM node_catalog c "
+        "LEFT JOIN sources s ON s.id = c.source_id "
+        "WHERE c.origin_kind='source' ORDER BY c.ordinal")]
     return [*local.values(), *rows]
 
 
 def regional_names(catalog, reserved=()) -> dict[tuple[int | None, str], str]:
-    """本地节点优先保留自定义名；订阅节点跨来源按地区编号。"""
+    """本地节点优先保留自定义名；订阅节点按「机场代码 + 地区」编号。
+
+    新名格式：`🇭🇰 [夜] 香港 家宽 2x NF 07`。
+    机场代码取来源名的首个汉字或前两个字母（撞码加长到唯一）；
+    家宽、倍率、解锁服务只在原节点名正则命中时才加，没有就不加。
+    序号按「机场 + 地区」从 01 起分配，同机场节点在客户端里相邻显示。
+    旧快照没有 source_name 时省略机场代码段，其余格式不变。
+    """
     from collections import Counter
     used = set(reserved)
     locals_ = [r for r in catalog if r["source_id"] is None and not r.get("retired")]
@@ -204,16 +316,33 @@ def regional_names(catalog, reserved=()) -> dict[tuple[int | None, str], str]:
                if entry["source_id"] is not None and
                not any(check(entry.get("raw_name", entry["display_name"]))
                        for check in (is_info_node, is_prompt_node))]
-    totals = Counter(region for _, region in entries)
-    counters: dict[tuple[str, str], int] = {}
+    codes: dict = {}
+    for entry, _ in entries:
+        sid = int(entry["source_id"])
+        if sid not in codes:
+            codes[sid] = _source_code(entry.get("source_name") or "", codes)
+    totals = Counter((region[0], region[1], codes[int(entry["source_id"])])
+                     for entry, region in entries)
+    counters: dict[tuple[str, str, str], int] = {}
     for entry, region in entries:
-        base = " ".join(region)
-        seq = counters.get(region, 0)
-        label = base if totals[region] == 1 and base not in used else ""
+        flag, cn = region
+        code = codes[int(entry["source_id"])]
+        raw = entry.get("raw_name") or entry.get("display_name") or ""
+        attrs = [cn + ("家宽" if _HOME_PATTERN.search(raw) else "")]
+        multiplier = _extract_multiplier(raw)
+        if multiplier:
+            attrs.append(multiplier)
+        services = _extract_services(raw)
+        if services:
+            attrs.append(services)
+        plain = f"{flag} [{code}] " + " ".join(attrs) if code else f"{flag} " + " ".join(attrs)
+        key = (flag, cn, code)
+        seq = counters.get(key, 0)
+        label = plain if totals[key] == 1 and plain not in used else ""
         while not label or label in used:
             seq += 1
-            label = f"{base} {seq:02d}"
-        counters[region] = seq
+            label = f"{plain} {seq:02d}"
+        counters[key] = seq
         used.add(label)
         if not entry.get("retired"):
             names.setdefault((entry["source_id"], entry["emit_name"]), label)
@@ -221,12 +350,14 @@ def regional_names(catalog, reserved=()) -> dict[tuple[int | None, str], str]:
 
 
 def normalize_name(name: str, source: str = "", alloc: dict | None = None,
-                   badge: str = "", speed_bps: int = 0, delay_ms: int = -1) -> str | None:
+                   badge: str = "", speed_bps: int = 0, delay_ms: int = -1,
+                   codes: dict | None = None) -> str | None:
     """规范化单个节点名。
 
     返回 None 表示这是占位/信息节点，应从产物与分发中丢弃。
-    alloc 是 (旗帜, 地区, 家宽) → 下一个序号 的分配表，调用方对同一批次
+    alloc 是 (旗帜, 地区, 机场代码) → 下一个序号 的分配表，调用方对同一批次
     传入同一个 dict，序号才会按出现顺序稳定递增。
+    codes 是 来源 → 机场代码 的分配表（撞码时逐字加长到唯一），同样按批次共享。
     badge 是能力徽章串（可为空，如 "🔓🎬"）：调用方按解锁检测缓存判定。
     speed_bps / delay_ms 是质量漏斗的结果（0 / -1 表示没有数据）：
     有数据时在名字末尾追加「120M/45ms」这样的摘要。
@@ -237,34 +368,38 @@ def normalize_name(name: str, source: str = "", alloc: dict | None = None,
     if is_info_node(name):
         return None
     region = detect_region(name)
-    home = bool(_HOME_PATTERN.search(name))
-    multiplier = _extract_multiplier(name)
-    tags = []
-    if _IEPL_PATTERN.search(name):
-        tags.append("IEPL")
-    carrier = _CARRIER_PATTERN.search(name)
-    if carrier:
-        tags.append(carrier.group(1))
     if not region:
         # 识别不出地区：保留原名（清理多余空白），保证确定性
         cleaned = re.sub(r"\s+", " ", name)
         return cleaned
     flag, cn = region
-    region_name = cn + ("家宽" if home else "")
-    key = (flag, region_name)
+    home = bool(_HOME_PATTERN.search(name))
+    multiplier = _extract_multiplier(name)
+    services = _extract_services(name)
     if alloc is None:
         alloc = {}
+    if codes is None:
+        codes = {}
+    code = _source_code(source, codes)
+    region_name = cn + ("家宽" if home else "")
+    key = (flag, region_name, code)
     seq = alloc.get(key, 0) + 1
     alloc[key] = seq
-    # 机场·标签 提前：同一机场的节点在客户端按名排序时聚在一起
-    bracket = ""
-    if source or tags:
-        if multiplier:
-            tags.insert(0, multiplier)
-        if source:
-            tags.append(source)
-        bracket = " [" + "·".join(tags) + "]"
+    # 机场代码与线路标签提前：同一机场的节点在客户端按名排序时聚在一起
+    tags = []
+    if code:
+        tags.append(code)
+    if multiplier:
+        tags.append(multiplier)
+    if _IEPL_PATTERN.search(name):
+        tags.append("IEPL")
+    carrier = _CARRIER_PATTERN.search(name)
+    if carrier:
+        tags.append(carrier.group(1))
+    bracket = " [" + "·".join(tags) + "]" if tags else ""
     label = f"{flag}{bracket} {region_name}"
+    if services:
+        label += f" {services}"
     if badge:
         # 兼容旧的布尔语义：True 表示「有 AI 徽章」
         badge_text = UNLOCK_BADGE if badge is True else str(badge)
@@ -283,15 +418,20 @@ def normalize_name(name: str, source: str = "", alloc: dict | None = None,
 
 
 def rename_batch(names: list[str], source: str = "",
-                 badge_lookup=None, perf_lookup=None) -> dict[str, str | None]:
+                 badge_lookup=None, perf_lookup=None,
+                 codes: dict | None = None) -> dict[str, str | None]:
     """对一批节点名做规范化，返回 {原名: 新名或 None}。
 
     None 表示占位节点应丢弃。批内序号按列表出现顺序分配；
     重复出现的原名只分配一次（首个生效），保证同名节点映射一致。
     badge_lookup(原始名) → 徽章串（可为空）：能力徽章判定（调用方按 unlock 缓存判）。
     兼容旧的布尔返回：True 视为单独的 AI 徽章。
+    codes 是跨调用共享的「来源 → 机场代码」缓存：同一渲染批次里多个来源
+    撞码时靠它逐字加长区分，不传则本批独立分配。
     """
     alloc: dict = {}
+    if codes is None:
+        codes = {}
     result: dict[str, str | None] = {}
     for name in names:
         if name in result:
@@ -307,7 +447,8 @@ def rename_batch(names: list[str], source: str = "",
             speed_bps = int(perf.get("speed_bps") or 0)
             delay_ms = int(perf.get("delay_ms", -1))
         result[name] = normalize_name(name, source=source, alloc=alloc, badge=badge,
-                                       speed_bps=speed_bps, delay_ms=delay_ms)
+                                       speed_bps=speed_bps, delay_ms=delay_ms,
+                                       codes=codes)
     return result
 
 

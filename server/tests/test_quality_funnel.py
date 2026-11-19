@@ -88,19 +88,19 @@ def test_name_includes_speed_and_delay():
     alloc = {}
     out = normalize_name("美国01 Hyper", source="机场A", alloc=alloc,
                          speed_bps=12 * 1024 * 1024, delay_ms=45)
-    assert out == "🇺🇸 [机场A] 美国 01 12M/45ms"
+    assert out == "🇺🇸 [机] 美国 01 12M/45ms"
 
 
 def test_name_without_perf_has_no_suffix():
     out = normalize_name("美国01 Hyper", source="机场A")
-    assert out == "🇺🇸 [机场A] 美国 01"
+    assert out == "🇺🇸 [机] 美国 01"
 
 
 def test_rename_batch_accepts_perf_lookup():
     mapping = rename_batch(["US 01"], source="机场A",
                             perf_lookup=lambda n: {"speed_bps": 3 * 1024 * 1024,
                                                    "delay_ms": 88})
-    assert mapping["US 01"] == "🇺🇸 [机场A] 美国 01 3M/88ms"
+    assert mapping["US 01"] == "🇺🇸 [机] 美国 01 3M/88ms"
 
 
 # ---------------------------------------------------------------- 分类输出

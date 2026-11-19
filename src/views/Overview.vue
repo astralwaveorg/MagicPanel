@@ -36,7 +36,7 @@
         </template>
         <div v-else class="stat-empty">
           暂无基础连通样本
-          <span>反映服务器经节点访问的结果</span>
+          <span>这里统计服务器经各节点访问外网的连通率</span>
         </div>
       </div>
 
@@ -47,7 +47,7 @@
         </div>
         <div class="stat-sub">
           最近更新 {{ latestConfig ? fmtTime(latestConfig) : '—' }}<br />
-          {{ configPulledRecently }}/{{ data.devices?.length || 0 }} 台最近 24 小时有配置拉取记录；是否加载成功另列
+          {{ configPulledRecently }}/{{ data.devices?.length || 0 }} 台最近 24 小时拉取过配置（拉取成功不代表已加载生效）
         </div>
         <div v-if="data.counts?.devices_stale > 0" class="stat-sub">
           <span class="mp-cell-flag">

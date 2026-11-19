@@ -694,9 +694,11 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
             local_final[old] = label
         # 用固定的兼容名称筛选；新测速结果不能改动现有策略组成员。
         old_labels = {}
+        shared_codes: dict = {}
         for src in inline_sources:
             for old, label in node_rename.rename_batch(
-                    inline_names[src["name"]], source=src["name"]).items():
+                    inline_names[src["name"]], source=src["name"],
+                    codes=shared_codes).items():
                 old_labels[(src.get("source_id"), old)] = label or old
         raw_by_key = {(sid, emit): raw for (sid, raw), emit in original_names.items()}
         for node in inline_nodes + fixed_nodes:
@@ -760,10 +762,12 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
                 if p not in dropped_refs and overrides.get(p, p) is not None]
     elif normalize_nodes:
         rename_map: dict[str, str | None] = {}
+        shared_codes: dict = {}
         for src in inline_sources:
             rename_map.update(node_rename.rename_batch(
                 inline_names[src["name"]], source=src["name"],
-                badge_lookup=badge_lookup, perf_lookup=perf_lookup))
+                badge_lookup=badge_lookup, perf_lookup=perf_lookup,
+                codes=shared_codes))
         fixed_by_source: dict[str, list[str]] = {}
         sources_by_id = {s.get('source_id'): s for s in snapshot['sources']}
         for node in fixed_nodes:
@@ -772,7 +776,8 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
         for sname, names in fixed_by_source.items():
             rename_map.update(node_rename.rename_batch(names, source=sname,
                                                        badge_lookup=badge_lookup,
-                                                       perf_lookup=perf_lookup))
+                                                       perf_lookup=perf_lookup,
+                                                       codes=shared_codes))
         dropped = {old for old, new in rename_map.items() if new is None}
         keep = {old: new for old, new in rename_map.items() if new is not None}
         final_name = keep

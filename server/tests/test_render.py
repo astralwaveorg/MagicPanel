@@ -91,7 +91,8 @@ def test_regional_inline_names_keep_membership_order_and_dialer():
          "raw_name": "🇺🇸 美国NTT 01", "node_uid": "local-test", "origin_kind": "local", "local_node_id": 9})
     snapshot["groups"] = [
         {"name": "选择", "type": "select", "use_sources": ["*"],
-         "filter": r"^.+ \[来源1\] (香港|日本) 01$", "local_nodes": [9],
+         # 过滤正则匹配的是 rename 标签（机场代码来自来源名首字：来源1→来）
+         "filter": r"\[来\] (香港|日本)", "local_nodes": [9],
          "targets": ["*"], "devices": ["*"]}
     ]
     result = yaml.safe_load(render.render_target(

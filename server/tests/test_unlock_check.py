@@ -151,16 +151,16 @@ def test_node_rename_accepts_multi_badge():
     alloc = {}
     out = node_rename.normalize_name("美国01 Hyper", source="机场A", alloc=alloc,
                                      badge="🔓🎬")
-    assert out == "🇺🇸 [机场A] 美国 🔓🎬 01"
+    assert out == "🇺🇸 [机] 美国 🔓🎬 01"
 
     mapping = node_rename.rename_batch(["美国02 Hyper"], source="机场A",
                                        badge_lookup=lambda n: "🎬")
-    assert mapping["美国02 Hyper"] == "🇺🇸 [机场A] 美国 🎬 01"
+    assert mapping["美国02 Hyper"] == "🇺🇸 [机] 美国 🎬 01"
 
     # 旧的布尔语义：True → 单个 AI 徽章
     legacy = node_rename.rename_batch(["美国03 Hyper"], source="机场A",
                                        badge_lookup=lambda n: True)
-    assert legacy["美国03 Hyper"] == "🇺🇸 [机场A] 美国 🔓 01"
+    assert legacy["美国03 Hyper"] == "🇺🇸 [机] 美国 🔓 01"
 
 
 def test_regional_names_keep_badges_out_of_build_labels(client):
@@ -211,7 +211,7 @@ def test_regional_names_keep_badges_out_of_build_labels(client):
         content = client.get(
             f"/api/v1/builds/{build['id']}/artifact/{name}").json()["content"]
         nodes = yaml.safe_load(content).get("proxies", [])
-        if any(node.get("server") == "192.0.2.10" and node["name"] == "🇺🇸 美国" for node in nodes):
+        if any(node.get("server") == "192.0.2.10" and node["name"] == "🇺🇸 [原] 美国" for node in nodes):
             found = True
         assert "🔓🎬📺" not in content
     assert found, "美区订阅节点使用简洁名称"

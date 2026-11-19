@@ -218,9 +218,8 @@
             <h3 class="mp-section-title">默认内容（可直接修改）</h3>
             <CodeEditor v-model="raw" language="yaml" height="46vh" />
             <div class="mp-form-hint">
-              这里是引擎默认配置的完整内容。保存时只把
-              <strong>与默认值不同的部分</strong>记下来，其余保持原样；
-              改动会影响该引擎下所有引擎平台配置与设备独立配置。点「恢复默认」即可还原。
+              这里是引擎默认配置的完整内容。保存时只记录<strong>与默认值不同的部分</strong>。
+              改动会作用于该引擎下的全部平台配置和设备独立配置。「恢复默认」可一键还原。
             </div>
           </template>
         </div>

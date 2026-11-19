@@ -65,7 +65,7 @@
     <EmptyState
       v-if="!error && !rows.length"
       :reason="hasFilter ? '没有符合筛选条件的规则。' : '还没有分流规则。'"
-      :next="hasFilter ? '没有符合筛选条件的结果。清除筛选后显示全部。' : '点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。'"
+      :next="hasFilter ? '清除筛选即可显示全部规则。' : '点击“添加规则”；构建前至少需要一条 MATCH 兜底规则。'"
     />
     <div v-else class="mp-card">
       <div class="mp-table-wrap">
@@ -198,7 +198,7 @@
           <div class="mp-form-hint">
             这两项是 Stash 的能力，只有 Stash 产物会带上，Mihomo 产物不受影响。
             「提前拒绝」要求目标直接是 REJECT / REJECT-DROP，
-            且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效——版本太旧的客户端可能加载失败。
+            且只对 Stash iOS/tvOS 3.7+、macOS 4.4+ 生效；版本太旧的客户端可能加载失败。
           </div>
           <div v-if="form.pre_matching && !preMatchingTargetOk" class="mp-form-warn">
             「提前拒绝」的目标只能是 REJECT / REJECT-DROP，请把上面的目标改掉再保存

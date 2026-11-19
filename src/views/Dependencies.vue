@@ -218,7 +218,7 @@
         <el-form-item label="隐藏路径（用逗号分隔）">
           <el-input v-model="settings.exclude_paths" placeholder=".git,.github,.env,*.bak,.*" />
           <div class="mp-form-hint">
-            排除的路径在页面里完全不显示；点开头路径（<code>.*</code>）默认都排除。
+            排除的路径不会在页面显示；点开头的隐藏路径默认全部排除（<code>.*</code>）。
           </div>
         </el-form-item>
       </el-form>

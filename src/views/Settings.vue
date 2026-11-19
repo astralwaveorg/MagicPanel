@@ -27,7 +27,7 @@
             <el-switch v-model="settings.node_name_normalize" />
           </div>
           <p class="mp-form-hint">
-            机场节点统一为「旗帜 [机场·标签] 国名 序号」格式（开启能力徽章时徽章紧跟国名），并丢弃剩余流量、套餐到期这类占位节点。
+            机场节点统一为「旗帜 [机场代码] 国名 关键信息 序号」格式：机场代码取来源名的首个汉字或前两个字母；节点名里命中正则时保留家宽、倍率和已标注的解锁服务；丢弃剩余流量、套餐到期这类占位节点。
             本地节点命名不受影响；关闭后产物与订阅恢复原始名称。
           </p>
         </el-form-item>
@@ -37,7 +37,7 @@
             <el-switch v-model="settings.build_regional_node_names" />
           </div>
           <p class="mp-form-hint">
-            订阅节点按地区命名，同地区有多个节点时加序号。本地节点保留自定义名称。启用后，设备更新配置时可能需要重新选择订阅节点。
+            订阅节点按「机场代码 + 地区」命名并加序号，同机场的节点在客户端里相邻显示。本地节点保留自定义名称。启用后，设备更新配置时可能需要重新选择订阅节点。
           </p>
         </el-form-item>
         <el-form-item>
@@ -64,7 +64,7 @@
           <el-switch v-model="webdav.enabled" />
         </div>
         <p class="mp-form-hint">
-          关闭后仍可手动上传备份；定时任务与调度器总开关无关。
+          关闭自动备份后仍可手动上传；这个开关不受调度器总开关影响。
         </p>
         <el-form-item label="WebDAV 地址">
           <el-input v-model="webdav.url" class="mono"

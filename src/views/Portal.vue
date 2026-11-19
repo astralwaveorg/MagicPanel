@@ -1012,6 +1012,7 @@ onUnmounted(() => {
   disposed = true
   gate.reset()
   clearInterval(lockTimer)
+  clearTimeout(rotateTimer)
   closeQr(); closeProvider(); closePreview()
   authorizedPin = ''
   qrCache.clear()
