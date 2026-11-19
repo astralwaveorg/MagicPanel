@@ -101,6 +101,8 @@ class NodeEngine:
             "allow-lan": False,
             "mode": "rule",
             "log-level": "error",
+            # 让延迟尽量反映已建立连接的响应；核心在同一次预算内复测。
+            "unified-delay": True,
             "external-controller": f"127.0.0.1:{self.controller_port}",
             # 所有节点进一个 select 组，探测时切组即可换出口
             "proxies": self.proxies,
