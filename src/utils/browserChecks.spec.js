@@ -82,3 +82,29 @@ describe('probeExitIp', () => {
     expect((await probeExitIp()).error).toBeTruthy()
   })
 })
+
+describe('probeOne 失败分类', () => {
+  it('服务端已响应但跨域重定向不可读 → 判可达（服务是通的）', async () => {
+    const err = new TypeError('Failed to load resource: net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin')
+    vi.stubGlobal('fetch', vi.fn(async () => { throw err }))
+    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
+    expect(r.state).toBe('reachable')
+    expect(r.reason).toBe('responded_redirect')
+  })
+
+  it('真网络失败 → 不可达（network_error）', async () => {
+    const err = new TypeError('Failed to fetch')
+    vi.stubGlobal('fetch', vi.fn(async () => { throw err }))
+    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
+    expect(r.state).toBe('unreachable')
+    expect(r.reason).toBe('network_error')
+  })
+
+  it('CSP 拦截 → blocked_by_policy', async () => {
+    const err = new TypeError("Refused to connect 'https://a.example/' because it violates the following Content Security Policy directive")
+    vi.stubGlobal('fetch', vi.fn(async () => { throw err }))
+    const r = await probeOne({ id: 'x', url: 'https://a.example/favicon.ico' }, 1000)
+    expect(r.state).toBe('unreachable')
+    expect(r.reason).toBe('blocked_by_policy')
+  })
+})

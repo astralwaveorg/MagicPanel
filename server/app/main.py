@@ -130,9 +130,14 @@ def create_app() -> FastAPI:
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault(
             "Content-Security-Policy",
+            # connect-src 必须放行 https：网络体检页的「当前网络」检测在浏览器里
+            # 向目标站点发请求（no-cors 只判可达）。只留 'self' 会被浏览器直接
+            # 拦截——请求立即失败（13ms 全部判不可达），看起来像"本地网络全不通"，
+            # 实际是内容安全策略拦截（2026-11-19 线上实证修复）。
+            # 只放行 https（不放 http），避免明文外发。
             "default-src 'self'; img-src 'self' data: blob:; "
             "style-src 'self' 'unsafe-inline'; script-src 'self'; "
-            "connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'",
+            "connect-src 'self' https:; font-src 'self' data:; frame-ancestors 'none'",
         )
         if request.url.scheme == "https" or request.headers.get(
                 "x-forwarded-proto", "").split(",")[0].strip() == "https":

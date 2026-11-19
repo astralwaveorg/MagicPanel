@@ -69,18 +69,39 @@ export async function probeOne(check, timeoutMs = BROWSER_TIMEOUT_MS) {
     const outcome = await Promise.race([
       fetch(check.url, { mode: 'no-cors', redirect: 'follow', cache: 'no-store' })
         .then(() => 'reachable')
-        .catch(() => 'unreachable'),
+        .catch((err) => ({ state: 'unreachable', err })),
       timer,
     ])
     const latency_ms = Math.round(performance.now() - started)
     if (outcome === 'reachable') {
       return { id: check.id, state: 'reachable', latency_ms }
     }
-    return { id: check.id, state: outcome === 'timeout' ? 'timeout' : 'unreachable',
-             latency_ms }
-  } catch {
+    if (outcome === 'timeout') {
+      return { id: check.id, state: 'timeout', latency_ms }
+    }
+    // 失败原因区分（2026-11-19 修正）：
+    // * NotSameOrigin / ERR_BLOCKED_BY_RESPONSE：服务器**已经响应**并要求
+    //   跳转（跨域重定向在 no-cors 下不可跟随）——这恰恰证明服务是通的，
+    //   判"不可达"是误判；
+    // * 极快失败（<200ms）多为浏览器策略拦截或域名被立即拒绝；
+    // * 其它慢失败才是真连不上。
+    const msg = String(outcome?.err?.message || outcome?.err || '')
+    if (/NotSameOrigin|ERR_BLOCKED_BY_RESPONSE/i.test(msg)) {
+      return { id: check.id, state: 'reachable', latency_ms,
+               reason: 'responded_redirect', detail: '服务有响应（跳转不可读）' }
+    }
+    // CSP 拦截有明确特征（Chrome: "violates the following Content Security
+    // Policy directive"）；其它失败一律算网络层不可达
+    if (/Content Security Policy|CSP/i.test(msg)) {
+      return { id: check.id, state: 'unreachable', latency_ms,
+               reason: 'blocked_by_policy', detail: '被浏览器内容安全策略拦截' }
+    }
+    return { id: check.id, state: 'unreachable', latency_ms,
+             reason: 'network_error', detail: '网络不可达' }
+  } catch (err) {
     return { id: check.id, state: 'unreachable',
-             latency_ms: Math.round(performance.now() - started) }
+             latency_ms: Math.round(performance.now() - started),
+             reason: 'network_error', detail: String(err).slice(0, 80) }
   }
 }
 
