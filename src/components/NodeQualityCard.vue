@@ -53,7 +53,7 @@
       <span class="mp-form-hint">{{ filtered.length }} 个节点</span>
     </div>
     <div v-if="items.length" class="mp-table-wrap">
-      <el-table :data="visible" size="small" empty-text="没有符合条件的节点">
+      <el-table :data="visible" size="small" empty-text="没有符合条件的节点" @sort-change="onSortChange">
         <el-table-column type="expand">
           <template #default="{ row }">
             <p v-if="row.download" class="mp-form-hint">
@@ -71,17 +71,17 @@
             </dl>
           </template>
         </el-table-column>
-        <el-table-column label="节点" prop="name" min-width="190" />
-        <el-table-column label="结果" min-width="115">
+        <el-table-column label="节点" prop="name" min-width="190" sortable="custom" />
+        <el-table-column label="结果" prop="stage" min-width="115" sortable="custom">
           <template #default="{ row }">{{ labels[row.stage] || '未测' }} {{ row.badges }}</template>
         </el-table-column>
-        <el-table-column label="延迟" min-width="85">
+        <el-table-column label="延迟" prop="delay_ms" min-width="85" sortable="custom">
           <template #default="{ row }">{{ row.delay_ms >= 0 ? latencyText(row.delay_ms) : '—' }}</template>
         </el-table-column>
-        <el-table-column label="下载速度" min-width="100">
+        <el-table-column label="下载速度" prop="speed_bps" min-width="100" sortable="custom">
           <template #default="{ row }">{{ row.speed_bps ? speedText(row.speed_bps) : '—' }}</template>
         </el-table-column>
-        <el-table-column label="检测时间" min-width="145">
+        <el-table-column label="检测时间" prop="checked_at" min-width="145" sortable="custom">
           <template #default="{ row }">{{ row.checked_at ? fmtTime(row.checked_at) : '—' }}</template>
         </el-table-column>
       </el-table>
@@ -137,6 +137,7 @@ const exporting = ref(false)
 const loadError = ref('')
 const filter = ref('')
 const page = ref(1)
+const sortState = ref({ field: '', order: '' })
 const pageSize = ref(100)
 const pageSizeOptions = [
   { label: '20 条/页', value: 20 },
@@ -170,9 +171,46 @@ const thresholds = computed(() => quality.value.thresholds || { delay_ms: 600, s
 const filters = computed(() => [{ id: '', label: '全部结果' }, ...Object.entries(labels)
   .filter(([id]) => quality.value.counts?.[id]).map(([id, label]) => ({ id, label }))])
 const filtered = computed(() => filter.value ? items.value.filter(row => row.stage === filter.value) : items.value)
+// 结果列按类别排序：达标在最前，未测最后（正序时）
+const STAGE_ORDER = { probed: 0, inconclusive: 1, speed_failed: 2, latency_failed: 3, unsupported: 4, unknown: 5 }
+const sorted = computed(() => {
+  const rows = filtered.value
+  const { field, order } = sortState.value
+  if (!field || !order) return rows
+  const dir = order === 'ascending' ? 1 : -1
+  // 缺失值（未测延迟/速度/时间）无论方向恒排最后
+  const missing = (row) => {
+    if (field === 'name') return false
+    if (field === 'stage') return false
+    if (field === 'delay_ms') return !(row.delay_ms >= 0)
+    if (field === 'speed_bps') return !row.speed_bps
+    if (field === 'checked_at') return !row.checked_at
+    return false
+  }
+  const value = (row) => {
+    if (field === 'name') return row.name || ''
+    if (field === 'stage') return STAGE_ORDER[row.stage] ?? 99
+    if (field === 'delay_ms') return row.delay_ms
+    if (field === 'speed_bps') return row.speed_bps
+    if (field === 'checked_at') return row.checked_at || ''
+    return ''
+  }
+  return [...rows].sort((a, b) => {
+    const ma = missing(a)
+    const mb = missing(b)
+    if (ma || mb) return (ma ? 1 : 0) - (mb ? 1 : 0)
+    const va = value(a)
+    const vb = value(b)
+    if (va === vb) return 0
+    const less = field === 'name'
+      ? String(va).localeCompare(String(vb), 'zh-CN', { numeric: true })
+      : va < vb ? -1 : 1
+    return dir * less
+  })
+})
 const visible = computed(() => pageSize.value
-  ? filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value)
-  : filtered.value)
+  ? sorted.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value)
+  : sorted.value)
 const autoState = computed(() => quality.value.auto
   ? quality.value.scheduler_on ? '自动检测已开启' : '系统定时任务未开启'
   : '自动检测已关闭')
@@ -181,6 +219,11 @@ const runningHint = computed(() => quality.value.task?.last?.pending
   ? `每批按设置上限分批循环，上一轮待测 ${quality.value.task.last.pending} 个`
   : '按批次上限分批进行')
 watch([filter, pageSize], () => { page.value = 1 })
+
+function onSortChange({ prop, order }) {
+  sortState.value = { field: order ? prop : '', order: order || '' }
+  page.value = 1
+}
 watch(() => filtered.value.length, size => {
   const perPage = pageSize.value || size || 1
   page.value = Math.min(page.value, Math.max(1, Math.ceil(size / perPage)))
