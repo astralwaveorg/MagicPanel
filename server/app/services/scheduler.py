@@ -538,19 +538,32 @@ def _run_quality_funnel(summary: dict) -> None:
         summary["funnel"] = f"已触发（本轮最多 {_funnel_batch} 个节点）"
 
 
-def start_quality_probe(operator: str, *, max_nodes: int = 3) -> bool:
+def start_quality_probe(operator: str, *, max_nodes: int = 3,
+                        run_all: bool = False) -> bool:
+    """启动一轮节点检测；run_all=True 时循环跑批次直到没有待测节点。
+
+    整个循环占用同一个探测工作位（_auto_probe_lock），期间其它自动探测
+    与门户解锁检测会排队——这是有意为之，避免两个探测互相抢核心。
+    安全上限 500 轮：按每批 3 个算覆盖 1500 个节点，防异常数据死循环。
+    """
     from . import quality_funnel
 
     def work():
         _quality_task["running"] = True
         try:
-            result = quality_funnel.run_funnel(
-                _collect_probe_proxies(), operator=operator, max_nodes=max_nodes)
-            _quality_task["last"] = result.get("stats", {})
-            stats = _quality_task["last"]
-            if stats.get("pending") and not stats.get("error"):
-                logger.info("节点检测：本轮 %s 个，完成平台检测 %s 个，耗时 %s 秒",
-                            stats["pending"], stats["probed"], stats["elapsed_sec"])
+            result = {"stats": {}}
+            for _ in range(500 if run_all else 1):
+                result = quality_funnel.run_funnel(
+                    _collect_probe_proxies(), operator=operator, max_nodes=max_nodes)
+                stats = result.get("stats", {})
+                _quality_task["last"] = stats
+                if stats.get("pending") and not stats.get("error"):
+                    logger.info("节点检测：本轮 %s 个，完成平台检测 %s 个，耗时 %s 秒",
+                                stats["pending"], stats["probed"], stats["elapsed_sec"])
+                if not run_all or stats.get("error") or stats.get("skipped"):
+                    # skipped = 没有待测节点（循环结束）；error = 本轮执行故障，
+                    # 继续硬循环只会掩盖问题，交给失败退避处理。
+                    break
             return result
         except Exception:
             _quality_task["last"] = {"error": "测试未完成，请查看应用日志"}

@@ -17,20 +17,33 @@
       </el-collapse-item>
     </el-collapse>
     <div class="quality-actions">
-      <el-button size="small" type="success" :loading="busy" :disabled="loading || quality.task?.running" @click="run">
-        测下一批
-      </el-button>
-      <el-button size="small" :disabled="loading" @click="load">刷新结果</el-button>
-      <el-button size="small" :disabled="!quality.counts?.probed" :loading="exporting" @click="download">
-        导出达标节点
-      </el-button>
+      <span class="qa-group">
+        <span class="qa-label">手动检测</span>
+        <el-button size="small" type="success" :loading="busy" :disabled="loading || quality.task?.running" @click="run">
+          测下一批
+        </el-button>
+        <el-button size="small" type="success" plain :loading="busy"
+                   :disabled="loading || quality.task?.running || !items.length" @click="runAll">
+          测全部节点
+        </el-button>
+      </span>
+      <span class="qa-group">
+        <span class="qa-label">结果</span>
+        <el-button size="small" :disabled="loading" @click="load">刷新结果</el-button>
+        <el-button size="small" :disabled="!quality.counts?.probed" :loading="exporting" @click="download">
+          导出达标节点
+        </el-button>
+      </span>
       <el-button size="small" :disabled="loading || !!loadError" @click="editSettings">检测设置</el-button>
-      <el-switch aria-label="自动检测" :model-value="quality.auto" :disabled="loading || saving || !!loadError"
-                 @change="toggleAuto" />
-      <span>{{ autoState }}</span>
+      <span class="qa-group">
+        <span class="qa-label">自动检测</span>
+        <el-switch aria-label="自动检测" :model-value="quality.auto" :disabled="loading || saving || !!loadError"
+                   @change="toggleAuto" />
+        <span class="mp-form-hint" style="margin:0">{{ autoState }}</span>
+      </span>
     </div>
     <p v-if="loadError" role="alert" class="mp-form-hint">{{ loadError }}</p>
-    <p v-else-if="quality.task?.running" class="mp-form-hint">正在检测，完成后会更新列表。</p>
+    <p v-else-if="quality.task?.running" class="mp-form-hint">正在检测（{{ runningHint }}）。完成后列表自动更新，也可点「刷新结果」立即查看。</p>
     <p v-else-if="quality.task?.last?.error" class="mp-form-hint">{{ quality.task.last.error }}</p>
     <p v-else-if="quality.task?.last?.skipped" class="mp-form-hint">{{ quality.task.last.skipped }}</p>
     <div v-if="items.length" class="quality-filters">
@@ -113,6 +126,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
+import { confirmBox } from '../confirm'
 import { fmtTime, latencyText } from '../format'
 
 const quality = ref({})
@@ -162,6 +176,10 @@ const visible = computed(() => pageSize.value
 const autoState = computed(() => quality.value.auto
   ? quality.value.scheduler_on ? '自动检测已开启' : '系统定时任务未开启'
   : '自动检测已关闭')
+// 运行中提示：说清当前是单批还是循环全量，口径来自最近一轮统计。
+const runningHint = computed(() => quality.value.task?.last?.pending
+  ? `每批按设置上限分批循环，上一轮待测 ${quality.value.task.last.pending} 个`
+  : '按批次上限分批进行')
 watch([filter, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, size => {
   const perPage = pageSize.value || size || 1
@@ -189,6 +207,19 @@ async function run() {
   busy.value = true
   try {
     await api('/api/v1/unlock/quality/run', { method: 'POST' })
+    quality.value = { ...quality.value, task: { running: true } }
+    schedule()
+  } catch (e) { ElMessage.error(e.message) } finally { busy.value = false }
+}
+
+async function runAll() {
+  if (!await confirmBox(
+    `将循环检测全部 ${items.value.length} 个节点，按批次上限分批进行，可能持续一到两个小时；期间面板其它自动检测会排队。确定开始？`,
+    '测全部节点', { confirmButtonText: '开始', cancelButtonText: '取消' },
+  )) return
+  busy.value = true
+  try {
+    await api('/api/v1/unlock/quality/run', { method: 'POST', body: { all: true } })
     quality.value = { ...quality.value, task: { running: true } }
     schedule()
   } catch (e) { ElMessage.error(e.message) } finally { busy.value = false }
@@ -242,6 +273,9 @@ onUnmounted(() => { if (timer) clearTimeout(timer); cancellation.abort() })
 
 <style scoped>
 .quality-actions, .quality-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.quality-actions { row-gap: 6px; }
+.qa-group { display: inline-flex; align-items: center; gap: 8px; }
+.qa-label { font-size: 12.5px; color: var(--mp-text-secondary); }
 .quality-filters .el-select { width: 150px; }
 .quality-page-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 10px; }
 .quality-page-controls { display: flex; align-items: center; gap: 10px; }

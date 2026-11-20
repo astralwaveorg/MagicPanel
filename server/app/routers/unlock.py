@@ -78,14 +78,20 @@ def quality(user=CurrentUser):
             "platforms": {pid: item.display_name for pid, item in ALL_DETECTORS.items()}}
 
 
+class QualityRunBody(BaseModel):
+    """all=True：循环跑批次直到没有待测节点（长任务）。"""
+    all: bool = False
+
+
 @router.post("/quality/run", status_code=202)
-def quality_run(user=RequireCapabilities("probe")):
+def quality_run(body: QualityRunBody | None = None, user=RequireCapabilities("probe")):
     from ..services import scheduler, tester
     if not tester.core_status().get("available"):
         raise HTTPException(409, "请先在系统设置安装 Mihomo 核心")
-    if not scheduler.start_quality_probe(user["username"]):
+    run_all = bool(body and body.all)
+    if not scheduler.start_quality_probe(user["username"], run_all=run_all):
         raise HTTPException(409, "有检测正在运行，或两轮检测的间隔还未结束")
-    return {"ok": True}
+    return {"ok": True, "run_all": run_all}
 
 
 @router.post("/quality/export")
