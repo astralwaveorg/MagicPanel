@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python3.12（与当前运行镜像一致）、FastAPI/Pydantic/SQLite/cryptography/PyYAML/httpx/pytest；Vue3/Element Plus/Vite6；Node22构建与CI；Vitest3/VTU2/Playwright；固定版本Mihomo、实际Stash；Linux VM namespace/nft及现有OpenClash。
 
-**Spec:** [总体设计](../specs/2026-11-15-MagicPanel-V2-总体设计与审查稿.md)、[工程规范](../specs/2026-11-15-MagicPanel-V2-工程检测与验收规范.md)、[体验与重构补充](../specs/2026-11-15-MagicPanel-V2-用户体验与重构补充设计.md)、[Google共同策略](../../reference/Google选路策略.md)、[开源研究](../../reference/2026-11-15-MagicPanel-V2-开源与检测研究.md)、本地私密[生产草案](../../network/2026-11-15-MagicPanel-V2-生产迁移草案.md)。
+**Spec:** [总体设计](../specs/2026-11-15-MagicPanel-V2-总体设计与审查稿.md)、[工程规范](../specs/2026-11-15-MagicPanel-V2-工程检测与验收规范.md)、[用户旅程与兼容迁移](../specs/2026-11-15-MagicPanel-V2-总体设计与审查稿.md#用户旅程与兼容迁移)、[Google共同策略](../../reference/Google选路策略.md)、[开源研究](../../reference/2026-11-15-MagicPanel-V2-开源与检测研究.md)、本地私密[生产草案](../../network/2026-11-15-MagicPanel-V2-生产迁移草案.md)。
 
 ## Global Constraints
 
