@@ -21,3 +21,4 @@ docs/archive/
 tmp/
 # pytest 缓存
 .pytest_cache/
+.workbuddy/
