@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "exported_at": "2026-11-21T19:42:59+00:00",
+  "exported_at": "2026-11-21T19:50:30+00:00",
   "meta": {
-    "build_id": 384,
+    "build_id": 385,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "ee4d31876f7a3a96daf218b82057d6a2353248038d27c8bfcb99a9eb24e24d26",
-    "build_created_at": "2026-11-22T03:42:38+08:00"
+    "policy_sha": "1a59d79bf8d38f0bed2e0f5626de870730b49e145c9dc725c4ae83c2497f0f93",
+    "build_created_at": "2026-11-22T03:50:00+08:00"
   },
   "variants": [
     {
@@ -1685,7 +1685,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1696,8 +1696,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
+      "updated_at": "2026-11-22T03:49:58+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1710,7 +1710,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1721,8 +1721,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
+      "updated_at": "2026-11-22T03:49:58+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1735,7 +1735,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1746,8 +1746,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
+      "updated_at": "2026-11-22T03:49:58+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1760,7 +1760,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1771,8 +1771,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T03:49:58+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1810,7 +1810,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1821,8 +1821,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
+      "updated_at": "2026-11-22T03:49:58+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1835,7 +1835,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1846,8 +1846,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T03:49:58+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1860,7 +1860,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1871,8 +1871,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
+      "updated_at": "2026-11-22T03:49:58+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -3572,5 +3572,5 @@
       "enabled": 1
     }
   ],
-  "digest": "5d2322ed82ccaea6335bedee4b38fbf3cd25a9fe0c0c426a60b6fe54cdc16bba"
+  "digest": "5df7377488f148f54a087db5e0afc27a533d688cec269b789219865a190f85d6"
 }
