@@ -198,7 +198,7 @@
           <el-table-column label="只分发可用节点" width="130" align="center">
             <template #default="{ row }">{{ row.filter_unavailable ? '开启' : '关闭' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <div class="op-row">
                 <el-button size="small" :loading="row._testing" @click="testNodes(row)"
@@ -270,7 +270,7 @@
               <span v-else style="color:var(--mp-muted)">未测速</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <div class="op-row">
                 <el-button size="small" :loading="testingLocal === row.id"

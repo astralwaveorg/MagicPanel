@@ -56,16 +56,16 @@
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <!-- 与旁边的按钮同高：小尺寸的下拉会比按钮矮一截，看着不协调 -->
-              <el-button v-if="!readonly" @click="openSource" type="info" plain>源码编辑</el-button>
+              <el-button v-if="!readonly" @click="openSource" type="info" plain>源码</el-button>
               <el-button v-if="isBuiltin ? builtinOverridden : !readonly" type="warning" plain @click="reset">
-                {{ isBuiltin ? '恢复默认' : '清除改动' }}
+                清除
               </el-button>
-              <el-button @click="preview" type="info" plain>预览产物</el-button>
+              <el-button @click="preview" type="info" plain>预览</el-button>
               <el-button v-if="!readonly" :loading="saving" @click="save" type="primary">
                 保存
               </el-button>
               <el-button v-if="!readonly" :loading="applying" @click="apply" type="success">
-                保存并构建发布
+                构建发布
               </el-button>
             </div>
           </div>

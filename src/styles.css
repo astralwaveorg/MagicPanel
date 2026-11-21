@@ -448,8 +448,7 @@ html, body, #app {
   .mp-btn-grid > .mp-selected-hint { grid-column: 1 / -1; }
 
   /* 页面头：标题与页面级操作同一行，省掉一行按钮 */
-  .mp-page-head-row { flex-wrap: nowrap; }
-  .mp-page-head-row .mp-page-title { flex: 0 0 auto; }
+  /* 窄屏允许换行：标题一行、按钮折行，避免按钮叠上标题 */
   .mp-page-head-row .mp-btn-grid { flex: 1 1 auto; width: auto; }
 
   /* 开关行：标签与开关同一行 */

@@ -88,7 +88,7 @@
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
-          <el-table-column prop="name" label="名称" min-width="130" :fixed="isMobile ? false : 'left'" />
+          <el-table-column prop="name" label="名称" min-width="160" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="类型" width="100">
             <template #default="{ row }">{{ KIND_LABELS[row.kind] || row.kind }}</template>
           </el-table-column>
@@ -118,7 +118,7 @@
               <span v-if="row.kind === 'inline'" style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="被引用" min-width="170">
+          <el-table-column label="被引用" min-width="85">
             <template #default="{ row }">
               <span v-if="!row.referenced_by || !row.referenced_by.length" class="mp-cell-sub">—</span>
               <el-link v-for="ref in (row.referenced_by || [])" :key="ref.id"
@@ -134,7 +134,7 @@
           <el-table-column label="最近成功" min-width="160">
             <template #default="{ row }"><span class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" :width="isMobile ? 150 : 210" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="210" fixed="right">
             <template #default="{ row }">
               <div class="op-row">
                 <el-button v-if="row.kind === 'remote'" size="small" :loading="row._refreshing"
