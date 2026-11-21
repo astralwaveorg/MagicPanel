@@ -1,6 +1,6 @@
 # MagicPanel-默认 对齐交付（2026-11-21）
 
-状态：**构建 #353 已通过全部硬校验，停在发布确认门**——按需求约束 3「发布生效前先向用户确认一次（发布瞬断全屋网络）」，确认问题已发出未获回复，发布动作等待用户一句话确认。确认后的完整执行步骤见文末「待执行」。
+状态：**已完成。** 构建 #353 发布生产（2026-11-21 08:27:29，release_rev 73）。路由器侧由向阳自行切换到目标模板路径（OpenClash.yaml，57 组，与目标样本组清单一致），订阅地址不变、OpenClash 自动更新——向阳明确「不用管路由器」，真相源验收第 2 条的订阅更新命令因此不再需要由 ZCode 执行。
 
 ## 一、已完成
 
@@ -27,17 +27,12 @@
 4. 游戏日本 UDP 池按约束 5 保留：🇯🇵 游戏 UDP 候选（hidden fallback，filter 匹配神龙机场日本 01-04）进入 🎮 游戏平台候选第二位，直连仍是默认。
 5. Google 严格资格检测/自动跨区未实现（brief 明确超范围）。
 
-## 四、待执行（用户确认发布后）
+## 四、发布与路由器状态（最终）
 
-```bash
-# 1) 发布（面板 API 或界面：构建 #353 → 发布测试 → 发布生产）
-# 2) 路由器订阅更新（真相源验收第 2 条；这是唯一触碰路由器的动作，仅执行该命令）
-ssh root@10.0.1.1 "sh /usr/share/openclash/openclash.sh 'MagicPanel-默认'"
-# 3) API 验收
-ssh root@10.0.1.1 'SECRET=$(uci -q get openclash.config.dashboard_password); curl -s -H "Authorization: Bearer $SECRET" http://127.0.0.1:9090/proxies | python3 -m json.tool | grep -E "\"🇬 谷歌服务|\"🇸🇬 新加坡媒体|\"🚇 WireGuard"'
-# 4) 分流抽查（dashboard 连接页）：google/youtube→🇬 谷歌服务；netflix→🇸🇬 新加坡媒体；
-#    telegram→📨 Telegram（直连）；github→🚀 GitHub；qq.com→直连；BT 非标端口→🔀 非标端口（直连）
-```
+- **发布**：#353 发布生产（08:27:29），release_rev 73；生产指针 = #353 PRODUCTION。
+- **路由器**：向阳已自行切换到目标模板路径——OpenClash 当前生效配置 `/etc/openclash/config/OpenClash.yaml`（07:43 更新，57 组，组清单与目标样本逐一对应：🚀 故障转移 SG 自建打头、Telegram 直连优先、新加坡媒体六合一、非标端口直连默认）。纯节点订阅地址不变，OpenClash 自动更新拉取；ZCode 未执行任何路由器写操作，真相源验收第 2 条命令由向阳自行管理。
+- **设备侧**：#353 产物为全部 13 台设备的订阅源，按 profile-update-interval 自动更新；节点名变化后客户端本地选中节点需重选一次。
+- **分流抽查口径**：产物规则表顺序已核对（google #50 早于 category-ai-!cn #51、apple-tvplus #59 早于 apple #60、netflix #63 早于 media #73、github #54 早于 category-dev #55、cn #85 早于 MATCH 末行）；运行时连接级抽查由向阳在 dashboard 连接页自行观察（google/youtube→🇬 谷歌服务、netflix→🇸🇬 新加坡媒体、telegram→📨 Telegram 直连、github→🚀 GitHub、cn 域名→直连、BT 非标端口→🔀 非标端口直连）。
 
 ## 五、回退路径
 
