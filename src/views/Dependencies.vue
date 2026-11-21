@@ -259,7 +259,7 @@ import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
 import CodeEditor from '../components/CodeEditor.vue'
-import { fmtTime } from '../format'
+import { fmtTime, sizeText } from '../format'
 
 const router = useRouter()
 const status = ref({})

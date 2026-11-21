@@ -173,7 +173,7 @@ def _public(row, with_meta: bool = True) -> dict:
         "trusted_upstream_id_key": row["trusted_upstream_id_key"],
         "id": row["id"],
         "name": row["name"],
-        "url_masked": security.mask_url(url),
+        "url_masked": security.mask_url_secret(url),
         "enabled": bool(row["enabled"]),
         "filter": row["filter"],
         "ua": row["ua"],
@@ -192,7 +192,7 @@ def _public(row, with_meta: bool = True) -> dict:
         # 自定义请求头只回显名字：值是凭据（Cookie 等），不回显
         "headers": [{"name": h["name"]} for h in _headers_of(row)],
         "use_proxy": bool(row["proxy_url_enc"] or ""),
-        "proxy_url_masked": (security.mask_url(security.decrypt_text(row["proxy_url_enc"]))
+        "proxy_url_masked": (security.mask_url_secret(security.decrypt_text(row["proxy_url_enc"]))
                              if row["proxy_url_enc"] else ""),
         "tested_at": row["tested_at"],
         "test_attempt_at": row["test_attempt_at"],

@@ -151,9 +151,8 @@
     <div class="mp-card">
       <h3>MagicPanel 订阅中心访问</h3>
       <p style="font-size:12.5px;color:var(--mp-text-secondary);margin:0 0 12px">
-        首页凭 4 位 PIN 进入，用于复制设备订阅地址；已登录的维护者免 PIN。
-        PIN 与账号绑定，一人一 PIN，任一有效即可进入，撤销某个人的 PIN 不影响其他人。
-        PIN 只是查看门槛，链接安全由地址中的随机令牌承担。连续输错 5 次锁定 10 分钟。
+        凭 4 位 PIN 进入门户；维护者登录免 PIN。一人一 PIN，撤销互不影响。
+        PIN 只是查看门槛，链接安全由地址中的随机令牌承担。连错 5 次锁 10 分钟。
       </p>
       <!-- 输入框与按钮同一行；窄屏再换行 -->
       <div class="mp-row-actions">

@@ -163,10 +163,22 @@ def decrypt_payload(payload: str) -> str:
 
 
 def mask_url(url: str) -> str:
-    """凭据类 URL 的展示形态：协议 + 主机 + 长度提示。
+    """URL 的展示形态：完整显示，仅剔除 userinfo 口令。
 
-    必须剔除 userinfo（user:password@）——否则每次打开面板
-    都会把订阅地址里的口令明文送到浏览器，抵消掉加密存储的意义。
+    仓库地址、WebDAV 地址这类 URL 的路径不含凭据，直接原样显示；
+    user:password@ 形式的口令替换为 ***（否则每次打开面板都会把
+    订阅地址里的口令明文送到浏览器，抵消掉加密存储的意义）。
+    """
+    if not url:
+        return ""
+    return _URL_USERINFO.sub("***@", url)
+
+
+def mask_url_secret(url: str) -> str:
+    """「路径即凭据」的 URL 展示形态：协议 + 主机 + 长度提示。
+
+    用于订阅地址（/feed/<token>/config.yaml）——路径里的令牌
+    等同于凭据，不能完整送进浏览器。
     """
     if not url:
         return ""

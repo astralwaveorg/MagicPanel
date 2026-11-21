@@ -63,7 +63,7 @@ def describe_error(value: str) -> str:
 
 def url_summary(value: str) -> str:
     try:
-        return security.mask_url(value or "")
+        return security.mask_url_secret(value or "")
     except ValueError:
         return "已配置地址（原文需授权查看）" if value else ""
 

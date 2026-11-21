@@ -76,10 +76,10 @@ def _public(row) -> dict:
     data["enabled"] = bool(data.get("enabled"))
     enc = data.pop("proxy_url_enc", "") or ""
     data.pop("content", None)
-    data["url"] = security.mask_url(data.get("url") or "")
+    data["url"] = security.mask_url_secret(data.get("url") or "")
     data["use_proxy"] = bool(enc)
     data["proxy_url_masked"] = (
-        security.mask_url(security.decrypt_text(enc)) if enc else ""
+        security.mask_url_secret(security.decrypt_text(enc)) if enc else ""
     )
     return data
 
