@@ -94,9 +94,9 @@
           </el-table-column>
           <el-table-column prop="behavior" label="行为" width="90" />
           <el-table-column prop="format" label="格式" width="90" />
-          <el-table-column label="URL" width="130">
+          <el-table-column label="URL" width="105">
             <template #default="{ row }">
-              <el-button v-if="row.kind === 'remote' && row.url" size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
+              <el-button v-if="row.kind === 'remote' && row.url" size="small" @click="copyUrl(row)" type="info" plain>复制</el-button>
               <el-tooltip v-else-if="row.kind === 'repo' && row.repo_path"
                           :content="row.repo_path" placement="top">
                 <span class="mp-cell-sub">仓库路径</span>
@@ -764,15 +764,15 @@ async function forceBatchDelete(ids) {
 }
 
 async function copyUrl(row) {
-  urlContent.value = row.url
-  urlCopied.value = false
   try {
     await copyText(row.url)
-    urlCopied.value = true
+    ElMessage.success('URL 已复制')
   } catch {
+    // 剪贴板被拒时才弹兜底窗，供手动复制
+    urlContent.value = row.url
     urlCopied.value = false
+    urlDialog.value = true
   }
-  urlDialog.value = true
 }
 
 async function preview(row) {

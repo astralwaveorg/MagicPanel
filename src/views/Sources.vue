@@ -115,7 +115,7 @@
           <el-table-column label="订阅地址" width="130">
             <template #default="{ row }">
               <el-button v-if="row.source_kind === 'file'" size="small" type="info" plain disabled>文件来源</el-button>
-              <el-button v-else size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
+              <el-button v-else size="small" @click="copyUrl(row)" type="info" plain>复制</el-button>
               <div v-if="(row.headers || []).length" class="mp-cell-flag">
                 <i class="mp-dot warn" />{{ row.headers.length }} 个请求头
               </div>
@@ -1446,18 +1446,12 @@ async function testAllLocal() {
 
 async function copyUrl(row) {
   try {
-    const data = await api(`/api/v1/sources/${row.id}/reveal`, { method: 'POST' })
-    urlContent.value = data.url
+    await copyText(row.url)
+    ElMessage.success('URL 已复制')
+  } catch {
+    urlContent.value = row.url
     urlCopied.value = false
-    try {
-      await copyText(data.url)
-      urlCopied.value = true
-    } catch {
-      urlCopied.value = false
-    }
     urlDialog.value = true
-  } catch (e) {
-    ElMessage.error(e.message)
   }
 }
 
