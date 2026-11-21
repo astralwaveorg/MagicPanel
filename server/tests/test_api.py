@@ -1425,6 +1425,29 @@ def test_local_node_crud_render_and_group_reference(client):
                          headers=h).status_code == 200
 
 
+def test_local_node_reorder(client):
+    """本地节点列表拖拽排序：按提交 id 顺序重排，重复/未知 id 被拒绝。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    ids = []
+    for name, host in (("排 A", "a01"), ("排 B", "b02"), ("排 C", "c03")):
+        ids.append(client.post("/api/v1/local-nodes", headers=h, json={
+            "name": name, "protocol": "ss", "server": f"{host}.example.com",
+            "port": 8388,
+            "params": {"cipher": "aes-256-gcm", "password": "secret"},
+        }).json()["id"])
+    r = client.post("/api/v1/local-nodes/reorder", headers=h,
+                    json=[ids[2], ids[0], ids[1]])
+    assert r.status_code == 200, r.text
+    order = [n["id"] for n in client.get("/api/v1/local-nodes", headers=h).json()
+             if n["id"] in ids]
+    assert order == [ids[2], ids[0], ids[1]]
+    assert client.post("/api/v1/local-nodes/reorder", headers=h,
+                       json=[ids[0], ids[0]]).status_code == 400
+    assert client.post("/api/v1/local-nodes/reorder", headers=h,
+                       json=[ids[0], 999999]).status_code == 400
+
+
 def test_local_node_update_tolerates_legacy_param_keys(client):
     """协议字段表演进后，存储参数里的遗留键不再永久卡死编辑（2026-11-20）。"""
     csrf = setup_admin(client)

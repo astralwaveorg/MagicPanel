@@ -235,7 +235,12 @@
         next="点击“添加节点”，手动填写服务器、协议和凭据。"
       />
       <div v-else class="mp-table-wrap">
-        <el-table :data="localNodes" size="small">
+        <el-table ref="localTableRef" :data="localNodes" size="small" row-key="id">
+          <el-table-column label="顺序" width="64" align="center">
+            <template #default="{ row }">
+              <span class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
+            </template>
+          </el-table-column>
           <el-table-column label="名称" min-width="180">
             <template #default="{ row }"><span class="mono">{{ row.display_name }}</span></template>
           </el-table-column>
@@ -616,13 +621,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { uploadCore } from '../core'
+import { useRowSortable } from '../useRowSortable'
 import StatusDot from '../components/StatusDot.vue'
 import EnableToggle from '../components/EnableToggle.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -689,6 +695,16 @@ const saving = ref(false)
 const editing = ref(null)
 const revealedUrl = ref('')
 const localNodes = ref([])
+const localTableRef = ref(null)
+const localSorter = useRowSortable(localTableRef, localNodes, async (ids) => {
+  try {
+    await api('/api/v1/local-nodes/reorder', { method: 'POST', body: ids })
+    ElMessage.success('顺序已更新')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+  await load()
+})
 const testingLocal = ref(0)
 const testingLocalBatch = ref(false)
 const localTestDone = ref(0)
@@ -916,6 +932,7 @@ async function load() {
     core.value = coreStatus
     localNodes.value = nodes
     localSchema.value = schema
+    await localSorter.init()
     if (!localForm.name && !localForm.server && !Object.keys(localForm.params).length) {
       const first = schema.protocols?.[0]?.value || 'ss'
       localForm.protocol = first
@@ -929,6 +946,7 @@ async function load() {
   }
 }
 onMounted(load)
+onBeforeUnmount(localSorter.destroy)
 
 async function installCore() {
   installingCore.value = true

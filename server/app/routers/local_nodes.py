@@ -105,6 +105,21 @@ def list_nodes(user=CurrentUser):
     return [_public(r) for r in rows]
 
 
+@router.post("/reorder")
+def reorder_nodes(ids: list[int], user=CurrentUser):
+    """本地节点列表拖拽排序：按提交的 id 顺序重排 sort，未提交的保持原相对顺序。"""
+    with db.tx() as conn:
+        if len(set(ids)) != len(ids):
+            raise HTTPException(400, "排序列表里有重复项")
+        known = {r["id"] for r in db.all_(conn, "SELECT id FROM local_nodes")}
+        if any(i not in known for i in ids):
+            raise HTTPException(400, "排序列表包含不存在的记录")
+        if not db.reorder_subset(conn, "local_nodes", ids):
+            raise HTTPException(400, "排序未生效")
+        security.audit(conn, user["username"], "调整本地节点顺序", "local_node", "")
+    return {"ok": True}
+
+
 @router.post("", status_code=201)
 def create_node(body: LocalNodeBody, user=RequireCapabilities('edit', 'reveal')):
     try:
