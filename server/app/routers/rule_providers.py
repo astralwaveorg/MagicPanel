@@ -255,6 +255,11 @@ def update_provider(rp_id: int, body: RuleProviderBody, force: bool = False,
         require_capability(user, "reveal")
     with db.tx() as conn:
         old = _get_or_404(conn, rp_id)
+        # 列表接口的 url 是脱敏展示值；编辑弹窗若没拿到完整原文就保存，
+        # 会把「…(N 字符)」写回来源导致抓取失效——提交值等于脱敏形态时视为未改动
+        if (body.url and old["url"]
+                and body.url == security.mask_url_secret(old["url"])):
+            body = body.model_copy(update={"url": old["url"]})
         fields = set(RuleProviderBody.model_fields) - {"proxy_url"}
         body = body.model_copy(update={key: old[key] for key in fields - body.model_fields_set})
         _validate_body(body)

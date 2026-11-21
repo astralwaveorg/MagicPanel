@@ -286,6 +286,14 @@ function openEdit(row) {
     useProxy: !!row.use_proxy, proxyUrl: '',
   } : {})
   dialog.value = true
+  // 远程模块回填完整 URL（列表里是脱敏展示值）
+  if (row && (row.source || 'inline') === 'remote' && row.url) {
+    try {
+      const data = await api(`/api/v1/snippets/${row.id}/reveal`, { method: 'POST' })
+      form.url = data.url || ''
+      if (form.useProxy) form.proxyUrl = data.proxy_url || ''
+    } catch { /* 无 reveal 权限时保持展示值，保存端会把脱敏值视为未改动 */ }
+  }
 }
 
 async function save() {
@@ -305,7 +313,7 @@ async function save() {
     interval: form.interval, client_interval: form.client_interval,
     // 抓取代理：留空表示不改；给了空串表示改成直连
     proxy_url: form.source === 'remote'
-      ? (form.useProxy ? (form.proxyUrl || '') : '')
+      ? (form.useProxy ? ((form.proxyUrl || '').trim() || null) : '')
       : null,
   }
   try {

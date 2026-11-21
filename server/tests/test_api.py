@@ -566,6 +566,27 @@ def test_rule_provider_inline_and_feed(client):
     assert got["binary"] is False
     assert "example.com" in got["content"] and "example.org" in got["content"]
 
+    # 远程来源把列表里的脱敏 URL 原样提交保存，必须视为未改动，
+    # 否则「…(N 字符)」会被写回来源导致抓取失效
+    client.post("/api/v1/rule-providers", headers=h, json={
+        "name": "remote-rules", "kind": "remote", "behavior": "domain",
+        "url": "https://example.com/upstream/list.yaml?token=abc123",
+    })
+    row = next(p for p in client.get("/api/v1/rule-providers", headers=h).json()
+               if p["name"] == "remote-rules")
+    assert "…" in row["url"] and "字符" in row["url"]
+    r = client.put(f"/api/v1/rule-providers/{row['id']}", headers=h, json={
+        "name": "remote-rules", "kind": "remote", "behavior": "domain",
+        "url": row["url"], "interval": 43200,
+    })
+    assert r.status_code == 200, r.text
+    from app import db
+    with db.connect() as conn:
+        stored = conn.execute("SELECT url, interval FROM rule_providers WHERE id=?",
+                              (row["id"],)).fetchone()
+    assert "token=abc123" in stored[0], stored[0]
+    assert stored[1] == 43200
+
     make_policy(client, csrf)
     client.post("/api/v1/rules", headers=h, json={
         "type": "RULE-SET", "value": "my-rules", "target": "节点选择"})

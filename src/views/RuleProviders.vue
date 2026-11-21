@@ -505,6 +505,14 @@ async function openEdit(row) {
       ElMessage.error(e.message)
     }
   }
+  // 远程来源回填完整 URL（列表里是脱敏展示值，直接保存会写坏地址）
+  if (row && row.kind === 'remote' && row.url) {
+    try {
+      const data = await api(`/api/v1/rule-providers/${row.id}/reveal`, { method: 'POST' })
+      form.url = data.url || ''
+      if (form.use_proxy) form.proxy_url = data.proxy_url || ''
+    } catch { /* 无 reveal 权限时保持展示值，保存端会把脱敏值视为未改动 */ }
+  }
 }
 
 async function save() {
@@ -513,7 +521,8 @@ async function save() {
   try {
     const body = { ...form }
     if (body.use_proxy) {
-      body.proxy_url = (body.proxy_url || '').trim()
+      // 没填新地址 = 不改（null）；填了才提交，避免每次编辑清掉已有代理
+      body.proxy_url = (body.proxy_url || '').trim() || null
     } else {
       body.proxy_url = ''
     }

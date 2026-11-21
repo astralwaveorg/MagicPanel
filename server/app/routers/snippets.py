@@ -159,6 +159,11 @@ def update_snippet(sid: int, body: SnippetBody, user=CurrentUser):
         if clash:
             raise HTTPException(409, "同名拓展模块已存在")
         # 抓取代理：留空表示不改；传空串表示改成直连
+        # 列表接口的 url 是脱敏展示值；提交值等于脱敏形态时视为未改动，
+        # 避免「…(N 字符)」被写回来源
+        if (body.url and old["url"]
+                and body.url == security.mask_url_secret(old["url"])):
+            body = body.model_copy(update={"url": old["url"]})
         proxy_enc = old["proxy_url_enc"] or ""
         if body.proxy_url is not None:
             proxy_enc = (security.encrypt_text(body.proxy_url)
