@@ -601,6 +601,7 @@ async function refreshMany(list) {
     return ElMessage.info('没有可抓取的远程规则来源（内联来源无需抓取）')
   }
   batchRefreshing.value = true
+  ElMessage.info(`开始抓取 ${targets.length} 个规则来源…`)
   refreshDone.value = 0
   refreshTotal.value = targets.length
   const queue = [...targets]

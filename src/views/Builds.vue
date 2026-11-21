@@ -432,6 +432,7 @@ function currentBuildText(build) {
 
 async function createBuild(previewRegionalNames = false) {
   building.value = true
+  ElMessage.info(previewRegionalNames ? '正在生成节点改名预览…' : '正在构建并校验…')
   try {
     const build = await api('/api/v1/builds', { method: 'POST', body: {
       note: previewRegionalNames ? '预览统一节点名' : '',

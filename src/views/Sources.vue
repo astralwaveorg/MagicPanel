@@ -968,6 +968,7 @@ async function onUploadCore(file) {
 
 async function testRow(row, silent = false) {
   row._testing = true
+  if (!silent) ElMessage.info('测速进行中…')
   try {
     const updated = await api(`/api/v1/sources/${row.id}/test`, { method: 'POST' })
     Object.assign(row, updated)
@@ -1016,6 +1017,7 @@ async function testMany(list) {
     return ElMessage.info('没有可测速的节点来源，请先抓取快照')
   }
   batchTesting.value = true
+  ElMessage.info(`开始测速 ${targets.length} 个来源…`)
   testDone.value = 0
   testTotal.value = targets.length
   let ok = 0
@@ -1153,6 +1155,7 @@ async function toggleLocalEnabled(row) {
 
 async function refreshRow(row, silent = false) {
   row._refreshing = true
+  if (!silent) ElMessage.info('抓取进行中…')
   try {
     const updated = await api(`/api/v1/sources/${row.id}/refresh`, { method: 'POST' })
     Object.assign(row, updated)
@@ -1182,6 +1185,7 @@ async function refreshMany(list) {
       : '全部来源都已关闭自动抓取，只使用本地快照')
   }
   batchRefreshing.value = true
+  ElMessage.info(`开始抓取 ${targets.length} 个来源…`)
   refreshDone.value = 0
   refreshTotal.value = targets.length
   const queue = [...targets]
@@ -1361,6 +1365,7 @@ async function copyRevealed() {
 }
 
 async function testLocal(row) {
+  ElMessage.info('测速进行中…')
   testingLocal.value = row.id
   try {
     const res = await api(`/api/v1/local-nodes/${row.id}/test`, { method: 'POST' })
@@ -1389,6 +1394,7 @@ async function testAllLocal() {
   const targets = [...localNodes.value]
   if (!targets.length) return ElMessage.info('还没有本地节点')
   testingLocalBatch.value = true
+  ElMessage.info(`开始测速 ${targets.length} 个本地节点…`)
   localTestDone.value = 0
   localTestTotal.value = targets.length
   let ok = 0

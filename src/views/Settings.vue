@@ -367,6 +367,7 @@ onMounted(() => {
 
 async function installCoreOnline() {
   coreBusy.value = true
+  ElMessage.info('核心安装中，视网络情况需要一到两分钟…')
   try {
     const result = await api('/api/v1/core/install', { method: 'POST' })
     ElMessage.success(`核心已安装：${result.version}`)

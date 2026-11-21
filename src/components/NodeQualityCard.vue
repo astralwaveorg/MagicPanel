@@ -227,11 +227,17 @@ function schedule() {
   timer = setTimeout(async () => { timer = null; await load() }, 5000)
 }
 
+const wasRunning = ref(false)
+
 async function load() {
   try {
     quality.value = await api('/api/v1/unlock/quality', { signal: cancellation.signal }) || {}
     loadError.value = ''
-    if (quality.value.task?.running) schedule()
+    const running = !!quality.value.task?.running
+    // 从「运行中」回落到「空闲」的沿：给一次完成提醒（首次加载不提示）
+    if (wasRunning.value && !running) ElMessage.success('节点检测完成，结果已更新')
+    wasRunning.value = running
+    if (running) schedule()
   } catch (e) {
     if (!cancellation.signal.aborted) loadError.value = e.message
   } finally { loading.value = false }
