@@ -90,7 +90,7 @@
                 <button
                   class="pt-btn primary"
                   @click="copy(nodesFeed.url, 'nodes')"
-                >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制地址' }}</button>
+                >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制' }}</button>
                 <a class="pt-btn" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
                 <button class="pt-btn pt-btn-danger" :loading="rotateBusy" @click="rotateNodesToken">重置</button>
               </div>
@@ -138,7 +138,8 @@
                       {{ d.env === 'production' ? '生产环境' : '测试环境' }}
                     </span>
                   </div>
-                  <p class="pt-card-meta">
+                  <p class="pt-card-meta"
+                     :title="`${platformLabel(d.platform)} · ${d.target_name}${hasOwnProfile(d) ? ' · 设备名：' + d.display_name : ''}`">
                     <span class="pt-plat">{{ platformLabel(d.platform) }}</span> · {{ d.target_name }}
                     <template v-if="hasOwnProfile(d)">
                       · 设备名：{{ d.display_name }}
