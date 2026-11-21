@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "exported_at": "2026-11-21T19:27:13+00:00",
+  "exported_at": "2026-11-21T19:35:40+00:00",
   "meta": {
-    "build_id": 381,
+    "build_id": 383,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "5693a43fca60d2b193896353dfae4ebac886439257e1f0f8ed60594392113756",
-    "build_created_at": "2026-11-22T03:26:53+08:00"
+    "policy_sha": "9c0d0041f0be3c1edee102db2cf89901a016213357ad15e809aca5160e16422e",
+    "build_created_at": "2026-11-22T03:35:02+08:00"
   },
   "variants": [
     {
@@ -1635,7 +1635,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🚀 故障转移\", \"🇭🇰 香港自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇺🇸 美国自动\", \"🇹🇼 台湾自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🐔 自建智选\", \"🚀 故障转移\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1646,8 +1646,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1000\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:34:10+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1059\"}, {\"kind\": \"group\", \"ref\": \"1000\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1660,7 +1660,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇬 Google 当前地区\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇺🇸 美国自动\", \"🇸🇬 SG自建\", \"🇸🇬 新加坡自动\", \"🇯🇵 JP自建\", \"🇯🇵 日本自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1671,8 +1671,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T02:48:51+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1060\"}]",
+      "updated_at": "2026-11-22T03:34:42+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1043\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2774,31 +2774,6 @@
       "updated_at": "2026-11-22T00:44:55+08:00",
       "members_v2": "[]",
       "members_format": "typed-v2"
-    },
-    {
-      "id": 1060,
-      "variant_id": 0,
-      "name": "🇬 Google 当前地区",
-      "type": "select",
-      "sort": 60,
-      "hidden": 1,
-      "filter": "",
-      "use_sources": "[]",
-      "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇺🇸 美国自动\", \"🇸🇬 SG自建\", \"🇯🇵 JP自建\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🚀 故障转移\"]",
-      "url": "https://www.gstatic.com/generate_204",
-      "interval": 600,
-      "timeout": 8000,
-      "tolerance": 150,
-      "lazy": 1,
-      "strategy": "",
-      "local_first": 0,
-      "targets": "[\"*\"]",
-      "devices": "[\"*\"]",
-      "created_at": "2026-11-22T00:44:55+08:00",
-      "updated_at": "2026-11-22T03:09:24+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1000\"}]",
-      "members_format": "typed-v2"
     }
   ],
   "rule_providers": [
@@ -3622,5 +3597,5 @@
       "enabled": 1
     }
   ],
-  "digest": "7bbdc72a396dc25927555387df563e96d151b97f73dcee0ec157b42d34d2359b"
+  "digest": "a526545bf752b1937f866a74223ae186588e7ddf58d16da82acb48ccc9399114"
 }
