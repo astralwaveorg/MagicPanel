@@ -44,15 +44,21 @@
 
 向阳决策：设备按「内网的不需要，LVSP/安卓/iOS 保留」处置；深度重构立项实施。
 
-**批次二（重构实施）：**
+## 六、深度重构（向阳确认立项，2026-11-21 实施完成）
 
-1. **渲染器死代码清理**：`render.py` 删除 `_apply_service_groups` 全函数（168 行）与调用块——规则目标改为「新加坡媒体」等新组名后 SERVICE_RULES 不再命中。附带效果：36 个「- 服务名」别名副本节点与 1 个「已验证 · Netflix」组不再生成，OpenClash 产物回到**纯目标形态 58 组**（57 + 游戏 UDP 池 + 路由回家），节点列表 131 个（无别名副本噪音）。routing_planner 的 SERVICE_ALIAS_NAMES/service_proofs 保留（探测排序与「分流候选」展示仍在用）。
-2. **探测矩阵裁剪 35 → 17**：`probe_platform_ids` = 新加坡媒体六项（netflix/disney/hbo/primevideo/dazn/viu）+ AI 七项（chatgpt/claude/gemini/grok/copilot/perplexity）+ youtube_premium/tiktok/spotify/bahamut/appletv。漏斗实测：17 探测器生效、两自建节点 qualified、剩余平台按 deadline 分批补测（调度器自动）。
-3. **测试**：删除 7 个旧机制测试，改造 1 个（hysteria2 渲染正确性断言保留，别名断言移除）。回归后端 963 passed / 前端 86 passed。
-4. **构建 #355 发布生产**（release_rev 75）：规则表/rule-providers 与 #353 完全一致，proxies 167→131（去别名副本）、组 59→58（去已验证组）——产物更贴近目标形态。
+向阳决策：设备按「内网的不需要，LVSP/安卓/iOS 保留」处置；深度重构立项实施。
 
-**设备处置：** Astral-Macmini-Stash、Astral-AppleTV-Stash、Astral-PassWall-Mihomo 已删除；**Astral-Windows-Stash 与 Astral-Windows-Mihomo 保守保留**（向阳未及回复，误删代价是设备重新导入订阅，多留无害）——不需要时在设备管理删除即可，订阅地址同时失效。
+**批次三（自建测速池修复，构建 #363 发布生产 release_rev 78）：**
 
-**批次一（此前已落地）：** 移动网络方案归档（35 组/126 规则数据保留）、来源瘦身 141→63、死规则全量分析（零死集合）、构建 #354 发布（产物零变化）。
+自建测速池（SG/US/JP）与 WireGuard 组的成员在产物中为「空组保护」占位。根因三层：
+1. regional 渲染路径的组员过滤要求 display 带类型后缀名，而产物节点名是用户自定义名（无后缀）——引用形态两头不匹配；
+2. 本地自建节点不在来源池（是 local_nodes），组 filter 只筛来源节点，永远筛不到；
+3. regional 路径从未实现 local_nodes 字段展开（_group_entry 只在非 regional 路径调用）。
+
+修复：四个组改用 **typed-v2 uid 引用**（members_v2 + node ref）——与路由回家组同一机制，渲染路径已验证。产物实测：🇯🇵 日本自建测速=[日本自建 01]、🇺🇸 美国自建测速=[01, 02]、🇸🇬 新加坡自建测速=[01]、🚇 WireGuard=[DIRECT, WireGuard 节点]，LVSP 设备产物 59 组含路由回家。
+
+**设备处置：** Astral-Macmini-Stash、Astral-AppleTV-Stash、Astral-PassWall-Mihomo 已删除；Astral-iPhone-Stash 曾被脚本误删（id 错位），已从 DB 备份恢复（令牌原样、订阅链接不变）；**Astral-Windows-Stash 与 Astral-Windows-Mihomo 保守保留**（向阳未及回复，误删代价是设备重新导入订阅，多留无害）——不需要时在设备管理删除即可。
+
+**批次一/二（此前已落地）：** 目标形态对齐（#353）、移动网络方案归档 + 来源瘦身 141→63 + 死规则全量分析零死集合（#354）、渲染器死代码清理 + 探测矩阵裁剪 35→17（#355）。
 
 **文案复查：** 分流候选面板的「Netflix 日本 · 非自制剧样本」标签已随新形态过时，属 NodeQualityCard 文案，待下批界面调整时一并更新。
