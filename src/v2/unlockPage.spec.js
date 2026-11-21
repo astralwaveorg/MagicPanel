@@ -44,16 +44,16 @@ test('页面挂载后渲染两网络环境对照表与分类（非空白）', as
   wrapper = mount(Unlock, { global: { plugins: [ElementPlus] } })
   await flushPromises()
   expect(wrapper.text()).toContain('网络体检')
-  // 两个网络环境是页面主体
-  expect(wrapper.text()).toContain('当前网络')
+  // 服务器网络是页面主体
   expect(wrapper.text()).toContain('服务器网络')
+  expect(wrapper.text()).not.toContain('当前网络')
   // 服务分类与服务名
   expect(wrapper.text()).toContain('海外 AI')
   expect(wrapper.text()).toContain('Google Gemini')
   expect(wrapper.text()).toContain('Netflix')
-  // 两个检测入口
+  // 检测入口
   expect(wrapper.text()).toContain('检测服务器网络')
-  expect(wrapper.text()).toContain('检测当前网络')
+  expect(wrapper.text()).not.toContain('检测当前网络')
   // 未测状态可见
   expect(wrapper.text()).toContain('未测')
   expect(wrapper.text()).toContain('节点测速与解锁')
@@ -114,28 +114,3 @@ test('单项复测只请求所选服务并保留其他服务的结果', async ()
   expect(wrapper.text()).not.toContain('访问受限')
 })
 
-test('浏览器被拦、服务器通过时只提示核实，不判分流异常', async () => {
-  const responses = {
-    '/api/v1/unlock/catalog': CATALOG,
-    '/api/v1/unlock/last?exit=panel': RUN_RESULT,
-    '/api/v1/unlock/quality': QUALITY,
-  }
-  vi.stubGlobal('fetch', async path => {
-    if (path === 'https://ipinfo.io/json') {
-      return new Response(JSON.stringify(RUN_RESULT.ip))
-    }
-    if (path.startsWith('https://gemini.google.com/')) throw new TypeError('Failed to fetch')
-    return new Response(JSON.stringify(responses[path] ?? {}))
-  })
-  wrapper = mount(Unlock, { global: { plugins: [ElementPlus] } })
-  await flushPromises()
-  const button = wrapper.findAll('button').find(b => b.text() === '检测当前网络')
-  await button.trigger('click')
-  await flushPromises()
-  expect(wrapper.text()).toContain('1 项未确认响应')
-  expect(wrapper.text()).toContain('两边查询到的出口相同。各服务可能走不同线路。')
-  expect(wrapper.text()).toContain('无法确认')
-  expect(wrapper.text()).not.toContain('不一致')
-  expect(wrapper.get('a[aria-label="打开 Google Gemini"]').attributes('href'))
-    .toBe('https://gemini.google.com/')
-})
