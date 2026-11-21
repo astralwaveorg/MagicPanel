@@ -126,7 +126,8 @@ def validate_policy(snapshot: dict) -> dict[int, tuple[list[str], list[str]]]:
         warnings: list[str] = []
         _validate_one_variant(
             label, groups, rules, sources, providers, local_nodes,
-            local_display, local_display_all, behaviors, errors, warnings)
+            local_display, local_display_all, behaviors, errors, warnings,
+            provider_rows=snapshot.get("rule_providers") or [])
         for item in groups + rules:
             for name in item.get("targets") or []:
                 if name != config.ALL_SCOPE and name not in valid_targets:
@@ -149,7 +150,8 @@ def _validate_one_variant(
         sources: set[str], providers: set[str],
         local_nodes: dict, local_display: dict, local_display_all: dict,
         behaviors: dict[str, str],
-        errors: list[str], warnings: list[str]) -> None:
+        errors: list[str], warnings: list[str],
+        provider_rows: list | None = None) -> None:
     """校验单个方案的组与规则（报错带方案前缀）。"""
     group_names = [g["name"] for g in groups]
     group_set = set(group_names)
@@ -349,6 +351,40 @@ def _validate_one_variant(
     from ..services.base_config import _OVERSEAS_DIRECT_SETS
     for name in providers - used_providers - set(_OVERSEAS_DIRECT_SETS):
         warnings.append(f"{label}规则来源“{name}”已启用但未被规则引用")
+
+    # 分发资源非空门禁（2026-11-22，修复 2026-11-21 导入漏回填事故）：
+    # 被规则引用的来源，正文快照（content）为空时 feed 分发直接 404，
+    # 客户端订阅更新随即失败。静态通过、配置预览 200 都证明不了资源可取，
+    # 必须在构建期拦住。content_sha 是 sha256(content)，空正文有固定指纹。
+    # DNS 策略基线（_OVERSEAS_DIRECT_SETS）的三个集合名恒定写死在
+    # nameserver-policy 里：来源缺失/未抓取时只提示，不当构建失败——
+    # 它们是环境基线而非用户显式写的规则（全新测试库就没有这三行）。
+    empty_sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    by_name = {p["name"]: p for p in (provider_rows or [])}
+
+    def _content_missing(row) -> bool:
+        return (row is None or not row.get("content_sha")
+                or row["content_sha"] == empty_sha)
+
+    for name in sorted(used_providers):
+        if _content_missing(by_name.get(name)):
+            row = by_name.get(name)
+            if row is None:
+                errors.append(
+                    f"{label}规则来源“{name}”被分流规则引用但不存在")
+            elif (row.get("kind") or "") == "inline":
+                # 内联来源的正文就在库里（不存在「还没抓取」），为空即事故
+                errors.append(
+                    f"{label}内联规则来源“{name}”分发正文为空，客户端拉取会 404"
+                    "（请重存该来源或检查导入回填）")
+            else:
+                warnings.append(
+                    f"{label}规则来源“{name}”尚未抓取到内容，"
+                    "构建产物里的该资源暂不可取")
+    for name in sorted(set(_OVERSEAS_DIRECT_SETS) - used_providers):
+        if _content_missing(by_name.get(name)):
+            warnings.append(
+                f"{label}DNS 策略引用的规则来源“{name}”不存在或尚未抓取到内容")
 
 
 def validate_rendered(text: str, engine: str = "") -> list[str]:

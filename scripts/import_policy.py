@@ -44,11 +44,62 @@ def _replace(conn: sqlite3.Connection, table: str, rows: list[dict[str, object]]
     if not rows:
         return 0
     columns = list(rows[0].keys())
+    # 补齐目标库「NOT NULL 且无默认值」而快照没有的列（导出白名单不含
+    # created_at/updated_at；老库靠建表时的默认值兜底，全新库会直接失败）
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    for info in conn.execute(f"PRAGMA table_info({table})"):  # noqa: S608
+        name, notnull, dflt = info[1], info[3], info[4]
+        if name in columns or not notnull or dflt is not None:
+            continue
+        columns.append(name)
+        filler = now if name.endswith("_at") else ""
+        for row in rows:
+            row[name] = filler
     placeholders = ",".join("?" for _ in columns)
     sql = f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})"  # noqa: S608
     conn.execute(f"DELETE FROM {table}")  # noqa: S608 - 表名来自固定常量
     conn.executemany(sql, [[row.get(c) for c in columns] for row in rows])
+    if table == "rule_providers":
+        _refill_inline_content(conn)
     return len(rows)
+
+
+def _refill_inline_content(conn: sqlite3.Connection) -> int:
+    """整表导入后回填内联来源的分发正文。
+
+    导出白名单不含 `content`（可能含二进制 MRS 缓存），因此整表导入后
+    内联来源的正文快照为空——feed 分发 404，而远程抓取任务不会补内联
+    来源（2026-11-21 线上事故：connectivity-check / dns-direct /
+    lvsp-direct 三行 404）。这里按 `inline_content` 原样回填，并同步
+    计数与指纹（content 的 sha256 即分发 ETag，必须逐字节一致）。
+    rule_count 用简化口径（非注释、非 payload 行），仅用于界面显示。
+    """
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT id, inline_content, format FROM rule_providers "
+        "WHERE kind='inline' AND inline_content != ''"
+    ).fetchall()
+    fixed = 0
+    for rid, text, fmt in rows:
+        if (fmt or "yaml") == "mrs":
+            count = 0
+        else:
+            count = sum(
+                1 for ln in text.splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+                and ln.strip() != "payload:"
+            )
+        sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        conn.execute(
+            "UPDATE rule_providers SET content=?, rule_count=?, sha256=?, "
+            "last_status='ok', last_fetched_at=COALESCE(last_fetched_at, ?) "
+            "WHERE id=?",
+            (text, count, sha, now, rid),
+        )
+        fixed += 1
+    if fixed:
+        print(f"  已回填内联来源分发正文: {fixed} 条")
+    return fixed
 
 
 def main(argv: list[str] | None = None) -> int:
