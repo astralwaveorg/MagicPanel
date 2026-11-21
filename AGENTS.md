@@ -33,21 +33,22 @@ telegram-ip 移到 ai-cn 之后（sort 25-27，早于一切 AI/通讯集合）�
 门内展示复制/下载/二维码/重置；重置后旧链接立即失效。含全部凭据节点，链接泄露
 等同节点池泄露。
 
-**2026-11-22 策略组优化（构建 #377，修订 91）**：按《2026-11-21 策略组优化评审稿》
+**2026-11-22 策略组优化（构建 #378，修订 92）**：按《2026-11-21 策略组优化评审稿》
 与《2026-11-22 执行任务清单》完成三范围。**A**：修复三个内联规则来源 404
 （2026-11-21 导入漏回填 `content`，经面板接口原样重存回填；防复发见 96d40c3）。
 **B**：可见组 43→31——合并 11 个重复业务组（Grok/Copilot/国内AI/GitHub/容器/
 OneDrive/Discord/Spotify/AppleTV+/Steam/新闻）、删除 🐟 漏网之鱼、隐藏 ♻️ 自动选择、
 🇼🇸 台湾旗标改 🇹🇼；总控 🌍 国外域名 首项改 🚀 故障转移并移除 DIRECT，gfw/media/
-MATCH/自定义代理集合改指总控；🇬 谷歌服务改 select 包唯一入口「🇬 Google 当前地区」
-（隐藏档位组，美→新→日）；ChatGPT/Claude/国外AI 改 select（US→SG→JP 档位，去
-家宽/港/台/自动选择）；Telegram 收敛为 日/美/新+显式直连；TikTok/Talkatone/
-加密货币/Emby 改 select；PT站点=[直连,路由回家]；Bahamut 只留台湾自动；
-📹 Zoom 暂保留独立组待实测后决定是否并入即时通讯。新增 **🎬 Netflix** 可见组
-（向阳 2026-11-22 决定拆组：照新加坡媒体结构 SG自建→新加坡自动，实播验收后再调）。
-**C**（96d40c3）：import_policy.py 导入后回填内联正文；validate.py 构建门禁拦截
-「被规则引用但分发正文为空」的内联来源（remote/repo 未抓取为 warning）。
-改前/改后快照 `policy/snapshots/2026-11-22-{before,after}-group-optimization.json`。
+MATCH/自定义代理集合改指总控；🔍 谷歌服务（向阳定图标）改 select 包唯一入口
+「🇬 Google 当前地区」（隐藏档位组，美→新→日）；ChatGPT/Claude/国外AI 改 select
+（US→SG→JP 档位，去家宽/港/台/自动选择）；Telegram 收敛为 日/美/新+显式直连；
+TikTok/Talkatone/加密货币/Emby 改 select；PT站点=[直连,路由回家]；Bahamut 只留
+台湾自动；📹 Zoom 暂保留独立组待实测后决定是否并入即时通讯。新增 **🎬 Netflix**
+可见组（向阳 2026-11-22 决定拆组：照新加坡媒体结构 SG自建→新加坡自动，实播验收
+后再调）。**C**（96d40c3）：import_policy.py 导入后回填内联正文；validate.py 构建
+门禁拦截「被规则引用但分发正文为空」的内联来源（remote/repo 未抓取为 warning）。
+改前/改后快照 `policy/snapshots/2026-11-22-{before,after}-group-optimization.json`
+（after 为 #378 最终态，digest ee6bb42c…）。
 土耳其/其他地区/家宽三个隐藏组已是孤儿（无任何引用），后续确认后可删。
 
 **2026-11-20 节点名补充关键信息（第二次改名格式修订）**：订阅节点改名格式从
