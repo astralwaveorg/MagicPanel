@@ -92,12 +92,9 @@
                   @click="copy(nodesFeed.url, 'nodes')"
                 >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制地址' }}</button>
                 <a class="pt-btn" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
-                <button class="pt-btn pt-btn-danger" @click="rotateNodesToken" :disabled="rotateArmed === 'busy'">
-                  {{ rotateArmed === 'arming' ? '再点一次确认重置' : (rotateArmed === 'busy' ? '重置中…' : '重置链接') }}
-                </button>
+                <button class="pt-btn pt-btn-danger" :loading="rotateBusy" @click="rotateNodesToken">重置</button>
               </div>
             </div>
-            <p v-if="rotateError" class="pt-card-note pt-rotate-error">{{ rotateError }}</p>
           </div>
         </section>
 
@@ -416,6 +413,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { highlightYaml, lineGutter } from '../yamlHighlight'
 import { sizeText, intervalText } from '../format'
@@ -702,22 +700,19 @@ const guides = computed(() => data.value?.guides || [])
 
 // 全部节点订阅：所有启用节点的裸配置（一个策略组 + MATCH），不含分流。
 const nodesFeed = computed(() => data.value?.nodes_feed || {})
-const rotateArmed = ref('')
-let rotateTimer = 0
-
-function armRotate() {
-  rotateArmed.value = 'arming'
-  clearTimeout(rotateTimer)
-  rotateTimer = setTimeout(() => { rotateArmed.value = '' }, 4000)
-}
+const rotateBusy = ref(false)
 
 async function rotateNodesToken() {
-  // 两段式：第一次点击进入待确认态，4 秒内再点才真正重置。
-  if (rotateArmed.value !== 'arming') {
-    armRotate()
+  try {
+    await ElMessageBox.confirm(
+      '重置后当前订阅链接立即失效，使用旧链接的客户端将无法更新。确定重置吗？',
+      '重置节点订阅链接',
+      { confirmButtonText: '重置', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
     return
   }
-  rotateArmed.value = 'busy'
+  rotateBusy.value = true
   try {
     const resp = await fetch('/api/v1/portal/rotate-nodes-token', {
       method: 'POST',
@@ -729,16 +724,14 @@ async function rotateNodesToken() {
       const detail = await resp.json().catch(() => ({}))
       throw new Error(detail.message || '重置失败')
     }
-    rotateArmed.value = ''
+    ElMessage.success('已重置，新链接已生成')
     await fetchData(authorizedPin)
   } catch (e) {
-    rotateArmed.value = ''
-    rotateError.value = e.message
-    setTimeout(() => { rotateError.value = '' }, 4000)
+    ElMessage.error(e.message || '重置失败')
+  } finally {
+    rotateBusy.value = false
   }
 }
-
-const rotateError = ref('')
 
 const hasAnyResult = computed(() =>
   devices.value.length || clients.value.length || rules.value.length
@@ -1013,7 +1006,6 @@ onUnmounted(() => {
   disposed = true
   gate.reset()
   clearInterval(lockTimer)
-  clearTimeout(rotateTimer)
   closeQr(); closeProvider(); closePreview()
   authorizedPin = ''
   qrCache.clear()
@@ -1390,7 +1382,7 @@ onUnmounted(() => {
 .pt-nodes-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pt-btn.pt-btn-danger { border-color: rgba(226, 92, 92, 0.7); color: #e2b5b5; }
 .pt-btn.pt-btn-danger:hover:not(:disabled) { background: rgba(226, 92, 92, 0.18); }
-.pt-rotate-error { color: #e2b5b5; }
+
 .pt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 规则 */

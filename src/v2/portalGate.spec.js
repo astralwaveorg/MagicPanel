@@ -238,11 +238,11 @@ test('方案选择只展示设备授权项，保留query并统一复制/下载/�
   const chip = wrapper.findAll('.pt-variant-chip').find(w => w.text() === '办公 & 测试')
   await chip.trigger('click')
   const want = 'http://127.0.0.1:7100/feed/fixture-only/config.yaml?client=fixture&variant=%E5%8A%9E%E5%85%AC+%26+%E6%B5%8B%E8%AF%95'
-  const card = wrapper.get('.pt-card')
+  const card = wrapper.get('.pt-grid .pt-card')
   await card.get('button.pt-btn.primary').trigger('click')
   expect(copied).toEqual([want])
   expect(card.get('a[download]').attributes('href')).toBe(want)
-  expect(decodeURIComponent(card.findAll('a.pt-btn')[1].attributes('href').split('?url=')[1])).toBe(want)
+  expect(decodeURIComponent(card.findAll('a.pt-btn')[0].attributes('href').split('?url=')[1])).toBe(want)
   const originalFetch = fetch
   let previewUrl
   vi.stubGlobal('fetch', async (url, options) => {
