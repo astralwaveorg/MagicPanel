@@ -201,7 +201,7 @@ def test_auto_probes_share_worker_and_cool_down(client, monkeypatch):
     finish = threading.Event()
     monkeypatch.setattr(scheduler, "_collect_probe_proxies", list)
 
-    def slow_funnel(proxies, *, operator, max_nodes):
+    def slow_funnel(proxies, *, operator, max_nodes, selected=None):
         assert max_nodes == 10
         started.set()
         assert finish.wait(5)
