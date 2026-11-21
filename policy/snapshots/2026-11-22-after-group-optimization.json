@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "exported_at": "2026-11-21T18:59:17+00:00",
+  "exported_at": "2026-11-21T19:18:38+00:00",
   "meta": {
-    "build_id": 379,
+    "build_id": 380,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "51625ace5c80901859801cb87c51cc76c7c1cc75d5c9d9a0f28cfedfad5b15de",
-    "build_created_at": "2026-11-22T02:58:50+08:00"
+    "policy_sha": "46eb9d983d15d87c8a34f82291d4b306d186a77e3b7258fed4fc748e85fb6283",
+    "build_created_at": "2026-11-22T03:18:13+08:00"
   },
   "variants": [
     {
@@ -1710,7 +1710,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建测速\", \"🇺🇸 美国自动\", \"🇸🇬 SG自建测速\", \"🇸🇬 新加坡自动\", \"🇯🇵 JP自建测速\", \"🇯🇵 日本自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1721,8 +1721,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1043\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1735,7 +1735,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建测速\", \"🇺🇸 美国自动\", \"🇸🇬 SG自建测速\", \"🇸🇬 新加坡自动\", \"🇯🇵 JP自建测速\", \"🇯🇵 日本自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1746,8 +1746,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1043\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1760,7 +1760,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建测速\", \"🇺🇸 美国自动\", \"🇸🇬 SG自建测速\", \"🇸🇬 新加坡自动\", \"🇯🇵 JP自建测速\", \"🇯🇵 日本自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1771,8 +1771,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1043\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1785,7 +1785,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇯🇵 日本自动\", \"🇺🇸 美国自动\", \"🇸🇬 新加坡自动\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1796,8 +1796,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1810,7 +1810,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇸🇬 SG自建测速\", \"🇸🇬 新加坡自动\", \"🇯🇵 JP自建测速\", \"🇯🇵 日本自动\", \"🇺🇸 US自建测速\", \"🇺🇸 美国自动\"]",
+      "proxies": "[\"🇸🇬 SG自建\", \"🇸🇬 新加坡自动\", \"🇯🇵 JP自建\", \"🇯🇵 日本自动\", \"🇺🇸 US自建\", \"🇺🇸 美国自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1835,7 +1835,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🐔 自建智选\", \"🇭🇰 香港自动\", \"🇺🇸 US自建测速\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\"]",
+      "proxies": "[\"🐔 自建智选\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1846,8 +1846,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T02:58:41+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1059\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1059\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1860,7 +1860,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建测速\", \"🇺🇸 美国自动\", \"🇹🇼 台湾自动\", \"🇯🇵 日本自动\", \"🇭🇰 香港自动\", \"🇬🇧 英国自动\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1871,8 +1871,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1885,7 +1885,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1896,8 +1896,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1910,7 +1910,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇸🇬 SG自建测速\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇸🇬 SG自建\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1935,7 +1935,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇸🇬 SG自建测速\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇸🇬 SG自建\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 600,
       "timeout": 8000,
@@ -1985,7 +1985,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇸🇬 新加坡自动\", \"🇯🇵 日本自动\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇹🇼 台湾自动\", \"🇺🇸 US自建测速\", \"🇯🇵 JP自建测速\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇸🇬 新加坡自动\", \"🇯🇵 日本自动\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇹🇼 台湾自动\", \"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2035,7 +2035,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🎯 全球直连\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🎯 全球直连\", \"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2046,8 +2046,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2060,7 +2060,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建测速\", \"🇯🇵 JP自建测速\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2071,8 +2071,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2085,7 +2085,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2096,8 +2096,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2110,7 +2110,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2121,8 +2121,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2135,7 +2135,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2146,8 +2146,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2160,7 +2160,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🎯 全球直连\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🎯 全球直连\", \"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2171,8 +2171,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2185,7 +2185,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🎯 全球直连\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🎯 全球直连\", \"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2196,8 +2196,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2210,7 +2210,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2221,8 +2221,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2235,7 +2235,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2246,8 +2246,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2260,7 +2260,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🎯 全球直连\", \"🚇 路由回家\"]",
+      "proxies": "[\"🎯 全球直连\", \"🇯🇵 日本自动\", \"🇭🇰 香港自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2271,8 +2271,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1040\"}]",
+      "updated_at": "2026-11-22T03:07:03+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2335,7 +2335,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇸🇬 SG自建测速\", \"🇺🇸 US自建测速\", \"🇯🇵 JP自建测速\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 600,
       "timeout": 8000,
@@ -2346,8 +2346,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T18:42:42+08:00",
-      "updated_at": "2026-11-21T18:54:52+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2360,7 +2360,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🎯 全球直连\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌐 其他地区自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🎯 全球直连\", \"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2371,8 +2371,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T03:18:11+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1056\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2678,7 +2678,7 @@
     {
       "id": 1053,
       "variant_id": 0,
-      "name": "🇯🇵 JP自建测速",
+      "name": "🇯🇵 JP自建",
       "type": "url-test",
       "sort": 56,
       "hidden": 1,
@@ -2696,14 +2696,14 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-21T18:55:42+08:00",
+      "updated_at": "2026-11-22T03:18:11+08:00",
       "members_v2": "[{\"kind\": \"node\", \"ref\": \"86723dbfb98a4040803349ea843d5e4d\"}]",
       "members_format": "typed-v2"
     },
     {
       "id": 1055,
       "variant_id": 0,
-      "name": "🇸🇬 SG自建测速",
+      "name": "🇸🇬 SG自建",
       "type": "url-test",
       "sort": 57,
       "hidden": 1,
@@ -2721,14 +2721,14 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-21T18:56:00+08:00",
+      "updated_at": "2026-11-22T03:18:11+08:00",
       "members_v2": "[{\"kind\": \"node\", \"ref\": \"b360026fe3a44271975de275c08d0fa9\"}]",
       "members_format": "typed-v2"
     },
     {
       "id": 1054,
       "variant_id": 0,
-      "name": "🇺🇸 US自建测速",
+      "name": "🇺🇸 US自建",
       "type": "url-test",
       "sort": 58,
       "hidden": 1,
@@ -2746,7 +2746,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-21T18:55:50+08:00",
+      "updated_at": "2026-11-22T03:18:11+08:00",
       "members_v2": "[{\"kind\": \"node\", \"ref\": \"835eb25891764d7da637355fafbca237\"}, {\"kind\": \"node\", \"ref\": \"398ba80a91bb4242990b4b92b6b8fbdc\"}]",
       "members_format": "typed-v2"
     },
@@ -2785,7 +2785,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建测速\", \"🇺🇸 美国自动\", \"🇸🇬 SG自建测速\", \"🇸🇬 新加坡自动\", \"🇯🇵 JP自建测速\", \"🇯🇵 日本自动\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇺🇸 美国自动\", \"🇸🇬 SG自建\", \"🇯🇵 JP自建\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🚀 故障转移\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 600,
       "timeout": 8000,
@@ -2796,8 +2796,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-22T00:44:55+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1043\"}]",
+      "updated_at": "2026-11-22T03:09:24+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1000\"}]",
       "members_format": "typed-v2"
     }
   ],
@@ -3622,5 +3622,5 @@
       "enabled": 1
     }
   ],
-  "digest": "871ccc4d963ceb66b567a09ff68a73509bc7574dc62d126485ecaa93fd7c8945"
+  "digest": "50031de219dd9697cc651c8ffa4cc18c62510b66d1d584107d1beaee7b17ad08"
 }
