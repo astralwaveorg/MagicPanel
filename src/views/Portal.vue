@@ -100,25 +100,29 @@
         </section>
 
         <!-- 全部节点查看：NodeList 渲染成表格 -->
-        <el-dialog v-model="nodesViewOpen" title="全部节点" width="min(720px, 94vw)">
-          <p class="pt-card-note" style="margin-top:0">
-            {{ nodesRows.length }} 个节点 · 实时渲染 · 凭 4 位 PIN 查看完整信息
-          </p>
-          <div v-if="nodesViewing" style="padding:24px 0;text-align:center">
-            <el-icon class="is-loading" style="font-size:22px"><Loading /></el-icon>
+        <div v-if="nodesViewOpen" class="pt-modal" @click.self="nodesViewOpen = false">
+          <div class="pt-modal-card wide">
+            <p class="pt-modal-title pt-preview-title">
+              <span class="pt-preview-name">全部节点 · {{ nodesRows.length }} 个</span>
+              <span class="pt-preview-corner">
+                <button class="pt-preview-close" @click="nodesViewOpen = false" aria-label="关闭">✕</button>
+              </span>
+            </p>
+            <div v-if="nodesViewing" class="pt-nodes-loading">载入中…</div>
+            <div v-else class="pt-nodes-table-wrap">
+              <table class="pt-nodes-table">
+                <thead><tr><th>节点</th><th>类型</th><th>服务器</th></tr></thead>
+                <tbody>
+                  <tr v-for="row in nodesRows" :key="row.name">
+                    <td>{{ row.name }}</td>
+                    <td>{{ row.type }}</td>
+                    <td class="mono">{{ row.server }}:{{ row.port }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          <el-table v-else :data="nodesRows" size="small" max-height="520">
-            <el-table-column label="节点" min-width="190">
-              <template #default="{ row }">{{ row.name }}</template>
-            </el-table-column>
-            <el-table-column label="类型" width="90">
-              <template #default="{ row }">{{ row.type }}</template>
-            </el-table-column>
-            <el-table-column label="服务器" min-width="150">
-              <template #default="{ row }"><span class="mono">{{ row.server }}:{{ row.port }}</span></template>
-            </el-table-column>
-          </el-table>
-        </el-dialog>
+        </div>
 
         <!-- 核心配置 -->
         <section v-if="engineGroups.length">
@@ -438,7 +442,6 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { highlightYaml, lineGutter } from '../yamlHighlight'
 import { sizeText, intervalText } from '../format'
@@ -1060,6 +1063,22 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 全部节点查看：表格滚动容器，行紧凑 */
+.pt-nodes-table-wrap {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+}
+.pt-nodes-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pt-nodes-table th, .pt-nodes-table td {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+.pt-nodes-table th { color: #8f96b0; font-weight: 600; position: sticky; top: 0; background: #1a1d29; }
+.pt-nodes-loading { padding: 28px 0; text-align: center; color: #8f96b0; font-size: 13px; }
 /* 首页自带深色视觉，不随后台主题切换 */
 .pt-page {
   min-height: 100vh;
