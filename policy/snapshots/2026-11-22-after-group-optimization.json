@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "exported_at": "2026-11-21T20:10:40+00:00",
+  "exported_at": "2026-11-21T20:21:39+00:00",
   "meta": {
-    "build_id": 388,
+    "build_id": 389,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "9f06abb6cf1bb6041bda8f93e6a4c38a7791bd97a928a56942e7b5cda714e756",
-    "build_created_at": "2026-11-22T04:10:24+08:00"
+    "policy_sha": "854dc1bb5e0acaa0fb0db4f8f9560c7bfac822118e25da67e9d405c26078dd6c",
+    "build_created_at": "2026-11-22T04:20:52+08:00"
   },
   "variants": [
     {
@@ -782,7 +782,7 @@
       "sort": 46,
       "type": "RULE-SET",
       "value": "xai",
-      "target": "🤖 国外AI服务",
+      "target": "🤖 国际 AI",
       "enabled": 1,
       "note": "Grok",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -800,7 +800,7 @@
       "sort": 47,
       "type": "RULE-SET",
       "value": "social",
-      "target": "🌐 社交媒体",
+      "target": "🫧 社交媒体",
       "enabled": 1,
       "note": "海外社交媒体",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -854,7 +854,7 @@
       "sort": 50,
       "type": "RULE-SET",
       "value": "bing",
-      "target": "🤖 国外AI服务",
+      "target": "🤖 国际 AI",
       "enabled": 1,
       "note": "Copilot",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -908,7 +908,7 @@
       "sort": 53,
       "type": "RULE-SET",
       "value": "category-ai-!cn",
-      "target": "🤖 国外AI服务",
+      "target": "🤖 国际 AI",
       "enabled": 1,
       "note": "国外 AI",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -926,7 +926,7 @@
       "sort": 54,
       "type": "RULE-SET",
       "value": "docker",
-      "target": "💻 开发者服务",
+      "target": "📟 开发运维",
       "enabled": 1,
       "note": "容器注册表",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -944,7 +944,7 @@
       "sort": 55,
       "type": "RULE-SET",
       "value": "category-container",
-      "target": "💻 开发者服务",
+      "target": "📟 开发运维",
       "enabled": 1,
       "note": "容器服务",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -962,7 +962,7 @@
       "sort": 56,
       "type": "RULE-SET",
       "value": "github",
-      "target": "💻 开发者服务",
+      "target": "📟 开发运维",
       "enabled": 1,
       "note": "GitHub",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -980,7 +980,7 @@
       "sort": 57,
       "type": "RULE-SET",
       "value": "category-dev",
-      "target": "💻 开发者服务",
+      "target": "📟 开发运维",
       "enabled": 1,
       "note": "开发者服务",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1052,7 +1052,7 @@
       "sort": 61,
       "type": "RULE-SET",
       "value": "apple-tvplus",
-      "target": "🌎 国外媒体",
+      "target": "📺 国际媒体",
       "enabled": 1,
       "note": "AppleTV+（须先于 apple）",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1250,7 +1250,7 @@
       "sort": 72,
       "type": "RULE-SET",
       "value": "spotify",
-      "target": "🌎 国外媒体",
+      "target": "📺 国际媒体",
       "enabled": 1,
       "note": "Spotify",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1322,7 +1322,7 @@
       "sort": 76,
       "type": "RULE-SET",
       "value": "category-entertainment",
-      "target": "🌎 国外媒体",
+      "target": "📺 国际媒体",
       "enabled": 1,
       "note": "海外娱乐",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1448,7 +1448,7 @@
       "sort": 83,
       "type": "GEOIP",
       "value": "twitter",
-      "target": "🌐 社交媒体",
+      "target": "🫧 社交媒体",
       "enabled": 1,
       "note": "Twitter IP 段",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1466,7 +1466,7 @@
       "sort": 84,
       "type": "GEOIP",
       "value": "facebook",
-      "target": "🌐 社交媒体",
+      "target": "🫧 社交媒体",
       "enabled": 1,
       "note": "Facebook IP 段",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1728,7 +1728,7 @@
     {
       "id": 1016,
       "variant_id": 0,
-      "name": "🤖 国外AI服务",
+      "name": "🤖 国际 AI",
       "type": "fallback",
       "sort": 4,
       "hidden": 0,
@@ -1746,7 +1746,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:49:58+08:00",
+      "updated_at": "2026-11-22T04:20:47+08:00",
       "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}]",
       "members_format": "typed-v2"
     },
@@ -1928,7 +1928,7 @@
     {
       "id": 1024,
       "variant_id": 0,
-      "name": "🌎 国外媒体",
+      "name": "📺 国际媒体",
       "type": "fallback",
       "sort": 17,
       "hidden": 0,
@@ -1946,7 +1946,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
+      "updated_at": "2026-11-22T04:20:49+08:00",
       "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
@@ -2028,7 +2028,7 @@
     {
       "id": 1010,
       "variant_id": 0,
-      "name": "💻 开发者服务",
+      "name": "📟 开发运维",
       "type": "fallback",
       "sort": 24,
       "hidden": 0,
@@ -2046,7 +2046,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
+      "updated_at": "2026-11-22T04:20:45+08:00",
       "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
@@ -2103,7 +2103,7 @@
     {
       "id": 1007,
       "variant_id": 0,
-      "name": "🌐 社交媒体",
+      "name": "🫧 社交媒体",
       "type": "fallback",
       "sort": 28,
       "hidden": 0,
@@ -2121,7 +2121,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:42:35+08:00",
+      "updated_at": "2026-11-22T04:20:43+08:00",
       "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
@@ -3572,5 +3572,5 @@
       "enabled": 1
     }
   ],
-  "digest": "74a79bb78a12856bc1c416c0535438e0b27926676bebade780d399e4f8ed20ec"
+  "digest": "286d1a682e87e2bbcf3f7e12acad7d67592a6b9b7e7922fe24618e419507f670"
 }

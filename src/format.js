@@ -11,6 +11,16 @@ export function fmtTime(value) {
     `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+// 不带年份的短格式：列表列宽紧张时用（当年内的记录无需年份）
+export function fmtTimeShort(value) {
+  if (!value) return '—'
+  if (typeof value === 'number' && value < 1e12) value = value * 1000
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export function shortSha(sha) {
   return sha ? sha.slice(0, 12) : '—'
 }

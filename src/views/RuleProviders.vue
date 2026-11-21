@@ -118,7 +118,7 @@
               <span v-if="row.kind === 'inline'" style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="被引用" min-width="130">
+          <el-table-column label="被引用" min-width="96">
             <template #default="{ row }">
               <span v-if="!row.referenced_by || !row.referenced_by.length" class="mp-cell-sub">—</span>
               <el-link v-for="ref in (row.referenced_by || [])" :key="ref.id"
@@ -131,8 +131,8 @@
           <el-table-column label="抓取间隔" width="110" align="right">
             <template #default="{ row }">{{ row.kind === 'inline' ? '—' : intervalText(row.interval) }}</template>
           </el-table-column>
-          <el-table-column label="最近成功" min-width="160">
-            <template #default="{ row }"><span class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span></template>
+          <el-table-column label="最近成功" width="118" align="right">
+            <template #default="{ row }"><span class="mp-nowrap">{{ fmtTimeShort(row.last_fetched_at) }}</span></template>
           </el-table-column>
           <el-table-column label="操作" width="210" fixed="right">
             <template #default="{ row }">
@@ -328,7 +328,7 @@ import ErrorState from '../components/ErrorState.vue'
 import Pager from '../components/Pager.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
-import { fmtTime, intervalText, sourceStatus } from '../format'
+import { fmtTimeShort, intervalText, sourceStatus } from '../format'
 import { copyText } from '../utils/clipboard'
 
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管由自主维护同步而来）
