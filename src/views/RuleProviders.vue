@@ -136,7 +136,7 @@
           </el-table-column>
           <el-table-column label="操作" :width="isMobile ? 150 : 210" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <div class="op-grid">
+              <div class="op-row">
                 <el-button v-if="row.kind === 'remote'" size="small" :loading="row._refreshing"
                            :disabled="row._toggling" @click="refresh(row)" type="primary">抓取</el-button>
                 <el-button v-else-if="row.kind === 'repo'" size="small" :loading="row._refreshing"

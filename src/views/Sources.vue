@@ -198,15 +198,22 @@
           <el-table-column label="只分发可用节点" width="130" align="center">
             <template #default="{ row }">{{ row.filter_unavailable ? '开启' : '关闭' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <div class="op-grid">
-                <el-button size="small" type="info" plain @click="openNodes(row)">节点</el-button>
-                <el-button size="small" :loading="row._refreshing" @click="refresh(row)" type="primary">抓取</el-button>
-                <el-button size="small" :loading="row._testing" @click="testNodes(row)" type="success" plain>测速</el-button>
-                <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleEnabled(row)" />
-                <el-button size="small" @click="openEdit(row)">编辑</el-button>
-                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+              <div class="op-row">
+                <el-button size="small" :loading="row._testing" @click="testNodes(row)"
+                           type="success">测速</el-button>
+                <el-dropdown trigger="click" @command="(cmd) => sourceCommand(cmd, row)">
+                  <el-button size="small">更多<el-icon class="mp-caret"><ArrowDown /></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="nodes">节点</el-dropdown-item>
+                      <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                      <el-dropdown-item command="toggle">{{ row.enabled ? '停用' : '启用' }}</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </div>
             </template>
           </el-table-column>
@@ -263,15 +270,22 @@
               <span v-else style="color:var(--mp-muted)">未测速</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="168" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
-              <div class="op-grid">
+              <div class="op-row">
                 <el-button size="small" :loading="testingLocal === row.id"
                            :disabled="testingLocalBatch"
-                           @click="testLocal(row)" type="success" plain>测速</el-button>
-                <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleLocalEnabled(row)" />
-                <el-button size="small" @click="openLocalEdit(row)">编辑</el-button>
-                <el-button size="small" @click="removeLocal(row)" type="danger" plain>删除</el-button>
+                           @click="testLocal(row)" type="success">测速</el-button>
+                <el-dropdown trigger="click" @command="(cmd) => localCommand(cmd, row)">
+                  <el-button size="small">更多<el-icon class="mp-caret"><ArrowDown /></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                      <el-dropdown-item command="toggle">{{ row.enabled ? '停用' : '启用' }}</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </div>
             </template>
           </el-table-column>
@@ -623,7 +637,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Search, ArrowDown } from '@element-plus/icons-vue'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
@@ -993,7 +1007,24 @@ async function testRow(row, silent = false) {
 }
 
 async function testNodes(row) {
+  // 自动抓取开启时先抓一轮再测速；抓取失败沿用上次快照继续测
+  if (row.auto_fetch !== false) {
+    await refreshRow(row, true).catch(() => {})
+  }
   await testRow(row)
+}
+
+function sourceCommand(cmd, row) {
+  if (cmd === 'nodes') openNodes(row)
+  else if (cmd === 'edit') openEdit(row)
+  else if (cmd === 'toggle') toggleEnabled(row)
+  else if (cmd === 'delete') remove(row)
+}
+
+function localCommand(cmd, row) {
+  if (cmd === 'edit') openLocalEdit(row)
+  else if (cmd === 'toggle') toggleLocalEnabled(row)
+  else if (cmd === 'delete') removeLocal(row)
 }
 
 async function testMany(list) {

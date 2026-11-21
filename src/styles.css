@@ -294,6 +294,11 @@ html, body, #app {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
+/* 单行操作列：测速/抓取 + 更多（下拉收纳低频动作） */
+.op-row { display: flex; gap: 6px; }
+.op-row > .el-button { flex: 1; min-width: 0; margin: 0; padding: 5px 6px; }
+.op-row > .el-dropdown { flex: 1; }
+.op-row > .el-dropdown .el-button { width: 100%; margin: 0; padding: 5px 6px; }
 .op-grid .el-button {
   width: 100%;
   margin: 0;
