@@ -297,7 +297,12 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
             if warnings is not None:
                 warnings.append(f"兜底规则目标组“{name}”已强制保留到本目标")
 
-    # 剔除指向不存在策略组的规则（客户端加载时会直接报错）；兜底规则始终保留
+    # 剔除指向不存在策略组的规则（客户端加载时会直接报错）；兜底规则始终保留。
+    # 目标组在方案里存在、只是被设备作用域过滤（如 LVSP 专属的「🏠 路由回家」
+    # 不出现在其他设备产物）是有意设计，静默剔除不算告警；
+    # 目标组真的不存在才是悬空引用，必须报警。
+    all_group_names = {g["name"] for g in snapshot.get("groups", [])
+                       if g.get("variant_id", 0) == variant_id}
     kept_rules = []
     for r in rules:
         ref = r.get("target")
@@ -305,10 +310,10 @@ def _select_structure(snapshot: dict, target: dict, warnings: list | None,
                 or ref in config.BUILTIN_TARGETS or ref in group_names:
             kept_rules.append(r)
         else:
-            if warnings is not None:
+            if warnings is not None and ref not in all_group_names:
                 warnings.append(
                     f"规则 {r['type']},{r.get('value', '')} 指向的策略组"
-                    f"“{ref}”不适用于本目标，已剔除")
+                    f"“{ref}”不存在，已剔除")
     rules = kept_rules
 
     # 兜底规则（MATCH/FINAL）必须排在最后：客户端是"从上往下第一条命中即生效"，

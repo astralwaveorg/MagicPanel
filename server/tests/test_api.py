@@ -2102,7 +2102,7 @@ def test_rule_pointing_to_absent_group_is_dropped(client):
     # 构建结果里应有剔除说明（管理端可见原文，不做脱敏）
     results = build["results"]
     assert results['stash-b']['warnings']
-    assert any('仅A' in w for w in results['stash-b']['warnings'])
+    assert any('仅A' in w and '不存在' in w for w in results['stash-b']['warnings'])
     from app import db
     with db.connect() as conn:
         internal = json.loads(conn.execute('SELECT results FROM builds WHERE id=?',(build['id'],)).fetchone()[0])

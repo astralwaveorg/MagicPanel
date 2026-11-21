@@ -343,7 +343,11 @@ def _validate_one_variant(
         r["value"] for r in rules
         if r.get("enabled", True) and r["type"] == "RULE-SET"
     }
-    for name in providers - used_providers:
+    # DNS 段（引擎默认配置基线）经 nameserver-policy 的 rule-set: 键引用
+    # mirror-accelerate / pt / trackers（约束 31，源码级固化）——
+    # 它们不走 RULE-SET 规则，不能算「未引用」
+    from ..services.base_config import _OVERSEAS_DIRECT_SETS
+    for name in providers - used_providers - set(_OVERSEAS_DIRECT_SETS):
         warnings.append(f"{label}规则来源“{name}”已启用但未被规则引用")
 
 
