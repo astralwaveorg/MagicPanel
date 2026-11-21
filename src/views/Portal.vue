@@ -80,21 +80,22 @@
               所有启用节点的裸订阅：一个策略组加一条兜底规则，没有分流策略，适合导入任意客户端。
               链接即凭据，泄露等同于节点池泄露；重置后旧链接立即失效。
             </p>
-            <div
-              class="pt-card-url"
-              :title="nodesFeed.url + '（点击复制）'"
-              @click="copy(nodesFeed.url, 'nodes-url')"
-            >{{ nodesFeed.url }}</div>
-            <div class="pt-card-actions">
-              <button
-                class="pt-btn primary"
-                @click="copy(nodesFeed.url, 'nodes')"
-              >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制地址' }}</button>
-              <a class="pt-btn" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
-              <button class="pt-btn" @click="showQr('全部节点订阅', nodesFeed.url)">二维码</button>
-              <button class="pt-btn pt-btn-danger" @click="rotateNodesToken" :disabled="rotateArmed === 'busy'">
-                {{ rotateArmed === 'arming' ? '再点一次确认重置' : (rotateArmed === 'busy' ? '重置中…' : '重置链接') }}
-              </button>
+            <div class="pt-nodes-urlrow">
+              <div
+                class="pt-card-url"
+                :title="nodesFeed.url + '（点击复制）'"
+                @click="copy(nodesFeed.url, 'nodes-url')"
+              >{{ nodesFeed.url }}</div>
+              <div class="pt-nodes-actions">
+                <button
+                  class="pt-btn primary"
+                  @click="copy(nodesFeed.url, 'nodes')"
+                >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制地址' }}</button>
+                <a class="pt-btn" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
+                <button class="pt-btn pt-btn-danger" @click="rotateNodesToken" :disabled="rotateArmed === 'busy'">
+                  {{ rotateArmed === 'arming' ? '再点一次确认重置' : (rotateArmed === 'busy' ? '重置中…' : '重置链接') }}
+                </button>
+              </div>
             </div>
             <p v-if="rotateError" class="pt-card-note pt-rotate-error">{{ rotateError }}</p>
           </div>
@@ -1384,6 +1385,9 @@ onUnmounted(() => {
 .pt-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.4); }
 .pt-btn.primary { background: #5468f0; border-color: #5468f0; color: #fff; }
 .pt-btn.primary:hover:not(:disabled) { background: #6476f5; }
+.pt-nodes-urlrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.pt-nodes-urlrow .pt-card-url { flex: 1; min-width: 0; margin-top: 0; }
+.pt-nodes-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pt-btn.pt-btn-danger { border-color: rgba(226, 92, 92, 0.7); color: #e2b5b5; }
 .pt-btn.pt-btn-danger:hover:not(:disabled) { background: rgba(226, 92, 92, 0.18); }
 .pt-rotate-error { color: #e2b5b5; }
