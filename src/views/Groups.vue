@@ -84,25 +84,9 @@
               <span v-if="!hasFilter" class="drag-handle" :data-id="row.id" title="按住拖动排序">⠿</span>
             </template>
           </el-table-column>
-          <el-table-column prop="name" label="名称" min-width="110" />
+          <el-table-column prop="name" label="名称" min-width="120" />
           <el-table-column label="类型" width="90">
             <template #default="{ row }">{{ groupTypeLabel(row.type) }}</template>
-          </el-table-column>
-          <el-table-column label="适用引擎平台" min-width="150">
-            <template #default="{ row }">
-              <!-- 列里只给一行摘要，完整清单靠悬浮提示，避免行高被撑开 -->
-              <el-tooltip placement="top" :show-after="200">
-                <template #content>
-                  <div class="mp-scope-tip">
-                    <div>平台：{{ scopeText(row.targets) }}</div>
-                    <div v-if="row.devices && row.devices.length">
-                      设备：{{ scopeText(row.devices) }}
-                    </div>
-                  </div>
-                </template>
-                <span class="mp-scope-brief">{{ scopeBrief(row.targets, row.devices) }}</span>
-              </el-tooltip>
-            </template>
           </el-table-column>
           <el-table-column label="客户端可见" width="100">
             <template #default="{ row }">{{ row.hidden ? '隐藏' : '显示' }}</template>
@@ -137,15 +121,18 @@
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="本地节点" width="120">
+          <el-table-column label="规则分流" width="110">
             <template #default="{ row }">
-              <el-tooltip v-if="localMembers(row).length" placement="top" :show-after="200">
+              <!-- 指向该组的启用规则数；完整清单悬浮显示，单行不换行 -->
+              <el-tooltip v-if="ruleRefs(row.name).length" placement="top" :show-after="200">
                 <template #content>
-                  <div class="mp-list-tip">
-                    <div v-for="(n, i) in localMembers(row)" :key="i">{{ i + 1 }}. {{ n }}</div>
+                  <div class="mp-list-tip mp-rule-tip">
+                    <div v-for="(r, i) in ruleRefs(row.name)" :key="i">
+                      {{ i + 1 }}. {{ ruleText(r) }}
+                    </div>
                   </div>
                 </template>
-                <span class="mp-list-brief">{{ localNodeBrief(localMembers(row)) }}</span>
+                <span class="mp-list-brief">{{ ruleRefs(row.name).length }} 条规则</span>
               </el-tooltip>
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
@@ -380,7 +367,7 @@ import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
 import { ALL_SCOPE, hasAllScope, collapseIfComplete } from '../scopeOptions'
-import { groupTypeLabel, scopeBrief, proxiesBrief, sourceBrief, localNodeBrief } from '../format'
+import { groupTypeLabel, proxiesBrief, sourceBrief } from '../format'
 import { useRowSortable } from '../useRowSortable'
 import EmptyState from '../components/EmptyState.vue'
 import { useRefDialog } from '../useRefDialog'
@@ -395,6 +382,7 @@ import RefConfirmDialog from '../components/RefConfirmDialog.vue'
 import VariantBar from '../components/VariantBar.vue'
 
 const rows = ref([])
+const rules = ref([])
 const isMobile = useMobile()
 // 当前分流方案：0 = 默认方案；列表、新建、批量都限定在这个方案里
 const variantId = ref(0)
@@ -480,11 +468,23 @@ const targetNames = computed(() => targets.value.map((t) => t.name))
 const deviceNames = computed(() => devices.value.map((d) => d.name))
 const sourceNames = computed(() => sources.value.map((x) => x.name))
 
-// 适用范围展示："*" 是「包含所有」，不直接显示给用户
-function scopeText(list) {
-  if (!list || !list.length) return '不适用'
-  if (list.includes(ALL_SCOPE)) return '全部'
-  return list.join('、')
+// 规则分流列：按目标组聚合当前方案的启用规则（与组列表同方案同页拉取）
+const ruleTargets = computed(() => {
+  const map = {}
+  for (const r of rules.value) {
+    if (!r.enabled) continue
+    ;(map[r.target] ??= []).push(r)
+  }
+  for (const list of Object.values(map)) list.sort((a, b) => a.sort - b.sort)
+  return map
+})
+
+function ruleRefs(name) {
+  return ruleTargets.value[name] || []
+}
+
+function ruleText(r) {
+  return `#${r.sort} ${r.type}${r.value ? ',' + r.value : ''}`
 }
 
 const hasHealthCheck = computed(() =>
@@ -522,12 +522,6 @@ function pinLocalFirst() {
   form.proxies = [...selectedLocal.value, ...form.proxies.filter((name) => !localNames.value.has(name))]
 }
 
-function localMembers(row) {
-  const names = (row.proxies || []).filter((name) => localNames.value.has(name))
-  const legacy = localNodeList(row.local_nodes)
-  return [...new Set(row.local_first ? [...legacy, ...names] : [...names, ...legacy])]
-}
-
 function localNodeList(ids) {
   return (ids || [])
     .map((id) => localNodes.value.find((node) => node.id === id)?.display_name)
@@ -555,12 +549,14 @@ async function load() {
     if (filters.hidden) params.set('hidden', filters.hidden)
     if (filters.scope) params.set('scope', filters.scope)
     if (filters.member) params.set('member', filters.member)
-    const [groups, srcs, nodes, targetList, deviceList, allGroups] = await Promise.all([
+    const [groups, srcs, nodes, targetList, deviceList, allGroups, ruleList] = await Promise.all([
       api(`/api/v1/groups/page?${params.toString()}`),
       api('/api/v1/sources'), api('/api/v1/local-nodes'),
       api('/api/v1/targets'), api('/api/v1/devices'),
       // 候选组全量拉取：跨页的策略组也要能点选引用（不能只用当前页 rows）
       api(`/api/v1/groups?variant=${variantId.value}`),
+      // 规则分流列：指向每个组的启用规则（与组列表同方案）
+      api(`/api/v1/rules?variant=${variantId.value}`),
     ])
     rows.value = groups.items ?? []
     total.value = groups.total
@@ -570,6 +566,7 @@ async function load() {
     targets.value = targetList
     devices.value = deviceList
     allGroupNames.value = (allGroups ?? []).map((g) => g.name)
+    rules.value = ruleList ?? []
   } catch (e) {
     error.value = e.message
     ElMessage.error(e.message)
