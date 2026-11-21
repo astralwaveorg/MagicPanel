@@ -40,12 +40,17 @@
 - DB 层：导入时自动备份 `data/magicpanel.db.before-import-*`
 - 路由器层：重新执行订阅更新即回到旧产物（构建历史不可变，旧产物 #348 仍在）；极端情况用 `/etc/openclash/backup/` 现有 OpenClash 备份
 
-## 六、深度重构建议（本轮未实施，待用户决策）
+## 六、优化批次（2026-11-21 追加，向阳确认立项后实施）
 
-对齐后 MagicPanel 的「多引擎全功能」形态与实际用途（路由器 OpenClash 主代理 + 少量设备订阅）之间有明显简化空间，建议单独立项：
+向阳确认两项决策后实施：设备订阅按「内网的不需要，LVSP/安卓/iOS 保留」处置；深度重构立项。
 
-1. 规则来源去重：对齐后 141 个来源里 77 个停用待清理；自维护 magic-* 层与上游 geosite 大量重叠（magic-google vs google、magic-us vs 美国自动筛选），可合并瘦身。
-2. 移动网络方案（variant 2）是旧结构的完整副本（35 组/126 规则），对齐后与默认方案差异巨大——建议要么按新形态重做，要么停用归档。
-3. 单媒体组机制（Netflix 日本/Disney+/HBO 等 10 个组）在新形态下被「新加坡媒体」六合一取代，渲染器的服务别名机制（_apply_service_groups）可大幅简化。
-4. 探测流水线的 35 平台矩阵可裁剪到与分流目标匹配的 12-15 项（Netflix/Disney/ChatGPT/Claude/Gemini/Telegram 等）。
-5. 文案已按 humanizer 口径全面过一轮；重构界面时同步复查。
+已落地：
+
+1. **设备**：Astral-Macmini-Stash、Astral-AppleTV-Stash 已删除（内网设备走路由器主代理）；剩余 11 台 = Astral 6 台（iPhone/Android×2/MacBook/Windows×2）+ LVSP 5 台，全部保留订阅。
+2. **移动网络方案归档**：variant 2 enabled=0（35 组/126 规则数据保留，可恢复）；停用后 20 份 @移动网络 产物退出构建矩阵，旧 variant 订阅请求回退默认产物（兼容窗，约束 42）。
+3. **来源瘦身 141 → 63**：删除 78 个仅移动网络引用的旧来源（bm7 全家、magic-* 旧层、云服务商集合、地区专属集合等）；剩余 63 个全部被默认方案规则表或 DNS 基线引用，无无引用来源。
+4. **死规则全量分析**：43 个可分析集合全量条目首命中仿真——零死集合，最高覆盖率 0.5%（cn 110177 条里 496 条被上游 Custom_Direct 先命中，属正常交叉）。规则表无垃圾条目。
+5. 构建 #354 发布生产（release_rev 75），OpenClash 产物与 #353 逐行 diff 为零——设备订阅内容零变化，无网络瞬断。
+6. 回归：后端 970 passed / 前端 86 passed / 16 视图冒烟全过。
+
+单媒体组渲染器路径（_apply_service_groups）已因规则目标改为「新加坡媒体」而自然失效，代码清理延后到应用重构专项；无法全量分析的 4 个集合（Custom_Direct_Domain/Custom_Proxy_Domain 为 mrs 无文本版、magic-process/magic-reject 为小体量自维护集）语义无害。
