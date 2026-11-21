@@ -200,6 +200,12 @@ def get_content(rp_id: int, user=CurrentUser):
     """规则内容不涉凭据，允许维护者查看最近快照原文。"""
     with db.connect() as conn:
         row = _get_or_404(conn, rp_id)
+    if row["kind"] == "inline":
+        # 内联来源的内容存在 inline_content 列（content 同步写一份作快照），
+        # 编辑弹窗回填必须读它——读 content 在历史行上可能为空
+        text = row["inline_content"] or row["content"] or ""
+        return {"name": row["name"], "content": text, "binary": False,
+                "format": row["format"] or "yaml", "size": len(text)}
     if (row["format"] or "yaml") in config.BINARY_FORMATS:
         # 二进制格式（MRS）：库里存的是 base64，没有可读原文
         return {"name": row["name"], "content": "", "binary": True,

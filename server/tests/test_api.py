@@ -559,6 +559,13 @@ def test_rule_provider_inline_and_feed(client):
     assert r.status_code == 201, r.text
     assert r.json()["rule_count"] == 2 and r.json()["last_status"] == "ok"
 
+    # 编辑弹窗回填：inline 来源的 content 端点必须返回 inline_content，
+    # 否则编辑框永远显示占位符，看起来像内容丢失
+    rid = client.get("/api/v1/rule-providers", headers=h).json()[0]["id"]
+    got = client.get(f"/api/v1/rule-providers/{rid}/content", headers=h).json()
+    assert got["binary"] is False
+    assert "example.com" in got["content"] and "example.org" in got["content"]
+
     make_policy(client, csrf)
     client.post("/api/v1/rules", headers=h, json={
         "type": "RULE-SET", "value": "my-rules", "target": "节点选择"})
