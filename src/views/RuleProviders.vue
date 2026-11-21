@@ -118,7 +118,7 @@
               <span v-if="row.kind === 'inline'" style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="被引用" min-width="85">
+          <el-table-column label="被引用" min-width="130">
             <template #default="{ row }">
               <span v-if="!row.referenced_by || !row.referenced_by.length" class="mp-cell-sub">—</span>
               <el-link v-for="ref in (row.referenced_by || [])" :key="ref.id"

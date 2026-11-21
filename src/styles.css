@@ -548,7 +548,7 @@ html, body, #app {
 }
 
 /* 规则来源的"被引用"列：每个引用一行，可点进对应分流规则 */
-.mp-ref-link {
+.mp-ref-link { white-space: nowrap;
   display: block;
   font-size: 12.5px;
   line-height: 1.6;
