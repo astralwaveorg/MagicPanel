@@ -45,14 +45,19 @@
               <span v-else class="unlock-svc"><span class="unlock-icon-sm">{{ row.icon }}</span>{{ row.name }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="服务器网络" min-width="240">
+          <el-table-column label="服务器网络" min-width="200">
             <template #default="{ row }">
               <StatusDot :kind="serverKind(row.id)" :text="serverLabel(row.id)" />
               <span class="unlock-cell-sub"
                     :title="serverMap[row.id]?.checked_at ? fmtTime(serverMap[row.id].checked_at) : ''">{{ serverSub(row.id) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="出口信息" min-width="180">
+            <template #default="{ row }">
               <div v-if="serverMap[row.id]" class="unlock-route" :title="routeTitle(row.id)">
                 {{ routeLabel(row.id) }}
               </div>
+              <span v-else class="unlock-cell-sub" style="margin-left:0">—</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="86">
@@ -158,8 +163,8 @@ function routeLabel(id) {
 function resultRouteLabel(result) {
   const route = result?.extra?.route
   if (['router_connection', 'probe_connection'].includes(route?.source) && route.node) return `实际节点：${route.node}`
-  if (route?.source === 'domain_trace' && route.ip) return `域名出口：${route.ip}${route.country ? ' · ' + route.country : ''}`
-  return '未取得服务出口'
+  if (route?.source === 'domain_trace' && route.ip) return `${route.ip}${route.country ? ' · ' + route.country : ''}`
+  return '未取得出口'
 }
 function routeTitle(id) {
   const route = serverMap.value[id]?.extra?.route
