@@ -107,7 +107,7 @@
             <h2 class="pt-sec-title">核心配置</h2>
             <div class="pt-chips">
               <button
-                v-for="p in platformFilters"
+                v-for="p in platformFilters.filter((pf) => pf.count > 0)"
                 :key="p.key"
                 class="pt-chip"
                 :data-platform="p.key"
@@ -172,7 +172,12 @@
                       class="pt-btn primary"
                       :disabled="!urlFor(d)"
                       @click="copy(urlFor(d), 'dev-' + d.name)"
-                    >{{ copied === 'dev-' + d.name ? '已复制' : '复制地址' }}</button>
+                    >{{ copied === 'dev-' + d.name ? '已复制' : '复制' }}</button>
+                    <a
+                      v-if="urlFor(d)"
+                      class="pt-btn"
+                      :href="installUrl(d)"
+                    >导入</a>
                     <a
                       v-if="urlFor(d)"
                       class="pt-btn"
@@ -180,11 +185,6 @@
                       :download="downloadName(d)"
                       title="下载方案配置"
                     >下载</a>
-                    <a
-                      v-if="urlFor(d)"
-                      class="pt-btn"
-                      :href="installUrl(d)"
-                    >一键导入</a>
                     <button
                       class="pt-btn"
                       :disabled="!urlFor(d)"
@@ -1320,8 +1320,8 @@ onUnmounted(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.pt-card-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.pt-card-actions .pt-btn { min-width: 82px; }
+.pt-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.pt-card-actions .pt-btn { flex: 1; min-width: 0; padding: 7px 6px; text-align: center; white-space: nowrap; }
 
 /* 分流方案选择芯片：当前选中的高亮，悬浮给说明 */
 .pt-variant-row {
