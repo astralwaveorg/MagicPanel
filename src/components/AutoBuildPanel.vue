@@ -84,14 +84,6 @@
             <span class="mp-switch-label">校验通过后自动构建发布</span>
             <el-switch v-model="form.auto_publish_enabled" />
           </div>
-          <div class="mp-form-row">
-            <span class="mp-switch-label">发布环境</span>
-            <el-select v-model="form.auto_publish_env" class="mp-control-end"
-                       :disabled="!form.auto_publish_enabled">
-              <el-option value="production" label="生产环境" />
-              <el-option value="testing" label="测试环境" />
-            </el-select>
-          </div>
           <p class="mp-form-hint">
             只有策略快照变化且校验通过才发布；失败的构建不会覆盖当前生效版本。
           </p>

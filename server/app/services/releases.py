@@ -3,19 +3,22 @@
 一个构建在任意时刻只有一种状态：
 
     BUILT       已构建：产物已生成，从未发布过
-    TESTING     测试中：当前测试环境生效的唯一版本
-    PRODUCTION  生产中：当前生产环境生效的唯一版本（受保护）
+    TESTING     预演中：预演通道生效的唯一版本（发布前的验证口子）
+    PRODUCTION  已发布：当前生效的唯一版本（设备拉取这份）
     OFFLINE     已下线：曾发布过，被新版本替换或手动撤销（归档，不可彻底删除）
 
 流转规则（全部在单个写事务内完成）：
 
-    发布至测试  BUILT / OFFLINE → TESTING     原 TESTING 版本自动下线
-    发布至生产  TESTING / OFFLINE → PRODUCTION 原 PRODUCTION 版本自动下线
-    手动下线    TESTING → OFFLINE              测试环境空置
-    彻底删除    BUILT → 物理删除               其余状态一律拒绝
+    预演        BUILT / OFFLINE → TESTING        原预演版本自动下线
+    发布        BUILT / TESTING / OFFLINE → PRODUCTION  原生效版本自动下线
+    撤销预演    TESTING → OFFLINE                预演通道空置
+    彻底删除    BUILT → 物理删除                 其余状态一律拒绝
+
+「测试/生产」双渠道语义已收敛（2026-11-21）：常规流程改完直接发布，
+预演只是发布前的验证口子；TESTING 内部值与历史数据保持兼容。
 
 被替换的旧版本先置为 OFFLINE、目标版本后置为新状态，
-配合 builds 表上的两条部分唯一索引，保证生产/测试环境全局至多一条生效版本。
+配合 builds 表上的两条部分唯一索引，保证生效/预演通道全局至多一条版本。
 """
 import json
 import re
@@ -35,13 +38,13 @@ class BuildStatus(str, Enum):
 
 
 class Env(str, Enum):
-    """发布环境（取代旧的"通道"概念）。"""
+    """发布通道（production=设备实际拉取；testing=预演验证口子）。"""
 
     TESTING = "testing"
     PRODUCTION = "production"
 
 
-# 环境 → 该环境生效版本所处的状态
+# 通道 → 该通道生效版本所处的状态
 ENV_STATUS = {
     Env.TESTING: BuildStatus.TESTING,
     Env.PRODUCTION: BuildStatus.PRODUCTION,
@@ -49,14 +52,14 @@ ENV_STATUS = {
 
 STATUS_LABELS = {
     BuildStatus.BUILT: "已构建",
-    BuildStatus.TESTING: "测试中",
-    BuildStatus.PRODUCTION: "生产中",
+    BuildStatus.TESTING: "预演中",
+    BuildStatus.PRODUCTION: "已发布",
     BuildStatus.OFFLINE: "已下线",
 }
 
 ENV_LABELS = {
-    Env.TESTING: "测试环境",
-    Env.PRODUCTION: "生产环境",
+    Env.TESTING: "预演",
+    Env.PRODUCTION: "生效",
 }
 
 # 发布历史里的动作
@@ -289,12 +292,12 @@ def publish_to_testing(conn, build, operator: str, reason: str = "",
                        record: bool = True, expected_revision: int | None = None,
                        idempotency_key: str | None = None,
                        bump_revision: bool = True) -> dict:
-    """发布至测试环境：BUILT / OFFLINE → TESTING。"""
+    """预演：BUILT / OFFLINE → TESTING。发布前的验证口子，不影响设备拉取。"""
     status = build["status"]
     if status == BuildStatus.TESTING.value:
-        raise ReleaseError("该构建已是当前测试版本")
+        raise ReleaseError("该构建已在预演中")
     if status not in (BuildStatus.BUILT.value, BuildStatus.OFFLINE.value):
-        raise ReleaseError("只有未发布过或已下线的构建可以发布至测试环境")
+        raise ReleaseError("只有未发布过或已下线的构建可以进入预演")
     _check_publishable(build)
     _check_artifacts(build)
     return _switch(conn, build, Env.TESTING, BuildStatus.TESTING,
@@ -308,15 +311,16 @@ def publish_to_production(conn, build, operator: str, reason: str = "",
                           rollback: bool = False, record: bool = True,
                           expected_revision: int | None = None,
                           idempotency_key: str | None = None) -> dict:
-    """发布至生产环境：TESTING / OFFLINE → PRODUCTION。
+    """发布：BUILT / TESTING / OFFLINE → PRODUCTION。
 
-    未经过测试的构建（BUILT）不允许直接上线。
+    常规流程改完直接发布（2026-11-21 收敛）；预演中的构建也可以直接转正。
     """
     status = build["status"]
     if status == BuildStatus.PRODUCTION.value:
-        raise ReleaseError("该构建已是当前生产版本")
-    if status not in (BuildStatus.TESTING.value, BuildStatus.OFFLINE.value):
-        raise ReleaseError("请先发布至测试环境，再发布至生产环境")
+        raise ReleaseError("该构建已是当前发布版本")
+    if status not in (BuildStatus.BUILT.value, BuildStatus.TESTING.value,
+                      BuildStatus.OFFLINE.value):
+        raise ReleaseError("只有已构建、预演中或已下线的构建可以发布")
     _check_publishable(build)
     _check_artifacts(build)
     action = ACTION_ROLLBACK if rollback else ACTION_PUBLISH
@@ -364,23 +368,16 @@ def publish_build(conn, build, operator: str, reason: str = "",
                   env: Env = Env.PRODUCTION,
                   expected_revisions: dict | None = None,
                   idempotency_keys: dict | None = None) -> dict:
-    """一步到位地发布构建到指定环境。
+    """一步到位地发布构建到指定通道。
 
-    规格要求"发布至生产"的来源状态必须是 TESTING 或 OFFLINE，
-    而自动任务与"保存并构建发布"要在同一轮里把新构建推上线，
-    因此这里先置 TESTING、再置 PRODUCTION，两步同处一个事务，状态原子切换。
-
-    两步算**一次**发布：发布历史只记最终那一条（否则 10 条上限一轮就吃掉两条）。
+    发布通道（production）允许 BUILT 直接上线，单步切换；
+    预演通道走 publish_to_testing。
     """
     env = _env_of(env)
     if env is Env.TESTING:
         return publish_to_testing(conn, build, operator, reason,
             expected_revision=(expected_revisions or {}).get("testing"),
             idempotency_key=(idempotency_keys or {}).get("testing"))
-    # 过渡步骤不 bump：一步发布只算一次发布（注释见 _switch）
-    publish_to_testing(conn, build, operator, reason, record=False,
-                       bump_revision=False)
-    fresh = db.one(conn, "SELECT * FROM builds WHERE id=?", (build["id"],))
-    return publish_to_production(conn, fresh, operator, reason,
+    return publish_to_production(conn, build, operator, reason,
         expected_revision=(expected_revisions or {}).get("production"),
         idempotency_key=(idempotency_keys or {}).get("production"))

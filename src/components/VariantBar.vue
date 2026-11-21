@@ -95,7 +95,7 @@
           </el-checkbox>
         </el-form-item>
         <div v-if="!editForm.is_system" class="mp-form-hint">
-          改名或删除前，当前生产版本里不能还有这个方案的产物。有的话，先发布一版不含它的新构建，再回来操作。
+          改名或删除前，当前发布版本里不能还有这个方案的产物。有的话，先发布一版不含它的新构建，再回来操作。
         </div>
       </el-form>
       <template #footer>

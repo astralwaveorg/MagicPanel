@@ -25,11 +25,11 @@ export const PLATFORM_LABELS = {
 
 // 构建生命周期状态（后端状态机的四种状态）
 export const BUILD_STATUS_LABELS = {
-  BUILT: '已构建', TESTING: '测试中', PRODUCTION: '生产中', OFFLINE: '已下线',
+  BUILT: '已构建', TESTING: '预演中', PRODUCTION: '已发布', OFFLINE: '已下线',
 }
 
-// 发布环境（生产 / 测试）
-export const ENV_LABELS = { production: '生产环境', testing: '测试环境' }
+// 发布通道（生效 / 预演）：常规流程改完直接发布，预演只是验证口子
+export const ENV_LABELS = { production: '生效', testing: '预演' }
 
 // 发布历史里的动作
 export const RELEASE_ACTION_LABELS = { publish: '发布', rollback: '回滚', offline: '下线' }

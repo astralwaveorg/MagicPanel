@@ -56,10 +56,6 @@
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <!-- 与旁边的按钮同高：小尺寸的下拉会比按钮矮一截，看着不协调 -->
-              <el-select v-model="env" style="width:120px">
-                <el-option value="production" label="生产环境" />
-                <el-option value="testing" label="测试环境" />
-              </el-select>
               <el-button v-if="!readonly" @click="openSource" type="info" plain>源码编辑</el-button>
               <el-button v-if="isBuiltin ? builtinOverridden : !readonly" type="warning" plain @click="reset">
                 {{ isBuiltin ? '恢复默认' : '清除改动' }}
@@ -859,10 +855,8 @@ async function reset() {
 async function apply() {
   if (!current.value) return
   if (isBuiltin.value && !(await confirmBuiltinChange())) return
-  // 「保存并构建发布」会直接发布到所选环境：发生产影响所有设备，
-  // 必须二次确认（2026-11-18 修复：原来只有 builtin 层有确认，
-  // 设备/平台层点击后直接构建并发生产）
-  if (env.value === 'production') {
+  // 「保存并构建发布」直接发布到生效通道，影响所有设备，必须二次确认
+  {
     const s = current.value
     const scopeName = s.kind === 'builtin'
       ? '引擎默认配置'
@@ -870,9 +864,9 @@ async function apply() {
         ? `引擎平台「${s.name || s.label || s.platform}」`
         : `设备「${s.name || s.label || ''}」`)
     const ok = await confirmBox(
-      `将构建新产物并直接发布到生产环境，影响所有生产设备。${scopeName}的基础配置会随之生效。确定继续？`,
-      '发布到生产环境',
-      { type: 'warning', confirmButtonText: '构建并发布生产' })
+      `将构建新产物并直接发布，所有设备都会收到新配置。${scopeName}的基础配置会随之生效。确定继续？`,
+      '构建并发布',
+      { type: 'warning', confirmButtonText: '构建并发布' })
     if (!ok) return
   }
   applying.value = true
@@ -885,7 +879,7 @@ async function apply() {
         content: raw.value, env: env.value, note: '更新基础配置',
       },
     })
-    ElMessage.success(`已构建 #${r.build_id} 并发布到${ENV_LABELS[env.value] || env.value}`)
+    ElMessage.success(`已构建 #${r.build_id} 并发布`)
     await loadScopes()
     await select(current.value)
   } catch (e) {

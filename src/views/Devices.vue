@@ -103,12 +103,6 @@
             设备平台由所选引擎自动决定（当前：{{ PLATFORM_LABELS[form.platform] || form.platform }}）。
           </div>
         </el-form-item>
-        <el-form-item label="订阅环境">
-          <el-radio-group v-model="form.env">
-            <el-radio value="production">生产环境（跟随正式发布）</el-radio>
-            <el-radio value="testing">测试环境（提前试用）</el-radio>
-          </el-radio-group>
-        </el-form-item>
         <el-form-item label="设备名">
           <el-input v-model="form.note" placeholder="例如：客厅 Mac mini" />
           <div class="mp-form-hint">留空时显示配置文件名。</div>
@@ -141,14 +135,6 @@
           <el-option v-for="t in targets" :key="t.id" :value="t.id"
                      :label="`${t.name}（${t.engine}/${t.platform}）`" />
         </el-select>
-
-        <el-form-item>
-          <el-checkbox v-model="batch.useEnv">修改订阅环境</el-checkbox>
-        </el-form-item>
-        <el-radio-group v-if="batch.useEnv" v-model="batch.env">
-          <el-radio value="production">生产环境</el-radio>
-          <el-radio value="testing">测试环境</el-radio>
-        </el-radio-group>
 
         <el-form-item>
           <el-checkbox v-model="batch.useNote">修改设备名（备注）</el-checkbox>
@@ -197,7 +183,7 @@ const batchSaving = ref(false)
 const tableRef = ref(null)
 const batch = reactive({
   useTarget: false, target_id: null,
-  useEnv: false, env: 'production',
+  env: 'production',
   useNote: false, note: '',
 })
 
@@ -265,7 +251,7 @@ function clearSelection() {
 function openBatch() {
   if (!selected.value.length) return
   batch.useTarget = false; batch.target_id = null
-  batch.useEnv = false; batch.env = 'production'
+  batch.env = 'production'
   batch.useNote = false; batch.note = ''
   batchDialog.value = true
 }
@@ -274,7 +260,7 @@ async function saveBatch() {
   if (!selected.value.length) return
   const payload = { ids: selected.value.map((r) => r.id) }
   if (batch.useTarget) payload.target_id = batch.target_id
-  if (batch.useEnv) payload.env = batch.env
+  payload.env = 'production'
   if (batch.useNote) payload.note = batch.note
   const keys = Object.keys(payload).filter((k) => k !== 'ids')
   if (!keys.length) {

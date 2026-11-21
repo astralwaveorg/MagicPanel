@@ -164,20 +164,20 @@ def test_publish_to_production_offlines_previous_production(client):
 
 # ---- 状态机的拒绝路径 ----
 
-def test_builtin_cannot_be_published_to_production_directly(client):
-    """BUILT → PRODUCTION 被拒：没经过测试环境的版本不能直接上生产。"""
+def test_builtin_can_be_published_to_production_directly(client):
+    """BUILT → PRODUCTION 直发：常规流程改完直接发布（2026-11-21 收敛）。"""
     csrf = setup_admin(client)
     make_policy(client, csrf)
     h = auth_headers(csrf)
     build = _create_build(client, h)
 
     r = client.post(f"/api/v1/builds/{build['id']}/publish-to-prod", headers=h,
-                    json={"reason": "直接上生产"})
-    assert r.status_code == 400
-    assert "请先发布至测试环境" in r.json()["detail"]
-    # 状态不变，生产环境仍为空
-    assert _row(client, build["id"])["status"] == "BUILT"
-    assert _release_state(client)["production"] is None
+                    json={"reason": "直接发布"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "PRODUCTION"
+    assert _row(client, build["id"])["status"] == "PRODUCTION"
+    # 发布历史只记一条
+    assert _release_state(client)["production"]["id"] == build["id"]
 
 
 def test_failed_verification_cannot_be_published(client):

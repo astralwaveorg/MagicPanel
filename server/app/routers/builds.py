@@ -1,7 +1,7 @@
 """构建与版本发布（状态机）。
 
 构建把当前策略固化为不可变快照并逐目标渲染；发布按状态机切换
-版本状态（已构建 / 测试中 / 生产中 / 已下线），失败或空结果不会覆盖现网。
+版本状态（已构建 / 预演中 / 已发布 / 已下线），失败或空结果不会覆盖现网。
 """
 import difflib
 import json
@@ -660,7 +660,7 @@ def _publish(action: str, bid: int, reason: str, operator: str, body=None) -> di
                     idempotency_key=idem)
             elif action == "both":
                 if build["status"] == releases.BuildStatus.PRODUCTION.value:
-                    raise releases.ReleaseError("该构建已是当前生产版本")
+                    raise releases.ReleaseError("该构建已是当前发布版本")
                 result = releases.publish_build(
                     conn, build, operator, reason, releases.Env.PRODUCTION,
                     expected_revisions={"production": expected},
@@ -681,34 +681,31 @@ def _publish(action: str, bid: int, reason: str, operator: str, body=None) -> di
 
 @router.post("/builds/{bid}/publish-to-test")
 def publish_to_test(bid: int, body: PublishBody, user=RequireCapabilities('publish_test')):
-    """发布至测试环境：已构建 / 已下线 → 测试中。"""
+    """预演：已构建 / 已下线 → 预演中（发布前的验证口子）。"""
     return _publish("test", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/publish-to-prod")
 def publish_to_prod(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
-    """发布至生产环境：测试中 / 已下线 → 生产中。"""
+    """发布：已构建 / 预演中 / 已下线 → 已发布。"""
     return _publish("prod", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/publish-both")
 def publish_both(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
-    """一键发布：已构建 / 已下线 → 测试中 + 生产中，一步到位。
-
-    两步同处一个事务，状态原子切换；发布历史只记最终那一条。
-    """
+    """直接发布：已构建 → 已发布（保留 API 兼容，语义与 publish-to-prod 相同）。"""
     return _publish("both", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/rollback-to-prod")
 def rollback_to_prod(bid: int, body: PublishBody, user=RequireCapabilities('publish_prod')):
-    """回滚生产版本：把已下线的历史构建重新设为生产版本。"""
+    """回滚：把已下线的历史构建重新设为生效版本。"""
     return _publish("rollback", bid, body.reason, user["username"], body)
 
 
 @router.post("/builds/{bid}/offline")
 def offline_build(bid: int, body: PublishBody, user=RequireCapabilities('publish_test')):
-    """手动下线：测试中 → 已下线（测试环境空置）。"""
+    """撤销预演：预演中 → 已下线。"""
     return _publish("offline", bid, body.reason, user["username"], body)
 
 

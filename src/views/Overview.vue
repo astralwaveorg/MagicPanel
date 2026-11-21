@@ -10,7 +10,7 @@
     <!-- 概览瓦片：最关键的四件事一眼看完 -->
     <div class="stat-grid">
       <div class="mp-card stat-tile">
-        <div class="stat-label">当前生产版本</div>
+        <div class="stat-label">当前发布版本</div>
         <template v-if="data.release_state?.production">
           <div class="stat-main mono">构建 #{{ data.release_state.production.id }}</div>
           <div class="stat-sub">
@@ -97,26 +97,11 @@
         <div class="stat-label">发布指针</div>
         <div class="stat-main mono">
           R{{ data.release_state?.release_revisions?.production ?? '—' }}
-          <span class="stat-unit">/</span>
-          T{{ data.release_state?.release_revisions?.testing ?? '—' }}
         </div>
         <div class="stat-sub">
-          生产 revision <span class="mono">{{ data.release_state?.release_revisions?.production ?? '—' }}</span><br />
-          测试 revision <span class="mono">{{ data.release_state?.release_revisions?.testing ?? '—' }}</span><br />
+          发布 revision <span class="mono">{{ data.release_state?.release_revisions?.production ?? '—' }}</span><br />
           发布失败会保留原指针，不会部分生效
         </div>
-      </div>
-    </div>
-
-
-    <div v-if="data.release_state?.testing" class="mp-card">
-      <h3>当前测试版本</h3>
-      <div class="mp-health-note">
-        构建 <span class="mono">#{{ data.release_state.testing.id }}</span>
-        · 发布时间 {{ fmtTime(data.release_state.testing.published_at
-          || data.release_state.testing.created_at) }}
-        · 策略摘要 <span class="mono">{{ shortSha(data.release_state.testing.policy_sha) }}</span>
-        · 验证通过后在「构建发布」推上生产
       </div>
     </div>
 

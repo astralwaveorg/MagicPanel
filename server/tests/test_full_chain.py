@@ -65,7 +65,7 @@ def test_admin_full_chain_login_edit_build_publish_feed(client):
     # 7. 审计留痕：登录、构建、发布都进了审计
     audits = client.get("/api/v1/audit?limit=200", headers=h).json()["items"]
     actions = {a["action"] for a in audits}
-    assert "发布到测试环境" in actions
+    assert "发布到预演" in actions
     assert "创建构建" in actions
 
 

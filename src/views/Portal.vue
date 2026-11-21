@@ -64,7 +64,7 @@
           <p class="pt-hero-sub">
             {{ devices.length }} 台设备 · {{ data.rules.length }} 条规则 ·
             {{ data.rule_providers.length }} 个规则来源 ·
-            {{ releaseText('production') }} · {{ releaseText('testing') }}
+            {{ releaseText('production') }}
           </p>
         </div>
       </header>
@@ -134,9 +134,7 @@
                       :title="previewUrlFor(d) ? '查看配置源码' : '暂无可预览的订阅地址'"
                       @click="openPreview(d)"
                     >{{ cardTitle(d) }}</button>
-                    <span class="pt-tag" :data-env="d.env">
-                      {{ d.env === 'production' ? '生产环境' : '测试环境' }}
-                    </span>
+
                   </div>
                   <p class="pt-card-meta"
                      :title="`${platformLabel(d.platform)} · ${d.target_name}${hasOwnProfile(d) ? ' · 设备名：' + d.display_name : ''}`">
@@ -751,11 +749,10 @@ function hasOwnProfile(d) {
 function cardTitle(d) {
   return hasOwnProfile(d) ? d.name : (d.display_name || d.name)
 }
-// 头部摘要：当前生效的生产 / 测试版本
-function releaseText(env) {
-  const label = env === 'production' ? '生产版本' : '测试版本'
-  const build = data.value?.release_state?.[env]
-  return `${label} ${build ? `构建 #${build.id}` : '未发布'}`
+// 头部摘要：当前已发布版本（设备拉取的版本）
+function releaseText() {
+  const build = data.value?.release_state?.production
+  return `已发布 ${build ? `构建 #${build.id}` : '未发布'}`
 }
 function ruleLine(r) {
   if (['MATCH', 'FINAL'].includes(r.type)) return `MATCH,${r.target}`
