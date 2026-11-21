@@ -1299,7 +1299,10 @@ onUnmounted(() => {
 .pt-tag[data-env='production'] { background: rgba(63, 185, 128, 0.18); color: #4ade9d; }
 .pt-tag[data-env='testing'] { background: rgba(250, 183, 82, 0.16); color: #f5c069; }
 .pt-tag.soft { background: rgba(255, 255, 255, 0.1); color: #aab1c8; }
-.pt-card-meta { color: #8f96b0; font-size: 12px; margin: 6px 0 0; }
+.pt-card-meta {
+  color: #8f96b0; font-size: 12px; margin: 6px 0 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .pt-plat { color: var(--pc, #8f96b0); }
 .pt-card-note { color: #79809a; font-size: 12px; margin: 8px 0 0; }
 .pt-url {
