@@ -23,18 +23,18 @@
         <div class="vb-create-title">新建方案</div>
         <el-form :model="createForm" label-position="top" class="vb-create-form">
           <el-row :gutter="10">
-            <el-col :span="8">
+            <el-col :xs="24" :sm="8">
               <el-form-item label="方案名称">
                 <el-input v-model="createForm.name" maxlength="32" placeholder="例如：自建美日" />
               </el-form-item>
             </el-col>
-            <el-col :span="10">
+            <el-col :xs="24" :sm="10">
               <el-form-item label="备注（可选）">
                 <el-input v-model="createForm.note" maxlength="256"
                           placeholder="一句话说明这套方案的用途" />
               </el-form-item>
             </el-col>
-            <el-col :span="6">
+            <el-col :xs="24" :sm="6">
               <el-form-item label="从哪套复制">
                 <el-select v-model="createForm.copy_from" style="width:100%">
                   <el-option v-for="v in variants" :key="v.id" :value="v.id"
@@ -43,7 +43,7 @@
               </el-form-item>
             </el-col>
           </el-row>
-          <el-checkbox v-model="createForm.use_sources_empty">
+          <el-checkbox v-model="createForm.use_sources_empty" class="vb-wrap-check">
             复制后清空所有组的「节点来源」引用（做「只用本地节点」类方案时勾上）
           </el-checkbox>
           <div class="vb-create-actions">
@@ -255,6 +255,9 @@ async function remove(row) {
 </script>
 
 <style scoped>
+/* 新建方案勾选项：文案长，窄屏对话框里允许折行 */
+.vb-wrap-check { white-space: normal; align-items: flex-start; }
+.vb-wrap-check :deep(.el-checkbox__label) { white-space: normal; line-height: 1.5; }
 .variant-bar {
   align-items: center;
 }
