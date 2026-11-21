@@ -88,11 +88,11 @@
               >{{ nodesFeed.url }}</div>
               <div class="pt-nodes-actions">
                 <button
-                  class="pt-btn primary"
+                  class="pt-btn pt-btn-sm"
                   @click="copy(nodesFeed.url, 'nodes')"
                 >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制' }}</button>
-                <a class="pt-btn" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
-                <button class="pt-btn pt-btn-danger" :loading="rotateBusy" @click="rotateNodesToken">重置</button>
+                <a class="pt-btn pt-btn-sm" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
+                <button class="pt-btn pt-btn-sm pt-btn-danger" :loading="rotateBusy" @click="rotateNodesToken">重置</button>
               </div>
             </div>
           </div>
@@ -1387,6 +1387,9 @@ onUnmounted(() => {
 .pt-nodes-urlrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .pt-nodes-urlrow .pt-card-url { flex: 1; min-width: 0; margin-top: 0; }
 .pt-nodes-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* 顶部三枚小按钮：统一幽灵描边、紧凑等高，不再各用一种配色 */
+.pt-nodes-actions .pt-btn { flex: 0 0 auto; padding: 7px 14px; font-size: 12.5px; }
+.pt-nodes-actions .pt-btn-danger { color: #d9a0a0; border-color: rgba(226, 92, 92, 0.45); }
 .pt-btn.pt-btn-danger { border-color: rgba(226, 92, 92, 0.7); color: #e2b5b5; }
 .pt-btn.pt-btn-danger:hover:not(:disabled) { background: rgba(226, 92, 92, 0.18); }
 
