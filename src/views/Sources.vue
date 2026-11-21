@@ -123,7 +123,14 @@
           </el-table-column>
           <el-table-column label="抓取状态" min-width="110">
             <template #default="{ row }">
-              <StatusDot v-if="row.auto_fetch === false" kind="muted" text="本地快照" />
+              <el-tooltip v-if="row.auto_fetch !== false && row.last_error"
+                          placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-note-tip mono">{{ row.last_error }}</div>
+                </template>
+                <StatusDot v-bind="sourceStatus(row)" />
+              </el-tooltip>
+              <StatusDot v-else-if="row.auto_fetch === false" kind="muted" text="本地快照" />
               <StatusDot v-else v-bind="sourceStatus(row)" />
             </template>
           </el-table-column>
@@ -158,33 +165,6 @@
               <span v-else class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="失败次数" width="80" align="right">
-            <template #default="{ row }">{{ row.auto_fetch === false ? '—' : row.fail_count }}</template>
-          </el-table-column>
-          <el-table-column label="抓取间隔" width="110" align="right">
-            <template #default="{ row }">{{ row.auto_fetch === false ? '—' : intervalText(row.interval) }}</template>
-          </el-table-column>
-          <el-table-column label="客户端更新" width="110" align="right">
-            <template #default="{ row }">
-              {{ row.mode === 'inline' ? '—' : (row.client_interval || '跟随') }}
-            </template>
-          </el-table-column>
-          <el-table-column label="测速间隔" width="110" align="right">
-            <template #default="{ row }">
-              {{ row.auto_test === false ? '关' : (row.test_interval ? intervalText(row.test_interval) : '关') }}
-            </template>
-          </el-table-column>
-          <el-table-column label="最近错误" min-width="160">
-            <template #default="{ row }">
-              <el-tooltip v-if="row.auto_fetch !== false && row.last_error" placement="top" :show-after="200">
-                <template #content>
-                  <div class="mp-note-tip mono">{{ row.last_error }}</div>
-                </template>
-                <span class="mp-clamp2">{{ row.last_error }}</span>
-              </el-tooltip>
-              <span v-else>—</span>
-            </template>
-          </el-table-column>
           <el-table-column label="测速" min-width="150">
             <template #default="{ row }">
               <span v-if="!row.tested_at" style="color:var(--mp-muted)">未测试</span>
@@ -194,9 +174,6 @@
                 <div style="font-size:12px;color:var(--mp-text-secondary)">{{ fmtTime(row.tested_at) }}</div>
               </span>
             </template>
-          </el-table-column>
-          <el-table-column label="只分发可用节点" width="130" align="center">
-            <template #default="{ row }">{{ row.filter_unavailable ? '开启' : '关闭' }}</template>
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
