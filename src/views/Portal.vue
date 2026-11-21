@@ -91,12 +91,34 @@
                   class="pt-btn pt-btn-sm"
                   @click="copy(nodesFeed.url, 'nodes')"
                 >{{ copied === 'nodes' || copied === 'nodes-url' ? '已复制' : '复制' }}</button>
+                <button class="pt-btn pt-btn-sm" :loading="nodesViewing" @click="viewNodes">查看</button>
                 <a class="pt-btn pt-btn-sm" :href="nodesFeed.url" download="magicpanel-nodes.yaml">下载</a>
                 <button class="pt-btn pt-btn-sm pt-btn-danger" :loading="rotateBusy" @click="rotateNodesToken">重置</button>
               </div>
             </div>
           </div>
         </section>
+
+        <!-- 全部节点查看：NodeList 渲染成表格 -->
+        <el-dialog v-model="nodesViewOpen" title="全部节点" width="min(720px, 94vw)">
+          <p class="pt-card-note" style="margin-top:0">
+            {{ nodesRows.length }} 个节点 · 实时渲染 · 凭 4 位 PIN 查看完整信息
+          </p>
+          <div v-if="nodesViewing" style="padding:24px 0;text-align:center">
+            <el-icon class="is-loading" style="font-size:22px"><Loading /></el-icon>
+          </div>
+          <el-table v-else :data="nodesRows" size="small" max-height="520">
+            <el-table-column label="节点" min-width="190">
+              <template #default="{ row }">{{ row.name }}</template>
+            </el-table-column>
+            <el-table-column label="类型" width="90">
+              <template #default="{ row }">{{ row.type }}</template>
+            </el-table-column>
+            <el-table-column label="服务器" min-width="150">
+              <template #default="{ row }"><span class="mono">{{ row.server }}:{{ row.port }}</span></template>
+            </el-table-column>
+          </el-table>
+        </el-dialog>
 
         <!-- 核心配置 -->
         <section v-if="engineGroups.length">
@@ -416,6 +438,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { highlightYaml, lineGutter } from '../yamlHighlight'
 import { sizeText, intervalText } from '../format'
@@ -703,6 +726,29 @@ const guides = computed(() => data.value?.guides || [])
 // 全部节点订阅：所有启用节点的裸配置（一个策略组 + MATCH），不含分流。
 const nodesFeed = computed(() => data.value?.nodes_feed || {})
 const rotateBusy = ref(false)
+const nodesViewOpen = ref(false)
+const nodesViewing = ref(false)
+const nodesRows = ref([])
+
+async function viewNodes() {
+  nodesViewOpen.value = true
+  if (nodesRows.value.length) return
+  nodesViewing.value = true
+  try {
+    const resp = await fetch(nodesFeed.value.preview_url, {
+      credentials: 'same-origin', cache: 'no-store',
+    })
+    if (!resp.ok) throw new Error(`预览失败（${resp.status}）`)
+    const { default: jsYaml } = await import('js-yaml')
+    const doc = jsYaml.load(await resp.text()) || {}
+    nodesRows.value = doc.proxies || []
+  } catch (e) {
+    ElMessage.error(e.message)
+    nodesViewOpen.value = false
+  } finally {
+    nodesViewing.value = false
+  }
+}
 
 async function rotateNodesToken() {
   try {
