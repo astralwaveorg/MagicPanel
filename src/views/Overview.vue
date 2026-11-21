@@ -272,7 +272,8 @@ const coreVersionShort = computed(() => {
 })
 
 const providerIssues = computed(() => (data.value.rule_providers || [])
-  .filter((p) => p.enabled && p.last_status && p.last_status !== 'ok').length)
+  // 只有远程来源才走「抓取」；inline/repo 来源没有抓取动作，never 是常态
+  .filter((p) => p.kind === 'remote' && p.enabled && p.last_status && p.last_status !== 'ok').length)
 
 function availRate(s) {
   const total = (s.tested_ok || 0) + (s.tested_failed || 0)
