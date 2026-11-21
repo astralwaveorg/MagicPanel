@@ -1,7 +1,7 @@
 <template>
   <div class="mp-artifact">
     <p class="mp-page-desc">
-      <strong>引擎默认配置</strong>提供基础值，<strong>引擎平台配置</strong>适配客户端平台，<strong>设备独立配置</strong>适配单台设备。没单独设置的项目沿用上一层。
+      <strong>引擎默认</strong>给基础值，<strong>引擎平台</strong>按客户端适配，<strong>设备独立</strong>只管单台。没设置的项目继承上一层。
     </p>
 
     <!-- 手机：作用域改用下拉选择，左侧长列表在窄屏太占版面 -->
@@ -72,23 +72,23 @@
 
           <el-alert v-if="isBuiltin" type="warning" :closable="false" show-icon
                     style="margin-bottom:12px">
-            <strong>引擎默认配置是所有客户端的基础</strong>：修改将影响该引擎下的全部客户端，
-            并被下层引擎平台配置与设备独立配置继承。只保存改动项，可恢复默认。
+            <strong>这里是全部客户端的基线</strong>：改动会影响该引擎下的所有客户端。
+            只保存改动项，可恢复默认。
           </el-alert>
           <el-alert v-else-if="!changedCount" type="info" :closable="false" show-icon
                     style="margin-bottom:12px">
-            当前层级暂无改动，完全继承上层。保存时仅记录改动项。
+            本层暂无改动，完全继承上层。
           </el-alert>
           <el-alert v-else type="success" :closable="false" show-icon
                     style="margin-bottom:12px">
-            当前层级已改动 {{ changedCount }} 个键（蓝色为新增，橙色为覆盖），其余继承上层。
+            本层已改 {{ changedCount }} 个键（蓝新增，橙覆盖），其余继承上层。
           </el-alert>
 
           <!-- 生效配置：可点击编辑；本层改动过的键用颜色标出 -->
           <div class="mp-effective-toolbar">
             <el-button v-if="!readonly" size="small" @click="openAddParam" type="primary">新增参数</el-button>
             <span class="mp-toolbar-hint">
-              点「值」或「编辑」修改。划线的是继承值。
+              点「值」或「编辑」修改；划线为继承值。
             </span>
             <span class="mp-legend">
               <span class="mp-legend-item is-added">本层新增</span>
@@ -406,8 +406,7 @@ function applySource() {
 // 引擎默认配置是整条链路最底层，改动前必须明确告知影响范围
 async function confirmBuiltinChange() {
   return confirmBox(
-    '引擎默认配置是所有客户端的基础：修改将影响该引擎下的全部客户端，'
-    + '并被下层引擎平台配置与设备独立配置继承。确定要修改吗？',
+    '引擎默认配置是全部客户端的基线，改动会被下层继承。确定要修改吗？',
     '修改引擎默认配置',
     { type: 'warning', confirmButtonText: '继续修改' })
 }
@@ -436,9 +435,9 @@ const inheritChain = computed(() => {
 const currentHint = computed(() => {
   if (!current.value) return ''
   const s = current.value
-  if (s.kind === 'builtin') return '引擎内置的默认内容，是该引擎全部配置的起点'
-  if (s.kind === 'general') return '覆盖引擎默认配置，作用于该引擎 + 平台的全部设备'
-  return `覆盖引擎平台配置，仅对当前设备生效（${s.detail}）`
+  if (s.kind === 'builtin') return '引擎内置默认，全部配置的起点'
+  if (s.kind === 'general') return '覆盖引擎默认，作用于该平台全部设备'
+  return `只对当前设备生效（${s.detail}）`
 })
 
 // 生效配置展开成"点号路径"的扁平行：字典行是分组标题，叶子行可编辑。
