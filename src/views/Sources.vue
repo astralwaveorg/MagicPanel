@@ -1447,7 +1447,7 @@ async function testAllLocal() {
 async function copyUrl(row) {
   try {
     await copyText(row.url)
-    ElMessage.success('URL 已复制')
+    ElMessage.success('已复制')
   } catch {
     urlContent.value = row.url
     urlCopied.value = false

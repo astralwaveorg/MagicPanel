@@ -766,7 +766,7 @@ async function forceBatchDelete(ids) {
 async function copyUrl(row) {
   try {
     await copyText(row.url)
-    ElMessage.success('URL 已复制')
+    ElMessage.success('已复制')
   } catch {
     // 剪贴板被拒时才弹兜底窗，供手动复制
     urlContent.value = row.url

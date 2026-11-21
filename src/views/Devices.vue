@@ -337,7 +337,7 @@ async function reveal(row) {
     const resp = await api(`/api/v1/devices/${row.id}/reveal`, { method: 'POST' })
     try {
       await navigator.clipboard.writeText(resp.subscription_url)
-      ElMessage.success('订阅地址已复制')
+      ElMessage.success('已复制')
     } catch {
       ElMessage.warning('复制失败，请到 MagicPanel 订阅中心查看')
     }

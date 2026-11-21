@@ -476,7 +476,7 @@ async function saveWebdav() {
     if (webdav.password) values.password = webdav.password
     await api('/api/v1/backup/webdav', { method: 'PUT', body: { values } })
     webdav.password = ''
-    ElMessage.success('已保存 WebDAV 配置')
+    ElMessage.success('已保存')
     await loadWebdav()
   } catch (e) {
     ElMessage.error(e.message)

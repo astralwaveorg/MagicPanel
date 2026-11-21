@@ -125,7 +125,7 @@ export async function saveAutoSettings() {
       auto_publish_enabled: form.auto_publish_enabled ? '1' : '0',
       auto_publish_env: form.auto_publish_env,
     } } })
-    ElMessage.success('自动任务设置已保存')
+    ElMessage.success('已保存')
     await refreshAutoStatus()
   } catch (e) {
     ElMessage.error(e.message)
