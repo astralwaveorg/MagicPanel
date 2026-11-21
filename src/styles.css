@@ -450,22 +450,9 @@ html, body, #app {
   /* 开关行：标签与开关同一行 */
   .mp-switch-row { padding: 6px 0; }
 
-  /* 顺序列：手机上触屏拖不动手柄，改用 ↑↓ 按钮，手柄隐藏；
-     两个按钮必须同一行（列宽只有 56px），否则会竖着排开 */
-  .drag-handle { display: none; }
-  .order-cell {
-    flex-wrap: nowrap !important;
-    gap: 0 !important;
-    justify-content: center;
-    align-items: center;
-  }
-  .order-cell .el-button {
-    margin: 0 !important;
-    padding: 4px 3px !important;
-    min-width: 24px;
-    height: 30px;
-    line-height: 1;
-  }
+  /* 顺序列：移动端保留拖拽手柄——useRowSortable 配了 200ms 触屏延迟
+     （delayOnTouchOnly），按住拖动与滚动手势不冲突；此前手柄在窄屏
+     被 display:none 隐藏、替代的 ↑↓ 按钮又从未实现，移动端排序失效 */
 
   /* 表格：字号与内边距收紧；固定列由脚本在窄屏关闭 */
   .el-table { font-size: 13px; }

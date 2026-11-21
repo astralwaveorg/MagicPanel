@@ -274,7 +274,7 @@ async function load() {
 }
 onMounted(load)
 
-function openEdit(row) {
+async function openEdit(row) {
   presetKey.value = ''
   editing.value = row || null
   Object.assign(form, emptyForm(), row ? {

@@ -88,13 +88,13 @@
         <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="id" size="small"
                   @selection-change="onSelectionChange">
           <el-table-column type="selection" width="44" :fixed="isMobile ? false : 'left'" />
-          <el-table-column prop="name" label="名称" min-width="110" :fixed="isMobile ? false : 'left'" />
+          <el-table-column prop="name" label="名称" min-width="130" :fixed="isMobile ? false : 'left'" />
           <el-table-column label="类型" width="100">
             <template #default="{ row }">{{ KIND_LABELS[row.kind] || row.kind }}</template>
           </el-table-column>
           <el-table-column prop="behavior" label="行为" width="90" />
           <el-table-column prop="format" label="格式" width="90" />
-          <el-table-column label="URL" width="110">
+          <el-table-column label="URL" width="130">
             <template #default="{ row }">
               <el-button v-if="row.kind === 'remote' && row.url" size="small" @click="copyUrl(row)" type="info" plain>复制 URL</el-button>
               <el-tooltip v-else-if="row.kind === 'repo' && row.repo_path"
@@ -118,12 +118,6 @@
               <span v-if="row.kind === 'inline'" style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
-          <el-table-column prop="rule_count" label="规则数" width="90" align="right" sortable>
-            <template #default="{ row }">{{ row.rule_count ?? '—' }}</template>
-          </el-table-column>
-          <el-table-column label="摘要" min-width="130">
-            <template #default="{ row }"><span class="mono mp-nowrap">{{ shortSha(row.sha256) }}</span></template>
-          </el-table-column>
           <el-table-column label="被引用" min-width="170">
             <template #default="{ row }">
               <span v-if="!row.referenced_by || !row.referenced_by.length" class="mp-cell-sub">—</span>
@@ -140,15 +134,25 @@
           <el-table-column label="最近成功" min-width="160">
             <template #default="{ row }"><span class="mp-nowrap">{{ fmtTime(row.last_fetched_at) }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
+          <el-table-column label="操作" :width="isMobile ? 150 : 210" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <div class="op-grid">
-                <el-button size="small" :disabled="!row.has_content" @click="preview(row)" type="info" plain>内容</el-button>
-                <el-button size="small" v-if="row.kind === 'remote'" :loading="row._refreshing" @click="refresh(row)" type="primary">抓取</el-button>
-                <el-button size="small" v-else-if="row.kind === 'repo'" :loading="row._refreshing" @click="refresh(row)" type="primary">从仓库同步</el-button>
-                <EnableToggle :enabled="row.enabled" :loading="row._toggling" @toggle="toggleEnabled(row)" />
+                <el-button v-if="row.kind === 'remote'" size="small" :loading="row._refreshing"
+                           :disabled="row._toggling" @click="refresh(row)" type="primary">抓取</el-button>
+                <el-button v-else-if="row.kind === 'repo'" size="small" :loading="row._refreshing"
+                           :disabled="row._toggling" @click="refresh(row)" type="primary">同步</el-button>
+                <span v-else class="mp-cell-sub" style="text-align:center">—</span>
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
-                <el-button size="small" @click="remove(row)" type="danger" plain>删除</el-button>
+                <el-dropdown trigger="click" @command="(cmd) => rowCommand(cmd, row)">
+                  <el-button size="small">更多<el-icon class="mp-caret"><ArrowDown /></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="view" :disabled="!row.has_content">查看</el-dropdown-item>
+                      <el-dropdown-item command="toggle">{{ row.enabled ? '停用' : '启用' }}</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </div>
             </template>
           </el-table-column>
@@ -310,7 +314,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Search, ArrowDown } from '@element-plus/icons-vue'
 import { confirmBox } from '../confirm'
 import { api } from '../api'
 import { useMobile } from '../mobile'
@@ -324,7 +328,7 @@ import ErrorState from '../components/ErrorState.vue'
 import Pager from '../components/Pager.vue'
 import BatchResultDialog from '../components/BatchResultDialog.vue'
 import RefConfirmDialog from '../components/RefConfirmDialog.vue'
-import { fmtTime, intervalText, shortSha, sourceStatus } from '../format'
+import { fmtTime, intervalText, sourceStatus } from '../format'
 import { copyText } from '../utils/clipboard'
 
 // 来源类型三态：远程 / 内联 / 仓库（仓库托管由自主维护同步而来）
@@ -513,6 +517,12 @@ async function openEdit(row) {
       if (form.use_proxy) form.proxy_url = data.proxy_url || ''
     } catch { /* 无 reveal 权限时保持展示值，保存端会把脱敏值视为未改动 */ }
   }
+}
+
+function rowCommand(cmd, row) {
+  if (cmd === 'view') preview(row)
+  else if (cmd === 'toggle') toggleEnabled(row)
+  else if (cmd === 'delete') remove(row)
 }
 
 async function save() {
