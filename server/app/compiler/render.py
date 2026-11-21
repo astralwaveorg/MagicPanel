@@ -400,12 +400,20 @@ def render_target(snapshot: dict, target: dict, warnings: list | None = None,
     # 本地节点跟随本目标实际生效的策略组，避免把其他设备的私有隧道及密钥
     # 分发给本目标。不能按全局策略组筛选：其中可能包含目标专属的策略组。
     # 节点也可以直接作为组成员被引用（用产物标识），这时它同样跟着这个组走。
+    # regional 改名模式下产物名 = 用户自定义名（无类型后缀），组员引用必须
+    # 用这个形态才能通过 _select_structure 过滤并在改名映射后落到产物节点。
     local_index = local_node_service.display_index(
         [n for n in snapshot.get("local_nodes", []) if n.get("enabled")])
+    local_display_extra: set[str] = set()
+    if regional_plan is not None:
+        for (sid, _old), label in regional_plan.items():
+            if sid is None:
+                local_display_extra.add(label)
     variant_id = int((variant or {}).get("id", 0))
     groups, rules = _select_structure(
         snapshot, target, warnings, (device or {}).get("name"),
-        set(local_index) | {n['emit_name'] for n in snapshot.get('node_catalog',[]) if n.get('origin_kind') == 'source'}, variant_id)
+        set(local_index) | local_display_extra
+        | {n['emit_name'] for n in snapshot.get('node_catalog',[]) if n.get('origin_kind') == 'source'}, variant_id)
     used_local = {
         node_id for group in groups for node_id in (group.get("local_nodes") or [])
     }
