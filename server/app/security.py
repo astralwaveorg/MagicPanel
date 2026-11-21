@@ -171,7 +171,7 @@ def mask_url(url: str) -> str:
     """
     if not url:
         return ""
-    return _URL_USERINFO.sub("***@", url)
+    return _URL_USERINFO.sub("***", url)
 
 
 def mask_url_secret(url: str) -> str:
