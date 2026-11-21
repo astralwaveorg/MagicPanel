@@ -1425,6 +1425,16 @@ def test_local_node_crud_render_and_group_reference(client):
                          headers=h).status_code == 200
 
 
+def test_quality_run_rejects_conflicting_params(client):
+    """「测试选中节点」与「测全部节点」互斥：参数冲突先于核心检查被拒绝。"""
+    csrf = setup_admin(client)
+    h = auth_headers(csrf)
+    r = client.post("/api/v1/unlock/quality/run", headers=h,
+                    json={"all": True, "node_keys": ["香港 02"]})
+    assert r.status_code == 400, r.text
+    assert "不能同时" in r.json()["detail"]
+
+
 def test_local_node_reorder(client):
     """本地节点列表拖拽排序：按提交 id 顺序重排，重复/未知 id 被拒绝。"""
     csrf = setup_admin(client)

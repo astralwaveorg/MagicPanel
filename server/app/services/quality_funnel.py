@@ -132,11 +132,13 @@ def _matching_results(proxies, results, cfg, key):
 
 
 def run_funnel(proxies: list[dict], operator: str = "系统",
-               only_missing: bool = True, *, max_nodes: int | None = None) -> dict:
+               only_missing: bool = True, *, max_nodes: int | None = None,
+               selected: list[str] | None = None) -> dict:
     """跑一轮漏斗，返回 {results: [...], stats: {...}}。
 
     proxies：Mihomo 节点字典列表（含 name/server/port/type）。
     only_missing=True 时跳过已有完整结果的节点（增量跑）。
+    selected：指定节点名列表——强制重测这些节点（忽略复测间隔与每批上限）。
     """
     from . import routing_planner
     from .probes import registry
@@ -151,6 +153,11 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
     key = security.derive_subkey(security.load_master_material(), purpose="node-quality")
 
     from . import node_rename
+
+    if selected is not None:
+        wanted = set(selected)
+        proxies = [p for p in proxies if p.get("name") in wanted]
+        only_missing = False
 
     pending = []
     revisions = {}
@@ -187,7 +194,10 @@ def run_funnel(proxies: list[dict], operator: str = "系统",
 
     pending.sort(key=queue_key)
     limit = cfg["round_limit"]
-    if max_nodes is not None:
+    if selected is not None:
+        # 手动勾选的节点全量本轮跑完，不受每批上限约束
+        limit = len(pending)
+    elif max_nodes is not None:
         limit = min(limit, max_nodes)
     pending = pending[:limit]
     if not pending:

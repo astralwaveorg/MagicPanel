@@ -17,43 +17,37 @@
       </el-collapse-item>
     </el-collapse>
     <div class="quality-actions">
-      <span class="qa-group">
-        <span class="qa-label">手动检测</span>
-        <el-button size="small" type="success" :loading="busy" :disabled="loading || quality.task?.running" @click="run">
-          测下一批
-        </el-button>
-        <el-button size="small" type="success" plain :loading="busy"
-                   :disabled="loading || quality.task?.running || !items.length" @click="runAll">
-          测全部节点
-        </el-button>
-      </span>
-      <span class="qa-group">
-        <span class="qa-label">结果</span>
-        <el-button size="small" :disabled="loading" @click="load">刷新结果</el-button>
-        <el-button size="small" :disabled="!quality.counts?.probed" :loading="exporting" @click="download">
-          导出达标节点
-        </el-button>
-      </span>
+      <el-button size="small" type="success" :loading="busy"
+                 :disabled="loading || quality.task?.running || !selection.length" @click="runSelected">
+        测试选中节点
+      </el-button>
+      <el-button size="small" type="success" plain :loading="busy"
+                 :disabled="loading || quality.task?.running || !items.length" @click="runAll">
+        测全部节点
+      </el-button>
+      <el-button size="small" :disabled="loading" @click="load">刷新结果</el-button>
+      <el-button size="small" :disabled="!quality.counts?.probed" :loading="exporting" @click="download">
+        导出达标节点
+      </el-button>
       <el-button size="small" :disabled="loading || !!loadError" @click="editSettings">检测设置</el-button>
+      <el-select v-if="items.length" v-model="filter" size="small" aria-label="筛选节点" class="quality-filter-select">
+        <el-option v-for="option in filters" :key="option.id" :label="option.label" :value="option.id" />
+      </el-select>
+      <span v-if="items.length" class="mp-form-hint" style="margin:0">{{ filtered.length }} 个节点</span>
       <span class="qa-group">
         <span class="qa-label">自动检测</span>
         <el-switch aria-label="自动检测" :model-value="quality.auto" :disabled="loading || saving || !!loadError"
                    @change="toggleAuto" />
-        <span class="mp-form-hint" style="margin:0">{{ autoState }}</span>
       </span>
     </div>
     <p v-if="loadError" role="alert" class="mp-form-hint">{{ loadError }}</p>
     <p v-else-if="quality.task?.running" class="mp-form-hint">正在检测（{{ runningHint }}）。完成后列表自动更新，也可点「刷新结果」立即查看。</p>
     <p v-else-if="quality.task?.last?.error" class="mp-form-hint">{{ quality.task.last.error }}</p>
     <p v-else-if="quality.task?.last?.skipped" class="mp-form-hint">{{ quality.task.last.skipped }}</p>
-    <div v-if="items.length" class="quality-filters">
-      <el-select v-model="filter" size="small" aria-label="筛选节点">
-        <el-option v-for="option in filters" :key="option.id" :label="option.label" :value="option.id" />
-      </el-select>
-      <span class="mp-form-hint">{{ filtered.length }} 个节点</span>
-    </div>
     <div v-if="items.length" class="mp-table-wrap">
-      <el-table :data="visible" size="small" empty-text="没有符合条件的节点" @sort-change="onSortChange">
+      <el-table :data="visible" size="small" empty-text="没有符合条件的节点"
+                @sort-change="onSortChange" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="44" />
         <el-table-column type="expand">
           <template #default="{ row }">
             <p v-if="row.download" class="mp-form-hint">
@@ -211,9 +205,6 @@ const sorted = computed(() => {
 const visible = computed(() => pageSize.value
   ? sorted.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value)
   : sorted.value)
-const autoState = computed(() => quality.value.auto
-  ? quality.value.scheduler_on ? '自动检测已开启' : '系统定时任务未开启'
-  : '自动检测已关闭')
 // 运行中提示：说清当前是单批还是循环全量，口径来自最近一轮统计。
 const runningHint = computed(() => quality.value.task?.last?.pending
   ? `每批按设置上限分批循环，上一轮待测 ${quality.value.task.last.pending} 个`
@@ -246,10 +237,15 @@ async function load() {
   } finally { loading.value = false }
 }
 
-async function run() {
+const selection = ref([])
+function onSelectionChange(rows) { selection.value = rows }
+
+async function runSelected() {
+  const names = selection.value.map(row => row.name).filter(Boolean)
+  if (!names.length) return
   busy.value = true
   try {
-    await api('/api/v1/unlock/quality/run', { method: 'POST' })
+    await api('/api/v1/unlock/quality/run', { method: 'POST', body: { node_keys: names } })
     quality.value = { ...quality.value, task: { running: true } }
     schedule()
   } catch (e) { ElMessage.error(e.message) } finally { busy.value = false }
@@ -315,11 +311,10 @@ onUnmounted(() => { if (timer) clearTimeout(timer); cancellation.abort() })
 </script>
 
 <style scoped>
-.quality-actions, .quality-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
-.quality-actions { row-gap: 6px; }
+.quality-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0; row-gap: 6px; }
+.quality-filter-select { width: 140px; }
 .qa-group { display: inline-flex; align-items: center; gap: 8px; }
 .qa-label { font-size: 12.5px; color: var(--mp-text-secondary); }
-.quality-filters .el-select { width: 150px; }
 .quality-page-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 10px; }
 .quality-page-controls { display: flex; align-items: center; gap: 10px; }
 .quality-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
