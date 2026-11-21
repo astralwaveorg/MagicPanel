@@ -40,17 +40,19 @@
 - DB 层：导入时自动备份 `data/magicpanel.db.before-import-*`
 - 路由器层：重新执行订阅更新即回到旧产物（构建历史不可变，旧产物 #348 仍在）；极端情况用 `/etc/openclash/backup/` 现有 OpenClash 备份
 
-## 六、优化批次（2026-11-21 追加，向阳确认立项后实施）
+## 六、深度重构（向阳确认立项，2026-11-21 实施完成）
 
-向阳确认两项决策后实施：设备订阅按「内网的不需要，LVSP/安卓/iOS 保留」处置；深度重构立项。
+向阳决策：设备按「内网的不需要，LVSP/安卓/iOS 保留」处置；深度重构立项实施。
 
-已落地：
+**批次二（重构实施）：**
 
-1. **设备**：Astral-Macmini-Stash、Astral-AppleTV-Stash 已删除（内网设备走路由器主代理）；剩余 11 台 = Astral 6 台（iPhone/Android×2/MacBook/Windows×2）+ LVSP 5 台，全部保留订阅。
-2. **移动网络方案归档**：variant 2 enabled=0（35 组/126 规则数据保留，可恢复）；停用后 20 份 @移动网络 产物退出构建矩阵，旧 variant 订阅请求回退默认产物（兼容窗，约束 42）。
-3. **来源瘦身 141 → 63**：删除 78 个仅移动网络引用的旧来源（bm7 全家、magic-* 旧层、云服务商集合、地区专属集合等）；剩余 63 个全部被默认方案规则表或 DNS 基线引用，无无引用来源。
-4. **死规则全量分析**：43 个可分析集合全量条目首命中仿真——零死集合，最高覆盖率 0.5%（cn 110177 条里 496 条被上游 Custom_Direct 先命中，属正常交叉）。规则表无垃圾条目。
-5. 构建 #354 发布生产（release_rev 75），OpenClash 产物与 #353 逐行 diff 为零——设备订阅内容零变化，无网络瞬断。
-6. 回归：后端 970 passed / 前端 86 passed / 16 视图冒烟全过。
+1. **渲染器死代码清理**：`render.py` 删除 `_apply_service_groups` 全函数（168 行）与调用块——规则目标改为「新加坡媒体」等新组名后 SERVICE_RULES 不再命中。附带效果：36 个「- 服务名」别名副本节点与 1 个「已验证 · Netflix」组不再生成，OpenClash 产物回到**纯目标形态 58 组**（57 + 游戏 UDP 池 + 路由回家），节点列表 131 个（无别名副本噪音）。routing_planner 的 SERVICE_ALIAS_NAMES/service_proofs 保留（探测排序与「分流候选」展示仍在用）。
+2. **探测矩阵裁剪 35 → 17**：`probe_platform_ids` = 新加坡媒体六项（netflix/disney/hbo/primevideo/dazn/viu）+ AI 七项（chatgpt/claude/gemini/grok/copilot/perplexity）+ youtube_premium/tiktok/spotify/bahamut/appletv。漏斗实测：17 探测器生效、两自建节点 qualified、剩余平台按 deadline 分批补测（调度器自动）。
+3. **测试**：删除 7 个旧机制测试，改造 1 个（hysteria2 渲染正确性断言保留，别名断言移除）。回归后端 963 passed / 前端 86 passed。
+4. **构建 #355 发布生产**（release_rev 75）：规则表/rule-providers 与 #353 完全一致，proxies 167→131（去别名副本）、组 59→58（去已验证组）——产物更贴近目标形态。
 
-单媒体组渲染器路径（_apply_service_groups）已因规则目标改为「新加坡媒体」而自然失效，代码清理延后到应用重构专项；无法全量分析的 4 个集合（Custom_Direct_Domain/Custom_Proxy_Domain 为 mrs 无文本版、magic-process/magic-reject 为小体量自维护集）语义无害。
+**设备处置：** Astral-Macmini-Stash、Astral-AppleTV-Stash、Astral-PassWall-Mihomo 已删除；**Astral-Windows-Stash 与 Astral-Windows-Mihomo 保守保留**（向阳未及回复，误删代价是设备重新导入订阅，多留无害）——不需要时在设备管理删除即可，订阅地址同时失效。
+
+**批次一（此前已落地）：** 移动网络方案归档（35 组/126 规则数据保留）、来源瘦身 141→63、死规则全量分析（零死集合）、构建 #354 发布（产物零变化）。
+
+**文案复查：** 分流候选面板的「Netflix 日本 · 非自制剧样本」标签已随新形态过时，属 NodeQualityCard 文案，待下批界面调整时一并更新。
