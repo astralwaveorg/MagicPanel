@@ -44,10 +44,9 @@ def test_nodes_feed_shape_contains_all_enabled_nodes(client):
     names = [p["name"] for p in doc["proxies"]]
     # 本地节点用用户自定义名（不带类型后缀），与产物一致
     assert names == ["JP-02"]
-    assert doc["proxy-groups"] == [{
-        "name": "🚀 默认代理", "type": "select",
-        "proxies": ["JP-02", "DIRECT"]}]
-    assert doc["rules"] == ["MATCH,🚀 默认代理"]
+    # NodeList 形态：纯 proxies 段，不再附带策略组与兜底规则
+    assert "proxy-groups" not in doc and "rules" not in doc
+    assert doc["proxies"]
 
 
 def test_rotate_nodes_token_invalidates_old_link(client):

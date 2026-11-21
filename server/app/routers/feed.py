@@ -250,19 +250,18 @@ def _resolve_nodes_token(conn, token: str) -> str:
 
 
 def _render_nodes_config() -> tuple[str, int]:
-    """全部节点裸配置：所有启用节点 + 一个 select 组 + MATCH 兜底。
+    """全部节点 NodeList：只输出 proxies 段的纯节点列表。
 
     节点池与探测、构建同一来源（_collect_probe_proxies）：已统一 emit_name、
     剔除占位与公告节点、重名去重，含启用的本地节点。名字套用构建同款的
     regional 改名（机场代码/家宽/倍率/解锁服务），与产物里的名称一致。
-    方言为 Mihomo/Clash。
+    纯 proxies 结构可直接导入各类客户端，也是订阅转换器的标准输入。
     """
     from ..services import scheduler, node_rename
     with db.connect() as conn:
         plan = node_rename.regional_names(node_rename.regional_catalog(conn))
     proxies = scheduler._collect_probe_proxies()
     seen = set()
-    names = []
     for proxy in proxies:
         name = str(proxy.get("name") or "")
         if not name:
@@ -273,27 +272,11 @@ def _render_nodes_config() -> tuple[str, int]:
             continue
         seen.add(label)
         proxy["name"] = label
-        names.append(label)
-    doc = {
-        "mixed-port": 7890,
-        "allow-lan": False,
-        "mode": "rule",
-        "log-level": "warning",
-        "unified-delay": True,
-        "tcp-concurrent": True,
-        "profile": {"store-selected": True},
-        "proxies": proxies,
-        "proxy-groups": [{
-            "name": "🚀 默认代理",
-            "type": "select",
-            "proxies": [*names, "DIRECT"],
-        }],
-        "rules": ["MATCH,🚀 默认代理"],
-    }
+    doc = {"proxies": proxies}
     text = yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=4096)
-    header = ("# MagicPanel 全部节点订阅：只含节点与一条兜底规则，不含分流策略。\n"
-              f"# 节点 {len(names)} 个，实时渲染于 {db.now()}。\n")
-    return header + text, len(names)
+    header = ("# MagicPanel 全部节点 NodeList：纯节点列表，不含策略组与分流规则。\n"
+              f"# 节点 {len(seen)} 个，实时渲染于 {db.now()}。\n")
+    return header + text, len(seen)
 
 
 @router.api_route("/nodes/{token}.yaml", methods=["GET", "HEAD"])

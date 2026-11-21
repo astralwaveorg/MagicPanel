@@ -73,12 +73,12 @@
         <!-- 全部节点订阅：裸配置，方便导入其它客户端或分享 -->
         <section v-if="nodesFeed.url" class="pt-nodes">
           <div class="pt-sec-head">
-            <h2 class="pt-sec-title">全部节点<small>{{ nodesFeed.nodeCount || '' }} 个节点 · 不含分流规则</small></h2>
+            <h2 class="pt-sec-title">全部节点<small>{{ nodesFeed.node_count ? nodesFeed.node_count + ' 个节点' : '' }} · NodeList</small></h2>
           </div>
           <div class="pt-card pt-nodes-card">
             <p class="pt-card-note">
-              所有启用节点的裸订阅：一个策略组加一条兜底规则，没有分流策略，适合导入任意客户端。
-              链接即凭据，泄露等同于节点池泄露；重置后旧链接立即失效。
+              全部启用节点的纯节点列表（NodeList），可直接导入客户端或交给订阅转换器。
+              链接即凭据，泄露等同节点池泄露；重置后旧链接立即失效。
             </p>
             <div class="pt-nodes-urlrow">
               <div
