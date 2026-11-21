@@ -374,9 +374,28 @@
       <!-- 配置源码预览 -->
       <div v-if="previewDevice" class="pt-modal" @click.self="closePreview">
         <div class="pt-modal-card pt-preview-card">
-          <p class="pt-modal-title">
-            {{ previewDevice.display_name || previewDevice.name }}
-            <span v-if="pickOf(previewDevice)" class="pt-tag soft">{{ pickOf(previewDevice) }} 方案</span>
+          <p class="pt-modal-title pt-preview-title">
+            <span class="pt-preview-name">
+              {{ previewDevice.display_name || previewDevice.name }}
+              <span v-if="pickOf(previewDevice) && !isDefaultPick(pickOf(previewDevice))"
+                    class="pt-tag soft">{{ pickOf(previewDevice) }} 方案</span>
+            </span>
+            <span class="pt-preview-corner">
+              <button
+                class="pt-btn pt-btn-sm"
+                :disabled="previewState !== 'ready'"
+                @click="copy(previewText, 'preview')"
+              >{{ copied === 'preview' ? '已复制' : '复制' }}</button>
+              <a
+                v-if="previewRawUrl"
+                class="pt-btn pt-btn-sm"
+                :href="previewRawUrl"
+                target="_blank"
+                rel="noopener"
+                title="在新标签页打开原始文件"
+              >原文</a>
+              <button class="pt-preview-close" @click="closePreview" aria-label="关闭">✕</button>
+            </span>
           </p>
           <p class="pt-preview-meta">
             {{ platformLabel(previewDevice.platform) }} · {{ previewDevice.target_name }}
@@ -387,22 +406,6 @@
           <div v-if="previewState === 'ready'" class="pt-yaml">
             <pre class="pt-yaml-gutter">{{ previewGutter }}</pre>
             <pre class="pt-yaml-code" v-html="previewHtml"></pre>
-          </div>
-          <div class="pt-detail-actions">
-            <button
-              class="pt-btn"
-              :disabled="previewState !== 'ready'"
-              @click="copy(previewText, 'preview')"
-            >{{ copied === 'preview' ? '已复制' : '复制内容' }}</button>
-            <a
-              v-if="previewRawUrl"
-              class="pt-btn"
-              :href="previewRawUrl"
-              target="_blank"
-              rel="noopener"
-              title="在新标签页打开原始文件"
-            >原文</a>
-            <button class="pt-btn" @click="closePreview">关闭</button>
           </div>
         </div>
       </div>
@@ -1548,7 +1551,15 @@ onUnmounted(() => {
 }
 /* 窄屏下三个按钮别把文字挤成两行 */
 .pt-preview-card .pt-detail-actions { flex-wrap: wrap; }
-.pt-preview-card .pt-detail-actions .pt-btn { white-space: nowrap; }
+.pt-preview-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pt-preview-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pt-preview-corner { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.pt-btn-sm { padding: 5px 12px; font-size: 12px; }
+.pt-preview-close {
+  background: none; border: none; color: #8f96b0; font-size: 18px; line-height: 1;
+  cursor: pointer; padding: 2px 6px; border-radius: 6px;
+}
+.pt-preview-close:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
 .pt-yaml {
   display: flex;
   max-height: 64vh;
