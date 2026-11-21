@@ -105,6 +105,20 @@
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
           </el-table-column>
+          <el-table-column label="规则分流" width="110">
+            <template #default="{ row }">
+              <!-- 指向该组的启用规则数；完整清单悬浮显示，单行不换行 -->
+              <el-tooltip v-if="ruleRefs(row.name).length" placement="top" :show-after="200">
+                <template #content>
+                  <div class="mp-list-tip mp-rule-tip">
+                    <div v-for="r in ruleRefs(row.name)" :key="r.id">{{ ruleText(r) }}</div>
+                  </div>
+                </template>
+                <span class="mp-list-brief">{{ ruleRefs(row.name).length }} 条规则</span>
+              </el-tooltip>
+              <span v-else style="color:var(--mp-muted)">—</span>
+            </template>
+          </el-table-column>
           <el-table-column label="节点来源" width="120">
             <template #default="{ row }">
               <el-tooltip v-if="row.use_sources && row.use_sources.length" placement="top" :show-after="200">
@@ -117,22 +131,6 @@
                   </div>
                 </template>
                 <span class="mp-list-brief">{{ sourceBrief(row.use_sources) }}</span>
-              </el-tooltip>
-              <span v-else style="color:var(--mp-muted)">—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="规则分流" width="110">
-            <template #default="{ row }">
-              <!-- 指向该组的启用规则数；完整清单悬浮显示，单行不换行 -->
-              <el-tooltip v-if="ruleRefs(row.name).length" placement="top" :show-after="200">
-                <template #content>
-                  <div class="mp-list-tip mp-rule-tip">
-                    <div v-for="(r, i) in ruleRefs(row.name)" :key="i">
-                      {{ i + 1 }}. {{ ruleText(r) }}
-                    </div>
-                  </div>
-                </template>
-                <span class="mp-list-brief">{{ ruleRefs(row.name).length }} 条规则</span>
               </el-tooltip>
               <span v-else style="color:var(--mp-muted)">—</span>
             </template>
@@ -484,7 +482,8 @@ function ruleRefs(name) {
 }
 
 function ruleText(r) {
-  return `#${r.sort} ${r.type}${r.value ? ',' + r.value : ''}`
+  // 只显示规则值（悬浮清单里类型前缀和序号太吵）；MATCH 这类无值的退回类型名
+  return r.value || r.type
 }
 
 const hasHealthCheck = computed(() =>
