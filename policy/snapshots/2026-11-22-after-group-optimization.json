@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "exported_at": "2026-11-21T20:21:39+00:00",
+  "exported_at": "2026-11-22T09:38:43+00:00",
   "meta": {
-    "build_id": 389,
+    "build_id": 394,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "854dc1bb5e0acaa0fb0db4f8f9560c7bfac822118e25da67e9d405c26078dd6c",
-    "build_created_at": "2026-11-22T04:20:52+08:00"
+    "policy_sha": "8bd055c4092c8f30f124cb61d5e1447aff7f18fac2cb0f23f7eb8a589324cfb1",
+    "build_created_at": "2026-11-22T17:35:50+08:00"
   },
   "variants": [
     {
@@ -1142,7 +1142,7 @@
       "sort": 66,
       "type": "RULE-SET",
       "value": "disney",
-      "target": "🇸🇬 新加坡媒体",
+      "target": "🇸🇬 SG 媒体",
       "enabled": 1,
       "note": "Disney+",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1160,7 +1160,7 @@
       "sort": 67,
       "type": "RULE-SET",
       "value": "hbo",
-      "target": "🇸🇬 新加坡媒体",
+      "target": "🇸🇬 SG 媒体",
       "enabled": 1,
       "note": "HBO Max",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1178,7 +1178,7 @@
       "sort": 68,
       "type": "RULE-SET",
       "value": "primevideo",
-      "target": "🇸🇬 新加坡媒体",
+      "target": "🇸🇬 SG 媒体",
       "enabled": 1,
       "note": "Prime Video",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1196,7 +1196,7 @@
       "sort": 69,
       "type": "RULE-SET",
       "value": "dazn",
-      "target": "🇸🇬 新加坡媒体",
+      "target": "🇸🇬 SG 媒体",
       "enabled": 1,
       "note": "DAZN",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1214,7 +1214,7 @@
       "sort": 70,
       "type": "RULE-SET",
       "value": "viu",
-      "target": "🇸🇬 新加坡媒体",
+      "target": "🇸🇬 SG 媒体",
       "enabled": 1,
       "note": "Viu",
       "created_at": "2026-11-21T08:16:50+08:00",
@@ -1878,14 +1878,14 @@
     {
       "id": 1019,
       "variant_id": 0,
-      "name": "🇸🇬 新加坡媒体",
-      "type": "select",
+      "name": "🇸🇬 SG 媒体",
+      "type": "fallback",
       "sort": 15,
       "hidden": 0,
-      "filter": "",
-      "use_sources": "[]",
+      "filter": "(?=.*(新加坡|(?<![a-zA-Z])[sS][gG][pP]?(?![a-zA-Z])))(?=.*自建)",
+      "use_sources": "[\"*\"]",
       "local_nodes": "[]",
-      "proxies": "[\"🇸🇬 SG自建\", \"🇸🇬 新加坡自动\"]",
+      "proxies": "[\"🇸🇬 SG自建\", \"🇯🇵 JP自建\", \"🇸🇬 新加坡自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1896,8 +1896,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-21T08:16:50+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
+      "updated_at": "2026-11-22T04:30:22+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1044\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2335,7 +2335,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 US自建\", \"♻️ 自动选择\", \"🇺🇸 美国自动\", \"🇭🇰 香港自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2346,8 +2346,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T04:01:12+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T04:24:22+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1001\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -2576,31 +2576,6 @@
       "members_format": "typed-v2"
     },
     {
-      "id": 1050,
-      "variant_id": 0,
-      "name": "🇹🇷 土耳其自动",
-      "type": "url-test",
-      "sort": 53,
-      "hidden": 1,
-      "filter": "(🇹🇷|土耳其|Turkey|TURKEY|Türkiye|\\bTR(?:[-_ ]?\\d+(?:[-_ ]?[A-Za-z]{2,})?)?\\b|TUR|IST|ANK)",
-      "use_sources": "[\"*\"]",
-      "local_nodes": "[]",
-      "proxies": "[]",
-      "url": "https://www.gstatic.com/generate_204",
-      "interval": 300,
-      "timeout": 8000,
-      "tolerance": 50,
-      "lazy": 1,
-      "strategy": "",
-      "local_first": 0,
-      "targets": "[\"*\"]",
-      "devices": "[\"*\"]",
-      "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-21T18:38:51+08:00",
-      "members_v2": "[]",
-      "members_format": "typed-v2"
-    },
-    {
       "id": 1051,
       "variant_id": 0,
       "name": "🌍 其他自动",
@@ -2660,7 +2635,7 @@
       "filter": "(?=.*(日本|(?<![a-zA-Z])[jJ][pP][nN]?(?![a-zA-Z])))(?=.*自建)",
       "use_sources": "[\"*\"]",
       "local_nodes": "[]",
-      "proxies": "[\"🇯🇵 日本自建 01 (机房)\"]",
+      "proxies": "[\"🇯🇵 日本自建 01 (机房)\", \"🇯🇵 日本自建 02 (机房)\", \"🇯🇵 日本自建 03 (机房)\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -2671,8 +2646,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:18:11+08:00",
-      "members_v2": "[{\"kind\": \"node\", \"ref\": \"86723dbfb98a4040803349ea843d5e4d\"}]",
+      "updated_at": "2026-11-22T17:35:38+08:00",
+      "members_v2": "[{\"kind\": \"node\", \"ref\": \"86723dbfb98a4040803349ea843d5e4d\"}, {\"kind\": \"node\", \"ref\": \"5526d38d3b6746ee8b699e1eafe43c71\"}, {\"kind\": \"node\", \"ref\": \"19a456cc8a8d41c58d565ce5a113724a\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -3572,5 +3547,5 @@
       "enabled": 1
     }
   ],
-  "digest": "286d1a682e87e2bbcf3f7e12acad7d67592a6b9b7e7922fe24618e419507f670"
+  "digest": "308fcfce329f6d355e41a71d493a11f14f3adb965d9df78c650f7899d9db6dfd"
 }
