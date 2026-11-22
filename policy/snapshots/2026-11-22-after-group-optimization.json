@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "exported_at": "2026-11-22T09:38:43+00:00",
+  "exported_at": "2026-11-22T10:14:51+00:00",
   "meta": {
-    "build_id": 394,
+    "build_id": 396,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "8bd055c4092c8f30f124cb61d5e1447aff7f18fac2cb0f23f7eb8a589324cfb1",
-    "build_created_at": "2026-11-22T17:35:50+08:00"
+    "policy_sha": "601b89e252fbc8b08ffafb796ffd7ad191632918cf30e04723608658d2e5f091",
+    "build_created_at": "2026-11-22T18:14:29+08:00"
   },
   "variants": [
     {
@@ -2629,7 +2629,7 @@
       "id": 1053,
       "variant_id": 0,
       "name": "🇯🇵 JP自建",
-      "type": "url-test",
+      "type": "fallback",
       "sort": 56,
       "hidden": 1,
       "filter": "(?=.*(日本|(?<![a-zA-Z])[jJ][pP][nN]?(?![a-zA-Z])))(?=.*自建)",
@@ -2646,7 +2646,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T17:35:38+08:00",
+      "updated_at": "2026-11-22T18:14:18+08:00",
       "members_v2": "[{\"kind\": \"node\", \"ref\": \"86723dbfb98a4040803349ea843d5e4d\"}, {\"kind\": \"node\", \"ref\": \"5526d38d3b6746ee8b699e1eafe43c71\"}, {\"kind\": \"node\", \"ref\": \"19a456cc8a8d41c58d565ce5a113724a\"}]",
       "members_format": "typed-v2"
     },
@@ -2654,7 +2654,7 @@
       "id": 1055,
       "variant_id": 0,
       "name": "🇸🇬 SG自建",
-      "type": "url-test",
+      "type": "fallback",
       "sort": 57,
       "hidden": 1,
       "filter": "(?=.*(新加坡|(?<![a-zA-Z])[sS][gG][pP]?(?![a-zA-Z])))(?=.*自建)",
@@ -2671,7 +2671,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:18:11+08:00",
+      "updated_at": "2026-11-22T18:14:18+08:00",
       "members_v2": "[{\"kind\": \"node\", \"ref\": \"b360026fe3a44271975de275c08d0fa9\"}]",
       "members_format": "typed-v2"
     },
@@ -2679,7 +2679,7 @@
       "id": 1054,
       "variant_id": 0,
       "name": "🇺🇸 US自建",
-      "type": "url-test",
+      "type": "fallback",
       "sort": 58,
       "hidden": 1,
       "filter": "(?=.*(美国|(?<![a-zA-Z])[uU][sS][aA]?(?![a-zA-Z])))(?=.*自建)",
@@ -2696,7 +2696,7 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T03:18:11+08:00",
+      "updated_at": "2026-11-22T18:14:18+08:00",
       "members_v2": "[{\"kind\": \"node\", \"ref\": \"835eb25891764d7da637355fafbca237\"}, {\"kind\": \"node\", \"ref\": \"398ba80a91bb4242990b4b92b6b8fbdc\"}]",
       "members_format": "typed-v2"
     },
@@ -3547,5 +3547,5 @@
       "enabled": 1
     }
   ],
-  "digest": "308fcfce329f6d355e41a71d493a11f14f3adb965d9df78c650f7899d9db6dfd"
+  "digest": "2b42df5f832d4ca223f53f9fbd078a844d026efc3968517593166378e589ef0a"
 }
