@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "exported_at": "2026-11-22T10:20:38+00:00",
+  "exported_at": "2026-11-22T10:50:28+00:00",
   "meta": {
-    "build_id": 397,
+    "build_id": 400,
     "build_status": "PRODUCTION",
     "verify_status": "success",
-    "policy_sha": "dc5de6bd4f07926a800f6a91eec066f1731eb46ecbcfe092ea5babf39ba360f7",
-    "build_created_at": "2026-11-22T18:20:17+08:00"
+    "policy_sha": "8e11d5d33470fe2ce518939d8e2ef85b0a67a221fbbdaf151c20adb6df5a3ae1",
+    "build_created_at": "2026-11-22T18:49:55+08:00"
   },
   "variants": [
     {
@@ -1935,7 +1935,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌍 其他自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🇸🇬 SG自建\", \"🇺🇸 美国自动\", \"🇯🇵 日本自动\", \"🇸🇬 新加坡自动\", \"🇭🇰 香港自动\", \"🇹🇼 台湾自动\", \"🇰🇷 韩国自动\", \"🇬🇧 英国自动\", \"🇩🇪 德国自动\", \"🌍 其他自动\", \"🏠 家宽自动\", \"♻️ 自动选择\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1946,8 +1946,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T04:20:49+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
+      "updated_at": "2026-11-22T18:49:41+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1046\"}, {\"kind\": \"group\", \"ref\": \"1048\"}, {\"kind\": \"group\", \"ref\": \"1049\"}, {\"kind\": \"group\", \"ref\": \"1051\"}, {\"kind\": \"group\", \"ref\": \"1052\"}, {\"kind\": \"group\", \"ref\": \"1001\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -1960,7 +1960,7 @@
       "filter": "",
       "use_sources": "[]",
       "local_nodes": "[]",
-      "proxies": "[\"🇸🇬 新加坡自动\", \"🇯🇵 日本自动\", \"🇭🇰 香港自动\", \"🇺🇸 美国自动\", \"🇹🇼 台湾自动\", \"🇺🇸 US自建\", \"🇯🇵 JP自建\", \"🎯 全球直连\"]",
+      "proxies": "[\"🇺🇸 US自建\", \"🇸🇬 SG自建\", \"🇯🇵 JP自建\", \"🇺🇸 美国自动\", \"🇸🇬 新加坡自动\", \"🇯🇵 日本自动\", \"🇭🇰 香港自动\", \"🇹🇼 台湾自动\", \"🎯 全球直连\"]",
       "url": "https://www.gstatic.com/generate_204",
       "interval": 300,
       "timeout": 8000,
@@ -1971,8 +1971,8 @@
       "targets": "[\"*\"]",
       "devices": "[\"*\"]",
       "created_at": "2026-11-21T08:16:50+08:00",
-      "updated_at": "2026-11-22T00:44:55+08:00",
-      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
+      "updated_at": "2026-11-22T18:49:41+08:00",
+      "members_v2": "[{\"kind\": \"group\", \"ref\": \"1054\"}, {\"kind\": \"group\", \"ref\": \"1055\"}, {\"kind\": \"group\", \"ref\": \"1053\"}, {\"kind\": \"group\", \"ref\": \"1042\"}, {\"kind\": \"group\", \"ref\": \"1044\"}, {\"kind\": \"group\", \"ref\": \"1043\"}, {\"kind\": \"group\", \"ref\": \"1041\"}, {\"kind\": \"group\", \"ref\": \"1045\"}, {\"kind\": \"group\", \"ref\": \"1056\"}]",
       "members_format": "typed-v2"
     },
     {
@@ -3547,5 +3547,5 @@
       "enabled": 1
     }
   ],
-  "digest": "b1e5e8338d9445692aa0dfbc027d1a89491de04c0780ffa7b6b23fa718e727b2"
+  "digest": "4d1b7509e836385c1462aa4db416448f0862de39de1792dabc0eb2badf1c38b0"
 }
