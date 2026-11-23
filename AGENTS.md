@@ -51,6 +51,18 @@ chrome`（渲染器对 reality-opts 自动补）——缺指纹时 mihomo 直接
 路径出口 IP 均为 185.220.197.154。改后快照
 `policy/snapshots/2026-11-23-after-japan-a-nodes.json`（digest dcb4673069ab6298）。
 
+**2026-11-24 配额路由优化（构建 #406，修订 120）**：按四机实测结论与向阳三项决定
+（JP 重编号、恢复 8443、Emby 日本优先）调整。**JP 自建重编号**（四步轮换）：
+01=VPS.TAXI-Hy2(443)、02=VPS.TAXI-Hy2(8443·恢复 brutal 50/100)、03=LegendVPS-Hy2、
+04=LegendVPS-SS、05=VPS.TAXI-Vless，组序与编号一致；**US自建翻转**为
+[Hy2, Vless]（hy2 实测 30.5 Mbps/170ms 是 vless 的 3.3 倍）。**国际媒体**自建序改
+SG→JP→US（自动序 日→新→美）、**Emby** 改 JP→SG→US（向阳：66Cloud 只有 1TB 流量，
+流媒体吃流量，日本 2TB+1TB 优先，SG 2TB 次之）——配额逻辑：流媒体走 SG(2TB)/JP(3TB)，
+66Cloud(1TB) 留给日常主力与谷歌/AI。快照
+`policy/snapshots/2026-11-24-{before,after}-quota-routing.json`
+（digest 56bbc750→6924bb1e）。产物断言：JP/US 自建组序、国际媒体、Emby、8443 渲染
+（up 50/down 100/skip-cert-verify）全过；8 自建节点测速全 ok。
+
 **2026-11-23 自建节点实测（4 台 VPS）**：报告见
 `/Users/astral/Documents/MagicPanel-评审/2026-11-23-自建节点测试报告.md`，节点清单与
 完整链接见同目录 `2026-11-23-自建节点清单与链接.md`（含凭据，勿外传；机器以服务商
