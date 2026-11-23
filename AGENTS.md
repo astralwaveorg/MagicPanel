@@ -33,6 +33,24 @@ telegram-ip 移到 ai-cn 之后（sort 25-27，早于一切 AI/通讯集合）�
 门内展示复制/下载/二维码/重置；重置后旧链接立即失效。含全部凭据节点，链接泄露
 等同节点池泄露。
 
+**2026-11-23 日本 A（185.220.197.154）节点补全（构建 #405，修订 119）**：该机跑的是
+**sing-box 1.14.4**（不是 hysteria2 服务），一个进程里同时开四个入站：TCP 443 是
+VLESS+Reality（uuid / flow xtls-rprx-vision / server_name www.microsoft.com /
+short-id 72708404faa2f8c7），UDP 443 是 hysteria2（BBR），UDP 8443 是 hysteria2
+（brutal，up_mbps 50 / down_mbps 100 / ignore_client_bandwidth），TCP 10808 是
+socks5。防火墙全空（ufw inactive、nft 无规则、iptables 全 ACCEPT），8443 不通
+不是被拦。面板侧原「🇯🇵 日本自建 03」= hysteria2 185.220.197.154:8443 的密码、
+sni、up/down 与服务端**逐项一致**（密码哈希 1120e598e5671fe9），配置本身没错；
+本次新增 **🇯🇵 日本自建 04**（hysteria2 UDP 443，BBR，不带 up/down）与
+**🇯🇵 日本自建 05**（VLESS Reality TCP 443），两者与 03 同机同密码，形成同一台
+机器的三条独立路径（UDP 高位端口 / UDP 443 / TCP 443）。全部加入隐藏组
+**🇯🇵 JP自建**（fallback，成员顺序 01→02→03→04→05）。**Reality 公钥必须从服务端
+私钥推导**（RFC 7748 x25519，base64url 无填充），客户端还需 `client-fingerprint:
+chrome`（渲染器对 reality-opts 自动补）——缺指纹时 mihomo 直接报
+「REALITY is based on uTLS, please set a client-fingerprint」。产物级验证：三条
+路径出口 IP 均为 185.220.197.154。改后快照
+`policy/snapshots/2026-11-23-after-japan-a-nodes.json`（digest dcb4673069ab6298）。
+
 **2026-11-22 策略组优化（构建 #400，修订 114）**：按《2026-11-21 策略组优化评审稿》
 与《2026-11-22 执行任务清单》完成三范围。**A**：修复三个内联规则来源 404
 （2026-11-21 导入漏回填 `content`，经面板接口原样重存回填；防复发见 96d40c3）。
