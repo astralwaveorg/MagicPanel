@@ -79,8 +79,17 @@ SG→JP→US（自动序 日→新→美）、**Emby** 改 JP→SG→US（向阳
 `policy/snapshots/magicpanel-policy-2026-11-25-{before,after}.json`
 （digest ff895cea→bf3d89d2）。产物断言：03/04 渲染、US自建组序、两个新组、三处规则序、
 providers 下发地址全过；面板测速 03=1246ms / 04=618ms / 18(66Cloud Hy2)=711ms（含
-NAS→路由器透明代理链开销，仅供对比；真实延迟以路由器订阅刷新后为准）。同机另部署
-sub2api（原生 systemd + PG17/Redis，见 `VPS脚本文档/07-当前生产状态-sadidc.md`）。
+NAS→路由器透明代理链开销，仅供对比；真实延迟以路由器订阅刷新后为准）。
+**同日终检（构建 #416，rev 130）**：🌍 国外域名（MATCH 总控）成员前置
+`美国自建 01、02` 节点直引（日常兜底走 66Cloud 30Mbps，US自建退居第二梯队）；
+补回「🇸🇬 新加坡自建 02」（VLESS Reality `sga.magichub.top:443`，MLKEM 开关开，
+入 SG自建 = [01,02]，消除媒体组单点）。路由器模板（OpenClashConfig `f4ace00b`）同步三分法：
+AI×5+PayPal/国外电商→`US自建优选`(01/02/04)、YouTube→`▶️ YouTube`(落地测速 01/02)、
+Gemini→`✨ Gemini`(优选)、GitHub/容器/开发者→`落地测速`、故障转移与谷歌服务保持
+`US自建测速`(含 03 快线)、Grok 规则与组并入 category-ai-!cn；ruleset 64/64 顶格。
+面板与路由器双侧出口实证：Claude/Gemini=66Cloud、YouTube=01/02、搜索=03、漏网=01。
+快照 `policy/snapshots/magicpanel-policy-2026-11-25b-{before,after}.json`（digest c2055386→329956d0）。同机另部署
+sub2api（原生 systemd + PG17/Redis，见 `VPS脚本文档/VPS现役机器档案.md`）。
 
 **2026-11-23 自建节点实测（4 台 VPS）**：报告见
 `/Users/astral/Documents/MagicPanel-评审/2026-11-23-自建节点测试报告.md`，节点清单与
