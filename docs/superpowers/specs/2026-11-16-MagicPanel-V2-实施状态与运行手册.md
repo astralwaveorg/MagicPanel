@@ -205,6 +205,8 @@ python -X utf8 scripts/freeze_feed_contract.py arm --root <private-dir> --expect
 
 用户已创建 `dns-hk.magichub.top` / `dns-kr.magichub.top` A 记录，但这两项不再作为 Router Final 必备。修订原因：自有 VPS 会把续费、单机、单域封锁和单地域故障引入家庭 DNS 关键路径；公共多源 DoH/DoT 是更合理的默认方向，但必须多运营方并用并分别实测，不能单一公共服务商。
 
+> **2026-11-26 后记**：hka（103.38.83.78）已于 2026-11-23 退役，`dns-hk` 与 `kix` 的 A 记录已从 Cloudflare 删除；自建 DoH 候选仅剩 `dns-kr`（休眠，机器 armoci 在线）。
+
 当前结论：
 
 - HK/KR 18443 部署暂停；两 A 记录可休眠，不进入 R6S 候选配置。
