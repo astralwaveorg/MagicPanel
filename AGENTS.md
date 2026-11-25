@@ -63,6 +63,25 @@ SG→JP→US（自动序 日→新→美）、**Emby** 改 JP→SG→US（向阳
 （digest 56bbc750→6924bb1e）。产物断言：JP/US 自建组序、国际媒体、Emby、8443 渲染
 （up 50/down 100/skip-cert-verify）全过；8 自建节点测速全 ok。
 
+**2026-11-25 SadIDC 美国快线 + 链式节点与谷歌三分法（构建 #414，发布 rev 128）**：
+新机 **SadIDC 82.158.91.7**（Debian 13 / 2C / 2G / 20Mbps 精品线，`sada.magichub.top`）
+上线，与 66Cloud 组成「中转机（快线、轻量直连）+ 落地机（66Cloud 优质 IP、大带宽）」结构。
+**新增本地节点**：🇺🇸 美国自建 03（hysteria2 直连 `sada.magichub.top:33031`，出口本机 IP）、
+🇺🇸 美国自建 04（hysteria2 链式 `sada.magichub.top:40334`，服务端 sing-box 经 hy2 隧道
+落地 66Cloud `usb.magichub.top:58591`，出口 192.220.75.184；客户端只当普通 hy2 节点，零兼容成本）。
+**US自建 组序改为 [04链式, 01(66 Hy2), 02(66 Vless), 03(SadIDC直连)]**——AI/风控组优先
+命中 66Cloud 优质 IP 出口。**谷歌三分法（向阳定）**：新增可见组 **▶️ YouTube**
+（select，[01, 02, US自建, 美国自动]，新远程集 `youtube`「youtube.mrs」）与 **✨ Gemini**
+（select，[04, US自建, SG自建, JP自建]，新远程集 `google-gemini`「google-gemini.mrs」）；
+🔍 谷歌服务 美国档首位插入 03 节点直引（剩余谷歌=搜索/浏览走快线）；规则序
+`google-gemini → youtube → google`。表头自建服务区新增 `DOMAIN-SUFFIX,eoysky.com → DIRECT`
+（sub2api 面板/API 经精品线直连）。快照
+`policy/snapshots/magicpanel-policy-2026-11-25-{before,after}.json`
+（digest ff895cea→bf3d89d2）。产物断言：03/04 渲染、US自建组序、两个新组、三处规则序、
+providers 下发地址全过；面板测速 03=1246ms / 04=618ms / 18(66Cloud Hy2)=711ms（含
+NAS→路由器透明代理链开销，仅供对比；真实延迟以路由器订阅刷新后为准）。同机另部署
+sub2api（原生 systemd + PG17/Redis，见 `VPS脚本文档/07-当前生产状态-sadidc.md`）。
+
 **2026-11-23 自建节点实测（4 台 VPS）**：报告见
 `/Users/astral/Documents/MagicPanel-评审/2026-11-23-自建节点测试报告.md`，节点清单与
 完整链接见同目录 `2026-11-23-自建节点清单与链接.md`（含凭据，勿外传；机器以服务商
