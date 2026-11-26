@@ -19,6 +19,16 @@
 
 跨阶段工作由 Codex（GPT-6.2 Sol）负责需求分析、关键设计、评审和验收；通过 Agent Relay 将边界明确的开发、自测和运维交给 Claude Code（MiniMax-M3.1-Flash）。独立工作区或最小材料交接，遵循桥接授权。合并改动后按风险集中验证，再提交、推送和部署。
 
+**2026-11-27 美国自建 05（构建 #421，发布 rev 135）**：新增本地节点 `🇺🇸 美国自建 05`
+（VLESS Reality，`154.219.123.112:33995`，SNI `www.amd.com`，uuid/公钥/short-id 见
+该机 `/root/reality-node.txt`），排在 `🇺🇸 US自建` fallback 组末位
+（04→01→02→03→05），不改既有首选顺序。该机是 NAT 容器（内网 `10.91.0.13`，公网
+`154.219.123.112`），公网端口需在商家面板映射；`/usr/local/bin/sb-reality.sh` 已补
+NAT 检测、外部自检、监听地址与残留防火墙规则清理。本机经该节点访问
+`generate_204` 返回 204，面板 Mihomo 测速 568–602ms。快照
+`policy/snapshots/2026-11-27-{before,after}-add-us05.json`
+（digest `8cf6ce85`→`37461805`）。
+
 **2026-11-17 Telegram/Claude 独立分流（向阳要求）**：新增可见 select 组 `✈️ Telegram`
 （默认 DIRECT，备选 日本软银01/02 节点直引、美国自建、默认代理）与 `🤖 Claude`
 （默认 美国自建NTT → 日本软银01/02 → 美国自动），排 sort 1/2；规则 anthropic/telegram/
