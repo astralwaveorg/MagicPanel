@@ -28,7 +28,7 @@ mpnode
 ## 非交互
 
 ```bash
-mpnode add "vless://uuid@1.2.3.4:443?security=reality&sni=...&pbk=...&sid=..."
+mpnode add "vless://<uuid>@<server>:<port>?security=reality&sni=...&pbk=...&sid=..."
 mpnode add --link ./node.yaml --region US --dry-run
 mpnode update "vless://..."                  # 按链接里的 server:port 匹配
 mpnode update "vless://..." --name "🇺🇸 美国自建 05" --rename "🇺🇸 美国自建 05"

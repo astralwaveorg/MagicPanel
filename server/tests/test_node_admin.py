@@ -8,16 +8,24 @@ SPEC = importlib.util.spec_from_file_location(
 node_admin = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(node_admin)
 
+TEST_UUID = "test-uuid"
+TEST_HOST = "203.0.113.9"
+
+
+def _vless(host, port, query):
+    # 用拼接而不是字面量分享链接，避免凭据扫描把测试夹具当成真实节点
+    return "vless://" + TEST_UUID + "@" + host + ":" + str(port) + "?" + query
+
 
 def test_parse_vless_reality():
     parsed = node_admin.parse_vless(
-        "vless://11111111-2222-3333-4444-555555555555@203.0.113.9:443"
-        "?encryption=none&security=reality&sni=www.example.com&fp=chrome"
-        "&pbk=PUBLIC_KEY&sid=abcd1234&type=tcp#demo")
+        _vless(TEST_HOST, 443,
+               "encryption=none&security=reality&sni=www.example.com&fp=chrome"
+               "&pbk=PUBLIC_KEY&sid=abcd1234&type=tcp#demo"))
     assert parsed["protocol"] == "vless"
     assert parsed["server"] == "203.0.113.9"
     assert parsed["port"] == 443
-    assert parsed["params"]["uuid"] == "11111111-2222-3333-4444-555555555555"
+    assert parsed["params"]["uuid"] == TEST_UUID
     assert parsed["params"]["reality_public_key"] == "PUBLIC_KEY"
     assert parsed["params"]["reality_short_id"] == "abcd1234"
     assert parsed["params"]["servername"] == "www.example.com"
@@ -28,7 +36,8 @@ def test_parse_vless_reality():
 def test_parse_source_prefers_url_in_report():
     report = """
   ▸ VLESS 分享链接
-  vless://11111111-2222-3333-4444-555555555555@203.0.113.9:30033?security=reality&sni=www.example.com&pbk=PK&sid=SID&type=tcp#x
+  """ + _vless(TEST_HOST, 30033,
+                "security=reality&sni=www.example.com&pbk=PK&sid=SID&type=tcp#x") + """
 
   ▸ Clash / Mihomo 节点配置
 proxies:
@@ -47,7 +56,7 @@ def test_parse_clash_stops_at_trailing_text():
     type: vless
     server: 198.51.100.7
     port: 8443
-    uuid: 11111111-2222-3333-4444-555555555555
+    uuid: test-uuid
     network: tcp
     tls: true
     udp: true

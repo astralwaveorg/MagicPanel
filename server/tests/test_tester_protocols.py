@@ -53,10 +53,16 @@ def test_hysteria_v1_render_matches_official_fields():
         assert entry['type'] == 'hysteria'
         assert entry['auth-str'] == 'pw'
         assert entry['protocol'] == 'udp'
-        assert entry['up'] == '50 Mbps' and entry['down'] == '200 Mbps'
+        if engine == 'stash':
+            # Stash 用 up-speed/down-speed 整数；Mihomo 用 up/down 带单位字符串
+            assert entry['up-speed'] == 50 and entry['down-speed'] == 200
+            assert 'up' not in entry and 'down' not in entry
+        else:
+            assert entry['up'] == '50 Mbps' and entry['down'] == '200 Mbps'
         assert entry['sni'] == 's.example.com'
         assert entry['skip-cert-verify'] is True
-        assert entry['obfs'] == 'salamander' and entry['obfs-password'] == 'op'
+        # Hysteria v1 的 obfs 字段就是混淆密码，不再额外写 obfs-password
+        assert entry['obfs'] == 'salamander' and 'obfs-password' not in entry
         assert entry['alpn'] == ['h3']
 
 

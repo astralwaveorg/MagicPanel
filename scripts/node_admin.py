@@ -13,7 +13,7 @@
 
 典型调用（外层由 node_admin.sh 处理 SSH 与快照）：
 
-    node_admin.sh add "vless://uuid@1.2.3.4:443?security=reality&sni=...&pbk=...&sid=..."
+    node_admin.sh add "vless://<uuid>@<server>:<port>?security=reality&sni=...&pbk=...&sid=..."
     node_admin.sh add --link ./node.yaml --region US --no-publish
     node_admin.sh update "vless://..."          # 按 server:port 匹配已有节点
     node_admin.sh delete --name "🇺🇸 美国自建 05" --force

@@ -145,8 +145,8 @@ PROTOCOLS = {
                    options=[{"value": value, "label": value} for value in ["udp", "wechat-video", "faketcp"]]),
             _field("sni", "SNI", "text", default=""),
             _field("skip_cert_verify", "跳过证书校验", "switch", default=False),
-            _field("obfs", "混淆", "text", default=""),
-            _field("obfs_password", "混淆密码", "password", default=""),
+            # Hysteria v1 的 obfs 字段本身就是混淆密码，没有单独的 obfs-password
+            _field("obfs", "混淆密码", "text", default=""),
             _field("alpn", "ALPN（逗号分隔）", "text", default=""),
             _field("up", "上行带宽 (Mbps)", "bandwidth", default=0),
             _field("down", "下行带宽 (Mbps)", "bandwidth", default=0),
@@ -161,9 +161,12 @@ PROTOCOLS = {
             _field("sni", "SNI", "text", default=""),
             _field("skip_cert_verify", "跳过证书校验", "switch", default=False),
             _field("obfs", "混淆", "select", default="",
-                   options=[{"value": "", "label": "无"}, {"value": "salamander", "label": "salamander"}]),
+                   options=[{"value": "", "label": "无"},
+                            {"value": "salamander", "label": "salamander"},
+                            {"value": "gecko", "label": "gecko"}]),
             _field("obfs_password", "混淆密码", "password", default="",
-                   show_if={"key": "obfs", "in": ["salamander"]}),
+                   show_if={"key": "obfs", "in": ["salamander", "gecko"]}),
+            _field("fast_open", "Fast Open", "switch", default=False),
             _field("up", "上行带宽 (Mbps)", "bandwidth", default=0),
             _field("down", "下行带宽 (Mbps)", "bandwidth", default=0),
             _field("udp", "启用 UDP", "switch", default=True),
@@ -176,8 +179,10 @@ PROTOCOLS = {
             _field("version", "TUIC 版本", "select", default="5",
                    options=[{"value": "5", "label": "v5"},
                             {"value": "4", "label": "v4"}]),
-            _field("uuid", "UUID", "password", required=True),
-            _field("password", "密码", "password", required=True),
+            # v4 用 token，v5 用 uuid + password；具体必填在 normalize_params 里按版本校验
+            _field("token", "Token（仅 v4）", "password", default=""),
+            _field("uuid", "UUID（仅 v5）", "password", default=""),
+            _field("password", "密码（仅 v5）", "password", default=""),
             _field("sni", "SNI", "text", default=""),
             _field("skip_cert_verify", "跳过证书校验", "switch", default=False),
             _field("congestion_controller", "拥塞控制", "select", default="bbr",
@@ -342,6 +347,14 @@ def normalize_params(protocol: str, params: dict) -> dict:
             allowed = {option["value"] for option in field.get("options", [])}
             if allowed and normalized[key] not in allowed:
                 raise ValueError(f"{field['label']}取值不支持")
+    if protocol == "tuic":
+        # v4 与 v5 的认证字段互斥：v4 用 token，v5 用 uuid + password
+        version = str(normalized.get("version") or "5")
+        if version == "4":
+            if not normalized.get("token"):
+                raise ValueError("TUIC v4 需要 Token")
+        elif not normalized.get("uuid") or not normalized.get("password"):
+            raise ValueError("TUIC v5 需要 UUID 和密码")
     return normalized
 
 
@@ -444,14 +457,15 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
                 "public-key": params["reality_public_key"],
                 "short-id": params.get("reality_short_id", ""),
             }
-            # 仅 mihomo 识别此键：开启后 ClientHello 带 X25519MLKEM768 混合密钥共享，
-            # 这是 Xray v26.9.9+ 服务端 REALITY 指纹校验的必要条件（Stash 不识别，故不输出）
-            if params.get("reality_support_x25519mlkem768") and not stash:
+            # Stash（iOS/tvOS 3.6+、macOS 4.3+）与 Mihomo 都识别此键：开启后
+            # ClientHello 带 X25519MLKEM768 混合密钥共享，这是 Xray v26.9.9+
+            # 服务端 REALITY 指纹校验的必要条件。
+            if params.get("reality_support_x25519mlkem768"):
                 entry["reality-opts"]["support-x25519mlkem768"] = True
     elif protocol == "trojan":
         entry["password"] = params.get("password", "")
-        if not stash:
-            entry["udp"] = bool(params.get("udp", True))
+        # Stash 文档同样支持 trojan 的 udp 开关
+        entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params, sni_field="sni", sni_key="sni")
         _put_network(entry, params)
     elif protocol == "hysteria":
@@ -462,14 +476,20 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
             entry["udp"] = bool(params.get("udp", True))
         up = _bandwidth_mbps(params.get("up"))
         down = _bandwidth_mbps(params.get("down"))
-        if up:
-            entry["up"] = f"{up} Mbps"
-        if down:
-            entry["down"] = f"{down} Mbps"
+        # Stash 用 up-speed/down-speed（整数），Mihomo 用 up/down（可带单位）
+        if stash:
+            if up:
+                entry["up-speed"] = up
+            if down:
+                entry["down-speed"] = down
+        else:
+            if up:
+                entry["up"] = f"{up} Mbps"
+            if down:
+                entry["down"] = f"{down} Mbps"
         if params.get("obfs"):
+            # Hysteria v1 的 obfs 字段本身就是混淆密码，没有 obfs-password
             entry["obfs"] = params["obfs"]
-            if params.get("obfs_password"):
-                entry["obfs-password"] = params["obfs_password"]
         if params.get("sni"):
             entry["sni"] = params["sni"]
         if params.get("skip_cert_verify"):
@@ -487,6 +507,8 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
             entry["sni"] = params["sni"]
         if params.get("skip_cert_verify"):
             entry["skip-cert-verify"] = True
+        if params.get("fast_open"):
+            entry["fast-open"] = True
         up = _bandwidth_mbps(params.get("up"))
         down = _bandwidth_mbps(params.get("down"))
         if stash:
@@ -505,22 +527,19 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
                 entry["obfs-password"] = params["obfs_password"]
     elif protocol == "tuic":
         version = str(params.get("version") or "5")
-        if stash:
-            # Stash 需要显式 version；v4 用 token，v5 用 uuid + password
-            entry["version"] = int(version)
-            if version == "4":
-                if params.get("token"):
-                    entry["token"] = params["token"]
-            else:
-                entry["uuid"] = params.get("uuid", "")
-                entry["password"] = params.get("password", "")
+        if version == "4":
+            # v4 用 token；v5 用 uuid + password，两者不能同时写
+            entry["token"] = params.get("token", "")
         else:
             entry["uuid"] = params.get("uuid", "")
             entry["password"] = params.get("password", "")
+        if stash:
+            # Stash 需要显式 version
+            entry["version"] = int(version)
+        else:
             entry["udp-relay-mode"] = params.get("udp_relay_mode") or "native"
             if params.get("reduce_rtt"):
                 entry["reduce-rtt"] = True
-            entry["udp"] = bool(params.get("udp", True))
         entry["congestion-controller"] = params.get("congestion_controller") or "bbr"
         if params.get("sni"):
             entry["sni"] = params["sni"]
@@ -531,7 +550,8 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
             entry["username"] = params["username"]
         if params.get("password"):
             entry["password"] = params["password"]
-        if protocol == "socks5" and not stash:
+        if protocol == "socks5":
+            # Stash 文档同样支持 SOCKS5 的 udp 开关
             entry["udp"] = bool(params.get("udp", True))
         _common_tls(entry, params, sni_field="sni", sni_key="sni")
     elif protocol == "snell":
