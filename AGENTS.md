@@ -19,6 +19,13 @@
 
 跨阶段工作由 Codex（GPT-6.2 Sol）负责需求分析、关键设计、评审和验收；通过 Agent Relay 将边界明确的开发、自测和运维交给 Claude Code（MiniMax-M3.1-Flash）。独立工作区或最小材料交接，遵循桥接授权。合并改动后按风险集中验证，再提交、推送和部署。
 
+**2026-11-27 美国自建 06（构建 #422，发布 rev 136）**：新增本地节点 `🇺🇸 美国自建 06`
+（VLESS Reality，`186.244.245.81:30033`，SNI `www.amd.com`，AS400619 Arosscloud 洛杉矶），
+排在 `🇺🇸 US自建` fallback 组末位（…→05→06）。该机同样是 NAT 容器（内网 `10.91.0.211`），
+公网端口已在商家面板映射；NAS/66Cloud/SadIDC 三处实测 30033 可连，面板 Mihomo 测速
+781–1025ms。快照 `policy/snapshots/2026-11-27-{before,after}-add-us06.json`
+（digest `4335ff2e`→`f46510b6`）。
+
 **2026-11-27 美国自建 05（构建 #421，发布 rev 135）**：新增本地节点 `🇺🇸 美国自建 05`
 （VLESS Reality，`154.219.123.112:33995`，SNI `www.amd.com`，uuid/公钥/short-id 见
 该机 `/root/reality-node.txt`），排在 `🇺🇸 US自建` fallback 组末位
