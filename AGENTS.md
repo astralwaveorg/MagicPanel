@@ -19,6 +19,18 @@
 
 跨阶段工作由 Codex（GPT-6.2 Sol）负责需求分析、关键设计、评审和验收；通过 Agent Relay 将边界明确的开发、自测和运维交给 Claude Code（MiniMax-M3.1-Flash）。独立工作区或最小材料交接，遵循桥接授权。合并改动后按风险集中验证，再提交、推送和部署。
 
+**2026-11-27 Stash/Mihomo 协议渲染对齐（构建 #423，发布 rev 137）**：按 Stash 与
+Mihomo 官方文档逐项核对本地节点字段。**Stash 产物**：VLESS Reality 补
+`support-x25519mlkem768`（Stash iOS/tvOS 3.6+、macOS 4.3+ 已支持，旧判断“Stash 不识别”
+作废）；Hysteria v1 改 `up-speed`/`down-speed` 整数并去掉非文档字段 `obfs-password`；
+TUIC v4 只写 `token`、v5 只写 `uuid`+`password`，表单新增 Token 并按版本校验；
+Trojan / SOCKS5 补 `udp`；Hysteria2 增加 `gecko` 混淆与 `fast-open`。**Mihomo/OpenClash**
+使用同一套字段，产物与 #422 逐字节一致。实际 Stash 产物仅 3 个 Reality 节点
+（US02、SG02、JP05）各多一行 `support-x25519mlkem768: true`。纯节点订阅
+（`/feed/nodes/{token}.yaml`）继续使用 Mihomo 方言。完整后端测试 980 passed。
+注意：Stash 产物仍不能直接给 Clash Verge 用（Hy2 是 `auth`，Mihomo 需要 `password`），
+Clash Verge 必须用 Mihomo 设备地址（如 `Astral-Windows-Mihomo`）。
+
 **2026-11-27 自建节点管理工具（mpnode）**：新增 `scripts/node_admin.py`（单文件，宿主 + 容器双模式）
 与项目 skill `.opencode/skills/magicpanel-node-admin`。宿主层提供中文交互、SSH 调 NAS、改前/改后快照；
 容器层复用 router/service 写库，维护 `node_catalog` 与策略组成员投影。支持
