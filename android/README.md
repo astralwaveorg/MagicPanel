@@ -18,35 +18,20 @@ App 负责承载它：登录态持久化、文件上传、下载、深色主题�
 
 ## 面板地址
 
-默认 `https://magichub.top:8443`。App 内「⋮ → 面板地址」可改，改完立即生效
+App 内「⋮ → 面板地址」可改，改完立即生效
 （存 SharedPreferences，不依赖重新打包）。
 
 ## 签名
 
-| 项 | 值 |
-|---|---|
-| keystore | `app/magicpanel.keystore`（**不入库**，需要自行备份） |
-| 别名 / 口令 | `magicpanel` / `magicpanel` |
-| 备份位置 | 本机 `~/tools/keystore-backup/magicpanel.keystore` |
-
-> 换机器或密钥丢失后重新签名的 APK **无法覆盖安装**旧版本（签名不一致），
-> 需要先卸载再装。
+Release 签名需要本地 keystore。签名文件、口令及备份位置由维护者在仓库外保管。覆盖安装旧版需要同一签名；丢失后用新的签名生成的 APK 无法覆盖安装。
 
 ## 构建
 
-```bash
-export JAVA_HOME=~/tools/jdk21/Contents/Home
-export ANDROID_HOME=~/tools/android-sdk
-export PATH=$JAVA_HOME/bin:$HOME/tools/gradle-8.9/bin:$PATH
-cd android
-gradle --no-daemon assembleRelease
-```
-
-产物：`app/build/outputs/apk/release/app-release.apk`
+配置 Android SDK、兼容的 JDK 与 Gradle 后，在 `android/` 运行 `gradle --no-daemon assembleRelease`。产物位于 `app/build/outputs/apk/release/app-release.apk`。
 
 ## 适配
 
 - minSdk 24（Android 7.0）/ targetSdk 35（Android 15）
 - 已适配 Android 15+ 强制 edge-to-edge（状态栏与手势条内边距）
 - 覆盖小米 17 Pro Max、一加 13 等主流 Android 15/16 机型
-- 只允许 HTTPS，面板域名走 `magichub.top:8443`
+- 只允许 HTTPS，使用所配置的面板域名

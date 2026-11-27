@@ -1,13 +1,12 @@
 # 策略快照
 
-这里存放**线上策略的无凭据快照**，用于复现、回溯和灾后重建。
-策略本体在 MagicPanel 的 `data/magicpanel.db`（`rules` / `proxy_groups` / `rule_providers` 三张表），
-不在代码里；把快照入库是为了让「改了哪些规则、顺序怎么排」可以版本化审阅。
+快照包含部署的规则、来源元数据和组顺序。即使剔除了节点凭据，也不宜作为公开示例。本目录的历史 JSON 暂保留：有旧版重建脚本按固定路径读取其中的输入。新的生产快照保存在仓库外；如需测试，用合成数据。
 
 ## 快照包含什么
 
 | 表 | 内容 |
 | --- | --- |
+| `variants` | 方案定义（schema 2） |
 | `rules` | 分流规则，含 `sort`（顺序即优先级） |
 | `proxy_groups` | 策略组，含类型、成员顺序、`local_first` 等 |
 | `rule_providers` | 规则来源元数据（列白名单） |
@@ -22,28 +21,28 @@
 ```sh
 python scripts/export_policy.py \
   --db /opt/magicpanel/data/magicpanel.db \
-  --out policy/snapshots/$(date +%F).json
+  --out "$BACKUP_DIR/policy-before.json"
 ```
 
-导出后检查 `digest` 与条数，再提交。
+先将 `BACKUP_DIR` 指向有备份的私有目录。导出后核对 `digest` 与行数，将文件保存在仓库外。
 
 ## 导入（复现）
 
 ```sh
 # 先干跑，确认 digest 与条数
 python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
-  --in policy/snapshots/2026-11-10.json --dry-run
+  --in "$BACKUP_DIR/policy-before.json" --dry-run
 
 # 正式导入（会自动备份数据库为 <db>.before-import-<时间戳>）
 python scripts/import_policy.py --db /opt/magicpanel/data/magicpanel.db \
-  --in policy/snapshots/2026-11-10.json
+  --in "$BACKUP_DIR/policy-before.json"
 
 # 重新构建并发布，路由器才会拿到新配置
 docker exec magicpanel python -c \
   "from app.routers import builds; print(builds.create_build('import', note='导入策略快照'))"
 ```
 
-导入只替换三张策略表，**不会**改动节点来源与设备令牌。
+导入按快照版本与非空表替换策略数据，不是增量合并；**不会**改动节点来源与设备令牌。
 
 ## 顺序约束（改规则前必读）
 

@@ -60,15 +60,13 @@ mpnode publish --note "手工补发"
 
 - 只改 `/etc` 之外的面板数据；不直接 `UPDATE local_nodes`，必须走脚本，否则 `node_catalog` 会漏同步。
 - 快照不导出 `local_nodes`（凭据），不要手工把节点凭据写进仓库。
-- 不自动 `git commit`。需要入库时再提交 `policy/snapshots/` 与文档。
+- 不自动 `git commit`。实际部署的快照和操作记录保存在仓库外。
 - 生产发布后如果产物核对失败，先看构建 `results` 与设备 token 是否有 `env=production` 的设备。
 
 ## Clash Verge 与其他客户端
 
 - 面板按设备目标渲染：Stash 设备给 Stash 产物，Mihomo 设备给 Mihomo 产物。
-- **Clash Verge 必须用 Mihomo 设备的订阅地址**（如 `Astral-Windows-Mihomo`）。Stash 产物里
-  Hysteria2 是 `auth:`，Mihomo 需要 `password:`；Reality 节点还缺 `support-x25519mlkem768`，
-  在 Clash Verge 里会表现为超时。
+- **Clash Verge 必须用 Mihomo 设备的订阅地址**。两种产物的 Hysteria2 认证字段不同。
 - 判断方法：看订阅 YAML 里 Hy2 节点是 `password:` 还是 `auth:`。
 
 ## 自检

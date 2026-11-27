@@ -22,3 +22,27 @@ tmp/
 # pytest 缓存
 .pytest_cache/
 .workbuddy/
+
+# 文档区默认只提交清单内的文件。新增共享手册前先核对用途及示例。
+/docs/**
+!/docs/deployment/
+!/docs/development/
+!/docs/reference/
+!/docs/README.md
+!/docs/deployment/1Panel-Docker-部署.md
+!/docs/development/MagicPanel-开发规格.md
+!/docs/development/MagicPanel-构建与发布-产物构成.md
+!/docs/development/旧版维护约束.md
+!/docs/development/接口清单与安卓客户端说明.md
+!/docs/reference/Agent-交接提示词.md
+!/docs/reference/Mihomo-Config-Navigation.md
+!/docs/reference/Official-Docs-Workflow.md
+!/docs/reference/Stash-Wiki-Navigation.md
+!/docs/reference/official-docs-index.json
+!/docs/reference/方案设计-多套分流方案.md
+!/docs/使用文档.md
+!/docs/开发文档.md
+!/docs/配置文档.md
+
+# 新的真实策略快照留在本地；不改变已有快照的跟踪状态。
+/policy/snapshots/*.json
