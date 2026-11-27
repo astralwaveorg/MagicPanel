@@ -211,10 +211,9 @@ def preview(tid:str,network:str="default",user=Depends(actor)):
     with s.tx() as c:
         rev,w=s.workspace(c); t=effective(w,w["templates"][tid],network); cfg,assets=cc.compile_template(w,t)
         line_count=len(cfg["rules"]); old=None
-        d=next((k for k,v in w["devices"].items() if v["template"]==tid and v.get("network","default")==network),None)
-        live=c.execute("SELECT manifest FROM releases JOIN live ON live.release=releases.id").fetchone()
-        if live and d:
-            ent=json.loads(s.unseal(live[0])).get(d)
+        live=c.execute("SELECT body FROM catalogs JOIN live ON live.release=catalogs.release").fetchone()
+        if live:
+            ent=json.loads(s.unseal(live[0]))["targets"].get(tid,{}).get(network)
             if ent:old=cc.load(s.read_blob(c,ent["config"]))
         before=(old or {}).get("rules",[]); after=cfg["rules"]
         return {"revision":rev,"rules":line_count,"resources":len(assets),"nodes":len(cfg.get("proxies",[])),
@@ -310,3 +309,37 @@ def conversion_read(token:str,req:Request):
     response.headers["Content-Disposition"]=subs.disposition(info["name"],info["ext"])
     response.headers["X-Studio-Cache"]="stale" if info["failed"] else "ready"
     return response
+
+from . import rule_repo as rr
+
+@app.get("/api/rule-repo")
+def repo_list(user=Depends(actor)):
+    return rr.catalog()
+
+@app.get("/api/rule-repo/file")
+def repo_file(name:str,user=Depends(actor)):
+    return rr.file(name)
+
+@app.get("/api/rule-repo/history")
+def repo_history(name:str,user=Depends(actor)):
+    return rr.history(name)
+
+@app.post("/api/rule-repo/review")
+def repo_review(body:dict,user=Depends(actor)):
+    return rr.review(body)
+
+@app.post("/api/rule-repo/commit")
+def repo_commit(body:dict,user=Depends(actor)):
+    result=rr.commit(body)
+    with s.tx(True) as c:s.event(c,user,"提交 magic-sets "+rr.filename(body["name"])+" @ "+result["commit"][:9])
+    return result
+
+@app.post("/api/rule-repo/apply")
+def repo_apply(body:dict,user=Depends(actor)):
+    remote=rr.file(body["name"])
+    with s.tx(True) as c:return rr.apply(c,user,body,remote)
+
+@app.get("/api/released-rules")
+def released_rules(profile:str,engine:str,network:str="default",asset:str="",offset:int=0,user=Depends(actor)):
+    from .rule_view import inspect
+    with s.tx() as c:return inspect(c,profile,engine,network,asset,offset)

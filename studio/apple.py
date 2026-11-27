@@ -99,6 +99,7 @@ def rule(line,kind):
         kinds=re.findall(r'\(([A-Z][A-Z0-9-]*),',rest)
         if not kinds or any(k not in ("NETWORK","DST-PORT","DOMAIN","DOMAIN-SUFFIX","IP-CIDR","IP-CIDR6","AND","OR","NOT") for k in kinds):raise ValueError("存在无法转换的复合规则")
         return typ+","+rest.replace("(NETWORK,udp)","(PROTOCOL,UDP)").replace("(NETWORK,tcp)","(PROTOCOL,TCP)").replace("(DST-PORT,","("+port+",")
+    if sr and typ in ("NETWORK","PROTOCOL"):raise ValueError("Shadowrocket 仅支持在逻辑条件内使用 PROTOCOL")
     if typ=="NETWORK" and rest.split(",")[0] in ("tcp","udp"):return "PROTOCOL,"+rest.split(",")[0].upper()+rest[len(rest.split(",")[0]):]
     if typ in ("MATCH","FINAL"):return "FINAL,"+rest
     if typ in ("DST-PORT","DEST-PORT"):return port+","+rest
@@ -110,7 +111,7 @@ def resource(c,entry,kind):
     if not m:raise ValueError("规则资源未固定")
     cid=m[1];behavior=entry["behavior"];fmt=entry.get("format","yaml")
     flavor="shadowrocket" if kind=="shadowrocket" and behavior=="classical" else "surge"
-    key=s.digest(s.encode([cid,fmt,behavior,flavor,2]))
+    key=s.digest(s.encode([cid,fmt,behavior,flavor,3 if flavor=="shadowrocket" else 2]))
     cache=c.execute("SELECT blob FROM text_rules WHERE key=?",(key,)).fetchone()
     if cache:return cache[0]
     raw=s.read_blob(c,cid)
@@ -141,7 +142,8 @@ def resource(c,entry,kind):
     blob=s.put_blob(c,("\n".join(out)+"\n").encode())
     c.execute("INSERT OR REPLACE INTO text_rules VALUES(?,?)",(key,blob));return blob
 
-def build(c,cfg,kind):
+def build(c,cfg,kind,extra=(),platform=None):
+    mobile=platform=="ios" or kind=="shadowrocket"
     if cfg.get("proxy-providers") or cfg.get("sub-rules"):raise ValueError("此模板使用了尚未支持的外部节点或子规则")
     lines=["[General]","dns-server = system","","[Proxy]"]; names={"DIRECT","REJECT"};dropped=0
     from .dialects import normalize
@@ -164,8 +166,13 @@ def build(c,cfg,kind):
             members.extend(["url="+scalar(g.get("url") or "https://www.gstatic.com/generate_204"),"interval="+str(int(g.get("interval",600)))])
         if g.get("hidden"):members.append("hidden=1")
         lines.append(key+" = "+", ".join([typ,*members]))
-    lines+=["","[Rule]"];assets=set()
+    lines+=["","[Rule]"];assets=set();skipped=0;asset_names={}
+    if extra:
+        from .rule_view import native_lines
+        lines.extend(native_lines("\n".join(extra),kind,{"DIRECT","REJECT",*(g["name"] for g in groups)}))
     for l in cfg["rules"]:
+        if mobile and l.startswith("PROCESS-NAME,"):
+            skipped+=1;continue
         dest=cc.rule_target(l)
         if dest not in names:
             if dest in {n["name"] for n in cfg.get("proxies",[])}:
@@ -174,9 +181,18 @@ def build(c,cfg,kind):
                 parts[ix]="REJECT";l=",".join(parts)
             else:raise ValueError("规则目标不能转换")
         if l.startswith("RULE-SET,"):
-            parts=l.split(",");key=resource(c,cfg["rule-providers"][parts[1]],kind)
+            rule(l,kind)  # Reject unsupported modifiers before replacing the source.
+            parts=l.split(",");ref=parts[1];provider=cfg["rule-providers"][ref]
+            key=resource(c,provider,kind)
+            if mobile and provider["behavior"]=="classical":
+                original=s.read_blob(c,key).decode().splitlines()
+                retained=[x for x in original if not x.startswith("PROCESS-NAME,")]
+                skipped+=len(original)-len(retained)
+                if not retained:continue
+                if len(retained)!=len(original):key=s.put_blob(c,("\n".join(retained)+"\n").encode())
+            asset_names.setdefault(key,ref)
             assets.add(key);parts[1]=MARK+"/"+key;l=",".join(parts)
             lines.append(l)
         else:lines.append(rule(l,kind))
     if not lines[-1].startswith("FINAL,"):raise ValueError("缺少最终分流规则")
-    return {"config":s.put_blob(c,("\n".join(lines)+"\n").encode()),"resources":sorted(assets),"format":"conf","nodes":len(cfg.get("proxies",[]))-dropped,"excluded":dropped,"empty":empty}
+    return {"config":s.put_blob(c,("\n".join(lines)+"\n").encode()),"resources":sorted(assets),"resource_names":asset_names,"desktop_rules_skipped":skipped,"format":"conf","nodes":len(cfg.get("proxies",[]))-dropped,"excluded":dropped,"empty":empty}

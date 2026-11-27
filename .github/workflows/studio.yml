@@ -1,0 +1,46 @@
+name: Studio v2
+on:
+  push:
+    branches: [v2]
+    paths: ['studio/**', '.github/workflows/studio.yml']
+  pull_request:
+    branches: [v2]
+    paths: ['studio/**', '.github/workflows/studio.yml']
+permissions:
+  contents: read
+jobs:
+  studio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: python -m pip install -r studio/requirements.txt pytest
+      - run: python -m pytest -q studio/tests
+      - working-directory: studio/client
+        run: |
+          npm ci
+          npx --no-install svelte-check --no-tsconfig
+          node --test tests/*.test.mjs
+          npm run build
+      - run: |
+          npm ci
+          npx playwright install --with-deps chrome
+      - name: Inspect the isolated workspace in Chrome
+        env:
+          STUDIO_ORIGIN: http://127.0.0.1:17999
+        shell: bash
+        run: |
+          export STUDIO_WEB="$PWD/studio/client/dist" STUDIO_QA_ORIGIN="$STUDIO_ORIGIN"
+          STUDIO_DATA=$(mktemp -d)
+          export STUDIO_DATA
+          python -m studio.init --admin review <<<'fixture-browser-password'
+          python -m uvicorn studio.api:app --host 127.0.0.1 --port 17999 --no-access-log &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" || true' EXIT
+          curl -fsS --retry 15 --retry-connrefused --retry-delay 1 "$STUDIO_ORIGIN/healthz"
+          node studio/tests/browser-workspace.cjs

@@ -47,10 +47,12 @@ def prepare(c,rid,cat):
         for eng in engines:
             aid="client:"+pid+":"+eng;p["adapters"][eng]=aid;targets[aid]={}
             for net,ent in targets[tid].items():
-                k=(ent["config"],eng)
+                extra=tuple(p.get("native_rules",{}).get(eng,[]))
+                k=(ent["config"],eng,extra,p["platform"])
                 if k not in cache:
-                    try:cache[k]=portable(c,ent,eng) if eng=="mihomo" else apple.build(c,cc.load(s.read_blob(c,ent["config"])),eng)
+                    try:cache[k]=portable(c,ent,eng) if eng=="mihomo" else apple.build(c,cc.load(s.read_blob(c,ent["config"])),eng,extra,p["platform"])
                     except (ValueError,KeyError,TypeError) as e:
+                        if extra:raise ValueError(p["name"]+" / "+eng+" · "+net+"："+str(e)) from None
                         cache[k]={"error":str(e)[:150] if isinstance(e,ValueError) else "模板字段不完整","resources":[]}
                 targets[aid][net]=cache[k]
     win=profiles.get("platform-windows")
@@ -67,3 +69,17 @@ def prepare(c,rid,cat):
 def upgrade(c):
     for row in c.execute("SELECT release,body FROM catalogs WHERE release NOT IN (SELECT release FROM client_catalogs)").fetchall():
         prepare(c,row[0],json.loads(s.unseal(row[1])))
+
+def protect_existing_outputs(c,previous,current):
+    """An update cannot turn a working subscription into a permanent error response."""
+    def catalog(rid):
+        row=c.execute("SELECT body FROM client_catalogs WHERE release=?",(rid,)).fetchone()
+        return json.loads(s.unseal(row[0])) if row else {}
+    before,after=catalog(previous),catalog(current)
+    for pid,p in after.get("deliveryProfiles",{}).items():
+        prior=before.get("deliveryProfiles",{}).get(pid,{}).get("adapters",{})
+        for engine,tid in p["adapters"].items():
+            old=before.get("targets",{}).get(prior.get(engine),{})
+            for net,entry in after["targets"][tid].items():
+                if entry.get("error") and net in old and not old[net].get("error"):
+                    raise ValueError(f"{p['name']} / {engine} / {net}：{entry['error']}。已保留原发布")

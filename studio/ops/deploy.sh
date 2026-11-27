@@ -9,7 +9,9 @@ test -z "$(git status --porcelain -- studio)"
 test "$(git ls-remote origin refs/heads/v2 | cut -f1)" = "$rev"
 ssh -o BatchMode=yes "$host" "set -eu; sudo -n install -d -m 700 -o archon -g users /opt/magicpanel-v2; mkdir -p '/opt/magicpanel-v2/releases/$rev'"
 git archive "$rev:studio" | ssh -o BatchMode=yes "$host" "tar xf - -C '/opt/magicpanel-v2/releases/$rev'"
-ssh -o BatchMode=yes "$host" "bash -s -- '$rev'" <<'NAS'
+scope=${STUDIO_DEPLOY_SCOPE:-stack}
+case "$scope" in studio|stack) ;; *) echo '未知发布范围' >&2; exit 1;; esac
+ssh -o BatchMode=yes "$host" "bash -s -- '$rev' '$scope'" <<'NAS'
 set -euo pipefail
 umask 077
 base=/opt/magicpanel-v2
@@ -63,7 +65,9 @@ if ! test -s "$state/studio.sqlite3"; then
 else
   docker compose run --rm -T --no-deps studio python -m studio.platform_upgrade </dev/null
 fi
-if ! docker compose up -d --no-build --wait --wait-timeout 80 </dev/null || ! curl -fsS --max-time 5 http://127.0.0.1:47102/healthz; then
+services=()
+if test "$2" = studio; then services=(--no-deps studio); fi
+if ! docker compose up -d --no-build --wait --wait-timeout 80 "${services[@]}" </dev/null || ! curl -fsS --max-time 5 http://127.0.0.1:47102/healthz; then
   trap - ERR
   resume_old
   exit 1

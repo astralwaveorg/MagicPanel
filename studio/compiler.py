@@ -14,7 +14,10 @@ BUILTINS = {"DIRECT","REJECT","REJECT-DROP","PASS","COMPATIBLE","GLOBAL"}
 CID = re.compile(r"studio:([a-f0-9]{64})\Z")
 
 def load(text):
-    return yaml.load(text, Loader=LOAD)
+    try:return yaml.load(text, Loader=LOAD)
+    except yaml.YAMLError as exc:
+        mark=getattr(exc,"problem_mark",None)
+        raise ValueError("YAML 格式错误"+(f"（第 {mark.line+1} 行）" if mark else "")) from None
 
 def dump(obj):
     return yaml.dump(obj, Dumper=DUMP, sort_keys=False, allow_unicode=True, width=4096)
@@ -128,6 +131,7 @@ def publish(c,actor,expected):
         issue(c)
         from . import delivery
         delivery.prepare(c,rid,catalog)
+        if active:delivery.protect_existing_outputs(c,active["id"],rid)
         c.execute("INSERT INTO catalogs VALUES(?,?)",(rid,s.seal(s.encode(catalog))))
     c.execute("INSERT OR REPLACE INTO live VALUES(1,?)",(rid,))
     s.event(c,actor,f"发布 #{rid} · 草稿 {rev}")

@@ -1,4 +1,4 @@
-export type Profile={name:string,platform:string,policy:string,adapters:Record<string,string>}
+export type Profile={name:string,platform:string,policy:string,adapters:Record<string,string>,native_rules?:Record<string,string[]>}
 export type Network={name:string,rules:{first?:string[],omit?:string[],targets?:Record<string,string>},groups:Record<string,{prefer:string[],type:string}>}
 export type Device={id:string,name:string,template:string,profile:string,network?:string,engine:string,enabled:boolean}
 export type Group={name:string,type:string,proxies?:string[],use?:string[]}

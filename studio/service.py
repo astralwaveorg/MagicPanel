@@ -20,7 +20,7 @@ def summary(c):
         templates=[dict(id=k,policy=t["policy"],name=t["name"],engine=t["engine"],platform=t["platform"],rules=len(t["order"]),
                         nodes=len(t["base"].get("proxies",[])),groups=[g["name"] for g in t["base"].get("proxy-groups",[])]) for k,t in w["templates"].items()],
         devices=[dict(id=k,**d) for k,d in w["devices"].items()],
-        rules=w["rules"],resources=[{"name":k,"format":r["format"],"behavior":r["behavior"]} for k,r in w["resources"].items()],
+        rules=w["rules"],resources=[{"name":k,"format":r["format"],"behavior":r["behavior"],"kind":r.get("kind","inline"),"repo_sha":r.get("repo_sha"),"managed":bool(r.get("managed")),"remote":bool(r.get("url"))} for k,r in w["resources"].items()],
         sources=[{"id":k,**{x:v.get(x) for x in ("name","managed","snapshot_count","last_success","issue","interval","template","group","scope")}} for k,v in w["sources"].items()],
         releases=[dict(r) for r in c.execute("SELECT id,revision,at,actor,EXISTS(SELECT 1 FROM catalogs WHERE catalogs.release=releases.id) AS unified FROM releases ORDER BY id DESC LIMIT 30")],
         auto=dict(c.execute("SELECT enabled,error FROM automation").fetchone()))
@@ -112,6 +112,7 @@ def edit(c,actor,rev,op,p):
         name=label(p["name"]); fmt=p["format"]; beh=p["behavior"];url=p.get("url","")
         if fmt not in ("mrs","yaml") or beh not in ("classical","domain","ipcidr") or (fmt=="mrs" and beh=="classical"):raise ValueError("格式与行为不兼容")
         existing=w["resources"].get(name)
+        if existing and existing.get("kind")=="repo" and url:raise ValueError("仓库资源不能改绑为普通远程地址")
         if existing and (fmt!=existing["format"] or beh!=existing["behavior"]):raise ValueError("不得改变现有资源类型，请使用新名称")
         if url and not url.startswith("https://"):raise ValueError("需要 HTTPS 规则地址")
         if not existing:
@@ -196,12 +197,21 @@ def edit(c,actor,rev,op,p):
     elif op=="device_rotate":
         if p["id"] not in devices: raise ValueError("设备不存在")
         s.new_token(c,p["id"])
+    elif op=="native_rules":
+        from . import rule_view
+        profile=w["profiles"].get(p.get("profile"))
+        engine=p.get("engine")
+        if not profile or engine not in rule_view.engines(profile["platform"]):raise ValueError("该平台不支持此客户端")
+        base=templates[profile["adapters"].get("stash") or profile["adapters"]["mihomo"]]
+        names={"DIRECT","REJECT",*(g["name"] for g in base["base"]["proxy-groups"])}
+        profile.setdefault("native_rules",{})[engine]=rule_view.native_lines(p["content"],engine,names)
     elif op=="resource_edit":
         name=label(p["name"]); text=p["content"]
         if not isinstance(text,str) or len(text)>1000000: raise ValueError("规则资源太大")
         data=cc.load(text)
         if not isinstance(data,dict) or not isinstance(data.get("payload"),list) or not all(isinstance(x,str) for x in data["payload"]): raise ValueError("资源须包含 payload 字符串列表")
         oldres=w["resources"].get(name)
+        if oldres and oldres.get("kind")=="repo":raise ValueError("仓库规则请在 magic-sets 中编辑，再应用到草稿")
         if not oldres or oldres["format"]!="yaml": raise ValueError("仅支持编辑已有 YAML 规则资源")
         key=s.put_blob(c,text.encode())
         for tt in templates.values():
