@@ -6,8 +6,8 @@ from urllib.parse import quote
 from fastapi import HTTPException
 from . import compiler as cc,store as s
 
-PLATFORMS={"win":"windows","windows":"windows","mac":"macos","macos":"macos","ios":"ios","android":"android","tvos":"tvos","appletv":"tvos"}
-ENGINES={"mihomo":"mihomo","clash":"mihomo","stash":"stash"}
+PLATFORMS={"openwrt":"openwrt","linux":"linux","win":"windows","windows":"windows","mac":"macos","macos":"macos","ios":"ios","android":"android","tvos":"tvos","appletv":"tvos"}
+ENGINES={"surge":"surge","surge6":"surge","surge5":"surge5","shadowrocket":"shadowrocket","mihomo":"mihomo","clash":"mihomo","stash":"stash"}
 CPUS={"arm64","aarch64","amd64","x86_64","x64","armv7","x86"}
 DEFAULT_ENGINE={"windows":"mihomo","macos":"stash","ios":"stash","tvos":"stash","android":"mihomo"}
 FLAGS={"scv","list","sort","tfo"}
@@ -22,7 +22,11 @@ def catalog(c,token,release=None):
     if release is None:row=c.execute("SELECT a.release,a.body FROM catalogs a JOIN live l ON l.release=a.release").fetchone()
     else:row=c.execute("SELECT release,body FROM catalogs WHERE release=?",(release,)).fetchone()
     if not row:raise HTTPException(404)
-    return row[0],json.loads(s.unseal(row[1]))
+    cat=json.loads(s.unseal(row[1]))
+    extra=c.execute("SELECT body FROM client_catalogs WHERE release=?",(row[0],)).fetchone()
+    if extra:
+        data=json.loads(s.unseal(extra[0]));cat["deliveryProfiles"]=data["deliveryProfiles"];cat["targets"].update(data["targets"])
+    return row[0],cat
 def options(items,cat):
     opts={}
     for key,v in items:
@@ -47,7 +51,7 @@ def options(items,cat):
     if not platform and not opts.get("template") and (kind or arch):
         raise ValueError("请指定 platform；不能仅凭引擎或 CPU 判断平台")
     pid=opts.get("template","platform-"+(platform or "windows"))
-    p=cat["profiles"].get(pid)
+    p=cat.get("deliveryProfiles",cat["profiles"]).get(pid)
     if not p or (platform and p["platform"]!=platform):raise ValueError("模板与平台不匹配")
     engine=ENGINES.get(kind) if kind else DEFAULT_ENGINE.get(p["platform"])
     if not kind and engine not in p["adapters"]:engine=next(iter(p["adapters"]))
@@ -57,9 +61,15 @@ def options(items,cat):
     if "tfo" in opts and engine!="mihomo":raise ValueError("此输出不支持 tfo；Stash 的 QUIC fast-open 不是 TCP Fast Open")
     name=opts.get("name",p["name"])
     if len(name)>80 or not re.fullmatch(r"[\w .()（）-]+",name) or name in (".","..") or not name.strip():raise ValueError("名称仅可包含文字、数字、空格、点、括号、连字符或下划线")
-    return cat["targets"][tid][network],opts,name
+    entry=cat["targets"][tid][network]
+    if "error" in entry:raise ValueError(entry["error"])
+    if entry.get("format")=="conf" and FLAGS.intersection(opts):raise ValueError("此客户端使用完整配置，不接受 YAML 节点参数")
+    opts["_engine"]=engine
+    return entry,opts,name
 def render(raw,root,rid,opts):
-    cfg=cc.load(raw);nodes=cfg.get("proxies",[])
+    from .dialects import normalize
+    cfg=cc.load(raw);nodes=[normalize(n,opts["_engine"]) for n in cfg.get("proxies",[])]
+    if "proxies" in cfg:cfg["proxies"]=nodes
     # Dynamic overrides cannot be applied honestly to external proxy providers.
     if cfg.get("proxy-providers") and any(k in opts for k in ("tfo","scv")):raise ValueError("带节点提供者的配置不支持全局节点参数")
     if cfg.get("proxy-providers") and opts.get("list"):raise ValueError("带节点提供者的模板不能仅导出静态节点")
@@ -71,4 +81,4 @@ def render(raw,root,rid,opts):
     if opts.get("sort"):nodes.sort(key=lambda n:n["name"].casefold())
     if opts.get("list"):return cc.dump({"proxies":nodes}).encode()
     return cc.materialize_cfg(cfg,root,rid)
-def disposition(name):return "attachment; filename*=UTF-8''"+quote(name+".yaml",safe="")
+def disposition(name,ext="yaml"):return "attachment; filename*=UTF-8''"+quote(name+"."+ext,safe="")

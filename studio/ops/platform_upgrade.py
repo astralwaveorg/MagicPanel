@@ -12,3 +12,6 @@ with s.tx(True) as c:
         c.execute("UPDATE automation SET enabled=1,failed_revision=NULL,error=''")
         s.event(c,"系统","启用五个平台模板，保留原设备产物归档")
         print({**outcome,"release":release})
+
+    from studio import delivery
+    delivery.upgrade(c)

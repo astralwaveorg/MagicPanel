@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS releases(id INTEGER PRIMARY KEY, revision INTEGER NOT
 CREATE TABLE IF NOT EXISTS live(id INTEGER PRIMARY KEY CHECK(id=1), release INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, at INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscription_key(id INTEGER PRIMARY KEY CHECK(id=1),digest TEXT UNIQUE NOT NULL,token BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS client_catalogs(release INTEGER PRIMARY KEY,body BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS text_rules(key TEXT PRIMARY KEY, blob TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS catalogs(release INTEGER PRIMARY KEY,body BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS corechecks(key TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS checks(kind TEXT,key TEXT,at INTEGER,error TEXT,PRIMARY KEY(kind,key));
@@ -61,6 +63,8 @@ def init():
             os.fsync(f.fileno())
     with tx() as c:
         c.executescript(DDL)
+        from .converter import DDL as CONVERSIONS
+        c.execute(CONVERSIONS)
     with sqlite3.connect(DB) as c:
         c.execute("PRAGMA journal_mode=WAL")
     DB.chmod(0o600)

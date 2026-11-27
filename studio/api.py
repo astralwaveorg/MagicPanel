@@ -26,10 +26,13 @@ def tick():
         row=c.execute("SELECT enabled,failed_revision FROM automation").fetchone()
         draft=c.execute("SELECT revision FROM draft").fetchone()
         if row["enabled"] and draft and row["failed_revision"]!=draft[0]:
+            c.execute("SAVEPOINT candidate")
             try: cc.publish(c,"自动发布",draft[0])
             except (KeyError,ValueError,TypeError):
+                c.execute("ROLLBACK TO candidate")
                 c.execute("UPDATE automation SET failed_revision=?,error='候选校验失败，请检查发布预览'",(draft[0],))
             else:c.execute("UPDATE automation SET failed_revision=NULL,error=''")
+            c.execute("RELEASE candidate")
 async def worker():
     while True:
         await asyncio.sleep(35)
@@ -162,7 +165,18 @@ def raw_response(req,raw,mime):
 def feed(token:str,req:Request):
     with s.tx() as c:
         rev,f=feed_entry(c,token)
-        raw=cc.materialize(s.read_blob(c,f["config"]),ORIGIN+"/feed/"+token,rev)
+        data=s.read_blob(c,f["config"]);root=ORIGIN+"/feed/"+token
+        engine=f.get("engine")
+        if not engine:
+            row=c.execute("SELECT body FROM catalogs WHERE release=?",(rev,)).fetchone()
+            if row:
+                cat=json.loads(s.unseal(row[0]))
+                kinds={eng for p in cat["profiles"].values() for eng,tid in p["adapters"].items()
+                       for ent in cat["targets"][tid].values() if ent["config"]==f["config"]}
+                if len(kinds)==1:engine=kinds.pop()
+        if not engine and any(n.get("type") in ("hy2","hysteria2") for n in cc.load(data).get("proxies",[])):
+            raise ValueError("归档配置未记录目标内核，请使用带平台和格式的统一订阅")
+        raw=subs.render(data,root,rev,{"_engine":engine}) if engine else cc.materialize(data,root,rev)
     return raw_response(req,raw,"text/yaml")
 @app.api_route("/feed/{token}/r/{rev}/{key}",methods=["GET","HEAD"])
 def feed_resource(token:str,rev:int,key:str,req:Request):
@@ -171,6 +185,7 @@ def feed_resource(token:str,rev:int,key:str,req:Request):
         if key not in f["resources"]:raise HTTPException(404)
         raw=s.read_blob(c,key)
     return raw_response(req,raw,"application/octet-stream")
+@app.get("/tools/converter")
 @app.get("/")
 def index():return FileResponse(WEB/"index.html")
 app.mount("/assets",StaticFiles(directory=WEB/"assets",check_dir=False),name="assets")
@@ -229,7 +244,7 @@ from . import subscription as subs
 def subscription_info(user=Depends(actor)):
     with s.tx(True) as c:
         key=subs.issue(c);_,cat=subs.catalog(c,key)
-        return {"base":ORIGIN+"/sub/"+key,"profiles":cat["profiles"],"networks":cat["networks"]}
+        return {"base":ORIGIN+"/sub/"+key,"profiles":cat["profiles"],"deliveryProfiles":cat.get("deliveryProfiles",cat["profiles"]),"networks":cat["networks"],"stats":{tid:{n:{k:v for k,v in e.items() if k in ("error","nodes","excluded","empty")} for n,e in nets.items()} for tid,nets in cat["targets"].items()}}
 @app.post("/api/subscription/rotate")
 def subscription_rotate(user=Depends(actor)):
     with s.tx(True) as c:
@@ -240,15 +255,58 @@ def subscription_config(token:str,req:Request):
     with s.tx() as c:
         rid,cat=subs.catalog(c,token)
         entry,opts,name=subs.options(req.query_params.multi_items(),cat)
-        raw=subs.render(s.read_blob(c,entry["config"]),ORIGIN+"/sub/"+token,rid,opts)
-    resp=raw_response(req,raw,"text/yaml")
-    resp.headers["Content-Disposition"]=subs.disposition(name)
+        root=ORIGIN+"/sub/"+token
+        conf=entry.get("format")=="conf"
+        data=s.read_blob(c,entry["config"])
+        if conf:
+            from .apple import MARK
+            from urllib.parse import urlencode
+            value=data.decode().replace(MARK+"/",f"{root}/r/{rid}/").replace("{FEED_HOST}",urlsplit(ORIGIN).hostname)
+            if opts["_engine"] in ("surge","surge5"):value="#!MANAGED-CONFIG "+root+"?"+urlencode(req.query_params.multi_items())+" interval=86400\n"+value
+            raw=value.encode()
+        else:raw=subs.render(data,root,rid,opts)
+    resp=raw_response(req,raw,"text/plain" if conf else "text/yaml")
+    resp.headers["Content-Disposition"]=subs.disposition(name,"conf" if conf else "yaml")
     resp.headers["X-Studio-Release"]=str(rid)
     return resp
 @app.api_route("/sub/{token}/r/{rid}/{key}",methods=["GET","HEAD"])
 def subscription_resource(token:str,rid:int,key:str,req:Request):
     with s.tx() as c:
         _,cat=subs.catalog(c,token,rid)
-        if not any(key in e["resources"] for plans in cat["targets"].values() for e in plans.values()):raise HTTPException(404)
+        formats={e.get("format","yaml") for plans in cat["targets"].values() for e in plans.values() if key in e["resources"]}
+        if not formats:raise HTTPException(404)
         raw=s.read_blob(c,key)
-    return raw_response(req,raw,"application/octet-stream")
+    return raw_response(req,raw,"text/plain" if "conf" in formats else "application/octet-stream")
+
+from . import converter as cv
+def conversion_meta(row):
+    return {**cv.details(row),"url":ORIGIN+"/c/"+s.unseal(row["secret"]).decode()}
+
+@app.get("/api/conversions")
+def conversion_list(user=Depends(actor)):
+    with s.tx() as c:return [conversion_meta(r) for r in c.execute("SELECT * FROM conversions WHERE owner=? ORDER BY built DESC",(user,))]
+
+@app.post("/api/conversions")
+def conversion_create(body:dict,user=Depends(actor)):
+    token=cv.create(user,body)
+    with s.tx() as c:return conversion_meta(cv.lookup(token,c,user))
+
+@app.post("/api/conversions/{token}/refresh")
+def conversion_refresh(token:str,user=Depends(actor)):
+    return conversion_meta(cv.artifact(token,user,True))
+
+@app.post("/api/conversions/{token}/remove")
+def conversion_remove(token:str,user=Depends(actor)):
+    with s.tx(True) as c:
+        row=cv.lookup(token,c,user);c.execute("DELETE FROM conversions WHERE id=?",(row["id"],))
+    return {"ok":True}
+
+@app.api_route("/c/{token}",methods=["GET","HEAD"])
+def conversion_read(token:str,req:Request):
+    import zlib
+    row=cv.artifact(token);info=cv.details(row);raw=zlib.decompress(s.unseal(row["body"]))
+    if info["target"] in ("surge","surge5"):raw=(f"#!MANAGED-CONFIG {ORIGIN}/c/{token} interval=3600\n").encode()+raw
+    response=raw_response(req,raw,{"yaml":"text/yaml","json":"application/json"}.get(info["ext"],"text/plain"))
+    response.headers["Content-Disposition"]=subs.disposition(info["name"],info["ext"])
+    response.headers["X-Studio-Cache"]="stale" if info["failed"] else "ready"
+    return response

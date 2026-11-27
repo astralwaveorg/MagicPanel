@@ -10,7 +10,7 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 COPY *.py /srv/studio/
-COPY ops/platform_upgrade.py /srv/studio/platform_upgrade.py
+COPY ops/platform_upgrade.py ops/check_hy2_auth.py /srv/studio/
 COPY --from=frontend /ui/dist /srv/studio/web
 ARG REVISION=unknown
 LABEL org.opencontainers.image.revision=$REVISION

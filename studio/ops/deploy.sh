@@ -36,6 +36,8 @@ chmod 600 "$base/minimax.key"
 printf 'REVISION=%s\nSTUDIO_STATE_DIR=%s\nSTUDIO_AI_KEY=%s\n' "$rev" "$state" "$base/minimax.key" > .env
 docker compose config --quiet
 docker compose build studio
+# This test uses ephemeral credentials, two loopback endpoints and no state volume.
+docker run --rm --network none --read-only --tmpfs /tmp -v "$base/core:/opt/studio-core:ro" "magicpanel-studio:$rev" python -m studio.check_hy2_auth /opt/studio-core/mihomo
 resume_old() {
   if test -n "$previous" && test -f "$previous/.env"; then
     (cd "$previous" && docker compose up -d --no-build --wait --wait-timeout 80 studio) >&2 || echo '旧 v2 镜像恢复失败' >&2
@@ -61,8 +63,11 @@ if ! test -s "$state/studio.sqlite3"; then
 else
   docker compose run --rm -T --no-deps studio python -m studio.platform_upgrade </dev/null
 fi
-docker compose up -d --no-build --wait --wait-timeout 80 </dev/null
-curl -fsS --max-time 5 http://127.0.0.1:47102/healthz
+if ! docker compose up -d --no-build --wait --wait-timeout 80 </dev/null || ! curl -fsS --max-time 5 http://127.0.0.1:47102/healthz; then
+  trap - ERR
+  resume_old
+  exit 1
+fi
 if "$promote"; then ln -sT "$state" "$base/state"; fi
 ln -sfnT "$base/releases/$rev" "$base/current"
 trap - ERR

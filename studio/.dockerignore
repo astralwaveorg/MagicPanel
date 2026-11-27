@@ -9,3 +9,4 @@
 !client/src/**
 !ops/
 !ops/platform_upgrade.py
+!ops/check_hy2_auth.py

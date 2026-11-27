@@ -38,6 +38,8 @@ def compile_template(ws, template):
     cfg["rules"] = lines
     if not isinstance(cfg.get("proxy-groups"),list):
         raise ValueError("缺少策略组")
+    from .dialects import normalize
+    if "proxies" in cfg:cfg["proxies"]=[normalize(n,template["engine"]) for n in cfg["proxies"]]
     proxies = [n["name"] for n in cfg.get("proxies",[])]
     groups = {g["name"]:g for g in cfg["proxy-groups"]}
     names = set(proxies) | set(groups) | BUILTINS
@@ -107,7 +109,7 @@ def publish(c,actor,expected):
                 verify(c,cfg,text)
         except (ValueError,TypeError,KeyError) as e:
             raise ValueError(f"{t['name']} · {ws['networks'][network]['name']}：{e}") from None
-        manifests[pair]={"config":s.put_blob(c,text.encode()),"resources":resources}
+        manifests[pair]={"config":s.put_blob(c,text.encode()),"resources":resources,"engine":t["engine"]}
         return manifests[pair]
     # Even a platform without an enrolled device must have a valid baseline.
     for tid in ws["templates"]:build(tid,"default")
@@ -124,6 +126,8 @@ def publish(c,actor,expected):
     if profiles:
         from .subscription import issue
         issue(c)
+        from . import delivery
+        delivery.prepare(c,rid,catalog)
         c.execute("INSERT INTO catalogs VALUES(?,?)",(rid,s.seal(s.encode(catalog))))
     c.execute("INSERT OR REPLACE INTO live VALUES(1,?)",(rid,))
     s.event(c,actor,f"发布 #{rid} · 草稿 {rev}")

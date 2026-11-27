@@ -54,11 +54,8 @@ def convert(text,engine):
     if not isinstance(nodes,list) or not nodes or len(nodes)>3000:raise ValueError("未找到有效节点")
     for n in nodes:
         if not isinstance(n,dict) or not all(n.get(k) for k in ("name","type","server","port")):raise ValueError("节点需要名称、协议、地址与端口")
-        if n["type"]=="hysteria2":
-            dst,src=("auth","password") if engine=="stash" else ("password","auth")
-            if src in n:n.setdefault(dst,n.pop(src))
-            if not n.get(dst):raise ValueError("Hysteria2 节点缺少认证字段")
-    return nodes
+    from .dialects import normalize
+    return [normalize(n,engine) for n in nodes]
 def proposal(mode,text,w,tid):
     t=w["templates"][tid]; groups=[g["name"] for g in t["base"].get("proxy-groups",[])]
     common={"template":tid}; choices=groups+["DIRECT","REJECT"]

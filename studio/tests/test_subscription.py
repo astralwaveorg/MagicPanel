@@ -28,10 +28,10 @@ def test_single_subscription_release_and_carrier_isolation(tmp_path,monkeypatch)
         for key,order,dest in (("telecom",["A","B"],"默认出口"),("mobile",["B","A"],"REJECT"),("unicom",["B","A"],"默认出口")):
             doc=fetch(target+key)
             assert doc["proxy-groups"][0]["proxies"]==order and doc["rules"]==["MATCH,"+dest]
-        doc=fetch("type=mihomo&arch=win&name=AstralWindows&network=mobile&sort=true&tfo=false&scv=true")
+        doc=fetch("type=mihomo&arch=win&name=Office-PC&network=mobile&sort=true&tfo=false&scv=true")
         assert [n["name"] for n in doc["proxies"]]==["A","B"] and doc["proxy-groups"][0]["proxies"]==["B","A"]
         assert all(n["tfo"] is False and n["skip-cert-verify"] for n in doc["proxies"])
-        assert set(fetch("type=mac&arch=aarch64&name=XXXMacmini&list=true"))=={"proxies"}
+        assert set(fetch("type=mac&arch=aarch64&name=Desktop-Mac&list=true"))=={"proxies"}
         assert "skip-cert-verify" not in fetch(target+"telecom")["proxies"][0]
         for q in ("type=mac&tfo=false","scv=off","platform=android&arch=mac","emoji=true","scv=false&skip-cert-verify=true","network=absent"):
             assert client.get(base+"?"+q).status_code==422
