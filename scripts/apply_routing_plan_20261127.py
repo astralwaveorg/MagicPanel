@@ -239,8 +239,9 @@ def apply(expected, backup, expected_after):
             raise SystemExit('Common proxy baseline mismatch.')
         conn.execute("UPDATE rules SET value='magic-proxy',updated_at=? WHERE id=2028", (now,))
         reddit_rule = conn.execute('''INSERT INTO rules
-            (variant_id,sort,type,value,target,created_at,updated_at)
-            VALUES (0,0,'RULE-SET','Reddit',?,?,?)''', (REDDIT, now, now)).lastrowid
+            (variant_id,sort,type,value,target,targets,devices,created_at,updated_at)
+            VALUES (0,0,'RULE-SET','Reddit',?,?,?,?,?)''',
+            (REDDIT, '["*"]', '["*"]', now, now)).lastrowid
         node_refs.canonical_rule(conn, reddit_rule, group_refs[REDDIT])
         ranks = [(rule_rank(r), r['id']) for r in rules]
         ranks.append(((2, 4), reddit_rule))
