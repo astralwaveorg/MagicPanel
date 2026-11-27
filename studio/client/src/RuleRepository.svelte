@@ -32,7 +32,7 @@
  {#if !adding}<small>GitHub {original.sha.slice(0,9)} · {bound?.repo_sha?'草稿来源 '+bound.repo_sha.slice(0,9):bound?'已有本地快照，未记录 GitHub 版本':'尚未绑定到面板'}</small>{/if}
  <label>规则正文<textarea rows="9" spellcheck="false" disabled={busy} bind:value={body} oninput={()=>{review=null;confirmApply=false}}></textarea></label>
  <div class="actions"><button disabled={busy||!dirty} onclick={()=>run(async()=>{review=await api('rule-repo/review',payload())})}>预览提交差异</button>
- {#if !adding}<button disabled={busy} onclick={()=>run(async()=>{history=await api('rule-repo/history?name='+encodeURIComponent(name))})}>提交历史</button><button disabled={busy||dirty} onclick={()=>confirmApply=!confirmApply}>应用到草稿</button>{/if}</div>
+ {#if !adding}<button disabled={busy} onclick={()=>run(async()=>{history=await api('rule-repo/history?name='+encodeURIComponent(name))})}>提交历史</button><a class="button" href={'https://github.com/astralwaveorg/magic-sets/commits/main/rule/'+encodeURIComponent(name)} target="_blank" rel="noreferrer">GitHub 记录</a><button disabled={busy||dirty} onclick={()=>confirmApply=!confirmApply}>应用到草稿</button>{/if}</div>
  {#if review}<div class="review-block"><h3>待提交到 main</h3><pre>{review.diff}</pre>{#if review.truncated}<p>仅显示前 600 行差异。</p>{/if}
  <label>提交说明<input bind:value={message} disabled={busy}></label><label>GitHub 写入令牌<input type="password" autocomplete="off" bind:value={token} disabled={busy}></label><small>仅用于本次提交。使用限于 magic-sets、具有 Contents 写权限的令牌。</small>
  <div class="actions"><button class="solid" disabled={busy||!message.trim()||!token} onclick={()=>run(save)}>确认提交 GitHub</button><button disabled={busy} onclick={()=>{review=null;token=''}}>取消</button></div></div>{/if}

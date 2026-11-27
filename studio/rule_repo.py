@@ -2,11 +2,14 @@
 import base64
 import difflib
 import hashlib
+import gzip
+import io
+import tarfile
 import http.client
 import json
 import re
 from urllib.parse import urlencode
-from . import compiler as cc, store as s
+from . import compiler as cc, store as s, fetch
 
 REPO="astralwaveorg/magic-sets"
 BRANCH="main"
@@ -14,6 +17,9 @@ BASE="/repos/"+REPO
 NAME=re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,89}\.ya?ml\Z")
 SHA=re.compile(r"[0-9a-f]{40}\Z")
 LIMIT=300_000
+
+class ReadUnavailable(ValueError):
+    pass
 
 def filename(value):
     if not isinstance(value,str) or not NAME.fullmatch(value):raise ValueError("文件名须为 rule/ 下的 YAML 文件，不含目录")
@@ -28,20 +34,37 @@ def github(method,path,body=None,token=""):
     try:
         conn.request(method,BASE+path,body=json.dumps(body).encode() if body is not None else None,headers=headers)
         res=conn.getresponse();raw=res.read(1_200_001)
+        if method=="GET" and (res.status in (403,429) or res.status>=500):raise ReadUnavailable("GitHub API 暂不可用或已达到请求额度")
         if res.status in (409,422):raise ValueError("GitHub 未接受提交；请刷新文件、核对差异后重试")
         if not 200<=res.status<300:raise ValueError(f"GitHub 返回 HTTP {res.status}，请检查文件、权限或请求额度")
         if len(raw)>1_200_000:raise ValueError("GitHub 返回内容过大")
         return json.loads(raw)
     except (OSError,http.client.HTTPException,json.JSONDecodeError):
-        raise ValueError("GitHub 请求未完成；请刷新查看仓库状态") from None
+        raise (ReadUnavailable if method=="GET" else ValueError)("GitHub 请求未完成；请刷新查看仓库状态") from None
     finally:conn.close()
 
 def catalog():
-    files=github("GET","/contents/rule?ref="+BRANCH)
+    try:files=github("GET","/contents/rule?ref="+BRANCH)
+    except ReadUnavailable:
+        # Use the public source archive when the unauthenticated REST quota is exhausted.
+        try:
+            raw=fetch.get("https://codeload.github.com/"+REPO+"/tar.gz/refs/heads/"+BRANCH)
+            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as z:plain=z.read(3_000_001)
+            if len(plain)>3_000_000:raise ValueError("仓库快照过大")
+            with tarfile.open(fileobj=io.BytesIO(plain),mode="r:") as tar:
+                files=[{"type":"file","name":x.name.split("/")[-1]} for x in tar if x.isfile() and
+                       x.name.startswith("magic-sets-main/rule/") and x.name.count("/")==2]
+        except (OSError,EOFError,tarfile.TarError):raise ValueError("无法读取 GitHub 仓库快照") from None
     return {"repo":REPO,"branch":BRANCH,"files":[x["name"] for x in files if x.get("type")=="file" and NAME.fullmatch(x["name"])]}
 
 def file(name):
-    name=filename(name);r=github("GET","/contents/rule/"+name+"?ref="+BRANCH)
+    name=filename(name)
+    try:r=github("GET","/contents/rule/"+name+"?ref="+BRANCH)
+    except ReadUnavailable:
+        try:raw=fetch.get("https://raw.githubusercontent.com/"+REPO+"/"+BRANCH+"/rule/"+name)
+        except OSError:raise ValueError("无法读取 GitHub 文件") from None
+        if not 0<len(raw)<=LIMIT:raise ValueError("GitHub 文件超过大小限制")
+        return {"name":name,"sha":hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest(),"content":raw.decode("utf-8-sig")}
     if r.get("type")!="file" or r.get("encoding")!="base64" or not 0<r.get("size",0)<=LIMIT:raise ValueError("不是可编辑的 YAML 文件")
     raw=base64.b64decode(r["content"]);sha=hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()
     if sha!=r["sha"]:raise ValueError("GitHub 文件校验失败")

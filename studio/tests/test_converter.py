@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from studio import api,converter as cv,compiler as cc,store as s
 from studio.init import initialize
 
-SOURCE="proxies:\n  - {name: 日本 01, type: hysteria2, server: example.org, port: 443, auth: sample-pass}\n  - {name: 香港 02, type: trojan, server: example.net, port: 443, password: sample-other}\n"
+SOURCE="proxies:\n  - {name: 日本 01, type: hysteria2, server: example.org, port: 443, auth: sample-pass}\n  - {name: 香港 02, type: trojan, server: example.net, port: 443, password: dummy-secondary}\n"
 def test_saved_conversion_lifecycle(tmp_path,monkeypatch):
     monkeypatch.setattr(s,"ROOT",tmp_path);monkeypatch.setattr(s,"DB",tmp_path/"db");s.init()
     with s.tx(True) as c:initialize(c,"owner","fixture-super-secret")
@@ -38,4 +38,4 @@ def test_tool_rejects_unsafe_or_unusable_input(tmp_path,monkeypatch):
     for d in [{"sources":"http://127.0.0.1/a"},{"sources":"file:///tmp/source"},{"sources":SOURCE,"include":"["},{"sources":SOURCE,"exclude":".*"},{"sources":"proxies: []\nproxy-providers: {x: {}}"},{"sources":SOURCE,"config":"https://example.net/remote-script"}]:
         with pytest.raises(ValueError):cv.compile_recipe(cv.opts({"target":"mihomo",**d}))
     monkeypatch.setattr(cv,"sidecar",lambda p:cc.dump({"proxies":[{"name":"fixture","type":"hysteria2","server":"example.org","port":443,"password":"wrong"}]}).encode())
-    with pytest.raises(ValueError,match="凭据与输入不一致"):cv.compile_recipe(cv.opts({"target":"mihomo","sources":"hysteria2://sample@example.org:443#fixture"}))
+    with pytest.raises(ValueError,match="凭据与输入不一致"):cv.compile_recipe(cv.opts({"target":"mihomo","sources":"hysteria2://dummy@example.org:443#fixture"}))

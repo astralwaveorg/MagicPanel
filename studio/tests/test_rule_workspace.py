@@ -101,3 +101,15 @@ def test_publish_keeps_working_client_when_new_rule_cannot_translate(setup):
         with s.tx(True) as c:cc.publish(c,"review",rev)
     with s.tx() as c:
         assert c.execute("select release from live").fetchone()[0]==1 and c.execute("select count(*) from releases").fetchone()[0]==1
+
+def test_public_repo_quota_fallback(monkeypatch):
+    import gzip,io,tarfile
+    raw=b"payload: [example.org]";buf=io.BytesIO()
+    with tarfile.open(fileobj=buf,mode="w") as tar:
+        for path in ["magic-sets-main/rule/sample.yaml","magic-sets-main/nested/secret.yaml"]:
+            item=tarfile.TarInfo(path);item.size=len(raw);tar.addfile(item,io.BytesIO(raw))
+    def limited(*args):raise rr.ReadUnavailable("quota")
+    monkeypatch.setattr(rr,"github",limited)
+    monkeypatch.setattr(rr.fetch,"get",lambda url:gzip.compress(buf.getvalue()) if "codeload.github.com" in url else raw)
+    assert rr.catalog()["files"]==["sample.yaml"]
+    assert rr.file("sample.yaml")["sha"]==blob_sha(raw)

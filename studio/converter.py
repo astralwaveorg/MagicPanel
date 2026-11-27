@@ -155,7 +155,7 @@ def rules(d):
 
 def public_routing(nodes):
     # Only names participate in group selection. Never send original secrets to a template.
-    tags=["trojan://template-only@example.org:"+str(10000+i)+"#"+quote(n["name"],safe="") for i,n in enumerate(nodes)]
+    tags=["trojan://dummy-template@example.org:"+str(10000+i)+"#"+quote(n["name"],safe="") for i,n in enumerate(nodes)]
     doc=cc.load(sidecar({"target":"clash","url":"|".join(tags),"config":PUBLIC_TEMPLATE,"expand":"true","emoji":"false","insert":"false"}))
     names={n["name"] for n in nodes}
     if not isinstance(doc,dict) or {n["name"] for n in doc.get("proxies",[])}!=names or doc.get("rule-providers") or doc.get("proxy-providers"):
