@@ -21,8 +21,8 @@ def summary(c):
                         nodes=len(t["base"].get("proxies",[])),groups=[g["name"] for g in t["base"].get("proxy-groups",[])]) for k,t in w["templates"].items()],
         devices=[dict(id=k,**d) for k,d in w["devices"].items()],
         rules=w["rules"],resources=[{"name":k,"format":r["format"],"behavior":r["behavior"]} for k,r in w["resources"].items()],
-        sources=[{"id":k,**{x:v.get(x) for x in ("name","managed","snapshot_count","last_success","issue","interval","template","group")}} for k,v in w["sources"].items()],
-        releases=[dict(r) for r in c.execute("SELECT id,revision,at,actor FROM releases ORDER BY id DESC LIMIT 30")],
+        sources=[{"id":k,**{x:v.get(x) for x in ("name","managed","snapshot_count","last_success","issue","interval","template","group","scope")}} for k,v in w["sources"].items()],
+        releases=[dict(r) for r in c.execute("SELECT id,revision,at,actor,EXISTS(SELECT 1 FROM catalogs WHERE catalogs.release=releases.id) AS unified FROM releases ORDER BY id DESC LIMIT 30")],
         auto=dict(c.execute("SELECT enabled,error FROM automation").fetchone()))
 
 def template_detail(t):
@@ -98,12 +98,15 @@ def edit(c,actor,rev,op,p):
     elif op=="source_save":
         sid=p.get("id") or uid("s")
         existing=w["sources"].get(sid,{})
-        if existing.get("owned") and (existing.get("template")!=p["template"] or existing.get("group")!=p["group"]):raise ValueError("已有托管节点时请新建绑定或保持原组")
+        scope=p.get("scope",existing.get("scope","target"))
+        if scope not in ("target","policy"):raise ValueError("来源作用范围无效")
+        if existing.get("owned") and (existing.get("template")!=p["template"] or existing.get("group")!=p["group"] or existing.get("scope","target")!=scope):raise ValueError("已有托管节点时请新建绑定或保持原组")
         tmpl=templates[p["template"]]
         if p["group"] not in [g["name"] for g in tmpl["base"]["proxy-groups"]]:raise ValueError("分组不存在")
+        if scope=="policy" and any(p["group"] not in {g["name"] for g in v["base"]["proxy-groups"]} for v in templates.values() if v["policy"]==tmpl["policy"]):raise ValueError("部分客户端适配没有此策略组")
         url=p.get("url") or existing.get("url","")
         if not url.startswith("https://"):raise ValueError("需要 HTTPS 订阅地址")
-        existing.update(name=label(p["name"]),url=url,template=p["template"],group=p["group"],managed=bool(p.get("managed")),interval=max(300,min(604800,int(p.get("interval",21600)))))
+        existing.update(name=label(p["name"]),scope=scope,url=url,template=p["template"],group=p["group"],managed=bool(p.get("managed")),interval=max(300,min(604800,int(p.get("interval",21600)))))
         w["sources"][sid]=existing
     elif op=="resource_bind":
         name=label(p["name"]); fmt=p["format"]; beh=p["behavior"];url=p.get("url","")

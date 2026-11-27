@@ -59,11 +59,21 @@ if ! test -s "$state/studio.sqlite3"; then
   if ! test -s "$bootstrap_pass"; then python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$bootstrap_pass"; fi
   docker compose run --rm -T --no-deps studio python -m studio.init --admin admin < "$bootstrap_pass"
 else
-  docker compose run --rm -T --no-deps studio python -m studio.platform_upgrade
+  docker compose run --rm -T --no-deps studio python -m studio.platform_upgrade </dev/null
 fi
-docker compose up -d --no-build --wait --wait-timeout 80
+docker compose up -d --no-build --wait --wait-timeout 80 </dev/null
 curl -fsS --max-time 5 http://127.0.0.1:47102/healthz
 if "$promote"; then ln -sT "$state" "$base/state"; fi
 ln -sfnT "$base/releases/$rev" "$base/current"
 trap - ERR
 NAS
+# Check from a separate SSH session: a helper consuming stdin must never report a partial deploy as success.
+ssh -o BatchMode=yes "$host" "bash -s -- '$rev'" <<'VERIFY'
+set -eu
+cd /opt/magicpanel-v2/current
+test "$(basename "$(pwd -P)")" = "$1"
+cid=$(docker compose ps -q studio)
+test -n "$cid"
+test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$cid")" = "$1"
+test "$(docker inspect --format '{{.State.Health.Status}}' "$cid")" = healthy
+VERIFY

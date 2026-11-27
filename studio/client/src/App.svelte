@@ -67,7 +67,7 @@
  {:else if page==='release'}
  <div class="title"><div><small class="kicker">RELEASES</small><h1>发布记录</h1><p>配置和规则资源按发布版本保存。统一订阅可以恢复到已生成统一地址的版本。</p></div><button class="solid" onclick={()=>go('publish')}>校验并发布</button></div>
  <div class="panel"><h3>{dirty?'有草稿等待发布':'草稿与生效版本一致'}</h3><p>草稿 {s.revision} · 生效 #{s.live.id} · 自动发布{s.auto.enabled?'已开启':'已暂停'}</p><div class="actions"><button onclick={()=>go('auto')}>{s.auto.enabled?'暂停':'开启'}自动发布</button><button onclick={()=>go('preview')}>查看选定目标差异</button></div>{#if s.auto.error}<p class="error">{s.auto.error}</p>{/if}</div>{@render contextPicker()}
- <div class="list">{#each s.releases as r}<article><div><b>发布 #{r.id}</b><small>{new Date(r.at*1000).toLocaleString()} · {r.actor}</small></div>{#if r.id===s.live.id}<span class="tag">生效中</span>{:else}<button onclick={()=>go('rollback',String(r.id))}>恢复</button>{/if}</article>{/each}</div>{/if}
+ <div class="list">{#each s.releases as r}<article><div><b>发布 #{r.id}</b><small>{new Date(r.at*1000).toLocaleString()} · {r.actor}</small></div>{#if r.id===s.live.id}<span class="tag">生效中</span>{:else if r.unified}<button onclick={()=>go('rollback',String(r.id))}>恢复</button>{:else}<small>原型归档</small>{/if}</article>{/each}</div>{/if}
  </main></div>
 {/if}
 {#if form}{#key form}{@const active=form}<Sheet form={active} close={()=>{if(form===active)form=null}}/>{/key}{/if}

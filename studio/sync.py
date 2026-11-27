@@ -18,21 +18,24 @@ def refresh(kind,key,actor):
         except Exception:raise ValueError("远程来源不可用，已保留上次快照") from None
         if kind=="source":
             t=w["templates"][row["template"]]
-            nodes=ai.convert(fetch.node_text(body),t["engine"])
-            if row.get("snapshot_count",0)>20 and len(nodes)*3<row["snapshot_count"]:
-                raise ValueError("节点数量大幅减少，保留原快照")
-            group=next((g for g in t["base"]["proxy-groups"] if g["name"]==row["group"]),None)
-            if group is None:raise ValueError("绑定的组已删除")
-            prev=set(row.get("owned",[]))
-            for n in nodes:n["name"]=row["name"]+" / "+service.label(n["name"])
-            names=[n["name"] for n in nodes]
-            t["base"]["proxies"]=[n for n in t["base"].get("proxies",[]) if n["name"] not in prev]+nodes
-            for g in t["base"]["proxy-groups"]:
-                if "proxies" in g:
-                    g["proxies"]=[n for n in g["proxies"] if n not in prev-set(names)]
-            group["proxies"]=[n for n in group.get("proxies",[]) if n not in prev]+names
-            row.update(owned=names,snapshot_count=len(nodes))
-            cc.compile_template(w,t)
+            targets=[v for v in w["templates"].values() if v["policy"]==t["policy"]] if row.get("scope")=="policy" else [t]
+            text=fetch.node_text(body);variants={e:ai.convert(text,e) for e in {v["engine"] for v in targets}}
+            import copy
+            occupied=set()
+            for tmp in targets:
+                nodes=copy.deepcopy(variants[tmp["engine"]])
+                if row.get("snapshot_count",0)>20 and len(nodes)*3<row["snapshot_count"]:raise ValueError("节点数量大幅减少，保留原快照")
+                group=next((g for g in tmp["base"]["proxy-groups"] if g["name"]==row["group"]),None)
+                if group is None:raise ValueError("绑定的组已删除")
+                prev=set(row.get("owned",[]))
+                for n in nodes:n["name"]=row["name"]+" / "+service.label(n["name"])
+                names=[n["name"] for n in nodes];occupied.update(names)
+                tmp["base"]["proxies"]=[n for n in tmp["base"].get("proxies",[]) if n["name"] not in prev]+nodes
+                for g in tmp["base"]["proxy-groups"]:
+                    if "proxies" in g:g["proxies"]=[n for n in g["proxies"] if n not in prev-set(names)]
+                group["proxies"]=[n for n in group.get("proxies",[]) if n not in prev]+names
+                cc.compile_template(w,tmp)
+            row.update(owned=sorted(occupied),snapshot_count=len(occupied))
         else:
             if row["format"]=="mrs":
                 if not body.startswith(b"MRS") and not body.startswith(bytes.fromhex("28b52ffd")):raise ValueError("响应不符合 MRS 格式")

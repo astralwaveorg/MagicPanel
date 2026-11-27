@@ -38,3 +38,21 @@ def test_single_subscription_release_and_carrier_isolation(tmp_path,monkeypatch)
         assert client.get("/sub/"+"e"*43).status_code==404
         assert client.post("/api/subscription/rotate",json={}).is_success
         assert client.get(base).status_code==404
+
+def test_managed_source_is_shared_between_engines(tmp_path,monkeypatch):
+    from studio import sync
+    monkeypatch.setattr(s,"ROOT",tmp_path);monkeypatch.setattr(s,"DB",tmp_path/"studio.sqlite3");s.init()
+    with s.tx(True) as c:
+        initialize(c,"owner","fixture-private-secret")
+        service.edit(c,"owner",1,"source_save",{"name":"sample","url":"https://example.org/source","group":"默认出口","managed":True,"scope":"policy","template":"platform-windows-mihomo"})
+        key=next(iter(s.workspace(c)[1]["sources"]))
+    monkeypatch.setattr(sync.fetch,"get",lambda *a: b'proxies: [{name: fixture, type: hysteria2, server: example.org, password: abc, port: 443}]')
+    assert sync.refresh("source",key,"fixture")["changed"]
+    assert not sync.refresh("source",key,"fixture")["changed"]
+    with s.tx() as c:
+        rev,w=s.workspace(c)
+        assert rev==3
+        for t in w["templates"].values():
+            node,=t["base"]["proxies"]
+            assert node["name"]=="sample / fixture"
+            assert set(node.keys())&{"auth","password"}==({"auth"} if t["engine"]=="stash" else {"password"})
