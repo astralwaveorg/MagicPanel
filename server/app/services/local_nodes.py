@@ -5,6 +5,7 @@
 协议字段由服务端统一定义，前端据此动态渲染表单。
 """
 import json
+import re
 from copy import deepcopy
 
 import yaml
@@ -160,6 +161,7 @@ PROTOCOLS = {
             _field("password", "密码", "password", required=True),
             _field("sni", "SNI", "text", default=""),
             _field("skip_cert_verify", "跳过证书校验", "switch", default=False),
+            _field("cert_fingerprint", "证书 SHA-256 指纹（仅 Mihomo）", "text", default=""),
             _field("obfs", "混淆", "select", default="",
                    options=[{"value": "", "label": "无"},
                             {"value": "salamander", "label": "salamander"},
@@ -347,6 +349,11 @@ def normalize_params(protocol: str, params: dict) -> dict:
             allowed = {option["value"] for option in field.get("options", [])}
             if allowed and normalized[key] not in allowed:
                 raise ValueError(f"{field['label']}取值不支持")
+    if protocol == "hysteria2" and normalized.get("cert_fingerprint"):
+        fingerprint = normalized["cert_fingerprint"].replace(":", "").lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise ValueError("证书 SHA-256 指纹必须包含 64 位十六进制字符")
+        normalized["cert_fingerprint"] = fingerprint
     if protocol == "tuic":
         # v4 与 v5 的认证字段互斥：v4 用 token，v5 用 uuid + password
         version = str(normalized.get("version") or "5")
@@ -505,7 +512,9 @@ def render_proxy(node: dict, engine: str = "mihomo") -> dict:
             entry["udp"] = bool(params.get("udp", True))
         if params.get("sni"):
             entry["sni"] = params["sni"]
-        if params.get("skip_cert_verify"):
+        if not stash and params.get("cert_fingerprint"):
+            entry["fingerprint"] = params["cert_fingerprint"]
+        elif params.get("skip_cert_verify"):
             entry["skip-cert-verify"] = True
         if params.get("fast_open"):
             entry["fast-open"] = True

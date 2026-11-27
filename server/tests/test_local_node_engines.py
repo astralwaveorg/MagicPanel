@@ -48,6 +48,23 @@ def test_hysteria2_stash_and_mihomo_auth_fields():
     assert mihomo["fast-open"] is True
 
 
+def test_hysteria2_uses_sha256_certificate_pin_only_in_mihomo():
+    from app.services.local_nodes import normalize_params, render_proxy
+    params = normalize_params("hysteria2", {
+        "password": "pw", "skip_cert_verify": True,
+        "cert_fingerprint": ":".join(["AB"] * 32),
+    })
+    node = _node("hysteria2", params)
+    mihomo = render_proxy(node, "mihomo")
+    assert mihomo["fingerprint"] == "ab" * 32
+    assert "skip-cert-verify" not in mihomo
+    stash = render_proxy(node, "stash")
+    assert stash["skip-cert-verify"] is True
+    assert "fingerprint" not in stash
+    with pytest.raises(ValueError, match="64 位十六进制"):
+        normalize_params("hysteria2", {"password": "pw", "cert_fingerprint": "f" * 63})
+
+
 def test_tuic_v4_uses_token_for_both_engines():
     from app.services.local_nodes import render_proxy
     node = _node("tuic", {
