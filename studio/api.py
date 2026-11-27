@@ -18,7 +18,8 @@ from . import compiler as cc, store as s, service
 
 ORIGIN=os.environ.get("STUDIO_ORIGIN","https://v2.magichub.top:8443").rstrip("/")
 COOKIE="studio_session"
-WEB=Path(__file__).parent/"web"
+WEB=Path(os.getenv("STUDIO_WEB",str(Path(__file__).parent/"web")))
+if not WEB.exists():WEB=Path(__file__).parent/"client/dist"
 attempts={}; limiter=Lock()
 def tick():
     with s.tx(True) as c:
@@ -106,8 +107,11 @@ def logout(req:Request,user=Depends(actor)):
 def state(user=Depends(actor)):
     with s.tx() as c:return dict(user=user,**service.summary(c))
 @app.get("/api/templates/{tid}")
-def template(tid:str,user=Depends(actor)):
-    with s.tx() as c:return service.template_detail(s.workspace(c)[1]["templates"][tid])
+def template(tid:str,network:str="default",user=Depends(actor)):
+    from .routing import effective
+    with s.tx() as c:
+        _,w=s.workspace(c)
+        return service.template_detail(effective(w,w["templates"][tid],network))
 @app.get("/api/resources/{name}")
 def resource(name:str,user=Depends(actor)):
     with s.tx() as c:
@@ -131,6 +135,7 @@ def rollback(body:dict,user=Depends(actor)):
         live=c.execute("SELECT release FROM live").fetchone()[0]
         if body.get("expected")!=live:raise ValueError("发布已更新，请刷新")
         if not c.execute("SELECT 1 FROM releases WHERE id=?",(rid,)).fetchone():raise ValueError("版本不存在")
+        if c.execute("SELECT 1 FROM catalogs").fetchone() and not c.execute("SELECT 1 FROM catalogs WHERE release=?",(rid,)).fetchone():raise ValueError("此旧版没有统一订阅产物，不能在线回滚")
         c.execute("UPDATE live SET release=?",(rid,));c.execute("UPDATE automation SET enabled=0")
         s.event(c,user,f"回滚至 #{rid}，暂停自动发布")
     return {"release":rid}
@@ -168,7 +173,7 @@ def feed_resource(token:str,rev:int,key:str,req:Request):
     return raw_response(req,raw,"application/octet-stream")
 @app.get("/")
 def index():return FileResponse(WEB/"index.html")
-app.mount("/assets",StaticFiles(directory=WEB),name="assets")
+app.mount("/assets",StaticFiles(directory=WEB/"assets",check_dir=False),name="assets")
 
 from . import assistant as ai
 @app.post("/api/assistant")
@@ -178,14 +183,20 @@ def assistance(body:dict,user=Depends(actor)):
 @app.post("/api/node-preview")
 def node_preview(body:dict,user=Depends(actor)):
     with s.tx() as c:rev,w=s.workspace(c)
+    if body.get("scope")=="policy":
+        pid=w["templates"][body["template"]]["policy"]
+        engines={t["engine"] for t in w["templates"].values() if t["policy"]==pid}
+        variants={eng:ai.convert(body["text"],eng) for eng in engines}
+        return {"revision":rev,"summary":f"为方案的 {len(engines)} 种引擎添加节点到 "+body["group"],"op":"policy_nodes","data":{"policy":pid,"group":body["group"],"variants":variants}}
     nodes=ai.convert(body["text"],w["templates"][body["template"]]["engine"])
     return {"revision":rev,"summary":f"识别到 {len(nodes)} 个节点","op":"node_batch","data":{"template":body["template"],"group":body["group"],"nodes":nodes}}
 @app.get("/api/preview/{tid}")
-def preview(tid:str,user=Depends(actor)):
+def preview(tid:str,network:str="default",user=Depends(actor)):
+    from .routing import effective
     with s.tx() as c:
-        rev,w=s.workspace(c); t=w["templates"][tid]; cfg,assets=cc.compile_template(w,t)
+        rev,w=s.workspace(c); t=effective(w,w["templates"][tid],network); cfg,assets=cc.compile_template(w,t)
         line_count=len(cfg["rules"]); old=None
-        d=next((k for k,v in w["devices"].items() if v["template"]==tid),None)
+        d=next((k for k,v in w["devices"].items() if v["template"]==tid and v.get("network","default")==network),None)
         live=c.execute("SELECT manifest FROM releases JOIN live ON live.release=releases.id").fetchone()
         if live and d:
             ent=json.loads(s.unseal(live[0])).get(d)
@@ -205,3 +216,39 @@ def refresh_source(body:dict,user=Depends(actor)):
 @app.get("/api/checks")
 def checks(user=Depends(actor)):
     with s.tx() as c:return [dict(r) for r in c.execute("SELECT * FROM checks ORDER BY at DESC")]
+
+@app.get("/api/templates/{tid}/yaml")
+def template_yaml(tid:str,network:str="default",user=Depends(actor)):
+    from .routing import effective
+    with s.tx() as c:
+        _,w=s.workspace(c);cfg,_=cc.compile_template(w,effective(w,w["templates"][tid],network))
+        return {"yaml":cc.dump(cfg)}
+
+from . import subscription as subs
+@app.get("/api/subscription")
+def subscription_info(user=Depends(actor)):
+    with s.tx(True) as c:
+        key=subs.issue(c);_,cat=subs.catalog(c,key)
+        return {"base":ORIGIN+"/sub/"+key,"profiles":cat["profiles"],"networks":cat["networks"]}
+@app.post("/api/subscription/rotate")
+def subscription_rotate(user=Depends(actor)):
+    with s.tx(True) as c:
+        subs.issue(c,rotate=True);s.event(c,user,"轮换统一订阅密钥")
+    return {"ok":True}
+@app.api_route("/sub/{token}",methods=["GET","HEAD"])
+def subscription_config(token:str,req:Request):
+    with s.tx() as c:
+        rid,cat=subs.catalog(c,token)
+        entry,opts,name=subs.options(req.query_params.multi_items(),cat)
+        raw=subs.render(s.read_blob(c,entry["config"]),ORIGIN+"/sub/"+token,rid,opts)
+    resp=raw_response(req,raw,"text/yaml")
+    resp.headers["Content-Disposition"]=subs.disposition(name)
+    resp.headers["X-Studio-Release"]=str(rid)
+    return resp
+@app.api_route("/sub/{token}/r/{rid}/{key}",methods=["GET","HEAD"])
+def subscription_resource(token:str,rid:int,key:str,req:Request):
+    with s.tx() as c:
+        _,cat=subs.catalog(c,token,rid)
+        if not any(key in e["resources"] for plans in cat["targets"].values() for e in plans.values()):raise HTTPException(404)
+        raw=s.read_blob(c,key)
+    return raw_response(req,raw,"application/octet-stream")

@@ -2,6 +2,7 @@
 import copy
 import json
 import secrets
+from . import model
 from . import compiler as cc, store as s
 
 def uid(prefix): return prefix+secrets.token_hex(10)
@@ -15,7 +16,8 @@ def summary(c):
     rev,w=s.workspace(c)
     live=c.execute("SELECT r.id,r.revision FROM releases r JOIN live l ON r.id=l.release").fetchone()
     return dict(revision=rev,live=dict(live) if live else None,origin=w.get("origin_build"),
-        templates=[dict(id=k,name=t["name"],engine=t["engine"],platform=t["platform"],rules=len(t["order"]),
+        networks=w["networks"],profiles=w.get("profiles",{}),policies=w["policies"],pool_count=len({n["name"] for t in w["templates"].values() for n in t["base"].get("proxies",[])}),
+        templates=[dict(id=k,policy=t["policy"],name=t["name"],engine=t["engine"],platform=t["platform"],rules=len(t["order"]),
                         nodes=len(t["base"].get("proxies",[])),groups=[g["name"] for g in t["base"].get("proxy-groups",[])]) for k,t in w["templates"].items()],
         devices=[dict(id=k,**d) for k,d in w["devices"].items()],
         rules=w["rules"],resources=[{"name":k,"format":r["format"],"behavior":r["behavior"]} for k,r in w["resources"].items()],
@@ -25,7 +27,7 @@ def summary(c):
 
 def template_detail(t):
     # Node credentials are deliberately separate from frequently edited target settings.
-    return dict(name=t["name"],engine=t["engine"],platform=t["platform"],order=t["order"],
+    return dict(name=t["name"],engine=t["engine"],platform=t["platform"],order=t["order"],resolved_rules=t.get("resolved_rules",{}),
                 groups=t["base"].get("proxy-groups",[]),nodes=[{"name":n["name"],"type":n["type"]} for n in t["base"].get("proxies",[])],
                 settings={k:v for k,v in t["base"].items() if k not in ("proxy-groups","proxies","proxy-providers","rule-providers","rules")})
 
@@ -34,10 +36,31 @@ def edit(c,actor,rev,op,p):
     if rev!=old: raise ValueError("草稿已变化，请刷新后重试")
     templates=w["templates"]; rules=w["rules"]; devices=w["devices"]
     t=templates.get(p.get("template"))
-    if op in ("template_copy","template_edit","node_add","node_remove","node_batch","rule_order","device_save") and t is None:
+    if op in ("template_edit","node_add","node_remove","node_batch","rule_order","device_save") and t is None:
         raise ValueError("请选择有效模板")
-    if op=="template_copy":
-        v=copy.deepcopy(t); v["name"]=label(p["name"]); templates[uid("t")]=v
+    if op=="network_save":
+        from .routing import save
+        save(w,p)
+    elif op=="profile_copy":
+        from .platforms import duplicate
+        duplicate(w,p["from"],label(p["name"]),uid("platform-"))
+    elif op=="group_save":
+        if not t:raise ValueError("模板不存在")
+        groups=t["base"].setdefault("proxy-groups",[])
+        name=label(p["name"]); prev=p.get("original")
+        g=next((g for g in groups if g["name"]==prev),None) if prev else None
+        if prev and not g:raise ValueError("原策略组不存在")
+        if prev and name!=prev:raise ValueError("已引用的策略组名称不可在此更改")
+        if not prev and any(g["name"]==name for g in groups):raise ValueError("组名重复")
+        typ=p["type"]; members=p["members"]
+        if typ not in ("select","fallback","url-test","load-balance","relay"):raise ValueError("不支持的组类型")
+        if not isinstance(members,list) or len(set(members))!=len(members) or not (members or (g or {}).get("use")):raise ValueError("请指定不重复的候选成员")
+        if not g:g={"name":name};groups.append(g)
+        g.update(type=typ,proxies=members)
+        if typ in ("fallback","url-test","load-balance"):
+            g.setdefault("interval",600)
+            if t["engine"]=="mihomo":g.setdefault("url","https://www.gstatic.com/generate_204")
+        cc.compile_template(w,t)
     elif op=="template_edit":
         t["name"]=label(p["name"])
         groups=p["groups"]; settings=p["settings"]
@@ -46,6 +69,12 @@ def edit(c,actor,rev,op,p):
             if k not in ("proxy-groups","proxies","proxy-providers","rule-providers"): del t["base"][k]
         t["base"].update(settings); t["base"]["proxy-groups"]=groups
         cc.compile_template(w,t)
+    elif op=="policy_order":
+        pid=p["policy"];order=p["order"]
+        if not isinstance(order,list) or not order or set(order)-rules.keys():raise ValueError("方案规则无效")
+        model.change_order(w,pid,order)
+        for tmp in templates.values():
+            if tmp["policy"]==pid:cc.compile_template(w,tmp)
     elif op=="template_import":
         doc=cc.load(p["yaml"])
         if not isinstance(doc,dict) or not isinstance(doc.get("rules"),list):raise ValueError("模板需要 rules 和策略组")
@@ -60,9 +89,12 @@ def edit(c,actor,rev,op,p):
         for l in doc.pop("rules"):
             rid=lookup.get(l) or uid("r");rules[rid]=l;lookup[l]=rid;order.append(rid)
         eng=p["engine"]
+        if p["platform"] not in ("windows","macos","ios","tvos","android") or (p["platform"] in ("ios","tvos") and eng!="stash"):raise ValueError("平台与客户端不匹配")
         if eng not in ("stash","mihomo"):raise ValueError("未知引擎")
         tmpl=dict(name=label(p["name"]),engine=eng,platform=label(p["platform"]),base=doc,order=order)
-        cc.compile_template(w,tmpl);templates[uid("t")]=tmpl
+        pid=uid("p");w["policies"][pid]={"name":tmpl["name"],"order":order.copy()};tmpl["policy"]=pid
+        cc.compile_template(w,tmpl);tid=uid("t");templates[tid]=tmpl
+        w.setdefault("profiles",{})[uid("platform-")]={"name":tmpl["name"],"platform":tmpl["platform"],"adapters":{eng:tid},"policy":pid}
     elif op=="source_save":
         sid=p.get("id") or uid("s")
         existing=w["sources"].get(sid,{})
@@ -103,8 +135,13 @@ def edit(c,actor,rev,op,p):
             rid=uid("r")
             selected=p["templates"]
             if not selected or set(selected)-templates.keys(): raise ValueError("请选择应用模板")
-            for k in set(selected):
-                templates[k]["order"].insert(0 if p.get("first") else max(0,len(templates[k]["order"])-1),rid)
+            rest=set(selected)
+            for pid,pol in w["policies"].items():
+                target_ids={k for k,tmp in templates.items() if tmp["policy"]==pid}
+                if target_ids and target_ids<=rest:
+                    order=pol["order"].copy();order.insert(0 if p.get("first") else max(0,len(order)-1),rid)
+                    model.change_order(w,pid,order);rest-=target_ids
+            for k in rest:templates[k]["order"].insert(0 if p.get("first") else max(0,len(templates[k]["order"])-1),rid)
         rules[rid]=line
         for tmp in templates.values():
             if rid in tmp["order"]: cc.compile_template(w,tmp)
@@ -113,7 +150,23 @@ def edit(c,actor,rev,op,p):
         for tmp in templates.values():
             if rid in tmp["order"]:
                 tmp["order"]=[x for x in tmp["order"] if x!=rid]; cc.compile_template(w,tmp)
+        for pol in w["policies"].values():pol["order"]=[x for x in pol["order"] if x!=rid]
+        for net in w["networks"].values():
+            cfg=net["rules"];cfg.get("targets",{}).pop(rid,None)
+            for k in ("first","omit"):
+                if k in cfg:cfg[k]=[v for v in cfg[k] if v!=rid]
         del rules[rid]
+    elif op=="policy_nodes":
+        pid=p["policy"];group=p["group"];variants=p["variants"]
+        for tmp in templates.values():
+            if tmp["policy"]!=pid:continue
+            nodes=variants[tmp["engine"]]
+            g=next((g for g in tmp["base"]["proxy-groups"] if g["name"]==group),None)
+            if not g:raise ValueError("部分目标没有同名策略组，请选择单个目标")
+            for n in nodes:
+                if not isinstance(n,dict) or not n.get("type") or not n.get("server") or not 1<=int(n.get("port",0))<=65535:raise ValueError("节点字段无效")
+                tmp["base"].setdefault("proxies",[]).append(copy.deepcopy(n));g.setdefault("proxies",[]).append(label(n["name"]))
+            cc.compile_template(w,tmp)
     elif op in ("node_add","node_batch"):
         members=next((g for g in t["base"]["proxy-groups"] if g["name"]==p["group"]),None)
         if not members: raise ValueError("目标策略组不存在")
@@ -133,7 +186,10 @@ def edit(c,actor,rev,op,p):
         did=p.get("id") or uid("d")
         if p.get("id") and did not in devices: raise ValueError("设备不存在")
         if did not in devices: s.new_token(c,did)
-        devices[did]=dict(name=label(p["name"]),enabled=bool(p.get("enabled",True)),template=p["template"])
+        network=p.get("network","default")
+        if network not in w["networks"]:raise ValueError("线路方案不存在")
+        profile=next((k for k,v in w.get("profiles",{}).items() if p["template"] in v["adapters"].values()),None)
+        devices[did]=dict(name=label(p["name"]),enabled=bool(p.get("enabled",True)),template=p["template"],profile=profile,engine=t["engine"],network=network)
     elif op=="device_rotate":
         if p["id"] not in devices: raise ValueError("设备不存在")
         s.new_token(c,p["id"])
@@ -150,6 +206,6 @@ def edit(c,actor,rev,op,p):
             if entry:entry["url"]="studio:"+key
         oldres.update(blob=key,kind="inline",url="")
     else: raise ValueError("未知操作")
-    c.execute("UPDATE draft SET revision=?,body=? WHERE id=1",(old+1,s.seal(s.encode(w))))
+    c.execute("UPDATE draft SET revision=?,body=? WHERE id=1",(old+1,s.encode_workspace(w)))
     s.event(c,actor,op)
     return old+1

@@ -11,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from . import model,routing
 
 ROOT = Path(os.environ.get("STUDIO_DATA", "/var/lib/magicpanel-studio"))
 DB = ROOT / "studio.sqlite3"
@@ -24,6 +25,8 @@ CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, body BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS releases(id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, at INTEGER NOT NULL, actor TEXT NOT NULL, manifest BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS live(id INTEGER PRIMARY KEY CHECK(id=1), release INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, at INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscription_key(id INTEGER PRIMARY KEY CHECK(id=1),digest TEXT UNIQUE NOT NULL,token BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS catalogs(release INTEGER PRIMARY KEY,body BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS corechecks(key TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS checks(kind TEXT,key TEXT,at INTEGER,error TEXT,PRIMARY KEY(kind,key));
 CREATE TABLE IF NOT EXISTS automation(id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, failed_revision INTEGER, error TEXT NOT NULL DEFAULT '');
@@ -80,7 +83,12 @@ def workspace(c):
     row = c.execute("SELECT revision,body FROM draft WHERE id=1").fetchone()
     if not row:
         raise ValueError("尚未导入初始工作区")
-    return row[0], json.loads(unseal(row[1]))
+    w=model.expand(json.loads(unseal(row[1])))
+    routing.ensure(w)
+    return row[0],w
+
+def encode_workspace(w):
+    return seal(encode(model.pack(w)))
 
 def event(c, actor, message):
     c.execute("INSERT INTO events(at,actor,action) VALUES(?,?,?)", (int(time.time()), actor, message))

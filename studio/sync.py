@@ -49,7 +49,7 @@ def refresh(kind,key,actor):
                     e=t["base"].get("rule-providers",{}).get(key)
                     if e:e["url"]="studio:"+cid
             changed=old!=w
-            if changed:c.execute("UPDATE draft SET revision=revision+1,body=?",(s.seal(s.encode(w)),));s.event(c,actor,"更新来源快照")
+            if changed:c.execute("UPDATE draft SET revision=revision+1,body=?",(s.encode_workspace(w),));s.event(c,actor,"更新来源快照")
             c.execute("INSERT OR REPLACE INTO checks VALUES(?,?,?,?)",(kind,key,int(time.time()),""))
         return {"changed":changed}
     finally:LOCK.release()

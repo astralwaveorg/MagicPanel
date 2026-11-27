@@ -1,5 +1,11 @@
-*
+**
 !requirements.txt
 !*.py
-!web
-!web/**
+!client/
+!client/package*.json
+!client/vite.config.js
+!client/index.html
+!client/src/
+!client/src/**
+!ops/
+!ops/platform_upgrade.py

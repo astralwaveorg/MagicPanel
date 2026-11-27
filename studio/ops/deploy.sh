@@ -15,19 +15,55 @@ umask 077
 base=/opt/magicpanel-v2
 rev=$1
 cd "$base/releases/$rev"
-test -s "$base/bootstrap/data/master.key"
-test -s "$base/bootstrap/data/studio.sqlite3"
+exec 9>"$base/deploy.lock"
+flock -n 9 || { echo '已有 v2 部署任务'; exit 1; }
+state="$base/state"
+previous=$(readlink -f "$base/current" 2>/dev/null || :)
+promote=false
+if ! test -s "$state/studio.sqlite3" && test -s "$base/bootstrap/data/studio.sqlite3"; then
+  promote=true
+  state=$(mktemp -d "$base/state-candidate.XXXXXX")
+else
+  mkdir -p "$state"
+fi
 # Keep host-only secrets and state outside every source archive.
 if ! test -x "$base/core/mihomo"; then
-  mkdir -p "$base/core"
-  for file in mihomo geoip.dat geosite.dat country.mmdb; do cp -p "/opt/magicpanel/data/bin/$file" "$base/core/$file"; done
+  echo "缺少 /opt/magicpanel-v2/core/mihomo 和地理数据，请放入已验证的核心包" >&2
+  exit 1
 fi
 touch "$base/minimax.key"
 chmod 600 "$base/minimax.key"
-printf 'REVISION=%s\nSTUDIO_STATE_DIR=%s\nSTUDIO_AI_KEY=%s\n' "$rev" "$base/bootstrap/data" "$base/minimax.key" > .env
+printf 'REVISION=%s\nSTUDIO_STATE_DIR=%s\nSTUDIO_AI_KEY=%s\n' "$rev" "$state" "$base/minimax.key" > .env
 docker compose config --quiet
 docker compose build studio
+resume_old() {
+  if test -n "$previous" && test -f "$previous/.env"; then
+    (cd "$previous" && docker compose up -d --no-build --wait --wait-timeout 80 studio) >&2 || echo '旧 v2 镜像恢复失败' >&2
+  fi
+}
+if "$promote"; then
+  test -f "$previous/.env"
+  trap resume_old ERR
+  (cd "$previous" && docker compose stop studio)
+  cp -p "$base/bootstrap/data/master.key" "$state/master.key"
+  python3 - "$base/bootstrap/data/studio.sqlite3" "$state/studio.sqlite3" <<'PYBACKUP'
+import sqlite3,sys
+from pathlib import Path
+with sqlite3.connect(Path(sys.argv[1]).as_uri()+"?mode=ro",uri=True) as src,sqlite3.connect(sys.argv[2]) as dst:
+    src.backup(dst)
+    if dst.execute("pragma quick_check").fetchone()[0]!="ok": raise SystemExit(1)
+PYBACKUP
+fi
+if ! test -s "$state/studio.sqlite3"; then
+  bootstrap_pass="$base/initial-admin-password"
+  if ! test -s "$bootstrap_pass"; then python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$bootstrap_pass"; fi
+  docker compose run --rm -T --no-deps studio python -m studio.init --admin admin < "$bootstrap_pass"
+else
+  docker compose run --rm -T --no-deps studio python -m studio.platform_upgrade
+fi
 docker compose up -d --no-build --wait --wait-timeout 80
 curl -fsS --max-time 5 http://127.0.0.1:47102/healthz
-ln -sfn "$base/releases/$rev" "$base/current"
+if "$promote"; then ln -sT "$state" "$base/state"; fi
+ln -sfnT "$base/releases/$rev" "$base/current"
+trap - ERR
 NAS

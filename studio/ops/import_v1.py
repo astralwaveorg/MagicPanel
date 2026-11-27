@@ -95,7 +95,7 @@ def migrate(legacy,destination):
                     ws["templates"][bind]=other
                 ws["devices"][did]={"name":d["name"],"template":bind,"enabled":True}
                 s.new_token(destination,did)
-        destination.execute("INSERT INTO draft VALUES(1,1,?)",(s.seal(s.encode(ws)),))
+        destination.execute("INSERT INTO draft VALUES(1,1,?)",(s.encode_workspace(ws),))
         release=comp.publish(destination,"迁移",1)
         c.close()
         return dict(old_build=live[0],release=release,templates=len(ws["templates"]),devices=len(ws["devices"]),resources=len(ws["resources"]),rules=len(ws["rules"]))

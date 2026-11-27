@@ -28,7 +28,7 @@ def rule_target(line):
 def compile_template(ws, template):
     cfg = copy.deepcopy(template["base"])
     try:
-        lines = [ws["rules"][rid] for rid in template["order"]]
+        lines = [template.get("resolved_rules",{}).get(rid,ws["rules"][rid]) for rid in template["order"]]
     except KeyError:
         raise ValueError("引用了已删除的规则") from None
     if not lines or not lines[-1].startswith(("MATCH,","FINAL,")):
@@ -45,7 +45,12 @@ def compile_template(ws, template):
         raise ValueError("节点或策略组重名")
     providers = cfg.get("proxy-providers",{})
     rule_sets = cfg.get("rule-providers",{})
+    kinds={"DOMAIN","DOMAIN-SUFFIX","DOMAIN-KEYWORD","DOMAIN-REGEX","GEOSITE","GEOIP","IP-CIDR","IP-CIDR6","IP-SUFFIX","IP-ASN","SRC-GEOIP","SRC-IP-ASN","SRC-IP-CIDR","SRC-IP-SUFFIX","DST-PORT","SRC-PORT","IN-PORT","IN-TYPE","IN-USER","IN-NAME","PROCESS-PATH","PROCESS-PATH-REGEX","PROCESS-NAME","PROCESS-NAME-REGEX","NETWORK","DSCP","UID","RULE-SET","AND","OR","NOT","SUB-RULE","MATCH","FINAL","SCRIPT","PROTOCOL","USER-AGENT","URL-REGEX"}
     for line in lines:
+        typ=line.partition(",")[0] if isinstance(line,str) else ""
+        if typ not in kinds:raise ValueError("不支持的规则类型："+typ[:40])
+        if typ not in ("FINAL","MATCH") and (len(line.split(","))<3 or not line.split(",")[1].strip()):raise ValueError("规则缺少匹配值或策略目标")
+        if typ.startswith("PROCESS-") and template["engine"]=="stash" and template["platform"] in ("ios","tvos"):raise ValueError("此 Stash 平台不支持进程规则")
         if not isinstance(line,str) or "\n" in line or len(line.split(","))<2:
             raise ValueError("规则须为单行")
         if rule_target(line) not in names:
@@ -86,31 +91,48 @@ def publish(c,actor,expected):
     active=c.execute("SELECT r.id,r.revision FROM live l JOIN releases r ON r.id=l.release").fetchone()
     if active and active["revision"]==rev:
         return active["id"]
+    from .routing import effective
     manifests={}
-    for tid,t in ws["templates"].items():
+    def build(tid,network):
+        pair=(tid,network)
+        if pair in manifests:return manifests[pair]
+        t=effective(ws,ws["templates"][tid],network)
         try:
             cfg,resources=compile_template(ws,t)
             for key in resources:
-                if not c.execute("SELECT 1 FROM blobs WHERE id=?",(key,)).fetchone():
-                    raise ValueError("依赖资源缺失")
+                if not c.execute("SELECT 1 FROM blobs WHERE id=?",(key,)).fetchone():raise ValueError("依赖资源缺失")
+            text=dump(cfg)
+            if t["engine"]=="mihomo":
+                from .corecheck import verify
+                verify(c,cfg,text)
         except (ValueError,TypeError,KeyError) as e:
-            raise ValueError(f"{t['name']}：{e}") from None
-        text=dump(cfg)
-        if t["engine"]=="mihomo":
-            from .corecheck import verify
-            verify(c,cfg,text)
-        manifests[tid]={"config":s.put_blob(c,text.encode()),"resources":resources}
-    devices={did:manifests[d["template"]] for did,d in ws["devices"].items() if d["enabled"]}
-    if not devices:
+            raise ValueError(f"{t['name']} · {ws['networks'][network]['name']}：{e}") from None
+        manifests[pair]={"config":s.put_blob(c,text.encode()),"resources":resources}
+        return manifests[pair]
+    # Even a platform without an enrolled device must have a valid baseline.
+    for tid in ws["templates"]:build(tid,"default")
+    devices={did:build(d["template"],d.get("network","default")) for did,d in ws["devices"].items() if d["enabled"]}
+    profiles=ws.get("profiles",{})
+    catalog={"profiles":profiles,"targets":{},"networks":{k:v["name"] for k,v in ws["networks"].items()}}
+    for profile in profiles.values():
+        for tid in profile["adapters"].values():
+            catalog["targets"][tid]={network:build(tid,network) for network in ws["networks"]}
+    if not devices and not profiles:
         raise ValueError("没有启用的设备")
     rid=c.execute("INSERT INTO releases(revision,at,actor,manifest) VALUES(?,?,?,?)",
                   (rev,int(time.time()),actor,s.seal(s.encode(devices)))).lastrowid
+    if profiles:
+        from .subscription import issue
+        issue(c)
+        c.execute("INSERT INTO catalogs VALUES(?,?)",(rid,s.seal(s.encode(catalog))))
     c.execute("INSERT OR REPLACE INTO live VALUES(1,?)",(rid,))
     s.event(c,actor,f"发布 #{rid} · 草稿 {rev}")
     return rid
 
 def materialize(raw, root, release):
-    cfg=load(raw)
+    return materialize_cfg(load(raw),root,release)
+
+def materialize_cfg(cfg,root,release):
     for section in ("rule-providers","proxy-providers"):
         for entry in cfg.get(section,{}).values():
             m=CID.fullmatch(entry.get("url",""))
