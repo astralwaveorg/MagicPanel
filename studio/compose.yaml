@@ -1,0 +1,39 @@
+name: magicpanel-studio
+services:
+  studio:
+    image: magicpanel-studio:${REVISION:?set REVISION}
+    build:
+      context: .
+      args:
+        REVISION: ${REVISION}
+    restart: unless-stopped
+    ports: ["127.0.0.1:47102:8000"]
+    volumes:
+      - ${STUDIO_STATE_DIR:?set STUDIO_STATE_DIR}:/var/lib/magicpanel-studio
+      - ${STUDIO_AI_KEY:?set STUDIO_AI_KEY}:/run/secrets/minimax:ro
+    environment:
+      STUDIO_ORIGIN: https://v2.magichub.top:8443
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD","python","-c","from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz',timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    logging:
+      options: {max-size: 5m, max-file: '2'}
+  subconverter-extended:
+    image: ghcr.io/aethersailor/subconverter-extended:v1.11.9@sha256:d90379f5a488dff06db29f9d3a63eb3a30ae632b26d73f2ce740aa122847f359
+    restart: unless-stopped
+    environment:
+      SUBCONVERTER_SECURITY_PROFILE: strict
+      SUBCONVERTER_ALLOW_PUBLIC_UPLOAD: 'false'
+    logging:
+      driver: none
+    healthcheck:
+      test: ["CMD","wget","-q","-O","/dev/null","http://127.0.0.1:25500/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
