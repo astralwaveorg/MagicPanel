@@ -18,6 +18,10 @@ cd "$base/releases/$rev"
 test -s "$base/bootstrap/data/master.key"
 test -s "$base/bootstrap/data/studio.sqlite3"
 # Keep host-only secrets and state outside every source archive.
+if ! test -x "$base/core/mihomo"; then
+  mkdir -p "$base/core"
+  for file in mihomo geoip.dat geosite.dat country.mmdb; do cp -p "/opt/magicpanel/data/bin/$file" "$base/core/$file"; done
+fi
 touch "$base/minimax.key"
 chmod 600 "$base/minimax.key"
 printf 'REVISION=%s\nSTUDIO_STATE_DIR=%s\nSTUDIO_AI_KEY=%s\n' "$rev" "$base/bootstrap/data" "$base/minimax.key" > .env

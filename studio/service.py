@@ -19,7 +19,7 @@ def summary(c):
                         nodes=len(t["base"].get("proxies",[])),groups=[g["name"] for g in t["base"].get("proxy-groups",[])]) for k,t in w["templates"].items()],
         devices=[dict(id=k,**d) for k,d in w["devices"].items()],
         rules=w["rules"],resources=[{"name":k,"format":r["format"],"behavior":r["behavior"]} for k,r in w["resources"].items()],
-        sources=[{"id":k,**{x:v.get(x) for x in ("name","managed","snapshot_count","last_success","issue","interval")}} for k,v in w["sources"].items()],
+        sources=[{"id":k,**{x:v.get(x) for x in ("name","managed","snapshot_count","last_success","issue","interval","template","group")}} for k,v in w["sources"].items()],
         releases=[dict(r) for r in c.execute("SELECT id,revision,at,actor FROM releases ORDER BY id DESC LIMIT 30")],
         auto=dict(c.execute("SELECT enabled,error FROM automation").fetchone()))
 
@@ -46,6 +46,50 @@ def edit(c,actor,rev,op,p):
             if k not in ("proxy-groups","proxies","proxy-providers","rule-providers"): del t["base"][k]
         t["base"].update(settings); t["base"]["proxy-groups"]=groups
         cc.compile_template(w,t)
+    elif op=="template_import":
+        doc=cc.load(p["yaml"])
+        if not isinstance(doc,dict) or not isinstance(doc.get("rules"),list):raise ValueError("模板需要 rules 和策略组")
+        if any(k in doc for k in ("script","scripts","mitm","http","external-ui-url","external-controller","listeners")):raise ValueError("公共模板含需要单独审查的扩展或监听设置")
+        if doc.get("proxy-providers"):raise ValueError("请先将节点来源导入并固定为本地节点")
+        for rn,entry in doc.get("rule-providers",{}).items():
+            res=w["resources"].get(rn)
+            if not res or res["behavior"]!=entry.get("behavior"):raise ValueError("请先维护规则资源："+rn)
+            entry["url"]="studio:"+res["blob"];entry["format"]=res["format"]
+        order=[]
+        lookup={v:k for k,v in rules.items()}
+        for l in doc.pop("rules"):
+            rid=lookup.get(l) or uid("r");rules[rid]=l;lookup[l]=rid;order.append(rid)
+        eng=p["engine"]
+        if eng not in ("stash","mihomo"):raise ValueError("未知引擎")
+        tmpl=dict(name=label(p["name"]),engine=eng,platform=label(p["platform"]),base=doc,order=order)
+        cc.compile_template(w,tmpl);templates[uid("t")]=tmpl
+    elif op=="source_save":
+        sid=p.get("id") or uid("s")
+        existing=w["sources"].get(sid,{})
+        if existing.get("owned") and (existing.get("template")!=p["template"] or existing.get("group")!=p["group"]):raise ValueError("已有托管节点时请新建绑定或保持原组")
+        tmpl=templates[p["template"]]
+        if p["group"] not in [g["name"] for g in tmpl["base"]["proxy-groups"]]:raise ValueError("分组不存在")
+        url=p.get("url") or existing.get("url","")
+        if not url.startswith("https://"):raise ValueError("需要 HTTPS 订阅地址")
+        existing.update(name=label(p["name"]),url=url,template=p["template"],group=p["group"],managed=bool(p.get("managed")),interval=max(300,min(604800,int(p.get("interval",21600)))))
+        w["sources"][sid]=existing
+    elif op=="resource_bind":
+        name=label(p["name"]); fmt=p["format"]; beh=p["behavior"];url=p.get("url","")
+        if fmt not in ("mrs","yaml") or beh not in ("classical","domain","ipcidr") or (fmt=="mrs" and beh=="classical"):raise ValueError("格式与行为不兼容")
+        existing=w["resources"].get(name)
+        if existing and (fmt!=existing["format"] or beh!=existing["behavior"]):raise ValueError("不得改变现有资源类型，请使用新名称")
+        if url and not url.startswith("https://"):raise ValueError("需要 HTTPS 规则地址")
+        if not existing:
+            if fmt!="yaml":raise ValueError("新建资源请先导入 YAML 正文")
+            content=p["content"];content_doc=cc.load(content)
+            if not isinstance(content_doc,dict) or not isinstance(content_doc.get("payload"),list) or not content_doc["payload"]:raise ValueError("请提供非空 payload")
+            existing=dict(blob=s.put_blob(c,content.encode()),format=fmt,behavior=beh);w["resources"][name]=existing
+        existing.update(managed=bool(p.get("managed")) and bool(url or existing.get("url")),interval=86400)
+        if url:existing["url"]=url;existing["kind"]="remote"
+        if t:
+            import hashlib
+            path="./rules/"+hashlib.sha256(name.encode()).hexdigest()[:16]+"."+fmt
+            t["base"].setdefault("rule-providers",{}).setdefault(name,dict(type="http",behavior=beh,format=fmt,url="studio:"+existing["blob"],path=path,interval=86400))
     elif op=="rule_order":
         order=p["order"]
         if not isinstance(order,list) or set(order)-rules.keys(): raise ValueError("规则标识无效")

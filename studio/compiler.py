@@ -95,7 +95,11 @@ def publish(c,actor,expected):
                     raise ValueError("依赖资源缺失")
         except (ValueError,TypeError,KeyError) as e:
             raise ValueError(f"{t['name']}：{e}") from None
-        manifests[tid]={"config":s.put_blob(c,dump(cfg).encode()),"resources":resources}
+        text=dump(cfg)
+        if t["engine"]=="mihomo":
+            from .corecheck import verify
+            verify(c,cfg,text)
+        manifests[tid]={"config":s.put_blob(c,text.encode()),"resources":resources}
     devices={did:manifests[d["template"]] for did,d in ws["devices"].items() if d["enabled"]}
     if not devices:
         raise ValueError("没有启用的设备")

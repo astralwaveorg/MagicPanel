@@ -32,7 +32,12 @@ def tick():
 async def worker():
     while True:
         await asyncio.sleep(35)
-        try: await asyncio.to_thread(tick)
+        try:
+            from .sync import due
+            await asyncio.to_thread(due)
+            await asyncio.to_thread(tick)
+            from .maintenance import backup
+            await asyncio.to_thread(backup)
         except Exception:
             import logging
             logging.getLogger(__name__).error("自动任务未完成，稍后重试")
@@ -190,3 +195,13 @@ def preview(tid:str,user=Depends(actor)):
                 "sections":[k for k in set(cfg)|set(old or {}) if cfg.get(k)!=(old or {}).get(k)],
                 "added":[v for v in after if v not in before],"removed":[v for v in before if v not in after],
                 "order_changed":before!=after}
+
+@app.post("/api/refresh")
+def refresh_source(body:dict,user=Depends(actor)):
+    from .sync import refresh
+    if body["kind"] not in ("source","resource"):raise ValueError("未知来源类型")
+    return refresh(body["kind"],body["key"],user)
+
+@app.get("/api/checks")
+def checks(user=Depends(actor)):
+    with s.tx() as c:return [dict(r) for r in c.execute("SELECT * FROM checks ORDER BY at DESC")]

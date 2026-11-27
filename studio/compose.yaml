@@ -9,9 +9,11 @@ services:
     restart: unless-stopped
     ports: ["127.0.0.1:47102:8000"]
     volumes:
+      - /opt/magicpanel-v2/core:/opt/studio-core:ro
       - ${STUDIO_STATE_DIR:?set STUDIO_STATE_DIR}:/var/lib/magicpanel-studio
       - ${STUDIO_AI_KEY:?set STUDIO_AI_KEY}:/run/secrets/minimax:ro
     environment:
+      STUDIO_REQUIRE_CORE: "1"
       STUDIO_ORIGIN: https://v2.magichub.top:8443
     read_only: true
     tmpfs: [/tmp]

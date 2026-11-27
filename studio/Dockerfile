@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
-COPY __init__.py api.py assistant.py compiler.py store.py service.py /srv/studio/
+COPY __init__.py api.py assistant.py compiler.py store.py service.py fetch.py sync.py maintenance.py corecheck.py /srv/studio/
 COPY web /srv/studio/web
 ARG REVISION=unknown
 LABEL org.opencontainers.image.revision=$REVISION
