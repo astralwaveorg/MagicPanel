@@ -1,5 +1,27 @@
 # AGENTS.md
 
+## 接手时先确认应用和分支
+
+运行 `git status --short --branch` 确认分支和已有改动。这个仓库维护两套独立应用：
+
+| 任务对象 | 分支与代码 | 交接入口 | NAS 部署脚本 |
+| --- | --- | --- | --- |
+| MagicPanel Studio | `v2`；后端在 `studio/`，Svelte 前端在 `studio/client/` | [Studio 文档索引](studio/README.md) | [studio/ops/deploy.sh](studio/ops/deploy.sh) |
+| 旧版 MagicPanel | `main`；后端在 `server/`，Vue 前端在 `src/` | [旧版 Agent 交接](docs/reference/Agent-交接提示词.md) | [scripts/deploy.sh](scripts/deploy.sh) |
+
+下文旧版历史记录里的「V2」指旧版项目当时的迭代，与 `v2` 分支的 Studio 是两套实现。
+
+### MagicPanel Studio（`v2`）
+
+- 改统一订阅、平台模板或运营商分流，先读[订阅与分流设计](studio/docs/订阅与分流设计报告.md)；改独立转换地址，读[订阅转换工具](studio/docs/独立订阅转换工具.md)。转换工具不写平台模板或发布记录。
+- 改 GitHub 规则集或客户端规则，读[界面与规则管理验收](studio/docs/界面与规则管理验收.md)。提交规则文件、将文件应用到草稿、检查生效版本，是三个独立操作。核对客户端实际收到的规则时，查看对应平台和线路的生效产物。
+- 本地验证按 [Studio CI](.github/workflows/studio.yml) 执行：从仓库根目录运行 `python -m pytest -q studio/tests`；前端类型检查、链接测试和构建在 `studio/client/` 运行。改导入流程时验证对应应用的链接及其内层订阅下载；真机导入另记回执。
+- 发布与回滚遵循 [Studio 交付文档](studio/docs/delivery.md)。仅更新 Studio 服务时，用 `STUDIO_DEPLOY_SCOPE=studio bash studio/ops/deploy.sh`。脚本要求当前分支为 `v2`、`studio/` 无未提交改动、HEAD 与远端 `v2` 一致；只归档该提交的 `studio/`。部署后核对 NAS 的 `/opt/magicpanel-v2/current`、镜像 revision 和容器健康状态。不要用旧版脚本部署 Studio。
+
+## 旧版 MagicPanel（`main`）
+
+以下文档、运行记录、硬性约束和发布步骤均针对旧版。
+
 设计、验收和运行记录见[规格文档索引](docs/superpowers/specs/README.md)。
 
 改动前，先按任务阅读对应文档：
@@ -36,7 +58,7 @@ Clash Verge 必须用 Mihomo 设备地址（如 `Astral-Windows-Mihomo`）。
 容器层复用 router/service 写库，维护 `node_catalog` 与策略组成员投影。支持
 `vless` / `hysteria2` / `ss` / `trojan` 与 Clash `proxies:` YAML，自动命名、挂地区自建组末尾、
 构建发布并核对产物；已安装到 `~/.local/bin/mpnode`。Stash 产物不能给 Clash Verge 用
-（Hy2 是 `auth` 而非 `password`，Reality 缺 `support-x25519mlkem768`）。
+（Hy2 是 `auth` 而非 `password`；Reality 字段已在构建 #423 补齐）。
 
 **2026-11-27 美国自建 06（构建 #422，发布 rev 136）**：新增本地节点 `🇺🇸 美国自建 06`
 （VLESS Reality，`186.244.245.81:30033`，SNI `www.amd.com`，AS400619 Arosscloud 洛杉矶），
@@ -330,7 +352,7 @@ Google 专项规则优先于 AI/影音等主题集合，Gemini 归 Google 路径
 
 ## 0. 开工前：先让代码与环境对齐
 
-**唯一事实源是 GitHub 的 `astralwaveorg/MagicPanel` `main`。** NAS 上的
+**旧版应用的代码以 GitHub 的 `astralwaveorg/MagicPanel` `main` 为准。** NAS 上的
 `/opt/magicpanel` 是**部署副本**，由 `scripts/deploy.sh` 从工作区同步过去。
 两边不一致时以仓库为准，先把差异查清楚再动手，不要直接在 NAS 上改代码。
 
