@@ -44,6 +44,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # 转换服务独立部署；仅在同一 Compose 网络内可访问。
+  subconverter-extended:
+    image: ghcr.io/aethersailor/subconverter-extended:v1.11.9@sha256:d90379f5a488dff06db29f9d3a63eb3a30ae632b26d73f2ce740aa122847f359
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      SUBCONVERTER_SECURITY_PROFILE: strict
+      SUBCONVERTER_ALLOW_PUBLIC_UPLOAD: "false"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:25500/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # 每日备份：数据库一致性快照 + 主密钥归档，保留最近 14 份。
   # 没有备份的话，NAS 一次磁盘故障就会让所有凭据不可恢复。
   backup:
