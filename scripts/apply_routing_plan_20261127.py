@@ -11,8 +11,11 @@ import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from urllib.request import urlopen
 
-from app import config, db
+import yaml
+
+from app import config, db, security
 from app.routers.builds import create_build, current_policy
 from app.services import node_catalog, node_refs, policy_mutations, releases
 
@@ -27,6 +30,10 @@ FAIL = '🔰 故障转移'
 SG_MEDIA = '🇸🇬 SG 媒体'
 COLD = '🇺🇸 低配备用'
 DISNEY = '🏰 Disney+'
+REDDIT = '🔴 Reddit'
+COMMON_FILE = 'rule/magic-proxy.yaml'
+COMMON_URL = 'https://raw.githubusercontent.com/astralwaveorg/magic-sets/main/' + COMMON_FILE
+REDDIT_URL = 'https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Reddit/Reddit.yaml'
 DEFAULT_URL = 'https://www.gstatic.com/generate_204'
 BASIC = [US, JP, SG, AIR]
 MEDIA = [SG, JP, US, AIR]
@@ -41,7 +48,8 @@ GROUPS = {
     '✨ Gemini': ('fallback', [36, 18, 13]),
     '🤖 国际 AI': ('fallback', [36, 18, 13]),
     '🎬 Netflix': ('fallback', [28, 37, 18, 36, JP, SG_AIR]),
-    DISNEY: ('select', [SG_MEDIA, '🇹🇼 台湾自动', '🇭🇰 香港自动']),
+    REDDIT: ('fallback', [36, 18, 32, 33, 28, 37, US_AIR]),
+    DISNEY: ('select', [SG_MEDIA, 18, '🇹🇼 台湾自动', '🇭🇰 香港自动']),
     SG_MEDIA: ('fallback', [SG, SG_AIR]),
     '📨 Telegram': ('fallback', BASIC),
     '📟 开发运维': ('fallback', [*BASIC, DIRECT]),
@@ -111,8 +119,10 @@ def rule_rank(row):
         return 3, 0
     if i in {2025, 2026, 2099}:
         return 4, 0
-    if i in {2027, 2028}:
+    if i == 2027:
         return 5, 0
+    if i == 2028:
+        return 6, 1
     if i in {2074, 2079, 2080, 2081, 2082, 2083, 2084, 2085}:
         return 7, 0
     return 6, 0
@@ -131,11 +141,29 @@ def sha():
 
 
 def apply(expected, backup, expected_after):
+    with urlopen(REDDIT_URL, timeout=15) as response:
+        data = response.read(65_537)
+    payload = yaml.safe_load(data)
+    entries = payload.get('payload', []) if isinstance(payload, dict) else []
+    if not entries or len(data) > 65_536 or any(not isinstance(x, str) or not x.startswith('DOMAIN-SUFFIX,') for x in entries):
+        raise SystemExit('Unrecognized Reddit classical rule source.')
+    if not {'DOMAIN-SUFFIX,reddit.com', 'DOMAIN-SUFFIX,redd.it', 'DOMAIN-SUFFIX,redditstatic.com'} <= set(entries):
+        raise SystemExit('Reddit classical rules are missing required domains.')
+    content = data.decode('utf-8')
+    with urlopen(COMMON_URL, timeout=15) as response:
+        common = response.read(65_537)
+    common_doc = yaml.safe_load(common)
+    common_entries = common_doc.get('payload', []) if isinstance(common_doc, dict) else []
+    if (not common_entries or len(common) > 65_536
+            or any(not isinstance(x, str) or not x.startswith(('DOMAIN,', 'DOMAIN-SUFFIX,', 'IP-CIDR,'))
+                   for x in common_entries)):
+        raise SystemExit('Unrecognized common proxy rule source.')
+    common = common.decode('utf-8')
     with db.tx() as conn:
         if current_policy(conn)[1] != expected:
             raise SystemExit('Policy modified since the isolated baseline; no writes performed.')
         existing = {r['name']: dict(r) for r in conn.execute('SELECT * FROM proxy_groups WHERE variant_id=0')}
-        if set(existing) != (set(GROUPS) - {COLD, DISNEY}) | AIR_GROUPS:
+        if set(existing) != (set(GROUPS) - {COLD, DISNEY, REDDIT}) | AIR_GROUPS:
             raise SystemExit('Default group set differs from the agreed baseline.')
         for id, old_name in ((38, '🇺🇸 美国自建 05'), (39, '🇺🇸 美国自建 06')):
             if local(conn, id)['name'] != old_name:
@@ -161,7 +189,7 @@ def apply(expected, backup, expected_after):
             node_catalog.sync_local_node(conn, id)
             policy_mutations.refresh_node_projection(conn, projection['emit_name'], projection['node_uid'])
 
-        for name, source, hidden in ((COLD, US, 1), (DISNEY, SG_MEDIA, 0)):
+        for name, source, hidden in ((COLD, US, 1), (DISNEY, SG_MEDIA, 0), (REDDIT, SG_MEDIA, 0)):
             template = {**existing[source], 'name': name, 'hidden': hidden,
                         'created_at': db.now(), 'updated_at': db.now()}
             del template['id']
@@ -183,7 +211,8 @@ def apply(expected, backup, expected_after):
         for i, (name, (kind, members)) in enumerate(GROUPS.items()):
             id = existing[name]['id']
             conn.execute("""UPDATE proxy_groups SET sort=?,type=?,filter='',use_sources='[]',
-                url=?,interval=?,updated_at=? WHERE id=?""", (i, kind, DEFAULT_URL, 300, db.now(), id))
+                url=?,interval=?,updated_at=? WHERE id=?""",
+                (i, kind, 'https://www.reddit.com/' if name == REDDIT else DEFAULT_URL, 300, db.now(), id))
             node_refs.canonical_group(conn, id, [ref(m) for m in members])
         for i, name in enumerate(sorted(AIR_GROUPS, key=lambda n: existing[n]['sort']), start=len(GROUPS)):
             row = existing[name]
@@ -194,15 +223,36 @@ def apply(expected, backup, expected_after):
         rules = conn.execute('SELECT id,sort FROM rules WHERE variant_id=0 ORDER BY sort,id').fetchall()
         if len(rules) != 96 or rules[-1]['id'] != 2085:
             raise SystemExit('Default rule set differs from the agreed baseline.')
-        for sort, rule in enumerate(sorted(rules, key=rule_rank)):
-            conn.execute('UPDATE rules SET sort=? WHERE id=?', (sort, rule['id']))
+        now = db.now()
+        conn.execute('''INSERT INTO rule_providers
+            (name,behavior,format,kind,url,interval,client_interval,last_status,last_fetched_at,
+             rule_count,sha256,content,created_at,updated_at)
+            VALUES ('Reddit','classical','yaml','remote',?,28800,28800,'ok',?,?,?,?,?,?)''',
+            (REDDIT_URL, now, len(entries), security.sha256_text(content), content, now, now))
+        conn.execute('''INSERT INTO rule_providers
+            (name,behavior,format,kind,repo_path,interval,client_interval,last_status,last_fetched_at,
+             rule_count,sha256,content,created_at,updated_at)
+            VALUES ('magic-proxy','classical','yaml','repo',?,28800,28800,'ok',?,?,?,?,?,?)''',
+            (COMMON_FILE, now, len(common_entries), security.sha256_text(common), common, now, now))
+        old_ip = db.one(conn, 'SELECT value FROM rules WHERE id=2028')
+        if not old_ip or old_ip['value'] != 'Custom_Proxy_Classical_IP':
+            raise SystemExit('Common proxy baseline mismatch.')
+        conn.execute("UPDATE rules SET value='magic-proxy',updated_at=? WHERE id=2028", (now,))
+        reddit_rule = conn.execute('''INSERT INTO rules
+            (variant_id,sort,type,value,target,created_at,updated_at)
+            VALUES (0,0,'RULE-SET','Reddit',?,?,?)''', (REDDIT, now, now)).lastrowid
+        node_refs.canonical_rule(conn, reddit_rule, group_refs[REDDIT])
+        ranks = [(rule_rank(r), r['id']) for r in rules]
+        ranks.append(((2, 4), reddit_rule))
+        for sort, (_, id) in enumerate(sorted(ranks, key=lambda r: r[0])):
+            conn.execute('UPDATE rules SET sort=? WHERE id=?', (sort, id))
         disney = db.one(conn, 'SELECT value FROM rules WHERE id=2059')
         if not disney or disney['value'] != 'disney':
             raise SystemExit('Disney rule baseline mismatch.')
         node_refs.canonical_rule(conn, 2059, group_refs[DISNEY])
         if expected_after and current_policy(conn)[1] != expected_after:
             raise SystemExit('Rendered policy differs from the tested candidate; transaction rolled back.')
-    print('Default policy updated: 96 rules, 48 groups; the two cold node rows were retained.')
+    print('Default policy updated: 97 rules, 49 groups; the two cold node rows were retained.')
 
 
 def release(target, id, expected, old):
