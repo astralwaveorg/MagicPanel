@@ -5,10 +5,11 @@ if(!origin||new URL(origin).hostname!=='127.0.0.1')throw Error('Use an isolated 
 ;(async()=>{const browser=await chromium.launch({channel:'chrome'})
 try{
  for(const width of [320,390,768,1366]){
+  console.log('Checking viewport '+width)
   const ctx=await browser.newContext({viewport:{width,height:850},permissions:['clipboard-read','clipboard-write']})
   const p=await ctx.newPage(),errors=[];p.setDefaultTimeout(7000);p.on('pageerror',e=>errors.push(e.message))
   const nav=n=>p.getByRole('navigation').getByRole('button',{name:n,exact:true}).click()
-  const fits=async(stage)=>{assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'overflow: '+stage+' '+width)}
+  const fits=async(stage)=>{const over=await p.evaluate(()=>Array.from(document.querySelectorAll('body *')).filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(0,4).map(e=>[e.tagName,e.className]));assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'overflow: '+stage+' '+width+' '+JSON.stringify(over))}
   await p.goto(origin);await fits('login');await p.getByLabel('用户名').fill('review');await p.getByLabel('密码',{exact:true}).fill('fixture-browser-password');await p.getByRole('button',{name:'登录',exact:true}).click()
   await p.getByRole('button',{name:'复制订阅地址'}).waitFor();await fits('subscription')
   await p.getByRole('button',{name:'二维码',exact:true}).click();await p.waitForFunction(()=>document.querySelector('.qr-dialog canvas')?.width===240);await p.keyboard.press('Escape')
@@ -41,4 +42,4 @@ try{
   await p.getByRole('button',{name:'退出',exact:true}).click();await p.getByRole('button',{name:'登录',exact:true}).waitFor();assert.deepEqual(errors,[])
   await ctx.close();console.log(width+'px: all pages, rule formats, repo review, dialogs, keyboard, sign-out passed')
  }
-}finally{await browser.close()}})().catch(e=>{console.error(e.message);process.exit(1)})
+}finally{await browser.close()}})().catch(e=>{console.error(e.message);if(process.env.CI)console.error('::error title=Studio browser::'+String(e.message).replace(/%/g,'%25').replace(/\n/g,'%0A').replace(/\r/g,'%0D'));process.exit(1)})
