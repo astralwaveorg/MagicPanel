@@ -4,12 +4,13 @@ const origin=process.env.STUDIO_QA_ORIGIN
 if(!origin||new URL(origin).hostname!=='127.0.0.1')throw Error('Use an isolated loopback fixture')
 ;(async()=>{const browser=await chromium.launch({channel:'chrome'})
 try{
+ const layoutErrors=[]
  for(const width of [320,390,768,1366]){
   console.log('Checking viewport '+width)
   const ctx=await browser.newContext({viewport:{width,height:850},permissions:['clipboard-read','clipboard-write']})
   const p=await ctx.newPage(),errors=[];p.setDefaultTimeout(7000);p.on('pageerror',e=>errors.push(e.message))
   const nav=n=>p.getByRole('navigation').getByRole('button',{name:n,exact:true}).click()
-  const fits=async(stage)=>{const over=await p.evaluate(()=>Array.from(document.querySelectorAll('body *')).filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(0,4).map(e=>[e.tagName,e.className]));assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'overflow: '+stage+' '+width+' '+JSON.stringify(over))}
+  const fits=async(stage)=>{const over=await p.evaluate(()=>Array.from(document.querySelectorAll('body *')).filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(0,4).map(e=>[e.tagName,e.className]));if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth))layoutErrors.push('overflow: '+stage+' '+width+' '+JSON.stringify(over))}
   await p.goto(origin);await fits('login');await p.getByLabel('用户名').fill('review');await p.getByLabel('密码',{exact:true}).fill('fixture-browser-password');await p.getByRole('button',{name:'登录',exact:true}).click()
   await p.getByRole('button',{name:'复制订阅地址'}).waitFor();await fits('subscription')
   await p.getByRole('button',{name:'二维码',exact:true}).click();await p.waitForFunction(()=>document.querySelector('.qr-dialog canvas')?.width===240);await p.keyboard.press('Escape')
@@ -40,6 +41,7 @@ try{
   await nav('线路方案');await p.getByRole('button',{name:'调整优先顺序'}).click();await p.getByRole('dialog').waitFor();await fits('ordering');await p.keyboard.press('Escape')
   await nav('发布记录');await fits('release');await p.getByRole('button',{name:'查看配置差异'}).click();await p.getByRole('dialog').waitFor();await p.keyboard.press('Escape')
   await p.getByRole('button',{name:'退出',exact:true}).click();await p.getByRole('button',{name:'登录',exact:true}).waitFor();assert.deepEqual(errors,[])
-  await ctx.close();console.log(width+'px: all pages, rule formats, repo review, dialogs, keyboard, sign-out passed')
+  await ctx.close();console.log(width+'px: finished all pages, rule formats, repo review, dialogs, keyboard and sign-out')
  }
+ assert.equal(layoutErrors.length,0,layoutErrors.join('\n'))
 }finally{await browser.close()}})().catch(e=>{console.error(e.message);if(process.env.CI)console.error('::error title=Studio browser::'+String(e.message).replace(/%/g,'%25').replace(/\n/g,'%0A').replace(/\r/g,'%0D'));process.exit(1)})
