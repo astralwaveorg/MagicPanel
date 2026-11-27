@@ -582,8 +582,8 @@ def quality_task_status():
     return dict(_quality_task)
 
 
-def _collect_probe_proxies() -> list[dict]:
-    """收集候选节点（Mihomo 节点字典）：来源快照 + 本地节点。"""
+def _collect_probe_proxies(*, exclude_failed: bool = False) -> list[dict]:
+    """收集来源快照与本地节点；节点订阅可排除已知失败，后台复测仍保留它们。"""
     import sqlite3
     from . import local_nodes, source_nodes
     from .. import security
@@ -600,7 +600,8 @@ def _collect_probe_proxies() -> list[dict]:
     # 能力徽章与性能摘要的查询全部 miss（2026-11-19 实证）。
     catalog = [dict(r) for r in db.all_(conn, "SELECT * FROM node_catalog")]
     try:
-        for r in conn.execute("SELECT id AS source_id, snapshot_enc, filter FROM sources "
+        for r in conn.execute("SELECT id AS source_id, snapshot_enc, filter, "
+                              "filter_unavailable, test_results FROM sources "
                               "WHERE enabled=1 AND snapshot_enc IS NOT NULL ORDER BY id"):
             try:
                 raw = security.decrypt_text(r["snapshot_enc"]) or ""
@@ -608,10 +609,17 @@ def _collect_probe_proxies() -> list[dict]:
             except Exception as exc:
                 logger.warning("节点来源 %s 无法读取：%s", r["source_id"], type(exc).__name__)
                 continue
+            failed = set()
+            if exclude_failed and r["filter_unavailable"]:
+                results = json.loads(r["test_results"] or "{}")
+                failed = {name for name, delay in results.items() if delay < 0}
             for p in proxies:
                 if not isinstance(p, dict) or not p.get("name"):
                     continue
                 name = str(p["name"])
+                # 来源测速结果记录的是原名，须在目录映射及地区改名前过滤。
+                if name in failed:
+                    continue
                 if not source_nodes.match(r["filter"] or "", name):
                     continue
                 # 占位节点（剩余流量/到期时间…）不是真节点，探测它们只会

@@ -1,4 +1,7 @@
-"""门户「全部节点」订阅：令牌即凭据，裸配置形状与轮换语义。"""
+"""门户「全部节点」订阅：令牌、配置形状与来源过滤。"""
+import base64
+import json
+
 import yaml
 
 from conftest import auth_headers, setup_admin
@@ -47,6 +50,46 @@ def test_nodes_feed_shape_contains_all_enabled_nodes(client):
     # NodeList 形态：纯 proxies 段，不再附带策略组与兜底规则
     assert "proxy-groups" not in doc and "rules" not in doc
     assert doc["proxies"]
+
+
+def test_nodes_feed_respects_source_health_filter_without_losing_probe_candidates(client):
+    from app import db
+    from app.services import scheduler
+
+    headers = auth_headers(setup_admin(client))
+    _make_node(client, headers)
+    for source, prefix, filter_unavailable in (
+        ("甲机场", "filtered", True),
+        ("乙机场", "unfiltered", False),
+    ):
+        nodes = [
+            {"name": f"{raw_name} {prefix}", "type": "ss", "server": f"{prefix}-{suffix}.example.com",
+             "port": 8388, "cipher": "aes-256-gcm", "password": "example-test-password"}
+            for raw_name, suffix in (("美国失败线路", "failed"), ("日本可用线路", "ok"),
+                                     ("香港新线路", "untested"))
+        ]
+        response = client.post("/api/v1/sources/import-file", headers=headers, json={
+            "name": source, "mode": "inline",
+            "content_b64": base64.b64encode(yaml.safe_dump({"proxies": nodes}).encode()).decode(),
+        })
+        assert response.status_code == 201, response.text
+        with db.tx() as conn:
+            conn.execute("UPDATE sources SET filter_unavailable=?,test_results=? WHERE name=?",
+                         (filter_unavailable, json.dumps({f"美国失败线路 {prefix}": -1,
+                                                         f"日本可用线路 {prefix}": 120}),
+                          source))
+
+    portal = client.post("/api/v1/portal/data", headers=headers, json={"pin": ""}).json()
+    response = client.get(portal["nodes_feed"]["url"])
+    assert response.status_code == 200
+    servers = {p["server"] for p in yaml.safe_load(response.text)["proxies"]}
+    assert servers == {"node.example.com", "filtered-ok.example.com", "filtered-untested.example.com",
+                       "unfiltered-failed.example.com", "unfiltered-ok.example.com",
+                       "unfiltered-untested.example.com"}
+    assert int(response.headers["X-MagicPanel-Node-Count"]) == len(servers)
+    # 失败节点只是不发给客户端；后台仍能探测它恢复了没有。
+    candidates = {p["server"] for p in scheduler._collect_probe_proxies()}
+    assert candidates == servers | {"filtered-failed.example.com"}
 
 
 def test_rotate_nodes_token_invalidates_old_link(client):

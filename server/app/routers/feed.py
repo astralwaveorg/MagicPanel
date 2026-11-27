@@ -253,14 +253,14 @@ def _render_nodes_config() -> tuple[str, int]:
     """全部节点 NodeList：只输出 proxies 段的纯节点列表。
 
     节点池与探测、构建同一来源（_collect_probe_proxies）：已统一 emit_name、
-    剔除占位与公告节点、重名去重，含启用的本地节点。名字套用构建同款的
-    regional 改名（机场代码/家宽/倍率/解锁服务），与产物里的名称一致。
+    剔除占位与公告节点、重名去重，含启用的本地节点。来源开启「只分发可用节点」
+    时跳过最近测速失败的节点。名字套用构建同款的地区命名。
     纯 proxies 结构可直接导入各类客户端，也是订阅转换器的标准输入。
     """
     from ..services import scheduler, node_rename
     with db.connect() as conn:
         plan = node_rename.regional_names(node_rename.regional_catalog(conn))
-    proxies = scheduler._collect_probe_proxies()
+    proxies = scheduler._collect_probe_proxies(exclude_failed=True)
     seen = set()
     for proxy in proxies:
         name = str(proxy.get("name") or "")
