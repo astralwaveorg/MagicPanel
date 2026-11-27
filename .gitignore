@@ -22,3 +22,44 @@ tmp/
 # pytest 缓存
 .pytest_cache/
 .workbuddy/
+
+# 文档区默认只提交清单内的文件。新增共享手册前先核对用途及示例。
+/docs/**
+!/docs/deployment/
+!/docs/development/
+!/docs/reference/
+!/docs/README.md
+!/docs/deployment/1Panel-Docker-部署.md
+!/docs/development/MagicPanel-开发规格.md
+!/docs/development/MagicPanel-构建与发布-产物构成.md
+!/docs/development/旧版维护约束.md
+!/docs/development/接口清单与安卓客户端说明.md
+!/docs/reference/Agent-交接提示词.md
+!/docs/reference/Mihomo-Config-Navigation.md
+!/docs/reference/Official-Docs-Workflow.md
+!/docs/reference/Stash-Wiki-Navigation.md
+!/docs/reference/official-docs-index.json
+!/docs/reference/方案设计-多套分流方案.md
+!/docs/使用文档.md
+!/docs/开发文档.md
+!/docs/配置文档.md
+/studio/docs/**
+!/studio/docs/preview/
+!/studio/docs/architecture.md
+!/studio/docs/delivery.md
+!/studio/docs/platform-experience.md
+!/studio/docs/preview/客户端规则-手机.png
+!/studio/docs/preview/平台模板-手机.png
+!/studio/docs/preview/平台模板-桌面.png
+!/studio/docs/preview/订阅-手机暗色.png
+!/studio/docs/preview/订阅-桌面暗色.png
+!/studio/docs/preview/转换-手机浅色.png
+!/studio/docs/preview/转换-桌面浅色.png
+!/studio/docs/product.md
+!/studio/docs/客户端交付与界面二期.md
+!/studio/docs/独立订阅转换工具.md
+!/studio/docs/界面与规则管理验收.md
+!/studio/docs/订阅与分流设计报告.md
+
+# 新的真实策略快照留在本地；不改变已有快照的跟踪状态。
+/policy/snapshots/*.json

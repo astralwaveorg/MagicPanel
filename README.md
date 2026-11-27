@@ -1,5 +1,7 @@
 # MagicPanel
 
+此分支同时包含 [MagicPanel Studio](studio/README.md)。以下是旧版应用的使用与开发说明。
+
 一份策略，编译成各家客户端能直接用的订阅配置。
 
 MagicPanel 是个自托管的代理订阅配置服务：把机场订阅、规则集、分流规则、策略组、节点来源统一维护在一处，按客户端（Stash / Mihomo）编译成产物，发布出去，每台设备拿一个固定地址自动更新。
@@ -31,9 +33,7 @@ OpenClash 拿这份配置做全屋透明代理与分流——那是消费方，�
 策略组与分流规则支持**多套「方案」（variants）**：每个方案是一套完整、独立的
 组与规则副本，构建时每个方案各出一份产物，订阅地址用 `?variant=<方案名>` 选择。
 
-- **默认方案**是唯一 canonical 方案（当前生产基线的组数与规则数以面板与
-  快照为准，历史快照存档在 `policy/snapshots/`；2026-11-16 起此前的
-  「自建美日」方案已停用并移出门户，旧链接由 feed 回退默认产物）；
+- 未指定方案时使用默认方案。修改或停用其他方案前，先核对现有设备的订阅选择；
 - 门户页设备卡片上复制地址 / 下载文件 / 一键导入 / 二维码 / 预览源码
   全部联动；不带参数的地址永远是默认方案，老订阅不受影响。
 
@@ -97,7 +97,7 @@ npm run dev        # 前端 127.0.0.1:7100，API 127.0.0.1:8000，已代理 /api
 ### 测试与检查
 
 ```bash
-(cd server && ../.venv/bin/python -m pytest tests -q)   # 后端测试
+((cd server && ../.venv/bin/python -m pytest tests -q))   # 后端测试
 npm run test:ui                                        # 前端测试（vitest，含 16 视图冒烟）
 npm run build                                          # 前端构建
 python3 scripts/check_secrets.py                       # 凭据扫描
@@ -135,8 +135,7 @@ android/                管理端的安卓壳
 official-example/       官方配置样例，核对引擎默认配置用
 ```
 
-`policy/snapshots/*.json` 是规则与策略组的版本化存档——这些内容只存在数据库里，
-git 看不到。导出/导入见 [AGENTS.md](AGENTS.md) 的「策略快照」一节。
+旧版策略快照属于部署数据。通用导入、导出与恢复边界见[快照说明](policy/snapshots/README.md)。
 
 ## 开发与发布
 
@@ -150,7 +149,7 @@ git status --short                              # 应为空，脏工作区会把
 本地自检与发布：
 
 ```bash
-cd server && ../.venv/bin/python -m pytest tests -q     # 后端测试
+(cd server && ../.venv/bin/python -m pytest tests -q)     # 后端测试
 npm run build                                            # 前端产物（输出到 server/app/static）
 
 ./scripts/deploy.sh            # 测试 → 同步代码 → 重建容器 → 健康检查 → 数据自检 → 域名验证
@@ -170,13 +169,9 @@ npm run build                                            # 前端产物（输出
 **代码改完只是让面板跑新代码，订阅内容要生效还得发一版。** 渲染器（`compiler/render.py`）
 的改动也算策略侧——自动构建的指纹只看策略快照，不看渲染器代码，必须手动发一次。
 
-### 部署后怎么确认没坏
+### 部署后怎么确认
 
-```bash
-ssh archon@10.0.1.2 'docker inspect magicpanel --format "{{.State.Health.Status}}"'
-ssh archon@10.0.1.2 'docker exec magicpanel curl -s -o /dev/null -w "%{http_code}\n" \
-  -m 10 https://www.gstatic.com/generate_204'          # 期望 204（经路由器透明代理出网）
-```
+在部署主机运行 `docker compose ps`，核对实际运行镜像修订，并通过自己的反向代理访问管理端或受影响接口。若改动影响订阅，另用测试设备核对产物；普通健康检查不验证分流。
 
 更细的流程、约束与核对清单见 [AGENTS.md](AGENTS.md)（Agent 必读）与
 [开发文档](docs/开发文档.md)。
