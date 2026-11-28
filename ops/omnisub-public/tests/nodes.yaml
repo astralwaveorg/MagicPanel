@@ -1,0 +1,7 @@
+proxies:
+  - name: Demo
+    type: hysteria2
+    server: example.invalid
+    port: 443
+    auth: public-demo
+    sni: example.invalid

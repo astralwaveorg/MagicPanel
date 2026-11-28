@@ -1,0 +1,45 @@
+# At HTTP context. Replace PUBLIC_HOSTNAME and SITE_CERT_DIR before installing.
+limit_req_zone $binary_remote_addr zone=omnisub_peer:2m rate=5r/s;
+limit_req_zone $server_name zone=omnisub_site:1m rate=8r/s;
+limit_conn_zone $server_name zone=omnisub_conn:1m;
+server {
+    listen 80;
+    listen [::]:80;
+    server_name PUBLIC_HOSTNAME;
+    access_log off;
+    error_log /dev/null crit;
+    return 308 https://PUBLIC_HOSTNAME$request_uri;
+}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name PUBLIC_HOSTNAME;
+    ssl_certificate SITE_CERT_DIR/fullchain.pem;
+    ssl_certificate_key SITE_CERT_DIR/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    access_log off;
+    error_log /dev/null crit;
+    client_max_body_size 8k;
+    client_body_buffer_size 12k;
+    large_client_header_buffers 2 8k;
+    limit_req_status 429;
+    limit_conn_status 429;
+    limit_conn omnisub_conn 24;
+    location ~ ^/(?:api/links|sub|s/[A-Za-z0-9_=-]+)$ {
+        limit_req zone=omnisub_peer burst=12 nodelay;
+        limit_req zone=omnisub_site burst=16 nodelay;
+        proxy_cache off;
+        proxy_buffering off;
+        proxy_max_temp_file_size 0;
+        proxy_read_timeout 44s;
+        proxy_set_header Host PUBLIC_HOSTNAME;
+        proxy_pass http://127.0.0.1:47108;
+    }
+    location ~ ^/(?:|assets/(?:app\.js|style\.css)|favicon\.(?:svg|ico)|apple-touch-icon\.png|healthz)$ {
+        proxy_cache off;
+        proxy_set_header Host PUBLIC_HOSTNAME;
+        proxy_pass http://127.0.0.1:47108;
+    }
+    location / { return 404; }
+}

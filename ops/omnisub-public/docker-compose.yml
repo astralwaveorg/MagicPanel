@@ -1,0 +1,53 @@
+name: omnisub-public
+services:
+  engine:
+    image: ghcr.io/astralwaveorg/omnisub:v1.12.1@sha256:42edf5d85c3bf25e6812cdbfe836a742810e5277db5ad9d09c3dde4ca5a71c71
+    environment:
+      PREF_PATH: /base/pref.example.toml
+      SUBCONVERTER_SECURITY_PROFILE: strict
+      SUBCONVERTER_ALLOW_PUBLIC_UPLOAD: 'false'
+      SUBCONVERTER_LOG_LEVEL: error
+      SUBCONVERTER_REQUEST_DEADLINE_MS: '12000'
+    volumes: ['./public.ini:/base/base/public.ini:ro']
+    networks: [conversion]
+    read_only: true
+    tmpfs: [/tmp, /base/cache]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.5
+    pids_limit: 180
+    logging: {driver: none}
+    healthcheck:
+      test: ['CMD','wget','-qO','/dev/null','http://127.0.0.1:25500/healthz']
+      interval: 15s
+      timeout: 4s
+      retries: 4
+  web:
+    build: .
+    ports: ['127.0.0.1:47108:8000']
+    networks: [default, conversion]
+    depends_on: {engine: {condition: service_healthy}}
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST}
+      DENY_IPS: ${DENY_IPS:?set origin IP addresses}
+    secrets: [link-key]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 300m
+    cpus: 1.0
+    pids_limit: 64
+    logging: {driver: none}
+    healthcheck:
+      test: ['CMD','python','-c',"from urllib.request import urlopen; assert urlopen('http://localhost:8000/healthz',timeout=3).read().strip()==b'ok'"]
+      interval: 15s
+      timeout: 4s
+      retries: 4
+networks:
+  conversion: {internal: true}
+secrets:
+  link-key: {file: ./state/link-key}
