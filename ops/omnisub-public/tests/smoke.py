@@ -1,11 +1,12 @@
-import sys, json, urllib.parse, urllib.request, urllib.error, base64
-host=sys.argv[1]; s='hysteria2://public-demo@example.invalid:443?sni=example.invalid#Demo'
+import sys, json, urllib.parse, urllib.request, urllib.error, base64, secrets
+assert len(sys.argv)>=2, 'Pass the base URL of your instance'
+host=sys.argv[1]; secret='demo-'+secrets.token_hex(8); pw=secret.encode()
+s=urllib.parse.urlunsplit(('hysteria2', secret+'@example.invalid:443', '', 'sni=example.invalid', 'Demo'))
 def call(path,data=None):
  r=urllib.request.Request(host+path,data=None if data is None else json.dumps(data).encode(),headers={'Content-Type':'application/json','User-Agent':'OmniSub-acceptance'})
  try:
   with urllib.request.urlopen(r,timeout=38) as resp:return resp.status,resp.read(),resp.headers
  except urllib.error.HTTPError as e:return e.code,e.read(),e.headers
-assert len(sys.argv)>=2, 'Pass the base URL of your instance'
 for path,signature in [('/favicon.ico',b'\x00\x00\x01\x00'),('/favicon.svg',b'<svg'),('/apple-touch-icon.png',b'\x89PNG')]:
  code,body,h=call(path);assert code==200 and body.startswith(signature) and 'image/' in h['Content-Type']
 assert call('/healthz')[:2]==(200,b'ok\n')
@@ -14,12 +15,12 @@ for t in ('clash','stash','surge','shadowrocket'):
  assert status==200, (t,status,body[:150])
  x=json.loads(body);assert x['count']==1 and s not in x['path']
  a,raw,h=call(x['path']);assert a==200 and h['Cache-Control']=='no-store'
- if t=='clash':assert b'password: public-demo' in raw and b'auth: public-demo' not in raw and b'MATCH,' in raw
- if t=='stash':assert b'auth: public-demo' in raw and b'password: public-demo' not in raw
- if t=='surge':assert b'[Proxy]' in raw and b'password=public-demo' in raw and b'#!MANAGED-CONFIG' not in raw
- if t=='shadowrocket':assert b'public-demo@' in base64.b64decode(raw)
+ if t=='clash':assert (b'password: '+pw) in raw and (b'auth: '+pw) not in raw and b'MATCH,' in raw
+ if t=='stash':assert (b'auth: '+pw) in raw and (b'password: '+pw) not in raw
+ if t=='surge':assert b'[Proxy]' in raw and (b'password='+pw) in raw and b'#!MANAGED-CONFIG' not in raw
+ if t=='shadowrocket':assert (pw+b'@') in base64.b64decode(raw)
  print(t,a,h['Content-Disposition'],len(raw))
-bad=[{'target':'stash','sources':s.replace('public-demo','test%40test')},{'target':'stash','sources':s.replace('#','&pinSHA256=fixture#')},{'target':'clash','sources':s,'config':'unsupported'}]
+bad=[{'target':'stash','sources':s.replace(secret,'test%40test')},{'target':'stash','sources':s.replace('#','&pinSHA256=fixture#')},{'target':'clash','sources':s,'config':'unsupported'}]
 for b in bad:assert call('/api/links',b)[0]==422
 print('Protected inputs rejected; health, access controls, cache flags checked')
 
