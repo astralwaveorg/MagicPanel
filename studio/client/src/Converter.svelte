@@ -22,20 +22,20 @@
 </script>
 <div class="title"><div><h1>订阅转换</h1><p>合并订阅和节点，为客户端生成独立的更新地址。</p></div></div>
 {#if issue}<div class="error" role="alert">{issue}</div>{/if}
-<div class="tool-grid"><form class="setup-card convert-form" onsubmit={generate}>
- <div class="card-heading"><span class="tile"><Icon name="converter"/></span><h2>新建转换</h2></div>
+<div class="tool-grid"><form class="setup-card convert-form" aria-label="订阅转换" onsubmit={generate}>
  <label>订阅或节点<textarea required rows="5" maxlength="500000" bind:value={sources} placeholder="每行一个 HTTPS 订阅或节点链接，也可以粘贴节点 YAML。"></textarea></label>
  <button type="button" class="text-action" onclick={()=>legacy=!legacy} aria-expanded={legacy}>从旧转换长链接填写</button>
  {#if legacy}<div class="inline-tool"><label>原转换长链接<input type="url" bind:value={old} autocomplete="off"></label><button type="button" onclick={importOld}>读取选项</button><small>只在此浏览器解析，不访问原转换网站。</small></div>{/if}
  {#if importNote}<p role="status">{importNote}</p>{/if}
- <div class="choice-row"><label>输出格式<select aria-label="输出格式" bind:value={target} onchange={()=>{if(preset==='acl')preset='manual'}}>{#each Object.entries(targets) as [key,label]}<option value={key}>{label}</option>{/each}</select></label><label>配置名称<input required maxlength="64" bind:value={name}></label></div>
- {#if native}<label>分流模板<select aria-label="分流模板" bind:value={preset}><option value="manual">手动选择节点</option><option value="auto">自动选择低延迟节点</option><option value="custom">自定义分流规则</option>{#if target==='mihomo'}<option value="acl">ACL4SSR 公共分流模板</option>{/if}</select></label>{:else}<small>此格式由内网转换器生成。客户端不支持的协议可能被过滤。</small>{/if}
+ <div class="converter-fields"><label>输出格式<select aria-label="输出格式" bind:value={target} onchange={()=>{if(preset==='acl')preset='manual'}}>{#each Object.entries(targets) as [key,label]}<option value={key}>{label}</option>{/each}</select></label><label>配置名称<input required maxlength="64" bind:value={name}></label>
+ {#if native}<label>分流模板<select aria-label="分流模板" bind:value={preset}><option value="manual">手动选择节点</option><option value="auto">自动选择低延迟节点</option><option value="custom">自定义分流规则</option>{#if target==='mihomo'}<option value="acl">ACL4SSR 公共分流模板</option>{/if}</select></label>{/if}</div>
+ {#if !native}<small>此格式由内网转换器生成。客户端不支持的协议可能被过滤。</small>{/if}
  {#if native&&preset==='custom'}<label>分流规则<textarea rows="4" required bind:value={rules} placeholder="DOMAIN-SUFFIX,example.org,DIRECT"></textarea></label><small>每行一条，去向可选 出口、DIRECT 或 REJECT。未匹配的连接走「出口」。</small>{/if}
  <details bind:open={advanced}><summary><Icon name="sliders" size={16}/>筛选和输出选项</summary>
  <div class="choice-row"><label>保留节点<input bind:value={include} placeholder="名称匹配的正则表达式"></label><label>排除节点<input bind:value={exclude} placeholder="名称匹配的正则表达式"></label></div>
  <label>节点重命名<input bind:value={rename} placeholder="正则表达式@新文字"></label>
- <div class="choice-row"><label>地区旗帜<select aria-label="地区旗帜" bind:value={emoji}><option value="keep">保留名称</option><option value="region">按常见地区补充旗帜</option><option value="remove">移除开头的地区旗帜</option></select></label><label>节点顺序<select aria-label="节点顺序" bind:value={sort}><option value={false}>保留原顺序</option><option value={true}>按名称排序</option></select></label>
- {#if isYaml}<label>配置内容<select aria-label="配置内容" bind:value={nodes}><option value={false}>完整配置</option><option value={true}>仅节点列表</option></select></label><label>TLS 证书验证<select aria-label="TLS 证书验证" bind:value={scv}><option value="">沿用节点设置</option><option value="false">验证证书</option><option value="true">跳过验证（降低安全性）</option></select></label>{/if}
+ <div class="choice-row"><label>地区旗帜<select aria-label="地区旗帜" bind:value={emoji}><option value="keep">保留名称</option><option value="region">按常见地区补充旗帜</option><option value="remove">移除开头的地区旗帜</option></select></label><label>节点顺序<select aria-label="节点顺序" bind:value={sort}><option value={false}>保留原顺序</option><option value={true}>按名称排序</option></select></label></div>
+ <div class="converter-fields">{#if isYaml}<label>配置内容<select aria-label="配置内容" bind:value={nodes}><option value={false}>完整配置</option><option value={true}>仅节点列表</option></select></label><label>TLS 证书验证<select aria-label="TLS 证书验证" bind:value={scv}><option value="">沿用节点设置</option><option value="false">验证证书</option><option value="true">跳过验证（降低安全性）</option></select></label>{/if}
  {#if target==='mihomo'}<label>TCP Fast Open<select aria-label="TCP Fast Open" bind:value={tfo}><option value="">沿用节点设置</option><option value="true">开启</option><option value="false">关闭</option></select></label>{/if}</div></details>
  <div class="delivery-actions"><button class="solid" disabled={busy||!sources.trim()}><Icon name="converter" size={17}/>{busy?'正在转换…':'生成转换地址'}</button></div>
 </form><aside class="tool-aside"><div class="preview-top"><span class="eyeline">转换结果</span><Icon name="devices" size={20}/></div>

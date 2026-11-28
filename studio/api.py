@@ -188,6 +188,11 @@ def feed_resource(token:str,rev:int,key:str,req:Request):
 @app.get("/tools/converter")
 @app.get("/")
 def index():return FileResponse(WEB/"index.html")
+@app.api_route("/favicon.svg",methods=["GET","HEAD"])
+@app.api_route("/favicon.ico",methods=["GET","HEAD"])
+@app.api_route("/apple-touch-icon.png",methods=["GET","HEAD"])
+def brand_icon(req:Request):
+    return FileResponse(WEB / req.url.path.rsplit("/",1)[-1])
 app.mount("/assets",StaticFiles(directory=WEB/"assets",check_dir=False),name="assets")
 
 from . import assistant as ai
